@@ -984,11 +984,18 @@ function getDTRTotals(periodKey, empId) {
   const rate = emp ? +emp.rate : 0;
   const hourlyRate = rate / (+settings.hours||8);
 
+  // Always read latest dtrData — also check localStorage as backup
+  let periodDTR = dtrData[k];
+  if (!periodDTR) {
+    // Try reading fresh from localStorage
+    const stored = JSON.parse(localStorage.getItem('ct_dtrData') || '{}');
+    periodDTR = stored[k];
+  }
+
   let days=0,ot=0,nd=0,late=0,ut=0,holPay=0,ded=0,breakHrs=0;
   for (let d=p.start; d<=p.end; d++) {
     const dateStr = `${p.year}-${String(p.month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-    const entry = (dtrData[k] && dtrData[k][dateStr]) || {};
-    // Normalize — check for actual time strings
+    const entry = (periodDTR && periodDTR[dateStr]) || {};
     const hasIn  = entry.in  && String(entry.in).includes(':');
     const hasOut = entry.out && String(entry.out).includes(':');
     if (!hasIn && !hasOut) continue;
@@ -997,10 +1004,11 @@ function getDTRTotals(periodKey, empId) {
     const dow = new Date(dateStr + 'T00:00:00').getDay();
     const assignedShift = getEmpShiftForDay(empId, dow);
     const schedule = (assignedShift && assignedShift !== 'REST' && assignedShift !== 'OFF')
-      ? assignedShift : null; // null = use global settings
+      ? assignedShift : null;
 
     const c = computeDTRRow(entry, schedule);
-    if (c.hrs > 0) days++;
+    // Count as present if they have both in AND out (even on rest day/Sunday)
+    if (hasIn && hasOut) days++;
     ot       += c.ot;
     nd       += c.nd;
     late     += c.late;
