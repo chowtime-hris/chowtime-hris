@@ -2053,8 +2053,16 @@ function computeAllPayroll() {
       <td>₱${fmt(r.tax)}</td>
       <td>₱${fmt(r.loanDed+r.totalDed)}</td>
       <td style="font-weight:700;color:var(--brand);font-size:14px;">₱${fmt(r.net)}</td>
-    </tr>`).join('')||'<tr><td colspan="16" style="text-align:center;padding:20px;color:var(--muted);">No employees. Add employees in the Employees tab.</td></tr>';
+    </tr>`).join('')||'<tr><td colspan="16" style="text-align:center;padding:20px;color:var(--muted);">No employees.</td></tr>';
 }
+
+// Auto-recompute payroll 2 seconds after page loads to ensure Firebase dtrData is ready
+window.addEventListener('load', () => {
+  setTimeout(() => {
+    const active = document.querySelector('.page.active');
+    if (active?.id === 'page-payroll') computeAllPayroll();
+  }, 2000);
+});
 function exportPayroll() {
   const p=getPeriod();
   const rows=employees.map(e=>buildPayrollRow(e,p.key));
@@ -2559,7 +2567,8 @@ onValue(ref(db,'dtrData'), snap => {
       const empId = document.getElementById('editor-emp')?.value;
       if (empId) loadDTREditor();
     }
-    if (active?.id === 'page-payroll') computeAllPayroll();
+    // Always recompute payroll when DTR data updates — ensures correct data
+    computeAllPayroll();
     if (active?.id === 'page-dashboard') renderDashboard();
   }, 500);
 });
