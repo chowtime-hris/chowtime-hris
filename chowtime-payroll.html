@@ -1744,7 +1744,24 @@ function refreshTab(id) {
   if(id==='employees')  renderEmployeesTable();
   if(id==='dtr')        setupDTR();
   if(id==='dtr-editor') setupDTREditor();
-  if(id==='payroll')    computeAllPayroll();
+  if(id==='payroll') {
+    // Wait for Firebase dtrData to be ready before computing
+    if (window._dtrDataReady) {
+      computeAllPayroll();
+    } else {
+      document.getElementById('payroll-tbody').innerHTML =
+        '<tr><td colspan="16" style="text-align:center;padding:30px;color:var(--muted);">⏳ Loading data from Firebase... Please wait.</td></tr>';
+      // Keep checking until data is ready
+      const waitForDTR = setInterval(() => {
+        if (window._dtrDataReady) {
+          clearInterval(waitForDTR);
+          computeAllPayroll();
+        }
+      }, 300);
+      // Force compute after 5 seconds regardless
+      setTimeout(() => { clearInterval(waitForDTR); computeAllPayroll(); }, 5000);
+    }
+  }
   if(id==='payslip')    setupPayslipDropdown();
   if(id==='leaves')     renderLeaves();
   if(id==='loans')      renderLoans();
@@ -2552,9 +2569,11 @@ onValue(ref(db,'dtrData'), snap => {
     });
     dtrData = merged;
     localStorage.setItem('ct_dtrData', JSON.stringify(dtrData));
+    window._dtrDataReady = true; // signal DTR data is ready from Firebase
   } else {
     dtrData = {};
     localStorage.setItem('ct_dtrData', JSON.stringify({}));
+    window._dtrDataReady = true; // even empty = ready
   }
   // Refresh active tab — use setTimeout to let dtrData settle
   setTimeout(() => {
