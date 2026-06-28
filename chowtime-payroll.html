@@ -970,7 +970,10 @@ function computeDTRRow(entry, shiftSched) {
   const late       = Math.max(0, inM - shiftStart - grace);
   const ut         = (!isAuto && outM < shiftEnd) ? Math.max(0, shiftEnd - outM) : 0;
   const otStartM   = shiftEnd + otBuffer;
-  const ot         = (!isAuto && outM > otStartM) ? +((outM - otStartM) / 60).toFixed(2) : 0;
+  // OT applies if clocked out after OT buffer
+  // Auto clock-out: only OT if system used a time significantly after shift end
+  // (meaning employee actually worked late, not just auto-clocked at shift end)
+  const ot = outM > otStartM ? +((outM - otStartM) / 60).toFixed(2) : 0;
   const nd         = outM > 22*60 ? +((outM - 22*60) / 60).toFixed(2) : 0;
 
   return {hrs:workedHrs, late, ut, ot, nd, breakHrs:1, prepMins, paidDutyHrs, status:'complete'};
