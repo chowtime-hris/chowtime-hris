@@ -194,7 +194,12 @@ tbody td{padding:9px 11px;}
       </div>
       <div class="form-group">
         <label>Pay Period</label>
-        <select id="dtr-period-sel" onchange="loadDTR()"></select>
+        <select id="dtr-period-sel" onchange="loadDTR()">
+          <option value="2026-06-16">June 16–30, 2026</option>
+          <option value="2026-06-01">June 1–15, 2026</option>
+          <option value="2026-05-16">May 16–31, 2026</option>
+          <option value="2026-05-01">May 1–15, 2026</option>
+        </select>
       </div>
       <div class="form-group" style="align-self:flex-end;">
         <button class="btn btn-success" onclick="showDTRSaved()">✅ Auto-Saved</button>
@@ -2002,18 +2007,19 @@ function setupDTR() {
     employees.map(e=>`<option value="${e.id}">${e.name}</option>`).join('');
   if (curEmp) empSel.value = curEmp;
 
-  // Build period dropdown
   const perSel = document.getElementById('dtr-period-sel');
+  // Always rebuild full period dropdown with all periods for current year
   const today = new Date().toISOString().split('T')[0];
   const todayKey = getPeriodKey(today);
-  const curPer = perSel.value && perSel.value !== '' ? perSel.value : (getPeriod().key || todayKey);
-  const curYear = curPer ? +curPer.split('-')[0] : new Date().getFullYear();
-  const yearPeriods = PERIOD_KEYS.filter(k => +k.split('-')[0] === curYear);
-  perSel.innerHTML = yearPeriods.map(k=>`<option value="${k}">${getPeriodLabel(k)}</option>`).join('');
-  const bestPer = yearPeriods.includes(curPer) ? curPer : (yearPeriods.includes(todayKey) ? todayKey : yearPeriods[yearPeriods.length-1]);
-  perSel.value = bestPer;
-  document.getElementById('global-period').value = bestPer;
-  setPeriod(bestPer);
+  const savedKey = localStorage.getItem('ct_period') || todayKey;
+  const yearToShow = +savedKey.split('-')[0] || new Date().getFullYear();
+  const allPeriods = PERIOD_KEYS.filter(k => +k.split('-')[0] === yearToShow);
+  perSel.innerHTML = allPeriods.map(k=>`<option value="${k}">${getPeriodLabel(k)}</option>`).join('');
+  // Select the saved or current period
+  const bestKey = allPeriods.includes(savedKey) ? savedKey : (allPeriods.includes(todayKey) ? todayKey : allPeriods[allPeriods.length-1]);
+  perSel.value = bestKey;
+  document.getElementById('global-period').value = bestKey;
+  setPeriod(bestKey);
 
   if (empSel.value) loadDTR();
 }
