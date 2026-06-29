@@ -146,7 +146,6 @@ tbody td{padding:9px 11px;}
   <button onclick="showTab('thirteenth')">🎁 13th Month</button>
   <button onclick="showTab('tips')">💸 Tips & Commission</button>
   <button onclick="showTab('memo')">📋 Memo Log</button>
-  <button onclick="showTab('payments')" style="background:var(--green);color:white;">💸 Payment Release</button>
   <button onclick="showTab('shifts')">📅 Shift Scheduler</button>
   <button onclick="showTab('clockmon')">📡 Clock Monitor</button>
   <button onclick="showTab('settings')">⚙️ Settings</button>
@@ -345,25 +344,6 @@ tbody td{padding:9px 11px;}
     <p style="margin-top:10px;font-size:12px;color:var(--muted);">💡 Days Present, OT, ND, Holiday Pay and Deductions are pulled live from DTR entries for the selected period.</p>
   </div>
 
-  <!-- Employer Contribution Summary -->
-  <div class="panel" style="margin-top:0;">
-    <div class="panel-title"><span>🏛️</span> Employer Contribution Summary <span style="font-size:12px;color:var(--muted);font-weight:400;">— For remittance only, not deducted from employee</span></div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr>
-          <th>Employee</th>
-          <th>Monthly Salary</th>
-          <th>SSS (Employer)</th>
-          <th>PhilHealth (Employer)</th>
-          <th>Pag-Ibig (Employer)</th>
-          <th>Total Employer Cost</th>
-        </tr></thead>
-        <tbody id="employer-contrib-tbody"></tbody>
-      </table>
-    </div>
-    <div id="employer-contrib-total" style="margin-top:12px;padding:12px 16px;background:var(--surface);border-radius:8px;font-size:13px;"></div>
-    <p style="margin-top:10px;font-size:12px;color:var(--muted);">💡 These are your employer obligations to remit to SSS, PhilHealth, and Pag-Ibig monthly.</p>
-  </div>
 </div>
 
 <!-- PAYSLIP -->
@@ -380,8 +360,7 @@ tbody td{padding:9px 11px;}
         <select id="slip-period" onchange="generatePayslip()" style="width:100%;"></select>
       </div>
       <div class="form-group" style="align-self:flex-end;">
-        <button class="btn btn-primary no-print" onclick="window.print()">🖨️ Print</button>
-        <button class="btn btn-secondary no-print" onclick="emailPayslip()" style="margin-left:8px;">📧 Email</button>
+        <button class="btn btn-primary" onclick="window.print()">🖨️ Print</button>
       </div>
     </div>
     <div id="payslip-preview">
@@ -470,9 +449,6 @@ tbody td{padding:9px 11px;}
 </div>
 
 <!-- PAYMENT RELEASE -->
-<div id="page-payments" class="page">
-  <div class="panel">
-    <div class="panel-title"><span>💸</span> Payment Release — <span id="pay-release-period" style="color:var(--brand);font-size:14px;"></span></div>
     <div style="background:#e8f5e9;border:1px solid var(--green);border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:#2D7D3A;">
       💡 Mark employees as paid after releasing salary. Tap 📲 to view GCash QR for easy transfer.
     </div>
@@ -794,16 +770,9 @@ tbody td{padding:9px 11px;}
       <div class="form-group"><label>PHIC No.</label><input id="e-phic"></div>
       <div class="form-group"><label>Pag-Ibig No.</label><input id="e-pagibig"></div>
       <div class="form-group"><label>TIN</label><input id="e-tin"></div>
-      <div class="form-group"><label>📧 Email</label><input id="e-email" type="email" placeholder="employee@email.com"></div>
       <div class="form-group"><label>Contact No.</label><input id="e-contact"></div>
       <div class="form-group"><label>Emergency Contact</label><input id="e-emergency"></div>
-      <div class="form-group"><label>📱 GCash Number</label><input id="e-gcash" placeholder="09XXXXXXXXX"></div>
-      <div class="form-group"><label>🏦 Bank / Account No.</label><input id="e-bank" placeholder="BDO / 1234567890"></div>
-      <div class="form-group" style="grid-column:1/-1;">
-        <label>📲 GCash QR Code (Upload photo of QR)</label>
-        <input type="file" id="e-gcash-qr" accept="image/*" onchange="previewGCashQR(this)">
-        <div id="gcash-qr-preview" style="margin-top:8px;"></div>
-      </div>
+    </div>
     </div>
     <div style="display:flex;gap:10px;margin-top:18px;">
       <button class="btn btn-primary" onclick="saveEmployee()">💾 Save</button>
@@ -812,28 +781,11 @@ tbody td{padding:9px 11px;}
   </div>
 </div>
 
-<div id="gcash-qr-modal" class="modal-bg" style="display:none;">
-  <div class="modal" style="max-width:340px;text-align:center;">
-    <div class="modal-title">📲 GCash QR Code</div>
-    <div style="font-size:16px;font-weight:700;margin-bottom:4px;" id="gcash-qr-modal-name"></div>
-    <div style="font-size:13px;color:var(--green);margin-bottom:2px;" id="gcash-qr-modal-number"></div>
-    <div style="font-size:13px;color:var(--blue);margin-bottom:16px;" id="gcash-qr-modal-bank"></div>
-    <img id="gcash-qr-modal-img" src="" style="max-width:220px;max-height:220px;border-radius:12px;border:3px solid var(--green);display:none;margin:0 auto 16px;">
-    <div id="gcash-qr-modal-noqr" style="padding:20px;background:var(--surface);border-radius:8px;color:var(--muted);margin-bottom:16px;">No QR code saved yet.<br>Edit employee to upload QR.</div>
-    <button class="btn btn-secondary" onclick="closeModal('gcash-qr-modal')">Close</button>
-  </div>
-</div>
 
 <div id="leave-modal" class="modal-overlay">
   <div class="modal-box" style="max-width:460px;">
     <h2>🌴 File Leave</h2>
     <div class="form-grid" style="grid-template-columns:1fr 1fr;">
-      <div class="form-group" style="grid-column:1/-1;"><label>Employee</label><select id="l-emp" style="width:100%;"></select></div>
-      <div class="form-group"><label>Leave Type</label><select id="l-type"><option>Sick Leave</option><option>Vacation Leave</option><option>Emergency Leave</option><option>Maternity / Paternity</option></select></div>
-      <div class="form-group"><label>Status</label><select id="l-status"><option>Approved</option><option>Pending</option><option>Denied</option></select></div>
-      <div class="form-group"><label>Date From</label><input type="date" id="l-from"></div>
-      <div class="form-group"><label>Date To</label><input type="date" id="l-to"></div>
-      <div class="form-group" style="grid-column:1/-1;"><label>Reason</label><input id="l-reason"></div>
     </div>
     <div style="display:flex;gap:10px;margin-top:16px;">
       <button class="btn btn-primary" onclick="saveLeave()">💾 Save</button>
@@ -846,11 +798,6 @@ tbody td{padding:9px 11px;}
   <div class="modal-box" style="max-width:460px;">
     <h2>🏦 Add Loan</h2>
     <div class="form-grid" style="grid-template-columns:1fr 1fr;">
-      <div class="form-group" style="grid-column:1/-1;"><label>Employee</label><select id="ln-emp" style="width:100%;"></select></div>
-      <div class="form-group"><label>Loan Type</label><select id="ln-type"><option>SSS Loan</option><option>Pag-Ibig Loan</option><option>Cash Advance</option></select></div>
-      <div class="form-group"><label>Principal (₱)</label><input type="number" id="ln-amount"></div>
-      <div class="form-group"><label>Monthly Deduction (₱)</label><input type="number" id="ln-monthly"></div>
-      <div class="form-group"><label>Start Date</label><input type="date" id="ln-start"></div>
     </div>
     <div style="display:flex;gap:10px;margin-top:16px;">
       <button class="btn btn-primary" onclick="saveLoan()">💾 Save</button>
@@ -863,10 +810,6 @@ tbody td{padding:9px 11px;}
   <div class="modal-box" style="max-width:460px;">
     <h2>📋 Issue Memo</h2>
     <div class="form-grid" style="grid-template-columns:1fr 1fr;">
-      <div class="form-group" style="grid-column:1/-1;"><label>Employee</label><select id="m-emp" style="width:100%;"></select></div>
-      <div class="form-group"><label>Memo Type</label><select id="m-type"><option>Written Warning</option><option>Verbal Warning</option><option>Suspension</option><option>Commendation</option><option>Reminder</option></select></div>
-      <div class="form-group"><label>Issued By</label><input id="m-by" value="HR / Manager"></div>
-      <div class="form-group" style="grid-column:1/-1;"><label>Description</label><input id="m-desc"></div>
     </div>
     <div style="display:flex;gap:10px;margin-top:16px;">
       <button class="btn btn-primary" onclick="saveMemo()">💾 Save</button>
@@ -879,11 +822,6 @@ tbody td{padding:9px 11px;}
   <div class="modal-box" style="max-width:420px;">
     <h2>📈 Salary Increase</h2>
     <div class="form-grid" style="grid-template-columns:1fr 1fr;">
-      <div class="form-group" style="grid-column:1/-1;"><label>Employee</label><select id="si-emp" style="width:100%;"></select></div>
-      <div class="form-group"><label>Previous Rate (₱)</label><input type="number" id="si-prev"></div>
-      <div class="form-group"><label>New Rate (₱)</label><input type="number" id="si-new"></div>
-      <div class="form-group"><label>Effective Date</label><input type="date" id="si-date"></div>
-      <div class="form-group"><label>Reason</label><input id="si-reason"></div>
     </div>
     <div style="display:flex;gap:10px;margin-top:16px;">
       <button class="btn btn-primary" onclick="saveSalary()">💾 Save</button>
@@ -1187,11 +1125,7 @@ function getDTRTotals(periodKey, empId) {
 // ══════════════════════════════════════════════════════════
 function computeSSS(monthly)    { return Math.min(Math.max(Math.round(monthly*0.045/2),135),900); }
 function computePHIC(monthly)   { return Math.min(Math.round(monthly*0.05/4),1250); }
-function computePagIbig(monthly){ return Math.min(Math.round(monthly*0.02/2),100); }
-// ── Employer share functions ──────────────────────────────────────
-function computeSSSEmployer(monthly)    { return Math.min(Math.max(Math.round(monthly*0.095/2),285),1900); } // 9.5% employer
-function computePHICEmployer(monthly)   { return Math.min(Math.round(monthly*0.05/4),1250); } // equal share
-function computePagIbigEmployer(monthly){ return Math.min(Math.round(monthly*0.02/2),100); } // equal share ₱100/mo
+function computePagIbig(monthly){ return Math.min(Math.round(monthly*0.02/2),100); } // equal share ₱100/mo
 function computeTax(annualTaxable) {
   const t = Math.max(0, annualTaxable);
   if (t<=0)       return 0;
@@ -1223,14 +1157,6 @@ function buildPayrollRow(emp, periodKey) {
   const phic           = +(phicMonthly   / 2).toFixed(2);
   const pagibig        = +(pagibigMonthly/ 2).toFixed(2);
 
-  // ── Employer share (for remittance reporting) ───────────────
-  const erSSSMonthly    = computeSSSEmployer(monthly);
-  const erPHICMonthly   = computePHICEmployer(monthly);
-  const erPagibigMonthly= computePagIbigEmployer(monthly);
-  const erSSS           = +(erSSSMonthly    / 2).toFixed(2);
-  const erPHIC          = +(erPHICMonthly   / 2).toFixed(2);
-  const erPagibig       = +(erPagibigMonthly/ 2).toFixed(2);
-  const erTotal         = +(erSSS + erPHIC + erPagibig).toFixed(2);
 
   const annualT  = Math.max(0,(gross*24)-(sssMonthly+phicMonthly+pagibigMonthly)*12-250000);
   const tax      = gross > 0 ? Math.round(computeTax(annualT)/24) : 0;
@@ -1239,7 +1165,7 @@ function buildPayrollRow(emp, periodKey) {
   const totalDed = gross > 0 ? totals.ded : 0;
   // Net can't go below 0 — contributions still owed even if net is 0
   const net      = Math.max(0, gross - sss - phic - pagibig - tax - loanDed - totalDed);
-  return {id:emp.id,name:emp.name,pos:emp.pos,rate,days,hasDTR,basic,otPay,ndPay,holPay,gross,sss,phic,pagibig,tax,loanDed,totalDed,net,ot:totals.ot,nd:totals.nd,late:totals.late,erSSS,erPHIC,erPagibig,erTotal};
+  return {id:emp.id,name:emp.name,pos:emp.pos,rate,days,hasDTR,basic,otPay,ndPay,holPay,gross,sss,phic,pagibig,tax,loanDed,totalDed,net,ot:totals.ot,nd:totals.nd,late:totals.late};
 }
 
 // ══════════════════════════════════════════════════════════
@@ -1925,278 +1851,11 @@ function setupShifts() {
 window.openShiftModal=openShiftModal;window.saveShiftDef=saveShiftDef;window.deleteShiftDef=deleteShiftDef;
 window.openEmpShiftModal=openEmpShiftModal;window.toggleRotationFields=toggleRotationFields;
 window.saveEmpShift=saveEmpShift;window.renderShiftAssignment=renderShiftAssignment;
-function emailPayslip() {
-  const empId = document.getElementById('slip-emp').value;
-  const emp   = employees.find(e => e.id === empId);
-  if (!emp) return alert('Please select an employee first.');
 
-  const email = emp.email || '';
-  if (!email) {
-    // Ask for email if not saved
-    const inputEmail = prompt(`Enter email address for ${emp.name}:`, '');
-    if (!inputEmail) return;
-    // Save email to employee record
-    emp.email = inputEmail;
-    if (window._fbFns && window._fbDB) {
-      window._fbFns.set(
-        window._fbFns.ref(window._fbDB, `employees/${empId}/email`), inputEmail
-      ).catch(e => console.warn(e));
-    }
-    sendPayslipEmail(emp, inputEmail);
-  } else {
-    if (confirm(`Send payslip to ${email}?`)) {
-      sendPayslipEmail(emp, email);
-    }
-  }
-}
 
-function sendPayslipEmail(emp, email) {
-  // Get payslip content
-  const preview = document.getElementById('payslip-preview');
-  if (!preview) return alert('Generate payslip first.');
-
-  // Use mailto — opens default email app with payslip summary
-  const periodKey = document.getElementById('slip-period').value;
-  const periodLabel = getPeriodLabel(periodKey);
-  const r = buildPayrollRow(emp, periodKey);
-
-  const subject = encodeURIComponent(`Chowtime Payslip — ${emp.name} — ${periodLabel}`);
-  const body = encodeURIComponent(
-`CHOWTIME PAYROLL SYSTEM
-Payslip — ${periodLabel}
-
-Employee: ${emp.name}
-Position: ${emp.pos || ''}
-ID: ${emp.id}
-
-EARNINGS
-Days Present: ${r.days}
-Basic Pay: ₱${fmt(r.basic)}
-OT Pay: ₱${fmt(r.otPay)}
-Gross Pay: ₱${fmt(r.gross)}
-
-DEDUCTIONS
-SSS: ₱${fmt(r.sss)}
-PhilHealth: ₱${fmt(r.phic)}
-Pag-Ibig: ₱${fmt(r.pagibig)}
-Tax: ₱${fmt(r.tax)}
-Loan Deduction: ₱${fmt(r.loanDed)}
-
-NET PAY: ₱${fmt(r.net)}
-
-— System-generated payslip by Chowtime HRIS`
-  );
-
-  window.open(`mailto:${email}?subject=${subject}&body=${body}`, '_blank');
-  showToastAdmin && showToastAdmin(`📧 Email opened for ${emp.name}`);
-}
-window.emailPayslip = emailPayslip;
-
-// ── GCash QR Code ────────────────────────────────────────────
-function previewGCashQR(input) {
-  const preview = document.getElementById('gcash-qr-preview');
-  if (!input.files || !input.files[0]) return;
-  const reader = new FileReader();
-  reader.onload = e => {
-    preview.innerHTML = `
-      <img src="${e.target.result}" style="max-width:160px;max-height:160px;border-radius:8px;border:2px solid var(--green);">
-      <div style="font-size:11px;color:var(--green);margin-top:4px;">✅ QR Ready to save</div>`;
-    preview.dataset.qr = e.target.result;
-  };
-  reader.readAsDataURL(input.files[0]);
-}
-window.previewGCashQR = previewGCashQR;
-
-function showGCashQR(empId) {
-  const emp = employees.find(e => e.id === empId);
-  if (!emp) return;
-  const modal = document.getElementById('gcash-qr-modal');
-  if (!modal) return;
-  document.getElementById('gcash-qr-modal-name').textContent = emp.name;
-  document.getElementById('gcash-qr-modal-number').textContent = emp.gcash ? `GCash: ${emp.gcash}` : '';
-  document.getElementById('gcash-qr-modal-bank').textContent = emp.bank ? `Bank: ${emp.bank}` : '';
-  const img = document.getElementById('gcash-qr-modal-img');
-  if (emp.gcashQR) {
-    img.src = emp.gcashQR;
-    img.style.display = 'block';
-  } else {
-    img.style.display = 'none';
-  }
-  modal.style.display = 'flex';
-}
-window.showGCashQR = showGCashQR;
 
 // ── PAYMENT RELEASE ──────────────────────────────────────────
-let paymentHistory = load('paymentHistory') || [];
 
-function setupPayments() {
-  const p = getPeriod();
-  const label = document.getElementById('pay-release-period');
-  if (label) label.textContent = p.label || getPeriodLabel(p.key);
-
-  // Populate history employee filter
-  const histEmp = document.getElementById('pay-history-emp');
-  if (histEmp) {
-    histEmp.innerHTML = '<option value="">All Employees</option>' +
-      employees.map(e=>`<option value="${e.id}">${e.name}</option>`).join('');
-  }
-
-  renderPaymentRelease();
-  renderPaymentHistory();
-}
-
-function renderPaymentRelease() {
-  const p = getPeriod();
-  const tbody = document.getElementById('payment-release-tbody');
-  if (!tbody) return;
-
-  let totalNet = 0, totalPaid = 0, countPaid = 0;
-
-  tbody.innerHTML = employees.filter(e=>e&&e.id&&e.name).map(emp => {
-    const r = buildPayrollRow(emp, p.key);
-    totalNet += r.net || 0;
-
-    // Check if already paid this period
-    const existing = paymentHistory.find(ph => ph.empId===emp.id && ph.period===p.key);
-    const isPaid = !!existing;
-    if (isPaid) { totalPaid += r.net||0; countPaid++; }
-
-    return `<tr style="${isPaid?'background:#f0fff0;opacity:0.8':''}">
-      <td>
-        <strong>${emp.name}</strong><br>
-        <span style="font-size:11px;color:var(--muted);">${emp.id}</span>
-        ${emp.gcash||emp.gcashQR ? `<button onclick="showGCashQR('${emp.id}')" style="font-size:10px;padding:2px 6px;background:#00a651;color:white;border:none;border-radius:4px;cursor:pointer;margin-left:4px;">📲 QR</button>` : ''}
-      </td>
-      <td style="font-weight:700;color:var(--brand);font-size:15px;">₱${fmt(r.net)}</td>
-      <td style="color:#00a651;">${emp.gcash||'—'}</td>
-      <td style="color:var(--blue);font-size:12px;">${emp.bank||'—'}</td>
-      <td>
-        <select id="method-${emp.id}" style="min-width:110px;" ${isPaid?'disabled':''}>
-          <option value="Cash" ${existing?.method==='Cash'?'selected':''}>💵 Cash</option>
-          <option value="GCash" ${existing?.method==='GCash'?'selected':''}>📱 GCash</option>
-          <option value="Bank Transfer" ${existing?.method==='Bank Transfer'?'selected':''}>🏦 Bank Transfer</option>
-          <option value="Check" ${existing?.method==='Check'?'selected':''}>📝 Check</option>
-        </select>
-      </td>
-      <td><input id="ref-${emp.id}" placeholder="Ref / Receipt No." value="${existing?.ref||''}" ${isPaid?'readonly':''} style="width:130px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;"></td>
-      <td style="font-size:12px;color:var(--muted);">${existing?.datePaid||'—'}</td>
-      <td>
-        ${isPaid
-          ? `<span style="background:#e8f5e9;color:var(--green);padding:4px 10px;border-radius:20px;font-size:12px;font-weight:600;">✅ Paid</span>`
-          : `<span style="background:#fff3cd;color:#7a5500;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:600;">⏳ Pending</span>`
-        }
-      </td>
-      <td>
-        ${isPaid
-          ? `<button onclick="undoPayment('${emp.id}')" class="btn btn-secondary" style="font-size:11px;padding:4px 10px;">↩️ Undo</button>`
-          : `<button onclick="markAsPaid('${emp.id}')" class="btn btn-primary" style="font-size:11px;padding:4px 10px;background:var(--green);">✅ Mark Paid</button>`
-        }
-      </td>
-    </tr>`;
-  }).join('');
-
-  // Summary
-  const summary = document.getElementById('payment-summary');
-  if (summary) summary.innerHTML = `
-    <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 20px;">
-      <div style="font-size:11px;color:var(--muted);">TOTAL NET PAYROLL</div>
-      <div style="font-size:20px;font-weight:700;color:var(--brand);">₱${fmt(totalNet)}</div>
-    </div>
-    <div style="background:#e8f5e9;border:1px solid var(--green);border-radius:8px;padding:12px 20px;">
-      <div style="font-size:11px;color:var(--muted);">TOTAL RELEASED</div>
-      <div style="font-size:20px;font-weight:700;color:var(--green);">₱${fmt(totalPaid)}</div>
-    </div>
-    <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 20px;">
-      <div style="font-size:11px;color:var(--muted);">REMAINING</div>
-      <div style="font-size:20px;font-weight:700;color:var(--red);">₱${fmt(totalNet-totalPaid)}</div>
-    </div>
-    <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 20px;">
-      <div style="font-size:11px;color:var(--muted);">PAID</div>
-      <div style="font-size:20px;font-weight:700;color:var(--blue);">${countPaid}/${employees.length} employees</div>
-    </div>`;
-}
-
-function markAsPaid(empId) {
-  const p = getPeriod();
-  const emp = employees.find(e=>e.id===empId);
-  const r = buildPayrollRow(emp, p.key);
-  const method = document.getElementById(`method-${empId}`)?.value || 'Cash';
-  const ref    = document.getElementById(`ref-${empId}`)?.value || '';
-  const today  = new Date().toISOString().split('T')[0];
-
-  // Remove existing if any
-  paymentHistory = paymentHistory.filter(ph => !(ph.empId===empId && ph.period===p.key));
-
-  const record = {
-    empId, empName: emp.name, period: p.key, periodLabel: getPeriodLabel(p.key),
-    net: r.net, method, ref, datePaid: today, releasedBy: 'Admin'
-  };
-  paymentHistory.push(record);
-  save('paymentHistory', paymentHistory);
-
-  // Sync to Firebase
-  if (window._fbDB && window._fbFns) {
-    window._fbFns.set(
-      window._fbFns.ref(window._fbDB, `paymentHistory/${p.key}__${empId}`), record
-    ).catch(e=>console.warn(e));
-  }
-
-  showToastAdmin && showToastAdmin(`✅ ${emp.name} marked as paid via ${method}`);
-  renderPaymentRelease();
-  renderPaymentHistory();
-}
-
-function undoPayment(empId) {
-  const p = getPeriod();
-  if (!confirm('Undo this payment record?')) return;
-  paymentHistory = paymentHistory.filter(ph => !(ph.empId===empId && ph.period===p.key));
-  save('paymentHistory', paymentHistory);
-  if (window._fbDB && window._fbFns) {
-    window._fbFns.remove(
-      window._fbFns.ref(window._fbDB, `paymentHistory/${p.key}__${empId}`)
-    ).catch(e=>console.warn(e));
-  }
-  renderPaymentRelease();
-  renderPaymentHistory();
-}
-
-function renderPaymentHistory() {
-  const tbody = document.getElementById('payment-history-tbody');
-  if (!tbody) return;
-  const filterEmp = document.getElementById('pay-history-emp')?.value || '';
-  const filtered = filterEmp
-    ? paymentHistory.filter(ph=>ph.empId===filterEmp)
-    : [...paymentHistory];
-  filtered.sort((a,b)=>b.datePaid?.localeCompare(a.datePaid||'')||0);
-  tbody.innerHTML = filtered.length ? filtered.map(ph=>`
-    <tr>
-      <td><strong>${ph.empName||ph.empId}</strong></td>
-      <td style="font-size:12px;">${ph.periodLabel||ph.period}</td>
-      <td style="font-weight:700;color:var(--brand);">₱${fmt(ph.net||0)}</td>
-      <td>${ph.method||'—'}</td>
-      <td style="font-size:12px;color:var(--muted);">${ph.ref||'—'}</td>
-      <td style="font-size:12px;">${ph.datePaid||'—'}</td>
-      <td style="font-size:12px;color:var(--muted);">${ph.releasedBy||'Admin'}</td>
-    </tr>`).join('')
-    : '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--muted);">No payment records yet.</td></tr>';
-}
-
-function exportPaymentHistory() {
-  const rows = paymentHistory.map(ph =>
-    `${ph.empName},${ph.periodLabel||ph.period},₱${fmt(ph.net||0)},${ph.method||''},${ph.ref||''},${ph.datePaid||''},${ph.releasedBy||''}`
-  );
-  const csv = 'Employee,Period,Net Pay,Method,Reference,Date Paid,Released By\n' + rows.join('\n');
-  const a = document.createElement('a');
-  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
-  a.download = 'chowtime-payment-history.csv';
-  a.click();
-}
-
-window.markAsPaid = markAsPaid;
-window.undoPayment = undoPayment;
-window.renderPaymentHistory = renderPaymentHistory;
-window.exportPaymentHistory = exportPaymentHistory;
-window.setupPayments = setupPayments;
 
 function showTab(id) {
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
@@ -2236,7 +1895,6 @@ function refreshTab(id) {
   if(id==='memo')       renderMemos();
   if(id==='settings')   loadSettings();
   if(id==='shifts')     setupShifts();
-  if(id==='payments')   setupPayments();
 }
 
 // ══════════════════════════════════════════════════════════
@@ -2618,54 +2276,6 @@ function computeAllPayroll() {
       <td>₱${fmt(r.loanDed+r.totalDed)}</td>
       <td style="font-weight:700;color:var(--brand);font-size:14px;">₱${fmt(r.net)}</td>
     </tr>`).join('')||'<tr><td colspan="16" style="text-align:center;padding:20px;color:var(--muted);">No employees.</td></tr>';
-
-  // ── Employer Contribution Table ─────────────────────────────
-  const erTbody = document.getElementById('employer-contrib-tbody');
-  if (erTbody) {
-    let totalErSSS=0, totalErPHIC=0, totalErPagibig=0, totalErAll=0;
-    erTbody.innerHTML = rows.map(r => {
-      totalErSSS     += r.erSSS||0;
-      totalErPHIC    += r.erPHIC||0;
-      totalErPagibig += r.erPagibig||0;
-      totalErAll     += r.erTotal||0;
-      return `<tr>
-        <td><strong>${r.name}</strong></td>
-        <td>₱${fmt((r.rate||0)*26)}/mo</td>
-        <td style="color:var(--blue);">₱${fmt(r.erSSS||0)}</td>
-        <td style="color:var(--green);">₱${fmt(r.erPHIC||0)}</td>
-        <td style="color:var(--brand);">₱${fmt(r.erPagibig||0)}</td>
-        <td style="font-weight:700;">₱${fmt(r.erTotal||0)}</td>
-      </tr>`;
-    }).join('');
-
-    const totDiv = document.getElementById('employer-contrib-total');
-    if (totDiv) totDiv.innerHTML = `
-      <div style="display:flex;gap:20px;flex-wrap:wrap;">
-        <div><span style="color:var(--muted);font-size:11px;">TOTAL SSS (Employer)</span><br><strong style="color:var(--blue);font-size:16px;">₱${fmt(totalErSSS)}</strong></div>
-        <div><span style="color:var(--muted);font-size:11px;">TOTAL PhilHealth (Employer)</span><br><strong style="color:var(--green);font-size:16px;">₱${fmt(totalErPHIC)}</strong></div>
-        <div><span style="color:var(--muted);font-size:11px;">TOTAL Pag-Ibig (Employer)</span><br><strong style="color:var(--brand);font-size:16px;">₱${fmt(totalErPagibig)}</strong></div>
-        <div style="border-left:2px solid var(--border);padding-left:20px;"><span style="color:var(--muted);font-size:11px;">TOTAL EMPLOYER COST</span><br><strong style="color:var(--dark);font-size:18px;">₱${fmt(totalErAll)}</strong></div>
-      </div>`;
-  }
-}
-
-// Auto-recompute payroll 2 seconds after page loads to ensure Firebase dtrData is ready
-window.addEventListener('load', () => {
-  setTimeout(() => {
-    const active = document.querySelector('.page.active');
-    if (active?.id === 'page-payroll') computeAllPayroll();
-  }, 2000);
-});
-function exportPayroll() {
-  const p=getPeriod();
-  const rows=employees.map(e=>buildPayrollRow(e,p.key));
-  const csv=['Employee,Days,Basic,OT,ND,HolPay,Gross,SSS,PHIC,PagIbig,Tax,LoanDed,Net',
-    ...rows.map(r=>`${r.name},${r.days},${r.basic.toFixed(2)},${r.otPay.toFixed(2)},${r.ndPay.toFixed(2)},${r.holPay.toFixed(2)},${r.gross.toFixed(2)},${r.sss.toFixed(2)},${r.phic.toFixed(2)},${r.pagibig.toFixed(2)},${r.tax.toFixed(2)},${(r.loanDed+r.totalDed).toFixed(2)},${r.net.toFixed(2)}`)
-  ].join('\n');
-  const a=document.createElement('a');
-  a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
-  a.download=`chowtime_payroll_${p.key}.csv`; a.click();
-}
 
 // ══════════════════════════════════════════════════════════
 //  PAYSLIP
@@ -3131,7 +2741,7 @@ onValue(ref(db,'paymentHistory'), snap => {
     paymentHistory = Object.values(data);
     save('paymentHistory', paymentHistory);
     const active = document.querySelector('.page.active');
-    if (active?.id === 'page-payments') { renderPaymentRelease(); renderPaymentHistory(); }
+    if (active?.id === 'page-dashboard') renderDashboard();
   }
 });
 
