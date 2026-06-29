@@ -912,6 +912,8 @@ function buildPeriodDropdown() {
 //  PERSISTENT STATE  (localStorage keys: ct_*)
 // ══════════════════════════════════════════════════════════
 let employees = load('employees') || [];
+let shiftDefs  = load('shiftDefs') || [];  // declared early — used in getDTRTotals/getEmpShiftForDay
+let empShifts  = load('empShifts') || {};  // declared early — used in getEmpShiftForDay
 let leaves     = load('leaves')    || [];
 let loans      = load('loans')     || [];
 let memos      = load('memos')     || [];
@@ -1476,8 +1478,7 @@ function adminEditDTR(dateStr, field, value, empId, periodKey) {
 // ══════════════════════════════════════════════════════════
 //  SHIFT SCHEDULER
 // ══════════════════════════════════════════════════════════
-let shiftDefs = load('shiftDefs') || [];
-let empShifts = load('empShifts') || {};
+// shiftDefs and empShifts declared at top of file — do not re-declare here
 const DAYS = ['mon','tue','wed','thu','fri','sat','sun'];
 
 function getMonday(d) {
@@ -2115,9 +2116,20 @@ function loadDTR() { // loadDTR — loads DTR for selected employee and period
     </tr>`;
   }
   document.getElementById('dtr-tbody').innerHTML=rows;
-  updateDTRSummary(periodKey, empId);
+  const rowCount = rows.split('<tr').length - 1;
   const errDiv = document.getElementById('dtr-error');
-  if (errDiv) errDiv.style.display='none';
+  if (errDiv) {
+    errDiv.style.display='block';
+    if (rowCount === 0) {
+      errDiv.style.background='#fff3cd'; errDiv.style.borderColor='#f0a500'; errDiv.style.color='#7a5500';
+      errDiv.textContent = `⚠️ 0 rows. Period=${periodKey} Emp=${empId} start=${p.start} end=${p.end}`;
+    } else {
+      errDiv.style.background='#d4edda'; errDiv.style.borderColor='#2D7D3A'; errDiv.style.color='#2D7D3A';
+      errDiv.textContent = `✅ ${rowCount} rows OK — period: ${periodKey}`;
+    }
+    setTimeout(()=>{ if(errDiv) errDiv.style.display='none'; }, 5000);
+  }
+  updateDTRSummary(periodKey, empId);
   } catch(err) {
     console.error('loadDTR crashed:', err);
     const errDiv = document.getElementById('dtr-error');
