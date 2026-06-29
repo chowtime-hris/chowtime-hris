@@ -93,9 +93,25 @@ tbody td{padding:9px 11px;}
   </div>
   <div class="header-right">
     <select class="period-select" id="period-year-sel" onchange="buildPeriodDropdown();onPeriodChange();" title="Select Year" style="background:rgba(255,255,255,.15);margin-right:2px;">
+      <option value="2020">2020</option>
+      <option value="2021">2021</option>
+      <option value="2022">2022</option>
+      <option value="2023">2023</option>
+      <option value="2024">2024</option>
+      <option value="2025">2025</option>
+      <option value="2026" selected>2026</option>
+      <option value="2027">2027</option>
+      <option value="2028">2028</option>
+      <option value="2029">2029</option>
+      <option value="2030">2030</option>
+      <option value="2031">2031</option>
+      <option value="2032">2032</option>
+      <option value="2033">2033</option>
+      <option value="2034">2034</option>
+      <option value="2035">2035</option>
     </select>
     <select class="period-select" id="global-period" onchange="onPeriodChange()">
-      <option>Loading…</option>
+      <option value="2026-06-16" selected>June 16–30, 2026</option>
     </select>
     <span id="firebase-status-badge" style="padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;border:1px solid rgba(240,165,0,.5);background:rgba(240,165,0,.15);color:#f0c040;">
       ⟳ Connecting…
@@ -855,22 +871,17 @@ function buildPeriodDropdown() {
   const today = new Date();
   const curYear = today.getFullYear();
 
-  // Populate year selector if not done yet
-  if (yearSel && yearSel.options.length === 0) {
-    for (let y = 2020; y <= 2035; y++) {
-      const opt = document.createElement('option');
-      opt.value = y; opt.textContent = y;
-      if (y === curYear) opt.selected = true;
-      yearSel.appendChild(opt);
-    }
-  }
-
-  // Get current period key safely
-  let cur = '';
-  try { cur = getPeriod().key || ''; } catch(e) { cur = ''; }
-
-  // Get selected year — fallback to current year if invalid
+  // Get selected year from selector (already pre-populated in HTML)
   const filterYear = yearSel && +yearSel.value > 2000 ? +yearSel.value : curYear;
+
+  // Get current period safely
+  let cur = '';
+  try {
+    const saved = localStorage.getItem('ct_period');
+    cur = saved || getPeriodKey(today.toISOString().split('T')[0]) || '';
+  } catch(e) {
+    cur = getPeriodKey(today.toISOString().split('T')[0]) || '';
+  }
 
   // Filter periods for selected year
   const filtered = PERIOD_KEYS.filter(k => +k.split('-')[0] === filterYear);
@@ -880,11 +891,8 @@ function buildPeriodDropdown() {
     `<option value="${k}" ${k===cur?'selected':''}>${getPeriodLabel(k)}</option>`
   ).join('');
 
-  // Select current period if in this year, otherwise first of year
-  if (filtered.includes(cur)) {
-    sel.value = cur;
-  } else {
-    // Select closest period to today
+  // Make sure something is selected
+  if (!sel.value && filtered.length) {
     const todayKey = getPeriodKey(today.toISOString().split('T')[0]);
     sel.value = filtered.includes(todayKey) ? todayKey : filtered[filtered.length-1];
     setPeriod(sel.value);
