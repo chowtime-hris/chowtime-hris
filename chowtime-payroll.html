@@ -2116,7 +2116,13 @@ function loadDTR() { // loadDTR — loads DTR for selected employee and period
   }
   document.getElementById('dtr-tbody').innerHTML=rows;
   updateDTRSummary(periodKey, empId);
-  } catch(err) { console.error('loadDTR crashed:', err); }
+  const errDiv = document.getElementById('dtr-error');
+  if (errDiv) errDiv.style.display='none';
+  } catch(err) {
+    console.error('loadDTR crashed:', err);
+    const errDiv = document.getElementById('dtr-error');
+    if (errDiv) { errDiv.style.display='block'; errDiv.textContent = '❌ Error: ' + err.message; }
+  }
 }
 
 function saveDTRField(dateStr, field, value, empId, periodKey) {
