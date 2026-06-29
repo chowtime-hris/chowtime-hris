@@ -260,6 +260,7 @@ body{font-family:'Inter',sans-serif;background:var(--dark);color:#fff;min-height
     <div class="conf-time"   id="conf-time">—</div>
     <div class="conf-branch" id="conf-branch">—</div>
     <div class="conf-geo"    id="conf-geo">—</div>
+    <div id="conf-late" style="display:none;margin-top:10px;background:rgba(255,60,60,.25);border:1px solid rgba(255,100,100,.4);border-radius:8px;padding:8px 14px;font-size:13px;font-weight:700;color:#ff8080;">⚠️ LATE — will be deducted from pay</div>
   </div>
 
   <!-- Today log -->
@@ -354,6 +355,9 @@ function lsSet(k,v){ localStorage.setItem('ct_'+k,JSON.stringify(v)); }
 let employees  = lsGet('employees')  || [];
 let dtrData    = lsGet('dtrData')    || {};
 let kioskLog   = lsGet('kioskLog')   || [];
+let shiftDefs  = lsGet('shiftDefs')  || [];
+let empShifts  = lsGet('empShifts')  || {};
+function timeToMins(t){ if(!t) return 0; const [h,m]=t.split(':').map(Number); return h*60+m; }
 let settings   = lsGet('settings')   || {start:'09:00',end:'18:00',bstart:'12:00',bend:'13:00',grace:5,hours:8};
 let branchCfg  = lsGet('branchCfg')  || {name:'Main Branch',lat:14.5995,lng:120.9842,radius:200,enforceGeo:false};
 let fbCfg      = lsGet('firebase_cfg') || null;
@@ -833,6 +837,37 @@ async function doAction(action){
   document.getElementById('conf-time').textContent=timeDisp;
   document.getElementById('conf-branch').textContent='📍 '+BRANCH+' · ✅ Face Verified';
   document.getElementById('conf-geo').textContent=entry.dist!==null?`${entry.dist}m from branch`:'No GPS';
+
+  // ── LATE NOTIFICATION ────────────────────────────────────────────
+  // Show late warning if clocking in past prep start + grace
+  const lateMsg = document.getElementById('conf-late');
+  if (action === 'in' && lateMsg) {
+    try {
+      const now = new Date();
+      const dow = now.getDay();
+      const empShift = empShifts ? empShifts[empId] : null;
+      const shiftId  = empShift ? (empShift.shiftId || empShift.id) : null;
+      const shift    = shiftId ? shiftDefs.find(s => s.id === shiftId) : null;
+      if (shift) {
+        const shiftStart = timeToMins(shift.start || '09:00');
+        const prepMins   = +(shift.prep || 30);
+        const grace      = +(shift.grace || 5);
+        const prepStart  = shiftStart - prepMins;
+        const nowMins    = now.getHours()*60 + now.getMinutes();
+        const lateMins   = Math.max(0, nowMins - prepStart - grace);
+        if (lateMins > 0) {
+          lateMsg.style.display = 'block';
+          lateMsg.textContent = `⚠️ LATE ${lateMins} min — will be deducted from pay`;
+        } else {
+          lateMsg.style.display = 'none';
+        }
+      } else {
+        lateMsg.style.display = 'none';
+      }
+    } catch(e) { lateMsg.style.display = 'none'; }
+  } else if (lateMsg) {
+    lateMsg.style.display = 'none';
+  }
   const ph=document.getElementById('conf-photo');
   if(photo){ph.src=photo;ph.style.display='block';}else{ph.style.display='none';}
 
@@ -1075,6 +1110,16 @@ if(!fbCfg?.apiKey||!fbCfg?.databaseURL){
         };
         localStorage.setItem('ct_branchCfg', JSON.stringify(branchCfg));
       }
+    });
+
+    // Pull shift definitions for late detection
+    onValue(ref(db,'shiftDefs'), snap => {
+      const data = snap.val();
+      if (data) { shiftDefs = Array.isArray(data) ? data : Object.values(data); lsSet('shiftDefs', shiftDefs); }
+    });
+    onValue(ref(db,'empShifts'), snap => {
+      const data = snap.val();
+      if (data) { empShifts = data; lsSet('empShifts', empShifts); }
     });
 
     // Pull today log
