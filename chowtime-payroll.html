@@ -487,7 +487,7 @@ tbody td{padding:9px 11px;}
     <div class="panel-title"><span>⏰</span> Shift Definitions</div>
     <div class="alert alert-info">Define your shifts here. Each branch can use any combination of these shifts.</div>
     <div style="margin-bottom:12px;">
-      <button class="btn btn-primary" onclick="openShiftModal()">+ Add Shift</button>
+      <button class="btn btn-primary" onclick="if(typeof openShiftModal==='function'){openShiftModal();}else{alert('System still loading, please wait a moment.');}">+ Add Shift</button>
     </div>
     <div class="table-wrap">
       <table>
@@ -1063,17 +1063,17 @@ function computeTax(annualTaxable) {
   return 402500+(t-2000000)*0.30;
 }
 function buildPayrollRow(emp, periodKey) {
+  if (!emp || !emp.id) return {name:'?',pos:'',days:0,basic:0,otPay:0,ndPay:0,holPay:0,gross:0,sss:0,phic:0,pagibig:0,tax:0,loanDed:0,totalDed:0,net:0,ot:0,nd:0,late:0,hasDTR:false};
   const totals   = getDTRTotals(periodKey, emp.id);
-  // hasDTR: true if at least one day has been entered in DTR for this period/employee
   const hasDTR   = totals.days > 0 || totals.ot > 0 || totals.nd > 0 || totals.holPay > 0;
   const days     = hasDTR ? totals.days : 0;
-  const rate     = +emp.rate;
+  const rate     = +(emp.rate || 0); // safe fallback
   const monthly  = rate * 26;
   const hourly   = rate / (+settings.hours||8);
   const basic    = days * rate;
   const otPay    = +(totals.ot * hourly * (+settings.ot||1.25)).toFixed(2);
   const ndPay    = +(totals.nd * hourly * (+settings.nd||1.10)).toFixed(2);
-  const holPay   = totals.holPay;
+  const holPay   = totals.holPay || 0;
   const gross    = basic + otPay + ndPay + holPay;
 
   // ── Government contributions — DOLE rules ──────────────────
@@ -1995,19 +1995,26 @@ function setupDTR() {
     return;
   }
 
-  const empSel=document.getElementById('dtr-emp');
-  const curEmp=empSel.value;
-  empSel.innerHTML='<option value="">— Select Employee —</option>'+employees.map(e=>`<option value="${e.id}">${e.name}</option>`).join('');
-  if(curEmp) empSel.value=curEmp;
+  const empSel = document.getElementById('dtr-emp');
+  const curEmp = empSel.value;
+  empSel.innerHTML = '<option value="">— Select Employee —</option>' +
+    employees.map(e=>`<option value="${e.id}">${e.name}</option>`).join('');
+  if (curEmp) empSel.value = curEmp;
 
-  const perSel=document.getElementById('dtr-period-sel');
-  const curPer=perSel.value || getPeriod().key;
+  // Build period dropdown
+  const perSel = document.getElementById('dtr-period-sel');
+  const today = new Date().toISOString().split('T')[0];
+  const todayKey = getPeriodKey(today);
+  const curPer = perSel.value && perSel.value !== '' ? perSel.value : (getPeriod().key || todayKey);
   const curYear = curPer ? +curPer.split('-')[0] : new Date().getFullYear();
   const yearPeriods = PERIOD_KEYS.filter(k => +k.split('-')[0] === curYear);
   perSel.innerHTML = yearPeriods.map(k=>`<option value="${k}">${getPeriodLabel(k)}</option>`).join('');
-  perSel.value = yearPeriods.includes(curPer) ? curPer : getPeriod().key;
-  document.getElementById('global-period').value=perSel.value;
-  if(empSel.value) loadDTR();
+  const bestPer = yearPeriods.includes(curPer) ? curPer : (yearPeriods.includes(todayKey) ? todayKey : yearPeriods[yearPeriods.length-1]);
+  perSel.value = bestPer;
+  document.getElementById('global-period').value = bestPer;
+  setPeriod(bestPer);
+
+  if (empSel.value) loadDTR();
 }
 
 function loadDTR() { // loadDTR — loads DTR for selected employee and period
