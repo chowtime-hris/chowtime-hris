@@ -912,6 +912,7 @@ function buildPeriodDropdown() {
 //  PERSISTENT STATE  (localStorage keys: ct_*)
 // ══════════════════════════════════════════════════════════
 let employees = load('employees') || [];
+  
 let shiftDefs  = load('shiftDefs') || [];  // declared early — used in getDTRTotals/getEmpShiftForDay
 let empShifts  = load('empShifts') || {};  // declared early — used in getEmpShiftForDay
 let leaves     = load('leaves')    || [];
