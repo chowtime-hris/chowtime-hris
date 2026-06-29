@@ -2192,17 +2192,6 @@ function exportPaymentHistory() {
   a.click();
 }
 
-// Pull payment history from Firebase
-onValue(ref(db,'paymentHistory'), snap => {
-  const data = snap.val();
-  if (data) {
-    paymentHistory = Object.values(data);
-    save('paymentHistory', paymentHistory);
-    const active = document.querySelector('.page.active');
-    if (active?.id === 'page-payments') { renderPaymentRelease(); renderPaymentHistory(); }
-  }
-});
-
 window.markAsPaid = markAsPaid;
 window.undoPayment = undoPayment;
 window.renderPaymentHistory = renderPaymentHistory;
@@ -2387,7 +2376,9 @@ function saveEmployee(){
     hired:v('e-hired'),sss:v('e-sss'),phic:v('e-phic'),pagibig:v('e-pagibig'),
     tin:v('e-tin'), email:v('e-email')||'',
     gcash:v('e-gcash')||'', bank:v('e-bank')||'',
-    gcashQR: document.getElementById('gcash-qr-preview')?.dataset?.qr || employees.find(e=>e.id===v('e-id'))?.gcashQR || ''
+    gcashQR: document.getElementById('gcash-qr-preview')?.dataset?.qr || employees.find(emp=>emp.id===v('e-id'))?.gcashQR || '',
+    contact:v('e-contact')||'', emergency:v('e-emergency')||''
+  };
   if(!e.name||!e.rate) return alert('Name and Daily Rate are required.');
   if(!e.id) return alert('Employee ID is required.');
 
@@ -3131,6 +3122,16 @@ onValue(ref(db,'autoClockOut'), snap => {
   if (data) {
     autoClockOutSettings = data;
     save('autoClockOut', autoClockOutSettings);
+  }
+});
+
+onValue(ref(db,'paymentHistory'), snap => {
+  const data = snap.val();
+  if (data) {
+    paymentHistory = Object.values(data);
+    save('paymentHistory', paymentHistory);
+    const active = document.querySelector('.page.active');
+    if (active?.id === 'page-payments') { renderPaymentRelease(); renderPaymentHistory(); }
   }
 });
 
