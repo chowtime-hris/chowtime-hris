@@ -76,6 +76,7 @@ tbody td{padding:9px 11px;}
 .dtr-input{width:90px;padding:4px 6px;border:1px solid var(--border);border-radius:5px;font-size:12px;font-family:inherit;}
 .dtr-select{padding:3px 5px;border:1px solid var(--border);border-radius:5px;font-size:11px;font-family:inherit;}
 .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.52);z-index:200;overflow-y:auto;}
+.modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1000;overflow-y:auto;align-items:flex-start;justify-content:center;padding:40px 16px;}
 .modal-box{background:#fff;max-width:680px;margin:36px auto;border-radius:12px;padding:26px;}
 .modal-box h2{font-family:'Syne',sans-serif;font-size:18px;margin-bottom:16px;}
 @media(max-width:600px){nav.tabs{padding:5px 10px;}.kpi-value{font-size:20px;}.panel{padding:14px;}}
@@ -2018,16 +2019,26 @@ function setupDTR() {
 }
 
 function loadDTR() { // loadDTR — loads DTR for selected employee and period
-  const empId=document.getElementById('dtr-emp').value;
-  const periodKey=document.getElementById('dtr-period-sel').value;
+  const empId = document.getElementById('dtr-emp').value;
+  let periodKey = document.getElementById('dtr-period-sel').value;
 
-  document.getElementById('global-period').value=periodKey;
+  // If period key is empty or invalid — use current period
+  if (!periodKey || !PERIOD_KEYS.includes(periodKey)) {
+    periodKey = getPeriod().key;
+    document.getElementById('dtr-period-sel').value = periodKey;
+  }
+
+  document.getElementById('global-period').value = periodKey;
   setPeriod(periodKey);
 
-  if(!empId) { document.getElementById('dtr-tbody').innerHTML=''; document.getElementById('dtr-summary').innerHTML=''; return; }
+  if (!empId) {
+    document.getElementById('dtr-tbody').innerHTML = '';
+    document.getElementById('dtr-summary').innerHTML = '';
+    return;
+  }
 
-  const p=getPeriodDetails(periodKey);
-  if(!p) return;
+  const p = getPeriodDetails(periodKey);
+  if (!p) return;
 
   const emp = employees.find(e=>e.id===empId);
   const days_abbr=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
