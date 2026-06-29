@@ -1477,21 +1477,26 @@ function getMonday(d) {
 }
 
 function openShiftModal(idx) {
+  // Make sure modal elements exist
+  const modal = document.getElementById('shift-modal');
+  if (!modal) { console.error('Shift modal not found'); return; }
+
   editingShiftIdx = idx !== undefined ? idx : -1;
-  const s = idx !== undefined ? shiftDefs[idx] : {};
+  const s = idx !== undefined ? (shiftDefs[idx] || {}) : {};
   document.getElementById('shift-modal-title').textContent = idx!==undefined?'Edit Shift':'Add Shift';
   document.getElementById('shift-id').value     = s.id     || ('SHIFT-'+Date.now());
   document.getElementById('shift-name').value   = s.name   || '';
   document.getElementById('shift-label').value  = s.label  || '';
-  document.getElementById('shift-start').value  = s.start  || '07:00';
-  document.getElementById('shift-end').value    = s.end    || '15:00';
+  document.getElementById('shift-start').value  = s.start  || '09:00';
+  document.getElementById('shift-end').value    = s.end    || '18:00';
   document.getElementById('shift-bstart').value = s.bstart || '12:00';
   document.getElementById('shift-bend').value   = s.bend   || '13:00';
   document.getElementById('shift-grace').value  = s.grace  || 5;
   document.getElementById('shift-prep').value   = s.prep   || 0;
   document.getElementById('shift-color').value  = s.color  || '#2D7D3A';
-  document.getElementById('shift-modal').style.display='flex';
+  modal.style.display='flex';
 }
+window.openShiftModal = openShiftModal; // expose immediately
 let editingShiftIdx=-1;
 
 function saveShiftDef() {
@@ -1758,7 +1763,20 @@ function setupShifts() {
   const vw=document.getElementById('sched-view-week');
   if(sw&&!sw.value) sw.value=mon;
   if(vw&&!vw.value) vw.value=mon;
-  renderShiftDefs(); renderShiftAssignment(); renderWeeklySchedule();
+
+  // If no shift defs yet — try loading from localStorage backup
+  if (!shiftDefs.length) {
+    const stored = JSON.parse(localStorage.getItem('ct_shiftDefs') || '[]');
+    if (stored.length) shiftDefs = stored;
+  }
+  if (!empShifts || !Object.keys(empShifts).length) {
+    const stored = JSON.parse(localStorage.getItem('ct_empShifts') || '{}');
+    if (Object.keys(stored).length) empShifts = stored;
+  }
+
+  renderShiftDefs();
+  renderShiftAssignment();
+  renderWeeklySchedule();
 }
 window.openShiftModal=openShiftModal;window.saveShiftDef=saveShiftDef;window.deleteShiftDef=deleteShiftDef;
 window.openEmpShiftModal=openEmpShiftModal;window.toggleRotationFields=toggleRotationFields;
@@ -1970,24 +1988,25 @@ function saveEmployee(){
 //  DTR — fully linked per period & employee, auto-saves
 // ══════════════════════════════════════════════════════════
 function setupDTR() {
-  // Build employee dropdown
+  // If no employees yet — wait for Firebase
+  if (!employees.length) {
+    document.getElementById('dtr-emp').innerHTML = '<option value="">⏳ Loading employees...</option>';
+    setTimeout(setupDTR, 500);
+    return;
+  }
+
   const empSel=document.getElementById('dtr-emp');
   const curEmp=empSel.value;
   empSel.innerHTML='<option value="">— Select Employee —</option>'+employees.map(e=>`<option value="${e.id}">${e.name}</option>`).join('');
   if(curEmp) empSel.value=curEmp;
 
-  // Build period dropdown — all years 2020-2035
   const perSel=document.getElementById('dtr-period-sel');
   const curPer=perSel.value || getPeriod().key;
   const curYear = curPer ? +curPer.split('-')[0] : new Date().getFullYear();
-  // Show all periods for the selected year
   const yearPeriods = PERIOD_KEYS.filter(k => +k.split('-')[0] === curYear);
   perSel.innerHTML = yearPeriods.map(k=>`<option value="${k}">${getPeriodLabel(k)}</option>`).join('');
   perSel.value = yearPeriods.includes(curPer) ? curPer : getPeriod().key;
-
-  // Sync global period selector
   document.getElementById('global-period').value=perSel.value;
-
   if(empSel.value) loadDTR();
 }
 
@@ -2103,10 +2122,23 @@ function updateDTRSummary(periodKey, empId) {
 //  PAYROLL
 // ══════════════════════════════════════════════════════════
 function computeAllPayroll() {
-  const p=getPeriod();
-  document.getElementById('pay-period-label').textContent=p.label || getPeriodLabel(p.key);
-  const rows=employees.map(e=>buildPayrollRow(e, p.key));
-  document.getElementById('payroll-tbody').innerHTML=rows.map(r=>`
+  const p = getPeriod();
+  if (!p || !p.key) { setTimeout(computeAllPayroll, 500); return; }
+
+  // Wait for employees to load
+  if (!employees.length) {
+    document.getElementById('payroll-tbody').innerHTML =
+      '<tr><td colspan="16" style="text-align:center;padding:30px;color:var(--muted);">⏳ Loading employees...</td></tr>';
+    setTimeout(computeAllPayroll, 500);
+    return;
+  }
+
+  document.getElementById('pay-period-label').textContent = p.label || getPeriodLabel(p.key);
+  const rows = employees
+    .filter(e => e && e.id && e.name)
+    .map(e => { try { return buildPayrollRow(e, p.key); } catch(err) { return {name:e.name,days:0,basic:0,otPay:0,ndPay:0,holPay:0,gross:0,sss:0,phic:0,pagibig:0,tax:0,loanDed:0,totalDed:0,net:0}; } });
+
+  document.getElementById('payroll-tbody').innerHTML = rows.map(r=>`
     <tr>
       <td><strong>${r.name}</strong></td>
       <td>${r.days}</td>
@@ -2532,9 +2564,12 @@ onValue(ref(db,'employees'), snap => {
   });
   save('employees', employees.filter(e => !(sampleIds.includes(e.id) && sampleNames.includes(e.name))));
   renderEmployeesTable();
-  // Re-render dashboard when employees arrive from Firebase
+  // Re-render all tabs that need employee list
   const active = document.querySelector('.page.active');
   if (!active || active.id === 'page-dashboard') setTimeout(renderDashboard, 300);
+  if (active?.id === 'page-dtr') setupDTR();
+  if (active?.id === 'page-dtr-editor') setupDTREditor();
+  if (active?.id === 'page-shifts') setupShifts();
   ['dtr-emp','slip-emp','l-emp','ln-emp','m-emp','si-emp'].forEach(id => {
     const el = document.getElementById(id);
     if (el) {
@@ -2552,12 +2587,15 @@ onValue(ref(db,'employees'), snap => {
 onValue(ref(db,'shiftDefs'), snap => {
   const data = snap.val();
   if (data) {
-    // Firebase may return object or array — always convert to array
     shiftDefs = Array.isArray(data) ? data : Object.values(data);
     save('shiftDefs', shiftDefs);
-    // Re-render if shifts tab is active
+    // Re-render shifts tab always — not just when active
     const active = document.querySelector('.page.active');
-    if (active?.id === 'page-shifts') { renderShiftDefs(); renderShiftAssignment(); renderWeeklySchedule(); }
+    if (active?.id === 'page-shifts') {
+      renderShiftDefs();
+      renderShiftAssignment();
+      renderWeeklySchedule();
+    }
   }
 });
 onValue(ref(db,'empShifts'), snap => {
