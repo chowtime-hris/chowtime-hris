@@ -2603,36 +2603,53 @@ function emailPayslip() {
   if (!emp) return alert('Please select an employee first.');
   const pKey  = document.getElementById('slip-period').value || getPeriod().key;
   const r     = buildPayrollRow(emp, pKey);
+  const t     = getDTRTotals(pKey, empId);
   const label = getPeriodLabel(pKey);
+  const hourly = (emp.rate||0) / (+settings.hours||8);
+  const lateUtDed = r.totalDed || 0; // late + UT deduction
 
   const email = emp.email || prompt(`Enter email for ${emp.name}:`, '') || '';
   if (!email) return;
 
   const subject = encodeURIComponent(`Chowtime Payslip — ${emp.name} — ${label}`);
   const body = encodeURIComponent(
-`CHOWTIME PAYROLL SYSTEM
-Payslip — ${label}
+`====================================
+   CHOWTIME PAYROLL SYSTEM
+   Payslip — ${label}
+====================================
+Employee  : ${emp.name}
+ID        : ${emp.id}
+Position  : ${emp.pos||''}
+Type      : ${emp.type||''}
+Daily Rate: P${fmt(emp.rate||0)}
 
-Employee : ${emp.name}
-ID       : ${emp.id}
-Position : ${emp.pos||''}
+-------- ATTENDANCE --------
+Days Present  : ${r.days}
+Late (mins)   : ${t.late||0} mins
+Undertime     : ${t.ut||0} mins
+OT Hours      : ${t.ot||0} hrs
+Night Diff    : ${t.nd||0} hrs
 
-EARNINGS
-Days Present : ${r.days}
-Basic Pay    : P${fmt(r.basic)}
-OT Pay       : P${fmt(r.otPay)}
-Gross Pay    : P${fmt(r.gross)}
+-------- EARNINGS --------
+Basic Pay     : P${fmt(r.basic)}
+OT Pay (${t.ot||0}h): P${fmt(r.otPay)}
+Night Diff Pay: P${fmt(r.ndPay)}
+Holiday Pay   : P${fmt(r.holPay)}
+GROSS PAY     : P${fmt(r.gross)}
 
-DEDUCTIONS
-SSS          : P${fmt(r.sss)}
-PhilHealth   : P${fmt(r.phic)}
-Pag-Ibig     : P${fmt(r.pagibig)}
-Tax          : P${fmt(r.tax)}
-Loan         : P${fmt(r.loanDed)}
+-------- DEDUCTIONS --------
+SSS           : P${fmt(r.sss)}
+PhilHealth    : P${fmt(r.phic)}
+Pag-Ibig      : P${fmt(r.pagibig)}
+Withholding Tax: P${fmt(r.tax)}
+Late/UT Ded.  : P${fmt(lateUtDed)}
+Loan Deduction: P${fmt(r.loanDed)}
+Total Ded.    : P${fmt((r.sss||0)+(r.phic||0)+(r.pagibig||0)+(r.tax||0)+lateUtDed+(r.loanDed||0))}
 
-NET PAY      : P${fmt(r.net)}
-
--- Chowtime HRIS`);
+====================================
+NET PAY       : P${fmt(r.net)}
+====================================
+System-generated — Chowtime HRIS`);
 
   window.open(`mailto:${email}?subject=${subject}&body=${body}`, '_blank');
   showToastAdmin && showToastAdmin(`📧 Email opened for ${emp.name}`);
