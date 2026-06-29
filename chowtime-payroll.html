@@ -429,8 +429,8 @@ tbody td{padding:9px 11px;}
   <div class="panel">
     <div class="panel-title"><span>⚙️</span> Company & Payroll Settings</div>
     <div class="form-grid">
-      <div class="form-group"><label>Company Name</label><input id="s-company" value="Chowtime Restaurant"></div>
-      <div class="form-group"><label>Address</label><input id="s-address" value="123 Food Street, Manila"></div>
+      <div class="form-group"><label>Company Name</label><input id="s-company" placeholder="e.g. Chowtime Restaurant"></div>
+      <div class="form-group"><label>Address</label><input id="s-address" placeholder="e.g. 123 Food Street, Manila"></div>
       <div class="form-group"><label>Work Hours/Day</label><input type="number" id="s-hours" value="8"></div>
       <div class="form-group"><label>Shift Start</label><input type="time" id="s-start" value="09:00"></div>
       <div class="form-group"><label>Shift End</label><input type="time" id="s-end" value="18:00"></div>
@@ -852,12 +852,11 @@ function onPeriodChange() {
 function buildPeriodDropdown() {
   const sel = document.getElementById('global-period');
   const yearSel = document.getElementById('period-year-sel');
-  const cur = getPeriod().key;
-  const curYear = cur ? +cur.split('-')[0] : new Date().getFullYear();
+  const today = new Date();
+  const curYear = today.getFullYear();
 
-  // Populate year selector
-  if (yearSel) {
-    yearSel.innerHTML = '';
+  // Populate year selector if not done yet
+  if (yearSel && yearSel.options.length === 0) {
     for (let y = 2020; y <= 2035; y++) {
       const opt = document.createElement('option');
       opt.value = y; opt.textContent = y;
@@ -866,15 +865,30 @@ function buildPeriodDropdown() {
     }
   }
 
-  // Show only periods for selected year (keeps dropdown manageable)
-  const filterYear = yearSel ? +yearSel.value : curYear;
+  // Get current period key safely
+  let cur = '';
+  try { cur = getPeriod().key || ''; } catch(e) { cur = ''; }
+
+  // Get selected year — fallback to current year if invalid
+  const filterYear = yearSel && +yearSel.value > 2000 ? +yearSel.value : curYear;
+
+  // Filter periods for selected year
   const filtered = PERIOD_KEYS.filter(k => +k.split('-')[0] === filterYear);
+  if (!filtered.length) return;
+
   sel.innerHTML = filtered.map(k =>
     `<option value="${k}" ${k===cur?'selected':''}>${getPeriodLabel(k)}</option>`
   ).join('');
 
-  // If current period not in filtered, select first of year
-  if (!filtered.includes(cur) && filtered.length) sel.value = filtered[0];
+  // Select current period if in this year, otherwise first of year
+  if (filtered.includes(cur)) {
+    sel.value = cur;
+  } else {
+    // Select closest period to today
+    const todayKey = getPeriodKey(today.toISOString().split('T')[0]);
+    sel.value = filtered.includes(todayKey) ? todayKey : filtered[filtered.length-1];
+    setPeriod(sel.value);
+  }
 }
 
 // ══════════════════════════════════════════════════════════
@@ -886,7 +900,7 @@ let loans      = load('loans')     || [];
 let memos      = load('memos')     || [];
 let salaryLog  = load('salaryLog') || [];
 let settings   = load('settings')  || {
-  company:'Chowtime Restaurant', address:'123 Food Street, Manila',
+  company:'', address:'',
   hours:8, start:'09:00', end:'18:00',
   bstart:'12:00', bend:'13:00',
   grace:5, ot:1.25, nd:1.10, rh:2.0, sh:1.30
@@ -2546,6 +2560,18 @@ onValue(ref(db,'autoClockOut'), snap => {
   if (data) {
     autoClockOutSettings = data;
     save('autoClockOut', autoClockOutSettings);
+  }
+});
+
+// ── Pull settings from Firebase ────────────────────────────
+onValue(ref(db,'settings'), snap => {
+  const data = snap.val();
+  if (data) {
+    settings = {...settings, ...data};
+    save('settings', settings);
+    // Refresh settings tab if open
+    const active = document.querySelector('.page.active');
+    if (active?.id === 'page-settings') loadSettings();
   }
 });
 
