@@ -1819,7 +1819,9 @@ function renderDashboard() {
   const periodLabel = document.getElementById('dash-period-label');
   if (periodLabel) periodLabel.textContent = p.label || '';
 
-  const rows = employees.map(e=>{ try { return buildPayrollRow(e, p.key); } catch(e) { return {gross:0,net:0,sss:0,phic:0,pagibig:0}; } });
+  const rows = employees
+    .filter(e => e && e.id && e.name) // skip invalid employees
+    .map(e=>{ try { return buildPayrollRow(e, p.key); } catch(err) { return {name:e.name||'?',pos:e.pos||'',days:0,ot:0,late:0,gross:0,net:0,sss:0,phic:0,pagibig:0,loanDed:0,totalDed:0}; } });
   const totalGross = rows.reduce((a,r)=>a+(r.gross||0),0);
   const totalNet   = rows.reduce((a,r)=>a+(r.net||0),0);
   const totalDed   = rows.reduce((a,r)=>a+(r.sss||0)+(r.phic||0)+(r.pagibig||0),0);
@@ -1853,15 +1855,23 @@ function renderDashboard() {
     ? alerts.map(a=>`<div class="alert alert-warn" style="margin-bottom:8px;">${a}</div>`).join('')
     : `<div class="alert alert-success">✅ No alerts this period.</div>`;
 
+  // If no employees yet — show loading and retry when Firebase delivers them
+  if (!employees.length) {
+    document.getElementById('dash-tbody').innerHTML =
+      '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--muted);">⏳ Loading employees from Firebase...</td></tr>';
+    setTimeout(renderDashboard, 1000);
+    return;
+  }
+
   document.getElementById('dash-tbody').innerHTML = rows.map(r=>`
     <tr>
-      <td><strong>${r.name}</strong></td>
-      <td>${r.pos}</td>
-      <td>${r.days}</td>
-      <td>${r.ot}</td>
-      <td>${r.late}</td>
-      <td>₱${fmt(r.gross)}</td>
-      <td><strong style="color:var(--brand);">₱${fmt(r.net)}</strong></td>
+      <td><strong>${r.name||'—'}</strong></td>
+      <td>${r.pos||'—'}</td>
+      <td>${r.days||0}</td>
+      <td>${r.ot||0}</td>
+      <td>${r.late||0}</td>
+      <td>₱${fmt(r.gross||0)}</td>
+      <td><strong style="color:var(--brand);">₱${fmt(r.net||0)}</strong></td>
     </tr>`).join('')||'<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--muted);">Add employees to get started.</td></tr>';
 }
 function kpiCard(label,val,sub,color){
@@ -2522,6 +2532,9 @@ onValue(ref(db,'employees'), snap => {
   });
   save('employees', employees.filter(e => !(sampleIds.includes(e.id) && sampleNames.includes(e.name))));
   renderEmployeesTable();
+  // Re-render dashboard when employees arrive from Firebase
+  const active = document.querySelector('.page.active');
+  if (!active || active.id === 'page-dashboard') setTimeout(renderDashboard, 300);
   ['dtr-emp','slip-emp','l-emp','ln-emp','m-emp','si-emp'].forEach(id => {
     const el = document.getElementById(id);
     if (el) {
@@ -2566,6 +2579,8 @@ onValue(ref(db,'branchSchedules'), snap => {
       if (s.name) branchSchedules[s.name] = s;
     });
     save('branchSchedules', branchSchedules);
+    // Re-render branch schedule table wherever it's shown
+    renderBranchSchedules();
   }
 });
 
