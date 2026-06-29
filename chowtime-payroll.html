@@ -912,7 +912,6 @@ function buildPeriodDropdown() {
 //  PERSISTENT STATE  (localStorage keys: ct_*)
 // ══════════════════════════════════════════════════════════
 let employees = load('employees') || [];
-  
 let shiftDefs  = load('shiftDefs') || [];  // declared early — used in getDTRTotals/getEmpShiftForDay
 let empShifts  = load('empShifts') || {};  // declared early — used in getEmpShiftForDay
 let leaves     = load('leaves')    || [];
@@ -966,15 +965,25 @@ function minsToTime(m) { // 570 → "09:30"
 
 function computeDTRRow(entry, shiftSched) {
   const s = shiftSched || settings;
-  const shiftStart = timeToMins(s.start || settings.start || '09:00');
-  const shiftEnd   = timeToMins(s.end   || settings.end   || '18:00');
-  const breakMins  = 60;
-  const otBuffer   = 60;
-  const grace      = +(s.grace !== undefined ? s.grace : settings.grace) || 5;
+  const shiftStart  = timeToMins(s.start || settings.start || '09:00');
+  const shiftEnd    = timeToMins(s.end   || settings.end   || '18:00');
+  const otBuffer    = 60;
+  const grace       = +(s.grace !== undefined ? s.grace : settings.grace) || 5;
+  const prepMinsSet = +(s.prep !== undefined ? s.prep : 30); // prep time in minutes
+  const prepStart   = shiftStart - prepMinsSet; // when prep starts e.g. 08:30
+
+  // ── STRAIGHT SHIFT: no break deduction, paid start to end ────────
+  // If no break start/end set in shift definition → straight duty
+  // Only deduct break if shift has explicit bstart AND bend AND they differ
+  const shiftBstart = s.bstart || '';
+  const shiftBend   = s.bend   || '';
+  const hasBrk    = shiftBstart && shiftBend && shiftBstart !== shiftBend && shiftBstart !== '00:00';
+  const breakMins = hasBrk ? 60 : 0; // straight shift = 0 break deduction
+  const breakHrsDisplay = hasBrk ? '1h auto' : '0h (straight duty)';
+
   const paidDutyHrs = ((shiftEnd - shiftStart) - breakMins) / 60;
 
   // ── Normalize entry fields ───────────────────────────────────────
-  // Firebase sometimes returns nested objects — extract string values
   const rawIn  = entry.in;
   const rawOut = entry.out;
   const inStr  = (typeof rawIn  === 'string') ? rawIn  : (rawIn  ? String(rawIn)  : '');
@@ -984,33 +993,38 @@ function computeDTRRow(entry, shiftSched) {
   const isAuto = !!entry.auto;
 
   // ── NO ENTRY ────────────────────────────────────────────────────
-  if (!hasIn && !hasOut) return {hrs:0,late:0,ut:0,ot:0,nd:0,breakHrs:1,prepMins:0,status:'none'};
+  if (!hasIn && !hasOut) return {hrs:0,late:0,ut:0,ot:0,nd:0,breakHrs:breakMins/60,prepMins:0,status:'none'};
 
   const inM = timeToMins(inStr);
 
+  // ── LATE: counted from PREP START time (not shift start) ─────────
+  // e.g. Prep starts 08:30 → late if arrives after 08:30 + 5min grace
+  // This means arriving at 08:36+ is late
+  const late = Math.max(0, inM - prepStart - grace);
+
   // ── IN PROGRESS: clocked in but no clock-out yet ─────────────────
   if (hasIn && !hasOut) {
-    const late = Math.max(0, inM - shiftStart - grace);
-    return {hrs:0, late, ut:0, ot:0, nd:0, breakHrs:0, prepMins:Math.max(0,shiftStart-inM), status:'in-progress'};
+    return {hrs:0, late, ut:0, ot:0, nd:0, breakHrs:0, prepMins:Math.max(0,prepStart-inM), status:'in-progress'};
   }
 
   // ── COMPLETE: has both in and out ────────────────────────────────
-  const outM       = timeToMins(outStr);
-  const paidStartM = Math.max(inM, shiftStart);
-  const prepMins   = Math.max(0, shiftStart - inM);
+  const outM = timeToMins(outStr);
+
+  // Paid always starts at SHIFT START (not prep time, not clock-in if early)
+  // If late (arrived after prep start + grace) → paid starts at clock-in
+  const paidStartM = late > 0 ? inM : shiftStart;
+  const prepMin    = Math.max(0, shiftStart - inM);
+
   const rawMins    = Math.max(0, outM - paidStartM);
   const workedMins = Math.max(0, rawMins - breakMins);
   const workedHrs  = +(workedMins / 60).toFixed(2);
-  const late       = Math.max(0, inM - shiftStart - grace);
-  const ut         = (!isAuto && outM < shiftEnd) ? Math.max(0, shiftEnd - outM) : 0;
-  const otStartM   = shiftEnd + otBuffer;
-  // OT applies if clocked out after OT buffer
-  // Auto clock-out: only OT if system used a time significantly after shift end
-  // (meaning employee actually worked late, not just auto-clocked at shift end)
-  const ot = outM > otStartM ? +((outM - otStartM) / 60).toFixed(2) : 0;
-  const nd         = outM > 22*60 ? +((outM - 22*60) / 60).toFixed(2) : 0;
 
-  return {hrs:workedHrs, late, ut, ot, nd, breakHrs:1, prepMins, paidDutyHrs, status:'complete'};
+  const ut       = (!isAuto && outM < shiftEnd) ? Math.max(0, shiftEnd - outM) : 0;
+  const otStartM = shiftEnd + otBuffer;
+  const ot       = outM > otStartM ? +((outM - otStartM) / 60).toFixed(2) : 0;
+  const nd       = outM > 22*60 ? +((outM - 22*60) / 60).toFixed(2) : 0;
+
+  return {hrs:workedHrs, late, ut, ot, nd, breakHrs:breakMins/60, prepMins:prepMin, paidDutyHrs, status:'complete'};
 }
 
 function getDTRTotals(periodKey, empId) {
@@ -2093,7 +2107,7 @@ function loadDTR() { // loadDTR — loads DTR for selected employee and period
       <td style="background:#fff8e1;"><input class="dtr-input" type="time" value="${entry.bend||''}"
           placeholder="${settings.bend||'13:00'}"
           onchange="saveDTRField('${dateStr}','bend',this.value,'${empId}','${periodKey}')" /></td>
-      <td style="background:#fff8e1;color:var(--muted);text-align:center;font-size:12px;">1h auto</td>
+      <td style="background:#fff8e1;color:var(--muted);text-align:center;font-size:12px;">${shiftSched && !shiftSched.bstart ? '0h straight' : '1h auto'}</td>
       <td><input class="dtr-input" type="time" value="${entry.out||''}"
           ${entry.auto?'style="color:var(--muted);" title="Auto clock-out"':''}
           onchange="saveDTRField('${dateStr}','out',this.value,'${empId}','${periodKey}')" /></td>
