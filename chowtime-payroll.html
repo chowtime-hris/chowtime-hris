@@ -1016,18 +1016,19 @@ function computeDTRRow(entry, shiftSched) {
   const paidStartM = late > 0 ? inM : shiftStart;
   const prepMin    = Math.max(0, shiftStart - inM);
 
-  // Both auto and manual: paid up to actual clock-out time
-  // OT only starts 1hr AFTER shift end regardless of auto or manual
-  const rawMins    = Math.max(0, outM - paidStartM);
+  // ── OPTION B: Cap paid hours at shift end unless past OT buffer ──
+  // Between shift end and OT start = cap at shift end (no extra pay)
+  // Past OT buffer = pay from shift end + OT rate applies
+  const otStartM = shiftEnd + otBuffer;
+  const effectiveOutM = outM > otStartM ? outM : Math.min(outM, shiftEnd);
+
+  const rawMins    = Math.max(0, effectiveOutM - paidStartM);
   const workedMins = Math.max(0, rawMins - breakMins);
   const workedHrs  = +(workedMins / 60).toFixed(2);
 
-  const ut       = (!isAuto && outM < shiftEnd) ? Math.max(0, shiftEnd - outM) : 0;
-  const otStartM = shiftEnd + otBuffer;
-  // OT applies after 1hr buffer — both auto and manual
-  // But auto clock-out should never exceed shift end significantly
-  const ot       = outM > otStartM ? +((outM - otStartM) / 60).toFixed(2) : 0;
-  const nd       = outM > 22*60 ? +((outM - 22*60) / 60).toFixed(2) : 0;
+  const ut = (!isAuto && outM < shiftEnd) ? Math.max(0, shiftEnd - outM) : 0;
+  const ot = outM > otStartM ? +((outM - otStartM) / 60).toFixed(2) : 0;
+  const nd = effectiveOutM > 22*60 ? +((effectiveOutM - 22*60) / 60).toFixed(2) : 0;
 
   return {hrs:workedHrs, late, ut, ot, nd, breakHrs:breakMins/60, prepMins:prepMin, paidDutyHrs, status:'complete'};
 }
