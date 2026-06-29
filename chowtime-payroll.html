@@ -1801,13 +1801,20 @@ function refreshTab(id) {
 //  DASHBOARD
 // ══════════════════════════════════════════════════════════
 function renderDashboard() {
-  const p = getPeriod();
-  document.getElementById('dash-period-label').textContent = p.label;
+  // Safety check — don't crash if period system not ready
+  let p;
+  try { p = getPeriod(); } catch(e) {
+    setTimeout(renderDashboard, 500); return;
+  }
+  if (!p || !p.key) { setTimeout(renderDashboard, 500); return; }
 
-  const rows = employees.map(e=>buildPayrollRow(e, p.key));
-  const totalGross = rows.reduce((a,r)=>a+r.gross,0);
-  const totalNet   = rows.reduce((a,r)=>a+r.net,0);
-  const totalDed   = rows.reduce((a,r)=>a+r.sss+r.phic+r.pagibig,0);
+  const periodLabel = document.getElementById('dash-period-label');
+  if (periodLabel) periodLabel.textContent = p.label || '';
+
+  const rows = employees.map(e=>{ try { return buildPayrollRow(e, p.key); } catch(e) { return {gross:0,net:0,sss:0,phic:0,pagibig:0}; } });
+  const totalGross = rows.reduce((a,r)=>a+(r.gross||0),0);
+  const totalNet   = rows.reduce((a,r)=>a+(r.net||0),0);
+  const totalDed   = rows.reduce((a,r)=>a+(r.sss||0)+(r.phic||0)+(r.pagibig||0),0);
   const onLeave    = leaves.filter(l=>l.status==='Approved').length;
 
   document.getElementById('kpi-row').innerHTML = [
@@ -2430,8 +2437,8 @@ refreshTab = function(id) {
   if (id === 'clockmon') renderClockMonitor();
 };
 (function init(){
-  buildPeriodDropdown();
-  renderDashboard();
+  try { buildPeriodDropdown(); } catch(e) { console.error('Period dropdown error:', e); }
+  try { renderDashboard(); } catch(e) { console.error('Dashboard error:', e); }
 })();
 </script>
 <!-- Firebase multi-branch sync for HRIS admin -->
