@@ -973,13 +973,14 @@ function computeDTRRow(entry, shiftSched) {
   const prepStart   = shiftStart - prepMinsSet; // when prep starts e.g. 08:30
 
   // ── STRAIGHT SHIFT: no break deduction, paid start to end ────────
-  // If no break start/end set in shift definition → straight duty
-  // Only deduct break if shift has explicit bstart AND bend AND they differ
+  // Check by shift name OR by missing break fields
+  const shiftName   = (s.name || s.label || '').toUpperCase();
+  const isStraight  = shiftName.includes('STRAIGHT') || shiftName.includes('NONSTOP') || shiftName.includes('NO BREAK');
   const shiftBstart = s.bstart || '';
   const shiftBend   = s.bend   || '';
-  const hasBrk    = shiftBstart && shiftBend && shiftBstart !== shiftBend && shiftBstart !== '00:00';
-  const breakMins = hasBrk ? 60 : 0; // straight shift = 0 break deduction
-  const breakHrsDisplay = hasBrk ? '1h auto' : '0h (straight duty)';
+  const hasBrk    = !isStraight && shiftBstart && shiftBend && shiftBstart !== shiftBend && shiftBstart !== '00:00';
+  const breakMins = hasBrk ? 60 : 0;
+  const breakHrsDisplay = hasBrk ? '1h auto' : '0h straight';
 
   const paidDutyHrs = ((shiftEnd - shiftStart) - breakMins) / 60;
 
@@ -2107,7 +2108,9 @@ function loadDTR() { // loadDTR — loads DTR for selected employee and period
       <td style="background:#fff8e1;"><input class="dtr-input" type="time" value="${entry.bend||''}"
           placeholder="${settings.bend||'13:00'}"
           onchange="saveDTRField('${dateStr}','bend',this.value,'${empId}','${periodKey}')" /></td>
-      <td style="background:#fff8e1;color:var(--muted);text-align:center;font-size:12px;">${shiftSched && !shiftSched.bstart ? '0h straight' : '1h auto'}</td>
+      <td style="background:#fff8e1;color:var(--muted);text-align:center;font-size:12px;">${
+        shiftSched && ((shiftSched.name||shiftSched.label||'').toUpperCase().includes('STRAIGHT')) ? '0h straight' : '1h auto'
+      }</td>
       <td><input class="dtr-input" type="time" value="${entry.out||''}"
           ${entry.auto?'style="color:var(--muted);" title="Auto clock-out"':''}
           onchange="saveDTRField('${dateStr}','out',this.value,'${empId}','${periodKey}')" /></td>
