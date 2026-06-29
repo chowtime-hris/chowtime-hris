@@ -361,6 +361,7 @@ tbody td{padding:9px 11px;}
       </div>
       <div class="form-group" style="align-self:flex-end;">
         <button class="btn btn-primary" onclick="window.print()">🖨️ Print</button>
+        <button class="btn btn-secondary" onclick="emailPayslip()" style="margin-left:8px;">📧 Email</button>
       </div>
     </div>
     <div id="payslip-preview">
@@ -2594,6 +2595,49 @@ refreshTab = function(id) {
 (function init(){
   try { buildPeriodDropdown(); } catch(e) { console.error('Period dropdown error:', e); }
   try { renderDashboard(); } catch(e) { console.error('Dashboard error:', e); }
+// ── Email Payslip ────────────────────────────────────────────
+function emailPayslip() {
+  const empId = document.getElementById('slip-emp').value;
+  const emp   = employees.find(e => e.id === empId);
+  if (!emp) return alert('Please select an employee first.');
+  const pKey  = document.getElementById('slip-period').value || getPeriod().key;
+  const r     = buildPayrollRow(emp, pKey);
+  const label = getPeriodLabel(pKey);
+
+  const email = emp.email || prompt(`Enter email for ${emp.name}:`, '') || '';
+  if (!email) return;
+
+  const subject = encodeURIComponent(`Chowtime Payslip — ${emp.name} — ${label}`);
+  const body = encodeURIComponent(
+`CHOWTIME PAYROLL SYSTEM
+Payslip — ${label}
+
+Employee : ${emp.name}
+ID       : ${emp.id}
+Position : ${emp.pos||''}
+
+EARNINGS
+Days Present : ${r.days}
+Basic Pay    : P${fmt(r.basic)}
+OT Pay       : P${fmt(r.otPay)}
+Gross Pay    : P${fmt(r.gross)}
+
+DEDUCTIONS
+SSS          : P${fmt(r.sss)}
+PhilHealth   : P${fmt(r.phic)}
+Pag-Ibig     : P${fmt(r.pagibig)}
+Tax          : P${fmt(r.tax)}
+Loan         : P${fmt(r.loanDed)}
+
+NET PAY      : P${fmt(r.net)}
+
+-- Chowtime HRIS`);
+
+  window.open(`mailto:${email}?subject=${subject}&body=${body}`, '_blank');
+  showToastAdmin && showToastAdmin(`📧 Email opened for ${emp.name}`);
+}
+window.emailPayslip = emailPayslip;
+
 })();
 </script>
 <!-- Firebase multi-branch sync for HRIS admin -->
