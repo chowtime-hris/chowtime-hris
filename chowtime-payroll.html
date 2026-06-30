@@ -1067,11 +1067,25 @@ function computeDTRRow(entry, shiftSched) {
 
   const rawMins    = Math.max(0, effectiveOutM - paidStartM);
   const workedMins = Math.max(0, rawMins - breakMins);
-  const workedHrs  = +(workedMins / 60).toFixed(2);
+  let workedHrs    = +(workedMins / 60).toFixed(2);
 
   const ut = (!isAuto && outM < shiftEnd) ? Math.max(0, shiftEnd - outM) : 0;
-  const ot = outM > otStartM ? +((outM - otStartM) / 60).toFixed(2) : 0;
+  let ot = outM > otStartM ? +((outM - otStartM) / 60).toFixed(2) : 0;
   const nd = effectiveOutM > 22*60 ? +((effectiveOutM - 22*60) / 60).toFixed(2) : 0;
+
+  // ── STRAIGHT DUTY OT: shift itself is longer than 8h + 1h buffer ──
+  // e.g. Straight 09:00-21:00 = 12h shift. First 8h = regular,
+  // next 1h = buffer (still regular), remaining 3h = OT automatically
+  // (employee doesn't need to clock out late — the long shift itself
+  // generates OT for hours worked beyond 9h total)
+  if (isStraight) {
+    const regularCapHrs = 9; // 8h regular + 1h buffer = 9h before OT kicks in
+    if (workedHrs > regularCapHrs) {
+      const straightOT = +(workedHrs - regularCapHrs).toFixed(2);
+      ot = +(ot + straightOT).toFixed(2);
+      workedHrs = regularCapHrs;
+    }
+  }
 
   return {hrs:workedHrs, late, ut, ot, nd, breakHrs:breakMins/60, prepMins:prepMin, paidDutyHrs, status:'complete'};
 }
