@@ -287,6 +287,9 @@ tbody td{padding:9px 11px;}
     </div>
     <pre id="debug-output" style="background:#1a1a1a;color:#6fcf7a;padding:14px;border-radius:8px;font-size:12px;min-height:60px;overflow-x:auto;">Select employee and date to see raw data...</pre>
   </div>
+
+  <div class="panel">
+    <div class="panel-title"><span>⏰</span> Auto Clock-Out Settings</div>
     <div class="alert alert-info">
       Employees who forgot to clock out will be automatically clocked out at the branch closing time. Marked as <strong>⚡ Auto</strong> in the log.
     </div>
@@ -449,54 +452,8 @@ tbody td{padding:9px 11px;}
   </div>
 </div>
 
-<!-- PAYMENT RELEASE -->
-    <div style="background:#e8f5e9;border:1px solid var(--green);border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:#2D7D3A;">
-      💡 Mark employees as paid after releasing salary. Tap 📲 to view GCash QR for easy transfer.
-    </div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr>
-          <th>Employee</th>
-          <th>Net Pay</th>
-          <th>GCash No.</th>
-          <th>Bank</th>
-          <th>Payment Method</th>
-          <th>Reference No.</th>
-          <th>Date Paid</th>
-          <th>Status</th>
-          <th>Actions</th>
-        </tr></thead>
-        <tbody id="payment-release-tbody"></tbody>
-      </table>
-    </div>
-    <div style="margin-top:16px;display:flex;gap:12px;flex-wrap:wrap;" id="payment-summary"></div>
-  </div>
-
-  <!-- Payment History -->
-  <div class="panel">
-    <div class="panel-title"><span>📊</span> Payment History</div>
-    <div style="display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap;">
-      <select id="pay-history-emp" style="min-width:180px;" onchange="renderPaymentHistory()">
-        <option value="">All Employees</option>
-      </select>
-      <button class="btn btn-secondary" onclick="exportPaymentHistory()">📥 Export CSV</button>
-    </div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr>
-          <th>Employee</th>
-          <th>Period</th>
-          <th>Net Pay</th>
-          <th>Method</th>
-          <th>Reference</th>
-          <th>Date Paid</th>
-          <th>Released By</th>
-        </tr></thead>
-        <tbody id="payment-history-tbody"></tbody>
-      </table>
-    </div>
-  </div>
-</div>
+<!-- MEMO -->
+<div id="page-memo" class="page">
   <div class="panel">
     <div class="panel-title"><span>📋</span> Memo / Disciplinary Log</div>
     <button class="btn btn-primary" style="margin-bottom:14px;" onclick="openMemoModal()">+ Issue Memo</button>
@@ -775,7 +732,6 @@ tbody td{padding:9px 11px;}
       <div class="form-group"><label>Contact No.</label><input id="e-contact"></div>
       <div class="form-group"><label>Emergency Contact</label><input id="e-emergency"></div>
     </div>
-    </div>
     <div style="display:flex;gap:10px;margin-top:18px;">
       <button class="btn btn-primary" onclick="saveEmployee()">💾 Save</button>
       <button class="btn btn-secondary" onclick="closeModal('emp-modal')">Cancel</button>
@@ -898,7 +854,7 @@ function getPeriod() {
   const saved = localStorage.getItem('ct_period');
   // Accept any valid period key from 2020-2035
   if (saved && PERIOD_KEYS.includes(saved)) return getPeriodDetails(saved);
-  const today = new Date().toISOString().split('T')[0];
+  const today = toLocalDateStr(new Date());
   return getPeriodDetails(getPeriodKey(today));
 }
 function setPeriod(key) {
@@ -930,9 +886,9 @@ function buildPeriodDropdown() {
   let cur = '';
   try {
     const saved = localStorage.getItem('ct_period');
-    cur = saved || getPeriodKey(today.toISOString().split('T')[0]) || '';
+    cur = saved || getPeriodKey(toLocalDateStr(today)) || '';
   } catch(e) {
-    cur = getPeriodKey(today.toISOString().split('T')[0]) || '';
+    cur = getPeriodKey(toLocalDateStr(today)) || '';
   }
 
   // Filter periods for selected year
@@ -945,7 +901,7 @@ function buildPeriodDropdown() {
 
   // Make sure something is selected
   if (!sel.value && filtered.length) {
-    const todayKey = getPeriodKey(today.toISOString().split('T')[0]);
+    const todayKey = getPeriodKey(toLocalDateStr(today));
     sel.value = filtered.includes(todayKey) ? todayKey : filtered[filtered.length-1];
     setPeriod(sel.value);
   }
@@ -1283,7 +1239,7 @@ function saveAutoClockOut() {
 function runAutoClockOut() {
   if (!autoClockOutSettings.enabled) return;
   const globalAutoTime = autoClockOutSettings.time || '22:00';
-  const today = new Date().toISOString().split('T')[0];
+  const today = toLocalDateStr(new Date());
   const now   = new Date();
   const nowMins = now.getHours()*60 + now.getMinutes();
   const pKey  = getPeriodKey(today);
@@ -1441,7 +1397,7 @@ function setupDTREditor() {
       employees.map(e=>`<option value="${e.id}">${e.name}</option>`).join('');
   }
   const debugDate = document.getElementById('debug-date');
-  if (debugDate && !debugDate.value) debugDate.value = new Date().toISOString().split('T')[0];
+  if (debugDate && !debugDate.value) debugDate.value = toLocalDateStr(new Date());
 
   if (empSel.value) loadDTREditor();
 }
@@ -1560,6 +1516,15 @@ const DAYS = ['mon','tue','wed','thu','fri','sat','sun'];
 function getMonday(d) {
   const day=d.getDay(), diff=d.getDate()-day+(day===0?-6:1);
   const mon=new Date(d); mon.setDate(diff); return mon;
+}
+
+// Format date as YYYY-MM-DD using LOCAL time (not UTC) —
+// avoids the date-shift bug that toISOString() causes near midnight
+function toLocalDateStr(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const day = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
 }
 
 function openShiftModal(idx) {
@@ -1725,7 +1690,7 @@ function renderShiftAssignment() {
     const a=empShifts[emp.id]||{};
     const shift=a.shiftId?getShiftDefs().find(s=>s.id===a.shiftId):null;
     const days=weekDates.map(date=>{
-      const s=getEmpShiftForDay(emp.id,date.getDay(),date.toISOString().split('T')[0]);
+      const s=getEmpShiftForDay(emp.id,date.getDay(),toLocalDateStr(date));
       if(!s) return '<td style="text-align:center;color:var(--muted);">—</td>';
       if(s==='REST') return '<td style="text-align:center;"><span style="background:#f0f0f0;color:#888;padding:2px 6px;border-radius:8px;font-size:11px;">🛌</span></td>';
       if(s==='OFF')  return '<td style="text-align:center;"><span style="background:#fdd;color:#c00;padding:2px 6px;border-radius:8px;font-size:11px;">OFF</span></td>';
@@ -1772,7 +1737,7 @@ function renderWeeklySchedule() {
       </td>`;
     weekDates.forEach(date=>{
       const dow = date.getDay();
-      const dateStr = date.toISOString().split('T')[0]; // e.g. 2026-06-29
+      const dateStr = toLocalDateStr(date); // e.g. 2026-06-29 (local time, not UTC)
       const s = getEmpShiftForDay(emp.id, dow, dateStr);
       const a = empShifts[emp.id] || {};
 
@@ -1827,7 +1792,7 @@ function printSchedule() {
 }
 
 function setupShifts() {
-  const mon=getMonday(new Date()).toISOString().split('T')[0];
+  const mon=toLocalDateStr(getMonday(new Date()));
   const sw=document.getElementById('shift-week');
   const vw=document.getElementById('sched-view-week');
   if(sw&&!sw.value) sw.value=mon;
@@ -2080,7 +2045,7 @@ function setupDTR() {
 
   const perSel = document.getElementById('dtr-period-sel');
   // Always rebuild full period dropdown with all periods for current year
-  const today = new Date().toISOString().split('T')[0];
+  const today = toLocalDateStr(new Date());
   const todayKey = getPeriodKey(today);
   const savedKey = localStorage.getItem('ct_period') || todayKey;
   const yearToShow = +savedKey.split('-')[0] || new Date().getFullYear();
@@ -2431,7 +2396,7 @@ function renderMemos(){
 function openMemoModal(){document.getElementById('m-emp').innerHTML=employees.map(e=>`<option value="${e.id}">${e.name}</option>`).join('');document.getElementById('memo-modal').style.display='block';}
 function saveMemo(){
   const el=document.getElementById('m-emp');const emp=employees.find(e=>e.id===el.value);
-  memos.push({date:new Date().toISOString().split('T')[0],empId:el.value,empName:emp?.name||'',type:v('m-type'),desc:v('m-desc'),by:v('m-by')});
+  memos.push({date:toLocalDateStr(new Date()),empId:el.value,empName:emp?.name||'',type:v('m-type'),desc:v('m-desc'),by:v('m-by')});
   save('memos',memos);closeModal('memo-modal');renderMemos();
 }
 function deleteMemo(i){memos.splice(i,1);save('memos',memos);renderMemos();}
@@ -2512,7 +2477,7 @@ function renderClockMonitor() {
   const filterEmp  = document.getElementById('clockmon-emp').value;
 
   // Set default date to today
-  if (!filterDate) document.getElementById('clockmon-date').value = new Date().toISOString().split('T')[0];
+  if (!filterDate) document.getElementById('clockmon-date').value = toLocalDateStr(new Date());
 
   const filtered = kioskLog.filter(e =>
     (!filterDate || e.date === filterDate) &&
@@ -2818,7 +2783,7 @@ onValue(ref(db,'settings'), snap => {
 });
 
 function refreshKioskFromCloud() {
-  const today = new Date().toISOString().split('T')[0].replace(/-/g,'');
+  const today = toLocalDateStr(new Date()).replace(/-/g,'');
   onValue(ref(db,`kioskLog/${today}`), snap => {
     const data = snap.val();
     if (data) {
