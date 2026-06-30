@@ -1116,7 +1116,7 @@ function getDTRTotals(periodKey, empId) {
 
     // Get employee's assigned shift for this day
     const dow = new Date(dateStr + 'T00:00:00').getDay();
-    const assignedShift = getEmpShiftForDay(empId, dow);
+    const assignedShift = getEmpShiftForDay(empId, dow, dateStr);
     const schedule = (assignedShift && assignedShift !== 'REST' && assignedShift !== 'OFF')
       ? assignedShift : null;
 
@@ -1297,7 +1297,7 @@ function runAutoClockOut() {
 
     // Get employee's assigned shift to use their shift END as auto clock-out time
     const dow = now.getDay();
-    const assignedShift = getEmpShiftForDay(emp.id, dow);
+    const assignedShift = getEmpShiftForDay(emp.id, dow, today);
     const shiftEndTime = (assignedShift && assignedShift !== 'REST' && assignedShift !== 'OFF')
       ? assignedShift.end
       : globalAutoTime;
@@ -1691,10 +1691,20 @@ function saveEmpShift() {
   showToastAdmin&&showToastAdmin('✅ Shift assigned & synced!');
 }
 
-function getEmpShiftForDay(empId,dow) {
+function getEmpShiftForDay(empId,dow,dateStr) {
   const a=empShifts[empId]; if(!a) return null;
+
+  // ── Date-specific assignment takes priority ──────────────────
+  if (dateStr && a.dates && a.dates[dateStr] !== undefined) {
+    const val = a.dates[dateStr];
+    if (val === 'REST') return 'REST';
+    if (val === '') return null;
+    const defs = Array.isArray(shiftDefs) ? shiftDefs : Object.values(shiftDefs||{});
+    return defs.find(s=>s.id===val)||null;
+  }
+
+  // ── Fallback to old day-of-week pattern (for legacy data) ────
   if(a.restDay!==null&&a.restDay!==undefined&&+a.restDay===dow) return 'REST';
-  // Ensure shiftDefs is always an array before calling .find()
   const defs = Array.isArray(shiftDefs) ? shiftDefs : Object.values(shiftDefs||{});
   if(a.type==='fixed') return defs.find(s=>s.id===a.shiftId)||null;
   if(a.type==='rotation'){
@@ -1715,7 +1725,7 @@ function renderShiftAssignment() {
     const a=empShifts[emp.id]||{};
     const shift=a.shiftId?getShiftDefs().find(s=>s.id===a.shiftId):null;
     const days=weekDates.map(date=>{
-      const s=getEmpShiftForDay(emp.id,date.getDay());
+      const s=getEmpShiftForDay(emp.id,date.getDay(),date.toISOString().split('T')[0]);
       if(!s) return '<td style="text-align:center;color:var(--muted);">—</td>';
       if(s==='REST') return '<td style="text-align:center;"><span style="background:#f0f0f0;color:#888;padding:2px 6px;border-radius:8px;font-size:11px;">🛌</span></td>';
       if(s==='OFF')  return '<td style="text-align:center;"><span style="background:#fdd;color:#c00;padding:2px 6px;border-radius:8px;font-size:11px;">OFF</span></td>';
@@ -1762,8 +1772,8 @@ function renderWeeklySchedule() {
       </td>`;
     weekDates.forEach(date=>{
       const dow = date.getDay();
-      const s = getEmpShiftForDay(emp.id, dow);
-      const dayKey = ['sun','mon','tue','wed','thu','fri','sat'][dow];
+      const dateStr = date.toISOString().split('T')[0]; // e.g. 2026-06-29
+      const s = getEmpShiftForDay(emp.id, dow, dateStr);
       const a = empShifts[emp.id] || {};
 
       // Current value for the dropdown
@@ -1774,9 +1784,9 @@ function renderWeeklySchedule() {
       // Color for cell background
       const cellBg = s === 'REST' ? '#f8f8f8' : s && s.color ? s.color+'15' : '';
 
-      // Inline dropdown for editing
+      // Inline dropdown for editing — uses specific date now, not day-of-week
       const dropHtml = `
-        <select onchange="quickEditShift('${emp.id}','${dayKey}',this.value,'${emp.name}')"
+        <select onchange="quickEditShift('${emp.id}','${dateStr}',this.value,'${emp.name}')"
           style="width:100%;padding:4px 5px;border:1px solid ${s&&s.color?s.color:'#ddd'};
           border-radius:6px;font-size:11px;font-family:inherit;background:${cellBg||'#fff'};
           color:${s&&s.color?s.color:'#666'};font-weight:600;cursor:pointer;">
@@ -1793,44 +1803,17 @@ function renderWeeklySchedule() {
   wrap.innerHTML=html;
 }
 
-function quickEditShift(empId, dayKey, value, empName) {
-  // Ensure employee has a shift assignment object
-  if (!empShifts[empId]) empShifts[empId] = { type:'rotation', rotation:{}, restDay:null };
+function quickEditShift(empId, dateStr, value, empName) {
+  // Ensure employee has a shift assignment object with dates map
+  if (!empShifts[empId]) empShifts[empId] = { type:'rotation', rotation:{}, restDay:null, dates:{} };
+  if (!empShifts[empId].dates) empShifts[empId].dates = {};
 
-  if (value === 'REST') {
-    // Set as rest day — find the day of week number
-    const dayMap = {mon:1,tue:2,wed:3,thu:4,fri:5,sat:6,sun:0};
-    empShifts[empId].restDay = dayMap[dayKey];
-    // Remove from rotation if set
-    if (empShifts[empId].rotation) delete empShifts[empId].rotation[dayKey];
-  } else if (value === '') {
-    // Clear this day
-    if (empShifts[empId].rotation) empShifts[empId].rotation[dayKey] = '';
-    // Check if this was rest day
-    const dayMap = {mon:1,tue:2,wed:3,thu:4,fri:5,sat:6,sun:0};
-    if (empShifts[empId].restDay === dayMap[dayKey]) empShifts[empId].restDay = null;
-  } else {
-    // Assign a shift to this specific day
-    // Switch to rotation type if not already (to allow per-day control)
-    if (empShifts[empId].type === 'fixed') {
-      // Convert fixed to rotation — copy same shift to all days
-      const fixedId = empShifts[empId].shiftId;
-      empShifts[empId].type = 'rotation';
-      empShifts[empId].rotation = {};
-      ['mon','tue','wed','thu','fri','sat','sun'].forEach(d => {
-        empShifts[empId].rotation[d] = fixedId || '';
-      });
-    }
-    if (!empShifts[empId].rotation) empShifts[empId].rotation = {};
-    empShifts[empId].rotation[dayKey] = value;
-    // Clear rest day for this day if it was set
-    const dayMap = {mon:1,tue:2,wed:3,thu:4,fri:5,sat:6,sun:0};
-    if (empShifts[empId].restDay === dayMap[dayKey]) empShifts[empId].restDay = null;
-  }
+  // Save assignment for THIS SPECIFIC DATE only — does not affect other weeks
+  empShifts[empId].dates[dateStr] = value; // value can be shiftId, 'REST', or ''
 
   save('empShifts', empShifts);
   syncShiftsToFirebase();
-  showToastAdmin && showToastAdmin(`✅ ${empName} schedule updated!`);
+  showToastAdmin && showToastAdmin(`✅ ${empName} schedule updated for ${dateStr}!`);
   // Re-render weekly schedule to reflect change
   renderWeeklySchedule();
 }
@@ -2152,7 +2135,7 @@ function loadDTR() { // loadDTR — loads DTR for selected employee and period
     const isSun=dt.getDay()===0;
 
     // Get employee's assigned shift for this day
-    const assignedShift = getEmpShiftForDay(empId, dt.getDay());
+    const assignedShift = getEmpShiftForDay(empId, dt.getDay(), dateStr);
     const shiftSched = (assignedShift && assignedShift !== 'REST' && assignedShift !== 'OFF')
       ? assignedShift : null;
 
