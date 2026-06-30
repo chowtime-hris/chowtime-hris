@@ -1054,9 +1054,9 @@ function computeDTRRow(entry, shiftSched) {
   // ── COMPLETE: has both in and out ────────────────────────────────
   const outM = timeToMins(outStr);
 
-  // Paid always starts at SHIFT START (not prep time, not clock-in if early)
-  // If late (arrived after prep start + grace) → paid starts at clock-in
-  const paidStartM = late > 0 ? inM : shiftStart;
+  // Paid ALWAYS starts at SHIFT START — late minutes are deducted
+  // separately as a peso amount, not by shifting the paid-start time
+  const paidStartM = shiftStart;
   const prepMin    = Math.max(0, shiftStart - inM);
 
   // ── OPTION B: Cap paid hours at shift end unless past OT buffer ──
