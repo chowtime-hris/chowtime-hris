@@ -29,9 +29,9 @@ header{background:var(--dark);color:#fff;display:flex;align-items:center;justify
 .header-right{display:flex;align-items:center;gap:12px;}
 .period-select{background:var(--brand);color:#fff;border:none;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;}
 .period-select option{background:var(--dark);}
-nav.tabs{background:var(--warm);display:flex;gap:2px;padding:7px 18px;overflow-x:auto;scrollbar-width:none;}
+nav.tabs{background:var(--warm);display:flex;gap:2px;padding:7px 18px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;scroll-snap-type:x proximity;touch-action:pan-x;}
 nav.tabs::-webkit-scrollbar{display:none;}
-nav.tabs button{background:none;border:none;color:#c9b8ad;padding:7px 14px;border-radius:6px;font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap;transition:.15s;}
+nav.tabs button{background:none;border:none;color:#c9b8ad;padding:7px 14px;border-radius:6px;font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap;transition:.15s;scroll-snap-align:start;touch-action:manipulation;}
 nav.tabs button.active,nav.tabs button:hover{background:var(--brand);color:#fff;}
 main{max-width:1320px;margin:0 auto;padding:22px 18px 60px;}
 .page{display:none;}.page.active{display:block;}
@@ -744,6 +744,18 @@ tbody td{padding:9px 11px;}
   <div class="modal-box" style="max-width:460px;">
     <h2>🌴 File Leave</h2>
     <div class="form-grid" style="grid-template-columns:1fr 1fr;">
+      <div class="form-group" style="grid-column:1/-1;"><label>Employee</label>
+        <select id="l-emp"></select>
+      </div>
+      <div class="form-group"><label>Leave Type</label>
+        <select id="l-type"><option>Sick Leave</option><option>Vacation Leave</option><option>Emergency Leave</option><option>Maternity Leave</option><option>Paternity Leave</option><option>Unpaid Leave</option></select>
+      </div>
+      <div class="form-group"><label>Status</label>
+        <select id="l-status"><option>Pending</option><option>Approved</option><option>Denied</option></select>
+      </div>
+      <div class="form-group"><label>From</label><input type="date" id="l-from"></div>
+      <div class="form-group"><label>To</label><input type="date" id="l-to"></div>
+      <div class="form-group" style="grid-column:1/-1;"><label>Reason</label><input id="l-reason" placeholder="Reason for leave"></div>
     </div>
     <div style="display:flex;gap:10px;margin-top:16px;">
       <button class="btn btn-primary" onclick="saveLeave()">💾 Save</button>
@@ -756,6 +768,15 @@ tbody td{padding:9px 11px;}
   <div class="modal-box" style="max-width:460px;">
     <h2>🏦 Add Loan</h2>
     <div class="form-grid" style="grid-template-columns:1fr 1fr;">
+      <div class="form-group" style="grid-column:1/-1;"><label>Employee</label>
+        <select id="ln-emp"></select>
+      </div>
+      <div class="form-group"><label>Loan Type</label>
+        <select id="ln-type"><option>SSS Loan</option><option>Pag-Ibig Loan</option><option>Cash Advance</option><option>Company Loan</option></select>
+      </div>
+      <div class="form-group"><label>Start Date</label><input type="date" id="ln-start"></div>
+      <div class="form-group"><label>Principal Amount (₱)</label><input type="number" id="ln-amount" placeholder="0"></div>
+      <div class="form-group"><label>Monthly Deduction (₱)</label><input type="number" id="ln-monthly" placeholder="0"></div>
     </div>
     <div style="display:flex;gap:10px;margin-top:16px;">
       <button class="btn btn-primary" onclick="saveLoan()">💾 Save</button>
@@ -768,6 +789,14 @@ tbody td{padding:9px 11px;}
   <div class="modal-box" style="max-width:460px;">
     <h2>📋 Issue Memo</h2>
     <div class="form-grid" style="grid-template-columns:1fr 1fr;">
+      <div class="form-group" style="grid-column:1/-1;"><label>Employee</label>
+        <select id="m-emp"></select>
+      </div>
+      <div class="form-group"><label>Memo Type</label>
+        <select id="m-type"><option>Verbal Warning</option><option>Written Warning</option><option>Suspension</option><option>Commendation</option><option>Other</option></select>
+      </div>
+      <div class="form-group"><label>Issued By</label><input id="m-by" placeholder="Manager name"></div>
+      <div class="form-group" style="grid-column:1/-1;"><label>Description</label><input id="m-desc" placeholder="Details of the memo"></div>
     </div>
     <div style="display:flex;gap:10px;margin-top:16px;">
       <button class="btn btn-primary" onclick="saveMemo()">💾 Save</button>
@@ -780,6 +809,13 @@ tbody td{padding:9px 11px;}
   <div class="modal-box" style="max-width:420px;">
     <h2>📈 Salary Increase</h2>
     <div class="form-grid" style="grid-template-columns:1fr 1fr;">
+      <div class="form-group" style="grid-column:1/-1;"><label>Employee</label>
+        <select id="si-emp"></select>
+      </div>
+      <div class="form-group"><label>Previous Rate (₱/day)</label><input type="number" id="si-prev" placeholder="0"></div>
+      <div class="form-group"><label>New Rate (₱/day)</label><input type="number" id="si-new" placeholder="0"></div>
+      <div class="form-group"><label>Effective Date</label><input type="date" id="si-date"></div>
+      <div class="form-group"><label>Reason</label><input id="si-reason" placeholder="e.g. Regularization"></div>
     </div>
     <div style="display:flex;gap:10px;margin-top:16px;">
       <button class="btn btn-primary" onclick="saveSalary()">💾 Save</button>
