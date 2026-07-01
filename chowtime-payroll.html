@@ -144,7 +144,7 @@ tbody td{padding:9px 11px;}
   <button onclick="showTab('leaves')">🌴 Leaves</button>
   <button onclick="showTab('loans')">🏦 Loans</button>
   <button onclick="showTab('thirteenth')">🎁 13th Month</button>
-  <button onclick="showTab('tips')">💸 Tips & Commission</button>
+  <button onclick="showTab('tips')">💰 Sales Incentives</button>
   <button onclick="showTab('memo')">📋 Memo Log</button>
   <button onclick="showTab('shifts')">📅 Shift Scheduler</button>
   <button onclick="showTab('clockmon')">📡 Clock Monitor</button>
@@ -337,7 +337,7 @@ tbody td{padding:9px 11px;}
       <table>
         <thead><tr>
           <th>Employee</th><th>Days</th><th>Basic Pay</th><th>OT Pay</th><th>ND Pay</th>
-          <th>Holiday Pay</th><th>Incentives</th><th>Commission</th><th>Tips</th>
+          <th>Holiday Pay</th><th>Sales Incentive</th><th>Commission</th><th>Tips</th>
           <th>GROSS</th><th>SSS</th><th>PHIC</th><th>Pag-Ibig</th>
           <th>Tax</th><th>Loan Ded.</th><th>NET PAY</th>
         </tr></thead>
@@ -430,25 +430,28 @@ tbody td{padding:9px 11px;}
 <!-- TIPS -->
 <div id="page-tips" class="page">
   <div class="panel">
-    <div class="panel-title"><span>💸</span> Tips Pooling — FOH Staff</div>
-    <div class="alert alert-warn">Tips are split equally among front-of-house staff (Waiter, Cashier, Barista).</div>
-    <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;align-items:flex-end;">
+    <div class="panel-title"><span>💰</span> Sales Incentives — <span id="incentive-period-label" style="color:var(--brand);font-size:14px;font-weight:400;"></span></div>
+    <div class="alert alert-info">Set incentive amounts per employee for this pay period. These will appear as a separate line in payroll and payslip.</div>
+    <div style="margin-bottom:14px;display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
       <div class="form-group">
-        <label>Total Tips Pooled (₱)</label>
-        <input type="number" id="tips-pool" value="0" oninput="computeTips()" style="width:160px;">
+        <label>Incentive Type</label>
+        <select id="incentive-type" style="min-width:200px;">
+          <option value="Sales Incentive">📈 Sales Incentive</option>
+          <option value="Quota Bonus">🎯 Quota Bonus</option>
+          <option value="Performance Bonus">⭐ Performance Bonus</option>
+          <option value="Attendance Bonus">✅ Attendance Bonus</option>
+          <option value="Other Incentive">💰 Other Incentive</option>
+        </select>
       </div>
+      <button class="btn btn-primary" onclick="saveIncentives()">💾 Save All Incentives</button>
     </div>
-    <div class="tips-grid" id="tips-grid"></div>
-    <div style="margin-top:14px;font-weight:600;color:var(--green);" id="tips-result"></div>
-  </div>
-  <div class="panel">
-    <div class="panel-title"><span>🏆</span> Commission</div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Employee</th><th>Commission Type</th><th>Rate / Amount</th><th>Sales / Base</th><th>Commission Earned</th></tr></thead>
-        <tbody id="commission-tbody"></tbody>
+        <thead><tr><th>Employee</th><th>Position</th><th>Incentive Type</th><th>Amount (₱)</th><th>Notes</th></tr></thead>
+        <tbody id="incentive-tbody"></tbody>
       </table>
     </div>
+    <div style="margin-top:12px;font-size:12px;color:var(--muted);">💡 Amounts entered here will be added to Gross Pay in payroll computation for this period.</div>
   </div>
 </div>
 
@@ -962,6 +965,7 @@ function buildPeriodDropdown() {
 //  PERSISTENT STATE  (localStorage keys: ct_*)
 // ══════════════════════════════════════════════════════════
 let employees = load('employees') || [];
+let incentiveData = load('incentiveData') || {}; // declared early — used in buildPayrollRow
 let shiftDefs  = load('shiftDefs') || [];  // declared early — used in getDTRTotals/getEmpShiftForDay
 let empShifts  = load('empShifts') || {};  // declared early — used in getEmpShiftForDay
 let leaves     = load('leaves')    || [];
@@ -1158,6 +1162,10 @@ function computeTax(annualTaxable) {
   if (t<=2000000) return 102500+(t-800000)*0.25;
   return 402500+(t-2000000)*0.30;
 }
+function getEmpIncentive(empId, periodKey){
+  return (incentiveData[periodKey]||{})[empId]||null;
+}
+
 function buildPayrollRow(emp, periodKey) {
   if (!emp || !emp.id) return {name:'?',pos:'',days:0,basic:0,otPay:0,ndPay:0,holPay:0,gross:0,sss:0,phic:0,pagibig:0,tax:0,loanDed:0,totalDed:0,net:0,ot:0,nd:0,late:0,hasDTR:false};
   const totals   = getDTRTotals(periodKey, emp.id);
@@ -1170,7 +1178,11 @@ function buildPayrollRow(emp, periodKey) {
   const otPay    = +(totals.ot * hourly * (+settings.ot||1.25)).toFixed(2);
   const ndPay    = +(totals.nd * hourly * (+settings.nd||1.10)).toFixed(2);
   const holPay   = totals.holPay || 0;
-  const gross    = basic + otPay + ndPay + holPay;
+  // ── Quota Sales Incentive for this period ───────────────
+  const incentive = getEmpIncentive ? (getEmpIncentive(emp.id, periodKey) || {}) : {};
+  const incentiveAmt = +(incentive.amount || 0);
+  const incentiveType = incentive.type || '';
+  const gross    = basic + otPay + ndPay + holPay + incentiveAmt;
 
   // ── Government contributions — DOLE rules ──────────────────
   // Skip all DOLE deductions if employee is flagged as exempt
@@ -1199,7 +1211,7 @@ function buildPayrollRow(emp, periodKey) {
   const loanDed  = Object.values(loanByCategory).reduce((a,b)=>a+b, 0);
   const totalDed = gross > 0 ? totals.ded : 0;
   const net      = Math.max(0, gross - sss - phic - pagibig - tax - loanDed - totalDed);
-  return {id:emp.id,name:emp.name,pos:emp.pos,rate,days,hasDTR,basic,otPay,ndPay,holPay,gross,sss,phic,pagibig,tax,loanDed,loanByCategory,totalDed,net,ot:totals.ot,nd:totals.nd,late:totals.late};
+  return {id:emp.id,name:emp.name,pos:emp.pos,rate,days,hasDTR,basic,otPay,ndPay,holPay,incentiveAmt,incentiveType,gross,sss,phic,pagibig,tax,loanDed,loanByCategory,totalDed,net,ot:totals.ot,nd:totals.nd,late:totals.late};
 }
 
 // ══════════════════════════════════════════════════════════
@@ -2299,7 +2311,8 @@ function computeAllPayroll() {
       <td>₱${fmt(r.otPay)}</td>
       <td>₱${fmt(r.ndPay)}</td>
       <td>₱${fmt(r.holPay)}</td>
-      <td>₱0.00</td><td>₱0.00</td><td>₱0.00</td>
+      <td style="color:var(--green);">₱${fmt(r.incentiveAmt||0)}</td>
+      <td>₱0.00</td><td>₱0.00</td>
       <td style="font-weight:700;color:var(--green);">₱${fmt(r.gross)}</td>
       <td>₱${fmt(r.sss)}</td><td>₱${fmt(r.phic)}</td><td>₱${fmt(r.pagibig)}</td>
       <td>₱${fmt(r.tax)}</td>
@@ -2353,6 +2366,7 @@ function generatePayslip() {
     <div class="payslip-row"><span>Overtime Pay (${r.ot}h)</span><span>₱${fmt(r.otPay)}</span></div>
     <div class="payslip-row"><span>Night Differential (${r.nd}h)</span><span>₱${fmt(r.ndPay)}</span></div>
     <div class="payslip-row"><span>Holiday Pay</span><span>₱${fmt(r.holPay)}</span></div>
+    ${r.incentiveAmt>0?`<div class="payslip-row" style="color:var(--green);"><span>${r.incentiveType||'Sales Incentive'}</span><span>₱${fmt(r.incentiveAmt)}</span></div>`:''}
     <div class="payslip-row" style="font-weight:700;font-size:14px;background:#f0faf4;padding:6px 0;"><span>GROSS PAY</span><span style="color:var(--green);">₱${fmt(r.gross)}</span></div>
     <div class="payslip-section">Deductions</div>
     <div class="payslip-row"><span>SSS Contribution</span><span>₱${fmt(r.sss)}</span></div>
@@ -2402,14 +2416,53 @@ function renderLoans(){
         <td>₱${fmt(l.amount)}</td><td>₱${fmt(l.monthly)}</td>
         <td style="font-weight:600;">₱${fmt(l.balance||l.amount)}</td><td>${l.start||'—'}</td>
         <td><span class="tag ${l.status==='Paid'?'tag-green':'tag-orange'}">${l.status||'Active'}</span>
-            <button class="btn btn-sm btn-success" style="margin-left:4px;" onclick="markLoanPaid(${i})">✓ Paid</button>
+            <button class="btn btn-sm btn-secondary" style="margin-left:4px;" onclick="editLoan(${i})">✏️</button>
+            <button class="btn btn-sm btn-success" style="margin-left:3px;" onclick="markLoanPaid(${i})">✓ Paid</button>
             <button class="btn btn-sm btn-danger" style="margin-left:3px;" onclick="deleteLoan(${i})">🗑</button></td>
     </tr>`).join('')||'<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--muted);">No loans recorded.</td></tr>';
 }
-function openLoanModal(){document.getElementById('ln-emp').innerHTML=employees.map(e=>`<option value="${e.id}">${e.name}</option>`).join('');document.getElementById('loan-modal').style.display='block';}
+let editingLoanIdx = -1;
+function editLoan(i) {
+  editingLoanIdx = i;
+  const l = loans[i];
+  // Populate employee dropdown
+  document.getElementById('ln-emp').innerHTML = employees.map(e=>`<option value="${e.id}">${e.name}</option>`).join('');
+  document.getElementById('ln-emp').value = l.emp;
+  document.getElementById('ln-type').value  = l.type   || 'Cash Bond';
+  document.getElementById('ln-amount').value  = l.amount  || 0;
+  document.getElementById('ln-monthly').value = l.monthly || 0;
+  document.getElementById('ln-start').value   = l.start   || '';
+  // Update modal title to show Edit mode
+  const modal = document.getElementById('loan-modal');
+  modal.querySelector('h2').textContent = '✏️ Edit Loan / Deduction';
+  modal.style.display = 'block';
+}
+function openLoanModal(){
+  editingLoanIdx = -1;
+  document.getElementById('ln-emp').innerHTML=employees.map(e=>`<option value="${e.id}">${e.name}</option>`).join('');
+  // Reset form fields
+  ['ln-amount','ln-monthly','ln-start'].forEach(id=>{ document.getElementById(id).value=''; });
+  document.getElementById('ln-type').value = 'Cash Bond';
+  const modal = document.getElementById('loan-modal');
+  modal.querySelector('h2').textContent = '🏦 Add Loan / Deduction';
+  modal.style.display='block';
+}
 function saveLoan(){
-  const el=document.getElementById('ln-emp');const emp=employees.find(e=>e.id===el.value);
-  loans.push({emp:el.value,empName:emp?.name||'',type:v('ln-type'),amount:+v('ln-amount'),monthly:+v('ln-monthly'),balance:+v('ln-amount'),start:v('ln-start'),status:'Active'});
+  const el=document.getElementById('ln-emp');
+  const emp=employees.find(e=>e.id===el.value);
+  const record = {
+    emp:el.value, empName:emp?.name||'',
+    type:v('ln-type'), amount:+v('ln-amount'),
+    monthly:+v('ln-monthly'), start:v('ln-start'),
+    status: editingLoanIdx >= 0 ? (loans[editingLoanIdx].status||'Active') : 'Active',
+    balance: editingLoanIdx >= 0 ? (loans[editingLoanIdx].balance||+v('ln-amount')) : +v('ln-amount')
+  };
+  if (editingLoanIdx >= 0) {
+    loans[editingLoanIdx] = record;
+  } else {
+    loans.push(record);
+  }
+  editingLoanIdx = -1;
   save('loans',loans);closeModal('loan-modal');renderLoans();
 }
 function markLoanPaid(i){loans[i].status='Paid';save('loans',loans);renderLoans();}
@@ -2430,24 +2483,55 @@ function renderThirteenth(){
 }
 
 // ══════════════════════════════════════════════════════════
-//  TIPS & COMMISSION
+//  QUOTA SALES INCENTIVES
 // ══════════════════════════════════════════════════════════
+// incentiveData declared at top of file — used in buildPayrollRow
+
 function setupTips(){
-  const foh=employees.filter(e=>['Waiter','Cashier','Barista'].some(r=>e.pos.includes(r)));
-  const pool=+(document.getElementById('tips-pool')?.value||0);
-  const share=foh.length?(pool/foh.length):0;
-  document.getElementById('tips-grid').innerHTML=foh.length
-    ?foh.map(e=>`<div class="tips-item"><div class="tips-name">${e.name}</div><div style="font-size:11px;color:var(--muted);">${e.pos}</div><input type="number" value="${share.toFixed(2)}" readonly style="color:var(--green);font-weight:600;"></div>`).join('')
-    :'<p style="color:var(--muted);grid-column:1/-1;">Add FOH employees (Waiter, Cashier, Barista) to enable tips pooling.</p>';
-  document.getElementById('tips-result').textContent=foh.length?`₱${fmt(pool)} pooled → ₱${fmt(share)} each (${foh.length} FOH staff)`:'';
-  document.getElementById('commission-tbody').innerHTML=employees.map(e=>`
-    <tr><td>${e.name}</td>
-        <td><select style="padding:4px;border:1px solid var(--border);border-radius:5px;font-size:12px;"><option>Flat Rate</option><option>% of Sales</option><option>None</option></select></td>
-        <td><input type="number" value="0" style="width:80px;padding:4px;border:1px solid var(--border);border-radius:5px;font-size:12px;"></td>
-        <td><input type="number" value="0" style="width:100px;padding:4px;border:1px solid var(--border);border-radius:5px;font-size:12px;"></td>
-        <td style="color:var(--green);font-weight:600;">₱0.00</td></tr>`).join('');
+  const p = getPeriod();
+  const label = document.getElementById('incentive-period-label');
+  if(label) label.textContent = p.label || getPeriodLabel(p.key);
+  const periodIncentives = (incentiveData[p.key] || {});
+  const tbody = document.getElementById('incentive-tbody');
+  if(!tbody) return;
+  tbody.innerHTML = employees.filter(e=>e&&e.id&&e.name).map(emp => {
+    const ex = periodIncentives[emp.id] || {};
+    return `<tr>
+      <td><strong>${emp.name}</strong></td>
+      <td style="font-size:12px;color:var(--muted);">${emp.pos||''}</td>
+      <td><select id="itype-${emp.id}" style="font-size:12px;padding:3px 6px;border:1px solid var(--border);border-radius:5px;">
+        <option value="Sales Incentive" ${ex.type==='Sales Incentive'?'selected':''}>📈 Sales Incentive</option>
+        <option value="Quota Bonus" ${ex.type==='Quota Bonus'?'selected':''}>🎯 Quota Bonus</option>
+        <option value="Performance Bonus" ${ex.type==='Performance Bonus'?'selected':''}>⭐ Performance Bonus</option>
+        <option value="Attendance Bonus" ${ex.type==='Attendance Bonus'?'selected':''}>✅ Attendance Bonus</option>
+        <option value="Other Incentive" ${ex.type==='Other Incentive'?'selected':''}>💰 Other Incentive</option>
+      </select></td>
+      <td><input type="number" id="iamt-${emp.id}" value="${ex.amount||0}" min="0" style="width:100px;padding:4px 8px;border:1px solid var(--border);border-radius:5px;font-size:13px;"></td>
+      <td><input type="text" id="inote-${emp.id}" value="${ex.notes||''}" placeholder="Optional" style="width:130px;padding:4px 8px;border:1px solid var(--border);border-radius:5px;font-size:12px;"></td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--muted);">No employees.</td></tr>';
 }
+
+function saveIncentives(){
+  const p = getPeriod();
+  if(!incentiveData[p.key]) incentiveData[p.key] = {};
+  employees.filter(e=>e&&e.id).forEach(emp => {
+    const amt  = +(document.getElementById(`iamt-${emp.id}`)?.value||0);
+    const type = document.getElementById(`itype-${emp.id}`)?.value || 'Sales Incentive';
+    const notes= document.getElementById(`inote-${emp.id}`)?.value || '';
+    if(amt > 0) incentiveData[p.key][emp.id] = {amount:amt, type, notes};
+    else delete incentiveData[p.key][emp.id];
+  });
+  save('incentiveData', incentiveData);
+  if(window._fbDB && window._fbFns){
+    window._fbFns.set(window._fbFns.ref(window._fbDB,`incentiveData/${p.key}`), incentiveData[p.key]||{}).catch(e=>console.warn(e));
+  }
+  showToastAdmin && showToastAdmin('✅ Incentives saved!');
+}
+
+// getEmpIncentive defined near buildPayrollRow above
 function computeTips(){ setupTips(); }
+window.saveIncentives = saveIncentives;
 
 // ══════════════════════════════════════════════════════════
 //  MEMO LOG
@@ -2664,6 +2748,7 @@ Basic Pay     : P${fmt(r.basic)}
 OT Pay (${t.ot||0}h): P${fmt(r.otPay)}
 Night Diff Pay: P${fmt(r.ndPay)}
 Holiday Pay   : P${fmt(r.holPay)}
+${r.incentiveAmt>0?`${(r.incentiveType||'Sales Incentive').padEnd(14)}: P${fmt(r.incentiveAmt)}`:''}
 GROSS PAY     : P${fmt(r.gross)}
 
 -------- DEDUCTIONS --------
@@ -2824,6 +2909,16 @@ onValue(ref(db,'autoClockOut'), snap => {
   if (data) {
     autoClockOutSettings = data;
     save('autoClockOut', autoClockOutSettings);
+  }
+});
+
+onValue(ref(db,'incentiveData'), snap => {
+  const data = snap.val();
+  if (data) {
+    incentiveData = data;
+    save('incentiveData', incentiveData);
+    const active = document.querySelector('.page.active');
+    if (active?.id === 'page-tips') setupTips();
   }
 });
 
