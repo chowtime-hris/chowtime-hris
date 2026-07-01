@@ -402,11 +402,11 @@ tbody td{padding:9px 11px;}
 <!-- LOANS -->
 <div id="page-loans" class="page">
   <div class="panel">
-    <div class="panel-title"><span>🏦</span> Loan Register (SSS / Pag-Ibig / Cash Advance)</div>
+    <div class="panel-title"><span>🏦</span> Loan & Deduction Register</div>
     <button class="btn btn-primary" style="margin-bottom:14px;" onclick="openLoanModal()">+ Add Loan</button>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Employee</th><th>Loan Type</th><th>Principal</th><th>Monthly Ded.</th><th>Balance</th><th>Start</th><th>Status</th></tr></thead>
+        <thead><tr><th>Employee</th><th>Loan Type</th><th>Principal</th><th>Per Cut-off Ded.</th><th>Balance</th><th>Start</th><th>Status</th></tr></thead>
         <tbody id="loan-tbody"></tbody>
       </table>
     </div>
@@ -778,11 +778,20 @@ tbody td{padding:9px 11px;}
         <select id="ln-emp"></select>
       </div>
       <div class="form-group"><label>Loan Type</label>
-        <select id="ln-type"><option>SSS Loan</option><option>Pag-Ibig Loan</option><option>Cash Advance</option><option>Company Loan</option></select>
+        <select id="ln-type">
+          <option>Cash Bond</option>
+          <option>Company Loan</option>
+          <option>Cash Advance</option>
+          <option>SSS Loan</option>
+          <option>Pag-Ibig Loan</option>
+          <option>Fine / Disciplinary</option>
+          <option>Uniform / Equipment</option>
+          <option>Other Deduction</option>
+        </select>
       </div>
       <div class="form-group"><label>Start Date</label><input type="date" id="ln-start"></div>
       <div class="form-group"><label>Principal Amount (₱)</label><input type="number" id="ln-amount" placeholder="0"></div>
-      <div class="form-group"><label>Monthly Deduction (₱)</label><input type="number" id="ln-monthly" placeholder="0"></div>
+      <div class="form-group"><label>Per Cut-off Deduction (₱)</label><input type="number" id="ln-monthly" placeholder="0"></div>
     </div>
     <div style="display:flex;gap:10px;margin-top:16px;">
       <button class="btn btn-primary" onclick="saveLoan()">💾 Save</button>
@@ -1176,12 +1185,21 @@ function buildPayrollRow(emp, periodKey) {
 
   const annualT  = Math.max(0,(gross*24)-(sssMonthly+phicMonthly+pagibigMonthly)*12-250000);
   const tax      = gross > 0 ? Math.round(computeTax(annualT)/24) : 0;
-  // Loan & late deductions — only apply if employee has actual pay this period
-  const loanDed  = gross > 0 ? loans.filter(l=>l.emp===emp.id&&l.status!=='Paid').reduce((a,l)=>a+(+l.monthly||0)/2,0) : 0;
+
+  // ── Per-category loan/deduction breakdown ───────────────────
+  const activeLoans = gross > 0 ? loans.filter(l=>l.emp===emp.id && l.status!=='Paid') : [];
+  const loanByCategory = {};
+  const LOAN_CATS = ['Cash Bond','Company Loan','Cash Advance','SSS Loan','Pag-Ibig Loan','Fine / Disciplinary','Uniform / Equipment','Other Deduction'];
+  LOAN_CATS.forEach(cat => { loanByCategory[cat] = 0; });
+  activeLoans.forEach(l => {
+    const cat = l.type || 'Other Deduction';
+    if (loanByCategory[cat] !== undefined) loanByCategory[cat] += (+l.monthly||0);
+    else loanByCategory['Other Deduction'] += (+l.monthly||0);
+  });
+  const loanDed  = Object.values(loanByCategory).reduce((a,b)=>a+b, 0);
   const totalDed = gross > 0 ? totals.ded : 0;
-  // Net can't go below 0 — contributions still owed even if net is 0
   const net      = Math.max(0, gross - sss - phic - pagibig - tax - loanDed - totalDed);
-  return {id:emp.id,name:emp.name,pos:emp.pos,rate,days,hasDTR,basic,otPay,ndPay,holPay,gross,sss,phic,pagibig,tax,loanDed,totalDed,net,ot:totals.ot,nd:totals.nd,late:totals.late};
+  return {id:emp.id,name:emp.name,pos:emp.pos,rate,days,hasDTR,basic,otPay,ndPay,holPay,gross,sss,phic,pagibig,tax,loanDed,loanByCategory,totalDed,net,ot:totals.ot,nd:totals.nd,late:totals.late};
 }
 
 // ══════════════════════════════════════════════════════════
@@ -2342,7 +2360,8 @@ function generatePayslip() {
     <div class="payslip-row"><span>Pag-Ibig (HDMF)</span><span>₱${fmt(r.pagibig)}</span></div>
     <div class="payslip-row"><span>Withholding Tax</span><span>₱${fmt(r.tax)}</span></div>
     <div class="payslip-row"><span>DTR Deductions (Late ${r.late}min / UT)</span><span>₱${fmt(r.totalDed)}</span></div>
-    <div class="payslip-row"><span>Loan Deduction</span><span>₱${fmt(r.loanDed)}</span></div>
+    ${r.loanByCategory ? Object.entries(r.loanByCategory).filter(([cat,amt])=>amt>0).map(([cat,amt])=>`
+    <div class="payslip-row"><span>${cat}</span><span>₱${fmt(amt)}</span></div>`).join('') : `<div class="payslip-row"><span>Loan Deduction</span><span>₱${fmt(r.loanDed)}</span></div>`}
     <div class="payslip-row payslip-total"><span>NET PAY</span><span style="color:var(--brand);font-size:17px;">₱${fmt(r.net)}</span></div>
     <div style="margin-top:22px;font-size:11px;color:var(--muted);text-align:center;">System-generated payslip — ${settings.company}</div>`;
 }
@@ -2653,7 +2672,7 @@ PhilHealth    : P${fmt(r.phic)}
 Pag-Ibig      : P${fmt(r.pagibig)}
 Withholding Tax: P${fmt(r.tax)}
 Late/UT Ded.  : P${fmt(lateUtDed)}
-Loan Deduction: P${fmt(r.loanDed)}
+${r.loanByCategory ? Object.entries(r.loanByCategory).filter(([c,a])=>a>0).map(([c,a])=>`${c.padEnd(14)}: P${fmt(a)}`).join('\n') : `Loan Deduction: P${fmt(r.loanDed)}`}
 Total Ded.    : P${fmt((r.sss||0)+(r.phic||0)+(r.pagibig||0)+(r.tax||0)+lateUtDed+(r.loanDed||0))}
 
 ====================================
