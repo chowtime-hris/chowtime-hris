@@ -137,27 +137,29 @@ let state = {
   deductions: {}     // cutoffKey -> { staffId: {sss,philhealth,pagibig} }
 };
 
-function loadLocal(){
-  try{ const s = localStorage.getItem('__unused'); }catch(e){}
+const LS_STATE_KEY = 'chowtimeProduction_state_v1';
+const LS_CFG_KEY = 'chowtimeProduction_fbConfig_v1';
+
+function loadLocalState(){
+  try{
+    const raw = localStorage.getItem(LS_STATE_KEY);
+    if(raw){
+      const saved = JSON.parse(raw);
+      Object.keys(state).forEach(k=>{ if(saved[k]!==undefined) state[k]=saved[k]; });
+    }
+  }catch(e){ console.warn('Local storage unavailable, running in-memory only for this session.'); }
 }
-function persist(){
-  saveState('staff', state.staff);
-  saveState('products', state.products);
-  saveState('production', state.production);
-  saveState('skus', state.skus);
-  saveState('materials', state.materials);
-  saveState('sideJobs', state.sideJobs);
-  saveState('ledger', state.ledger);
-  saveState('deductions', state.deductions);
+function persistLocalState(){
+  try{ localStorage.setItem(LS_STATE_KEY, JSON.stringify(state)); }catch(e){}
 }
-let memStore = {}; // in-memory fallback (no browser storage per artifact rules)
 function saveState(key, val){
-  memStore[key] = val;
+  state[key] = val;
+  persistLocalState();
   if(USE_FIREBASE && DB){
     DB.ref('chowtimeProduction/'+key).set(val || {});
   }
 }
-function initFirebase(cfgStr){
+function initFirebase(cfgStr, fromSaved){
   try{
     const cfg = JSON.parse(cfgStr);
     if(firebase.apps.length) firebase.app().delete();
@@ -166,6 +168,7 @@ function initFirebase(cfgStr){
     USE_FIREBASE = true;
     document.getElementById('connBadge').textContent = 'Connected (synced)';
     document.getElementById('connBadge').className = 'badge-conn on';
+    try{ localStorage.setItem(LS_CFG_KEY, cfgStr); }catch(e){}
     DB.ref('chowtimeProduction').on('value', snap=>{
       const v = snap.val() || {};
       state.staff = v.staff || {};
@@ -176,11 +179,12 @@ function initFirebase(cfgStr){
       state.sideJobs = v.sideJobs || {};
       state.ledger = v.ledger || {};
       state.deductions = v.deductions || {};
+      persistLocalState();
       render();
     });
     return true;
   }catch(e){
-    alert('Invalid Firebase config: '+e.message);
+    if(!fromSaved) alert('Invalid Firebase config: '+e.message);
     return false;
   }
 }
@@ -287,23 +291,37 @@ function render(){
 }
 
 /* ---------- DASHBOARD ---------- */
+let dashCutoff = null;
 function renderDashboard(main){
-  const keys = allCutoffKeysWithData();
-  const currentKey = cutoffKeyFor(todayISO());
+  const keys = Array.from(new Set([cutoffKeyFor(todayISO()), ...allCutoffKeysWithData()]));
+  if(!dashCutoff || !keys.includes(dashCutoff)) dashCutoff = cutoffKeyFor(todayISO());
+  const selKey = dashCutoff;
   const staffList = activeStaffList();
 
   let totalGross=0, totalQty=0, topStaff=null, topAmt=-1;
   const prodTotals = {}; state.products.forEach(p=>prodTotals[p.code]=0);
-
-  staffList.forEach(s=>{
-    const {total, byProduct} = staffCutoffProduction(s.id, currentKey);
+  const perStaff = staffList.map(s=>{
+    const {total, byProduct} = staffCutoffProduction(s.id, selKey);
     totalGross += total;
     Object.keys(byProduct).forEach(k=>{ prodTotals[k]+=byProduct[k]; totalQty+=byProduct[k]; });
     if(total>topAmt){ topAmt=total; topStaff=s.name; }
+    const bal = ledgerBalance(s.id);
+    return {s, total, byProduct, bal};
   });
 
   main.innerHTML = `
-  <div class="msg info">Current cutoff: <strong>${cutoffLabel(currentKey)}</strong> — figures below auto-total from daily entries.</div>
+  <div class="card no-print">
+    <h2>Report a cutoff</h2>
+    <div class="row">
+      <div><label>Cutoff period</label>
+        <select id="dashCutoffSel">${keys.map(k=>`<option value="${k}" ${k===selKey?'selected':''}>${cutoffLabel(k)}</option>`).join('')}</select>
+      </div>
+      <button class="btn ghost" id="printSummaryBtn">Print / Save PDF</button>
+      <button class="btn gold" id="emailSummaryBtn">Email this summary</button>
+    </div>
+  </div>
+
+  <div class="msg info">Reporting cutoff: <strong>${cutoffLabel(selKey)}</strong> — figures below auto-total from daily entries.</div>
   <div class="grid cols-4">
     <div class="card kpi"><div class="num">₱${fmt(totalGross)}</div><div class="lbl">Production payroll (this cutoff)</div></div>
     <div class="card kpi"><div class="num">${fmt(totalQty).split('.')[0]}</div><div class="lbl">Units produced</div></div>
@@ -312,26 +330,24 @@ function renderDashboard(main){
   </div>
 
   <div class="card">
-    <h2>Production by item — ${cutoffLabel(currentKey)}</h2>
+    <h2>Production by item — ${cutoffLabel(selKey)}</h2>
     <div class="table-wrap"><table>
-      <thead><tr><th>Item</th>${state.products.map(p=>'').join('')}<th>Qty</th><th>Value (₱)</th></tr></thead>
+      <thead><tr><th>Item</th><th>Qty</th></tr></thead>
       <tbody>
         ${state.products.map(p=>{
           const qty = prodTotals[p.code]||0;
-          return `<tr><td>${p.label} <span style="color:#9a8a6a">(${p.code})</span></td><td>${fmt(qty)}</td><td>—</td></tr>`;
+          return `<tr><td>${p.label} <span style="color:#9a8a6a">(${p.code})</span></td><td>${fmt(qty)}</td></tr>`;
         }).join('')}
       </tbody>
     </table></div>
   </div>
 
   <div class="card">
-    <h2>Cutoff summary — all staff</h2>
+    <h2>Cutoff summary — all staff — ${cutoffLabel(selKey)}</h2>
     <div class="table-wrap"><table>
       <thead><tr><th>Staff</th><th>Role</th>${state.products.map(p=>`<th>${p.code}</th>`).join('')}<th>Production ₱</th><th>Loan owed</th><th>Cash fund</th></tr></thead>
       <tbody>
-        ${staffList.length? staffList.map(s=>{
-          const {total, byProduct} = staffCutoffProduction(s.id, currentKey);
-          const bal = ledgerBalance(s.id);
+        ${perStaff.length? perStaff.map(({s,total,byProduct,bal})=>{
           return `<tr>
             <td><strong>${s.name}</strong></td><td>${s.jobTitle||''}</td>
             ${state.products.map(p=>`<td>${fmt(byProduct[p.code]||0).split('.')[0]}</td>`).join('')}
@@ -340,11 +356,12 @@ function renderDashboard(main){
             <td>₱${fmt(bal.cashFund)}</td>
           </tr>`;
         }).join('') : `<tr><td colspan="${4+state.products.length}" class="empty">No staff yet — add staff in the Staff &amp; Rates tab.</td></tr>`}
+        <tr class="total-row" style="font-weight:800"><td colspan="2">TOTAL</td>${state.products.map(p=>`<td>${fmt(prodTotals[p.code]||0).split('.')[0]}</td>`).join('')}<td>₱${fmt(totalGross)}</td><td></td><td></td></tr>
       </tbody>
     </table></div>
   </div>
 
-  <div class="card">
+  <div class="card no-print">
     <h2>Past cutoffs on record</h2>
     <div class="table-wrap"><table>
       <thead><tr><th>Cutoff</th><th>Total production payroll (₱)</th></tr></thead>
@@ -357,6 +374,33 @@ function renderDashboard(main){
     </table></div>
   </div>
   `;
+
+  document.getElementById('dashCutoffSel').onchange = e=>{ dashCutoff = e.target.value; render(); };
+  document.getElementById('printSummaryBtn').onclick = ()=> window.print();
+  document.getElementById('emailSummaryBtn').onclick = ()=>{
+    const to = prompt('Send this cutoff summary to (email address):', '');
+    if(!to) return;
+    const lines = [];
+    lines.push(`CHOWTIME PRODUCTION — CUTOFF SUMMARY`);
+    lines.push(cutoffLabel(selKey));
+    lines.push('');
+    lines.push(`Total production payroll: ₱${fmt(totalGross)}`);
+    lines.push(`Units produced: ${fmt(totalQty).split('.')[0]}`);
+    lines.push(`Active staff: ${staffList.length}`);
+    lines.push('');
+    lines.push('PER STAFF');
+    perStaff.forEach(({s,total,bal})=>{
+      lines.push(`  ${s.name} (${s.jobTitle||''}): ₱${fmt(total)}  |  Loan owed: ₱${fmt(bal.loanOwed)}  |  Cash fund: ₱${fmt(bal.cashFund)}`);
+    });
+    lines.push('');
+    lines.push('BY ITEM');
+    state.products.forEach(p=>{
+      const qty = prodTotals[p.code]||0;
+      if(qty>0) lines.push(`  ${p.label}: ${fmt(qty)}`);
+    });
+    const subject = `Chowtime Production — Cutoff Summary — ${cutoffLabel(selKey)}`;
+    window.location.href = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(lines.join('\n'))}`;
+  };
 }
 
 /* ---------- PRODUCTION ENTRY ---------- */
@@ -815,6 +859,8 @@ function renderPayslip(main){
   `;
 
   document.getElementById('genBtn').onclick = ()=>genPayslip();
+  document.getElementById('psStaff').onchange = ()=>genPayslip();
+  document.getElementById('psCutoff').onchange = ()=>genPayslip();
   function genPayslip(){
     const sid = document.getElementById('psStaff').value;
     const ck = document.getElementById('psCutoff').value;
@@ -963,13 +1009,18 @@ function pushToHrisFeed(staffId, cutoffKey, payload){
 
 /* ---------- SETTINGS ---------- */
 function renderSettings(main){
+  let savedCfg = '';
+  try{ savedCfg = localStorage.getItem(LS_CFG_KEY) || ''; }catch(e){}
   main.innerHTML = `
   <div class="card">
-    <h2>Sync with Firebase (same database as HRIS, optional)</h2>
-    <div class="msg info">This system stores data under a separate <code>chowtimeProduction</code> node, so it will not collide with the existing payroll/kiosk/setup HRIS data even if you use the same Firebase project. Paste the same <code>firebaseConfig</code> you use in <code>chowtime-setup.html</code> to keep everything in one database, or leave blank to run this device standalone (data stays in this browser session only).</div>
+    <h2>Sync with Firebase</h2>
+    <div class="msg info">Your data now auto-saves in this browser, so refreshing the page won't lose anything even offline. Connecting Firebase below adds cloud backup and lets multiple tablets/devices share the same data in real time. Once connected, it'll stay connected automatically — you won't need to paste this again after a refresh.</div>
     <label>Firebase config (JSON)</label>
-    <textarea id="cfgInput" rows="6" style="width:100%;font-family:monospace;font-size:12px;padding:8px;border:1px solid var(--line);border-radius:6px;" placeholder='{"apiKey":"...","databaseURL":"https://...firebaseio.com",...}'></textarea>
-    <div class="foot-actions"><button class="btn gold" id="connectBtn">Connect</button></div>
+    <textarea id="cfgInput" rows="6" style="width:100%;font-family:monospace;font-size:12px;padding:8px;border:1px solid var(--line);border-radius:6px;" placeholder='{"apiKey":"...","databaseURL":"https://...firebaseio.com",...}'>${savedCfg}</textarea>
+    <div class="foot-actions">
+      ${savedCfg?'<button class="btn ghost" id="disconnectBtn">Disconnect / forget this device</button>':''}
+      <button class="btn gold" id="connectBtn">Connect</button>
+    </div>
   </div>
   <div class="card">
     <h2>Export data</h2>
@@ -991,7 +1042,7 @@ function renderSettings(main){
   <div class="card">
     <h2>Connecting to HRIS — safely, without editing it</h2>
     <p style="font-size:13.5px;line-height:1.6">
-    Your existing <code>chowtime-payroll.html</code> is not touched by this app in any way — its computation logic stays exactly as it is. This system only writes to a brand-new, separate spot in your Firebase database called <code>hrisProductionFeed</code>. Nothing reads from it yet, so there is nothing to break.</p>
+    Your existing <code>chowtime-payroll.html</code> is not touched by this app in any way — its computation logic stays exactly as it is. This system only writes to a brand-new, separate spot in Firebase called <code>hrisProductionFeed</code>. Nothing reads from it yet, so there is nothing to break.</p>
     <p style="font-size:13.5px;line-height:1.6">
     On the Payslip tab, once you're connected to Firebase, a <strong>"Send to HRIS feed"</strong> button saves that staff member's finished net salary for the cutoff to:</p>
     <div style="font-family:monospace;font-size:12px;background:#f6efdf;padding:8px 10px;border-radius:6px;">hrisProductionFeed / [cutoff, e.g. 2026-07-C1] / [staffId] → name, gross, deductions, net, account</div>
@@ -1002,7 +1053,17 @@ function renderSettings(main){
   document.getElementById('connectBtn').onclick = ()=>{
     const v = document.getElementById('cfgInput').value.trim();
     if(!v){ alert('Paste a config first, or leave this page to keep working offline.'); return; }
-    initFirebase(v);
+    if(initFirebase(v)) alert('Connected. This device will now reconnect automatically on every visit.');
+  };
+  const disBtn = document.getElementById('disconnectBtn');
+  if(disBtn) disBtn.onclick = ()=>{
+    if(confirm('Stop syncing this device to Firebase? Your data stays saved locally on this device either way.')){
+      try{ localStorage.removeItem(LS_CFG_KEY); }catch(e){}
+      USE_FIREBASE = false; DB = null;
+      document.getElementById('connBadge').textContent = 'Offline (local)';
+      document.getElementById('connBadge').className = 'badge-conn off';
+      render();
+    }
   };
   document.getElementById('exportCsvBtn').onclick = exportCsv;
   document.getElementById('exportJsonBtn').onclick = exportJson;
@@ -1036,7 +1097,12 @@ function downloadBlob(content, filename, type){
 }
 
 /* ================= BOOT ================= */
+loadLocalState();
 render();
+try{
+  const savedCfg = localStorage.getItem(LS_CFG_KEY);
+  if(savedCfg) initFirebase(savedCfg, true);
+}catch(e){}
 </script>
 </body>
 </html>
