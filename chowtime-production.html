@@ -100,7 +100,7 @@ tbody tr:hover{background:#fbf6ea;}
   <button data-tab="entry">Production Entry</button>
   <button data-tab="staff">Staff &amp; Rates</button>
   <button data-tab="materials">Materials &amp; Side Jobs</button>
-  <button data-tab="loans">Loans &amp; Cash Fund</button>
+  <button data-tab="loans">Deductions</button>
   <button data-tab="payslip">Payslip</button>
   <button data-tab="settings">Settings</button>
 </nav>
@@ -133,7 +133,7 @@ let state = {
   skus: DEFAULT_SKUS,
   materials: {},    // cutoffKey -> { skuCode: qty }
   sideJobs: {},     // cutoffKey -> { staffId: amount }
-  ledger: {},        // staffId -> [ {id,type:'fine'|'payment'|'cashfund_add'|'cashfund_deduct',amount,date,note} ]
+  ledger: {},        // staffId -> [ {id,type:'loan'|'fine'|'ca'|'payment'|'cashfund_add'|'cashfund_deduct',amount,date,note} ]
   deductions: {}     // cutoffKey -> { staffId: {sss,philhealth,pagibig} }
 };
 
@@ -250,7 +250,7 @@ function ledgerBalance(staffId){
   const entries = state.ledger[staffId] || [];
   let loanOwed=0, cashFund=0, totalOwedRaised=0, totalPaid=0;
   entries.forEach(e=>{
-    if(e.type==='loan' || e.type==='fine'){ loanOwed += Number(e.amount); totalOwedRaised += Number(e.amount); }
+    if(e.type==='loan' || e.type==='fine' || e.type==='ca'){ loanOwed += Number(e.amount); totalOwedRaised += Number(e.amount); }
     if(e.type==='payment'){ loanOwed -= Number(e.amount); totalPaid += Number(e.amount); }
     if(e.type==='cashfund_add') cashFund += Number(e.amount);
     if(e.type==='cashfund_deduct') cashFund -= Number(e.amount);
@@ -345,7 +345,7 @@ function renderDashboard(main){
   <div class="card">
     <h2>Cutoff summary — all staff — ${cutoffLabel(selKey)}</h2>
     <div class="table-wrap"><table>
-      <thead><tr><th>Staff</th><th>Role</th>${state.products.map(p=>`<th>${p.code}</th>`).join('')}<th>Production ₱</th><th>Loan owed</th><th>Cash fund</th></tr></thead>
+      <thead><tr><th>Staff</th><th>Role</th>${state.products.map(p=>`<th>${p.code}</th>`).join('')}<th>Production ₱</th><th>Deductions owed</th><th>Cash fund</th></tr></thead>
       <tbody>
         ${perStaff.length? perStaff.map(({s,total,byProduct,bal})=>{
           return `<tr>
@@ -390,7 +390,7 @@ function renderDashboard(main){
     lines.push('');
     lines.push('PER STAFF');
     perStaff.forEach(({s,total,bal})=>{
-      lines.push(`  ${s.name} (${s.jobTitle||''}): ₱${fmt(total)}  |  Loan owed: ₱${fmt(bal.loanOwed)}  |  Cash fund: ₱${fmt(bal.cashFund)}`);
+      lines.push(`  ${s.name} (${s.jobTitle||''}): ₱${fmt(total)}  |  Deductions owed: ₱${fmt(bal.loanOwed)}  |  Cash fund: ₱${fmt(bal.cashFund)}`);
     });
     lines.push('');
     lines.push('BY ITEM');
@@ -765,13 +765,15 @@ function renderLoans(main){
   const staffList = activeStaffList();
   main.innerHTML = `
   <div class="card">
-    <h2>Add ledger entry</h2>
+    <h2>Add deduction entry</h2>
+    <div class="msg info">Loan, Fine, and Cash Advance all work the same way here: logging one adds it to that staff member's balance, and it only comes out of their pay when you log an actual "Payment received" — in one lump sum or spread across several cutoffs, however it's actually being paid back.</div>
     <div class="grid cols-4">
       <div><label>Staff</label><select id="lStaff">${staffList.map(s=>`<option value="${s.id}">${s.name}</option>`).join('')}</select></div>
       <div><label>Type</label><select id="lType">
         <option value="loan">New loan given</option>
         <option value="fine">Fine / penalty</option>
-        <option value="payment">Loan payment received</option>
+        <option value="ca">Cash advance given</option>
+        <option value="payment">Payment received (reduces balance)</option>
         <option value="cashfund_add">Cash fund contribution</option>
         <option value="cashfund_deduct">Cash fund deduction/payout</option>
       </select></div>
@@ -785,7 +787,7 @@ function renderLoans(main){
   <div class="card">
     <h2>Balances overview</h2>
     <div class="table-wrap"><table>
-      <thead><tr><th>Staff</th><th>Total loaned + fines</th><th>Total paid</th><th>Balance owed</th><th>Cash fund</th></tr></thead>
+      <thead><tr><th>Staff</th><th>Total loans + fines + CA</th><th>Total paid</th><th>Balance owed</th><th>Cash fund</th></tr></thead>
       <tbody>
       ${staffList.length? staffList.map(s=>{
         const b = ledgerBalance(s.id);
@@ -804,7 +806,7 @@ function renderLoans(main){
     if(!history.length) return '';
     return `
     <div class="card">
-      <h2>${s.name} — loan &amp; payment history</h2>
+      <h2>${s.name} — deduction history</h2>
       <div class="table-wrap"><table>
         <thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Running balance</th><th>Note</th><th></th></tr></thead>
         <tbody>
@@ -852,10 +854,10 @@ function renderLoans(main){
   });
 }
 function staffLoanHistory(staffId){
-  const entries = (state.ledger[staffId]||[]).filter(e=>e.type==='loan'||e.type==='fine'||e.type==='payment');
+  const entries = (state.ledger[staffId]||[]).filter(e=>e.type==='loan'||e.type==='fine'||e.type==='ca'||e.type==='payment');
   const sorted = entries.slice().sort((a,b)=> a.date<b.date?-1:(a.date>b.date?1:0));
   let running = 0;
-  const typeLabels = {loan:'New loan', fine:'Fine / penalty', payment:'Payment'};
+  const typeLabels = {loan:'New loan', fine:'Fine / penalty', ca:'Cash advance', payment:'Payment'};
   return sorted.map(e=>{
     if(e.type==='payment') running -= Number(e.amount); else running += Number(e.amount);
     return {...e, typeLabel:typeLabels[e.type]||e.type, sign: e.type==='payment'?'−':'+', balance: running};
@@ -915,13 +917,13 @@ function renderPayslip(main){
     const phil = Number(document.getElementById('psPhil').value)||0;
     const pagibig = Number(document.getElementById('psPagibig').value)||0;
 
-    // this cutoff's actual deductions: loan PAYMENTS being withheld + any fines dated this cutoff
-    // (a "new loan given" is cash handed out, not a payroll deduction — it only becomes a
-    // deduction later, on whichever cutoff(s) a "Loan payment" entry is logged against it)
+    // this cutoff's actual deduction is whatever "Payment received" was logged this cutoff —
+    // covers whatever mix of loan/fine/cash-advance balance it's going toward. Issuing a loan,
+    // fine, or cash advance itself doesn't touch payroll; only a logged payment does, whenever
+    // and however much it's actually paid.
     const dates = new Set(cutoffDatesForKey(ck));
     const entries = (state.ledger[sid]||[]).filter(e=>dates.has(e.date));
-    const loanPayment = entries.filter(e=>e.type==='payment').reduce((a,e)=>a+Number(e.amount),0);
-    const fine = entries.filter(e=>e.type==='fine').reduce((a,e)=>a+Number(e.amount),0);
+    const deductionPayment = entries.filter(e=>e.type==='payment').reduce((a,e)=>a+Number(e.amount),0);
     const cashfund = entries.filter(e=>e.type==='cashfund_deduct').reduce((a,e)=>a+Number(e.amount),0);
     const currentBalance = ledgerBalance(sid).loanOwed;
     let caTotal = 0;
@@ -930,7 +932,7 @@ function renderPayslip(main){
       if(day && day.ca) caTotal += Number(day.ca[sid]||0);
     });
 
-    const totalDeduction = sss+phil+pagibig+loanPayment+fine+caTotal+cashfund;
+    const totalDeduction = sss+phil+pagibig+deductionPayment+caTotal+cashfund;
     const net = gross - totalDeduction;
 
     document.getElementById('payslipOut').innerHTML = `
@@ -958,16 +960,15 @@ function renderPayslip(main){
           <tr><td>SSS</td><td>₱${fmt(sss)}</td></tr>
           <tr><td>PhilHealth</td><td>₱${fmt(phil)}</td></tr>
           <tr><td>Pag-IBIG</td><td>₱${fmt(pagibig)}</td></tr>
-          <tr><td>Cash Advance</td><td>₱${fmt(caTotal)}</td></tr>
-          <tr><td>Loan payment</td><td>₱${fmt(loanPayment)}</td></tr>
-          <tr><td>Fine / penalty</td><td>₱${fmt(fine)}</td></tr>
+          <tr><td>Cash Advance (same-day)</td><td>₱${fmt(caTotal)}</td></tr>
+          <tr><td>Loan / Fine / CA payment</td><td>₱${fmt(deductionPayment)}</td></tr>
           <tr><td>Cash Fund payout</td><td>₱${fmt(cashfund)}</td></tr>
           <tr class="total-row"><td>Total Deductions</td><td>₱${fmt(totalDeduction)}</td></tr>
         </table>
         <table style="width:100%">
           <tr class="total-row"><td>NET SALARY</td><td>₱${fmt(net)}</td></tr>
         </table>
-        <div class="sub" style="margin-top:10px">Account: ${s.account||'—'} &nbsp;•&nbsp; Remaining loan balance: ₱${fmt(currentBalance)} &nbsp;•&nbsp; Generated ${new Date().toLocaleDateString()}</div>
+        <div class="sub" style="margin-top:10px">Account: ${s.account||'—'} &nbsp;•&nbsp; Remaining deduction balance: ₱${fmt(currentBalance)} &nbsp;•&nbsp; Generated ${new Date().toLocaleDateString()}</div>
       </div>
       <div class="foot-actions no-print">
         <button class="btn ghost" onclick="window.print()">Print / Save PDF</button>
@@ -1003,9 +1004,8 @@ function renderPayslip(main){
       lines.push(`  SSS: ₱${fmt(sss)}`);
       lines.push(`  PhilHealth: ₱${fmt(phil)}`);
       lines.push(`  Pag-IBIG: ₱${fmt(pagibig)}`);
-      lines.push(`  Cash Advance: ₱${fmt(caTotal)}`);
-      lines.push(`  Loan payment: ₱${fmt(loanPayment)}`);
-      lines.push(`  Fine / penalty: ₱${fmt(fine)}`);
+      lines.push(`  Cash Advance (same-day): ₱${fmt(caTotal)}`);
+      lines.push(`  Loan / Fine / CA payment: ₱${fmt(deductionPayment)}`);
       lines.push(`  Cash Fund payout: ₱${fmt(cashfund)}`);
       lines.push(`  Total Deductions: ₱${fmt(totalDeduction)}`);
       lines.push('');
@@ -1028,8 +1028,8 @@ function renderPayslip(main){
         gross: Number(gross.toFixed(2)), deductions: Number(totalDeduction.toFixed(2)),
         net: Number(net.toFixed(2)), account: s.account||'',
         breakdown: {production: Number(total.toFixed(2)), sideJobs: Number(side.toFixed(2)),
-          sss, philhealth: phil, pagibig, cashAdvance: caTotal, loanPayment, fine, cashFundPayout: cashfund},
-        remainingLoanBalance: Number(currentBalance.toFixed(2)),
+          sss, philhealth: phil, pagibig, cashAdvance: caTotal, deductionPayment, cashFundPayout: cashfund},
+        remainingDeductionBalance: Number(currentBalance.toFixed(2)),
         cutoffLabel: cutoffLabel(ck), pushedAt: new Date().toISOString()
       });
     };
