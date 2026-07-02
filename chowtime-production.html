@@ -606,7 +606,7 @@ function renderStaff(main){
     <div class="table-wrap" style="margin-top:10px"><table>
       <thead><tr><th>Code</th><th>Label</th><th></th></tr></thead>
       <tbody>
-      ${state.products.map((p,i)=>`<tr><td>${p.code}</td><td>${p.label}</td><td><span class="tag-rm" data-i="${i}">✕ remove</span></td></tr>`).join('')}
+      ${state.products.map((p,i)=>`<tr><td>${p.code}</td><td>${p.label}</td><td><span class="tag-rm editProd" data-i="${i}" style="color:var(--maroon)">✎ edit</span> <span class="tag-rm" data-i="${i}">✕ remove</span></td></tr>`).join('')}
       </tbody>
     </table></div>
     <div class="msg warn" style="margin-top:10px">Removing a product does not delete past production records for it, but it will no longer appear in entry forms.</div>
@@ -657,7 +657,43 @@ function renderStaff(main){
     saveState('products', state.products);
     render();
   };
-  document.querySelectorAll('.tag-rm').forEach(t=>t.onclick=()=>{
+  document.querySelectorAll('.editProd').forEach(t=>t.onclick=()=>{
+    const i = Number(t.dataset.i);
+    const p = state.products[i];
+    const newLabel = prompt(`Label for ${p.code}:`, p.label);
+    if(newLabel===null) return;
+    const newCodeRaw = prompt(`Code for "${newLabel.trim()||p.label}" (short, no spaces — changing this keeps all existing rates and production history, just renamed):`, p.code);
+    if(newCodeRaw===null) return;
+    const newCode = newCodeRaw.trim().toUpperCase();
+    const newLabelTrim = newLabel.trim();
+    if(!newCode || !newLabelTrim){ alert('Code and label cannot be empty'); return; }
+    if(newCode!==p.code && state.products.some((pp,ix)=>ix!==i && pp.code===newCode)){
+      alert('Another product already uses that code'); return;
+    }
+    const oldCode = p.code;
+    state.products[i] = {code:newCode, label:newLabelTrim};
+    if(newCode!==oldCode){
+      // migrate rates on every staff member
+      Object.values(state.staff).forEach(s=>{
+        if(s.rates && Object.prototype.hasOwnProperty.call(s.rates, oldCode)){
+          s.rates[newCode] = s.rates[oldCode];
+          delete s.rates[oldCode];
+        }
+      });
+      // migrate production history
+      Object.values(state.production).forEach(day=>{
+        if(day.products && Object.prototype.hasOwnProperty.call(day.products, oldCode)){
+          day.products[newCode] = day.products[oldCode];
+          delete day.products[oldCode];
+        }
+      });
+      saveState('staff', state.staff);
+      saveState('production', state.production);
+    }
+    saveState('products', state.products);
+    render();
+  });
+  document.querySelectorAll('.tag-rm:not(.editProd)').forEach(t=>t.onclick=()=>{
     state.products.splice(Number(t.dataset.i),1);
     saveState('products', state.products);
     render();
