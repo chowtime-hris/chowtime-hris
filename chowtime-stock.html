@@ -197,7 +197,7 @@
   <div class="card" style="text-align:center;">
     <h2>Owner PIN</h2>
     <p class="sub">Enter your owner PIN to continue.</p>
-    <input id="ownerPinGateInput" maxlength="8" placeholder="8 characters" style="text-align:center;font-size:18px;letter-spacing:3px;" onkeydown="if(event.key==='Enter') checkOwnerPin();">
+    <input id="ownerPinGateInput" maxlength="8" placeholder="8 characters" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" style="text-align:center;font-size:18px;letter-spacing:3px;" onkeydown="if(event.key==='Enter') checkOwnerPin();">
     <button class="btn-primary" style="margin-top:14px;" onclick="checkOwnerPin()">Unlock</button>
     <p class="hint" id="ownerPinGateStatus" style="color:var(--danger);"></p>
   </div>
@@ -301,7 +301,7 @@
       <label>Branch name</label>
       <input id="branchName" placeholder="e.g. Chowtime SM Pampanga">
       <label>Owner PIN (protects this dashboard)</label>
-      <input id="ownerPinInput" maxlength="8" placeholder="8 characters, letters or numbers">
+      <input id="ownerPinInput" maxlength="8" placeholder="8 characters, letters or numbers" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false">
       <label>Shortage charge (₱ per unit lost)</label>
       <input id="shortageRateInput" type="number" min="0" step="any" placeholder="69">
       <p class="hint">Applied per unit when POS stock is higher than the physical freezer count. Overages at the same rate get deducted from total charges.</p>
@@ -317,12 +317,18 @@
           <select id="itemUnit"><option>pcs</option><option>kg</option><option>pack</option><option>tray</option><option>box</option><option>L</option><option>g</option></select>
         </div>
         <div><label>Category</label><input id="itemCategory" placeholder="e.g. Meat"></div>
-        <div><label>Pack size (units)</label><input id="itemPackSize" type="number" min="1" step="any" placeholder="e.g. 5" value="1"></div>
-        <div><label>Pack cost (₱)</label><input id="itemPackCost" type="number" min="0" step="any" placeholder="e.g. 69"></div>
+      </div>
+      <div class="row">
+        <div><label>Pricing: units per charge</label><input id="itemPackSize" type="number" min="1" step="any" placeholder="e.g. 5" value="1"></div>
+        <div><label>Pricing: ₱ per charge</label><input id="itemPackCost" type="number" min="0" step="any" placeholder="e.g. 69"></div>
+        <div><label>Freezer: units per physical pack</label><input id="itemFreezerPackSize" type="number" min="1" step="any" placeholder="e.g. 10 (blank = no packs)"></div>
         <div style="flex:0 0 auto;"><button class="btn-primary" style="width:auto;" onclick="addItem()">+ Add Item</button></div>
       </div>
-      <p class="hint">Example: Chicken Nuggets, pack size 5, pack cost ₱69 → charges ₱13.80 per piece short. Leave pack cost blank to use the default rate (₱<span id="defaultRateHint">69</span>/unit) instead.</p>
-      <table><thead><tr><th>Item</th><th>Unit</th><th>Category</th><th class="num">₱/unit</th><th></th></tr></thead><tbody id="itemsTbody"></tbody></table>
+      <p class="hint">
+        <strong>Pricing</strong> (for charges): e.g. Chicken Nuggets, 5 units = ₱69 → charges ₱13.80 per piece short. Leave ₱ blank to use the default rate (₱<span id="defaultRateHint">69</span>/unit).<br>
+        <strong>Freezer packs</strong> (for counting): e.g. if nuggets come 10 pcs per bag, set 10 here so crew can enter "Full Packs + Loose pcs" instead of counting one by one. Leave blank if it's not stored in packs.
+      </p>
+      <table><thead><tr><th>Item</th><th>Unit</th><th>Category</th><th class="num">₱/unit</th><th class="num">Freezer pack</th><th></th></tr></thead><tbody id="itemsTbody"></tbody></table>
       <div id="itemsEmpty" class="empty">No items yet.</div>
     </div>
 
@@ -570,7 +576,7 @@ function enterOwner(){
 /* ---------- OWNER PIN GATE ---------- */
 function checkOwnerPin(){
   const entered = document.getElementById('ownerPinGateInput').value;
-  if(entered === String(ownerPin)){
+  if(entered.toLowerCase() === String(ownerPin).toLowerCase()){
     enterOwner();
   } else {
     document.getElementById('ownerPinGateStatus').textContent = 'Incorrect PIN — try again.';
@@ -636,9 +642,12 @@ function loadItemsTable(){
       const tr = document.createElement('tr');
       const rate = itemRate(id);
       const isCustom = it.packCost !== undefined && it.packCost !== null && it.packCost !== '';
-      tr.innerHTML = `<td>${escapeHtml(it.name)}</td><td>${escapeHtml(it.unit)}</td><td>${escapeHtml(it.category||'—')}</td>
+      const fps = parseFloat(it.freezerPackSize);
+      if(it.archived) tr.style.opacity = '0.5';
+      tr.innerHTML = `<td>${escapeHtml(it.name)}${it.archived?' <small style="color:var(--muted);">(archived)</small>':''}</td><td>${escapeHtml(it.unit)}</td><td>${escapeHtml(it.category||'—')}</td>
         <td class="num">₱${fmt(rate)}${isCustom?'':' <small style="color:var(--muted);">(default)</small>'}</td>
-        <td class="item-actions"><button class="btn-danger" onclick="deleteItem('${id}')">Delete</button></td>`;
+        <td class="num">${fps>1 ? fps+' '+escapeHtml(it.unit)+'/pack' : '—'}</td>
+        <td class="item-actions">${it.archived ? `<button class="btn-ghost" onclick="restoreItem('${id}')">Restore</button>` : `<button class="btn-danger" onclick="deleteItem('${id}')">Archive</button>`}</td>`;
       tbody.appendChild(tr);
     });
   });
@@ -650,16 +659,22 @@ function addItem(){
   const packSize = parseFloat(document.getElementById('itemPackSize').value) || 1;
   const packCostRaw = document.getElementById('itemPackCost').value;
   const packCost = packCostRaw !== '' ? parseFloat(packCostRaw) : null;
+  const freezerPackSizeRaw = document.getElementById('itemFreezerPackSize').value;
+  const freezerPackSize = freezerPackSizeRaw !== '' ? parseFloat(freezerPackSizeRaw) : null;
   if(!name){ toast('Enter an item name'); return; }
-  bref('items').push().set({name, unit, category, packSize, packCost, createdAt: Date.now()}).then(()=>{
+  bref('items').push().set({name, unit, category, packSize, packCost, freezerPackSize, archived: false, createdAt: Date.now()}).then(()=>{
     document.getElementById('itemName').value=''; document.getElementById('itemCategory').value='';
     document.getElementById('itemPackSize').value='1'; document.getElementById('itemPackCost').value='';
+    document.getElementById('itemFreezerPackSize').value='';
     toast('Item added');
   });
 }
 function deleteItem(id){
-  if(!confirm('Delete this item?')) return;
-  bref('items/'+id).remove().then(()=>toast('Item deleted'));
+  if(!confirm('Archive this item? It stays visible in past reports (with its name), but crew won\'t see it in the count list anymore. You can restore it anytime.')) return;
+  bref('items/'+id+'/archived').set(true).then(()=>toast('Item archived'));
+}
+function restoreItem(id){
+  bref('items/'+id+'/archived').set(false).then(()=>toast('Item restored'));
 }
 
 function loadCrewTable(){
@@ -964,21 +979,43 @@ function selectCheckpoint(id){
 }
 function renderItemsList(){
   const list = document.getElementById('itemsList'); list.innerHTML='';
-  const keys = Object.keys(items);
+  const keys = Object.keys(items).filter(id => !items[id].archived);
   if(!keys.length){ list.innerHTML='<p class="sub">No items in catalog yet. Ask the owner to add items in Setup.</p>'; return; }
   keys.forEach(id=>{
     const it = items[id];
+    const freezerPackSize = parseFloat(it.freezerPackSize) || 1;
+    const usesPack = freezerPackSize > 1;
     const block = document.createElement('div'); block.className='item-block';
-    block.innerHTML = `<div class="name">${escapeHtml(it.name)} <span class="unit">(${escapeHtml(it.unit)})</span></div>
-      <div class="dual-input">
-        <div class="field"><label>POS Stock</label><input type="number" min="0" step="any" data-item="${id}" data-field="pos" placeholder="0"></div>
-        <div class="field"><label>Freezer Count</label><input type="number" min="0" step="any" data-item="${id}" data-field="freezer" placeholder="0"></div>
-      </div>`;
+    if(usesPack){
+      block.innerHTML = `<div class="name">${escapeHtml(it.name)} <span class="unit">(${freezerPackSize} ${escapeHtml(it.unit)}/pack)</span></div>
+        <div class="dual-input">
+          <div class="field"><label>POS Stock (${escapeHtml(it.unit)})</label><input type="number" min="0" step="any" data-item="${id}" data-field="pos" placeholder="0"></div>
+          <div class="field"><label>Full Packs</label><input type="number" min="0" step="any" data-item="${id}" data-field="freezerPacks" placeholder="0" oninput="updatePackTotal('${id}')"></div>
+          <div class="field"><label>Loose ${escapeHtml(it.unit)}</label><input type="number" min="0" step="any" data-item="${id}" data-field="freezerLoose" placeholder="0" oninput="updatePackTotal('${id}')"></div>
+        </div>
+        <div class="note-small">= <span id="packTotal-${id}">0</span> ${escapeHtml(it.unit)} total in freezer</div>`;
+    } else {
+      block.innerHTML = `<div class="name">${escapeHtml(it.name)} <span class="unit">(${escapeHtml(it.unit)})</span></div>
+        <div class="dual-input">
+          <div class="field"><label>POS Stock</label><input type="number" min="0" step="any" data-item="${id}" data-field="pos" placeholder="0"></div>
+          <div class="field"><label>Freezer Count</label><input type="number" min="0" step="any" data-item="${id}" data-field="freezer" placeholder="0"></div>
+        </div>`;
+    }
     list.appendChild(block);
   });
   const sel = document.getElementById('wasteItemSelect');
   sel.innerHTML = keys.map(id=>`<option value="${id}">${escapeHtml(items[id].name)}</option>`).join('');
   renderWasteLogCrew();
+}
+function updatePackTotal(id){
+  const it = items[id];
+  const freezerPackSize = parseFloat(it.freezerPackSize) || 1;
+  const packsInp = document.querySelector(`input[data-item="${id}"][data-field="freezerPacks"]`);
+  const looseInp = document.querySelector(`input[data-item="${id}"][data-field="freezerLoose"]`);
+  const packs = parseFloat(packsInp.value) || 0;
+  const loose = parseFloat(looseInp.value) || 0;
+  const totalEl = document.getElementById('packTotal-'+id);
+  if(totalEl) totalEl.textContent = fmt(packs*freezerPackSize + loose);
 }
 function getWasteForCheckpoint(cp, cb){
   bref('waste/'+todayStr()).once('value').then(s=>{
@@ -993,9 +1030,28 @@ function submitCount(){
   const values={}; let filled=0;
   posInputs.forEach(inp=>{
     const id = inp.dataset.item;
-    const freezerInp = document.querySelector(`#itemsList input[data-item="${id}"][data-field="freezer"]`);
-    const posV = inp.value, frzV = freezerInp.value;
-    if(posV!==''&&frzV!==''){ values[id] = {pos: parseFloat(posV), freezer: parseFloat(frzV)}; filled++; }
+    const posV = inp.value;
+    const it = items[id] || {};
+    const freezerPackSize = parseFloat(it.freezerPackSize) || 1;
+    const usesPack = freezerPackSize > 1;
+    let freezerVal = null, freezerPacks = null, freezerLoose = null;
+    if(usesPack){
+      const packsInp = document.querySelector(`#itemsList input[data-item="${id}"][data-field="freezerPacks"]`);
+      const looseInp = document.querySelector(`#itemsList input[data-item="${id}"][data-field="freezerLoose"]`);
+      const packsV = packsInp.value, looseV = looseInp.value;
+      if(packsV!=='' && looseV!==''){
+        freezerPacks = parseFloat(packsV); freezerLoose = parseFloat(looseV);
+        freezerVal = freezerPacks*freezerPackSize + freezerLoose;
+      }
+    } else {
+      const freezerInp = document.querySelector(`#itemsList input[data-item="${id}"][data-field="freezer"]`);
+      if(freezerInp.value !== '') freezerVal = parseFloat(freezerInp.value);
+    }
+    if(posV!=='' && freezerVal!==null){
+      values[id] = {pos: parseFloat(posV), freezer: freezerVal};
+      if(usesPack){ values[id].freezerPacks = freezerPacks; values[id].freezerLoose = freezerLoose; }
+      filled++;
+    }
   });
   if(filled===0){ toast('Enter at least one item'); statusEl.textContent = 'Not submitted: no items filled in yet.'; return; }
   if(filled < posInputs.length){
