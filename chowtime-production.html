@@ -248,14 +248,14 @@ function staffCutoffProduction(staffId, cutoffKey){
 }
 function ledgerBalance(staffId){
   const entries = state.ledger[staffId] || [];
-  let loanOwed=0, cashFund=0;
+  let loanOwed=0, cashFund=0, totalOwedRaised=0, totalPaid=0;
   entries.forEach(e=>{
-    if(e.type==='fine') loanOwed += Number(e.amount);
-    if(e.type==='payment') loanOwed -= Number(e.amount);
+    if(e.type==='loan' || e.type==='fine'){ loanOwed += Number(e.amount); totalOwedRaised += Number(e.amount); }
+    if(e.type==='payment'){ loanOwed -= Number(e.amount); totalPaid += Number(e.amount); }
     if(e.type==='cashfund_add') cashFund += Number(e.amount);
     if(e.type==='cashfund_deduct') cashFund -= Number(e.amount);
   });
-  return {loanOwed, cashFund};
+  return {loanOwed, cashFund, totalOwedRaised, totalPaid};
 }
 function activeStaffList(){
   return Object.entries(state.staff).map(([id,s])=>({id,...s}));
@@ -553,23 +553,28 @@ function renderEntry(main){
 }
 
 /* ---------- STAFF & RATES ---------- */
+let editingStaffId = null;
 function renderStaff(main){
   const staffList = activeStaffList();
+  const editing = editingStaffId ? state.staff[editingStaffId] : null;
   main.innerHTML = `
   <div class="card">
-    <h2>Add staff member</h2>
+    <h2>${editing? `Edit staff member — ${editing.name}` : 'Add staff member'}</h2>
     <div class="grid cols-4">
-      <div><label>Name</label><input id="nName"></div>
-      <div><label>Role / Job title</label><input id="nJob"></div>
-      <div><label>ID number</label><input id="nId" placeholder="CT-0007"></div>
-      <div><label>Bank / account no.</label><input id="nAcc"></div>
-      <div><label>Email (for payslips)</label><input id="nEmail" type="email" placeholder="name@example.com"></div>
+      <div><label>Name</label><input id="nName" value="${editing?editing.name:''}"></div>
+      <div><label>Role / Job title</label><input id="nJob" value="${editing?(editing.jobTitle||''):''}"></div>
+      <div><label>ID number</label><input id="nId" placeholder="CT-0007" value="${editing?(editing.idNumber||''):''}"></div>
+      <div><label>Bank / account no.</label><input id="nAcc" value="${editing?(editing.account||''):''}"></div>
+      <div><label>Email (for payslips)</label><input id="nEmail" type="email" placeholder="name@example.com" value="${editing?(editing.email||''):''}"></div>
     </div>
     <h2 style="margin-top:16px">Piece rates (₱ per unit)</h2>
     <div class="grid cols-4">
-      ${state.products.map(p=>`<div><label>${p.label} (${p.code})</label><input id="rate-${p.code}" type="number" step="any" min="0" value="0.60"></div>`).join('')}
+      ${state.products.map(p=>`<div><label>${p.label} (${p.code})</label><input id="rate-${p.code}" type="number" step="any" min="0" value="${editing?((editing.rates&&editing.rates[p.code])!=null?editing.rates[p.code]:0):0.60}"></div>`).join('')}
     </div>
-    <div class="foot-actions"><button class="btn gold" id="addStaffBtn">Add staff</button></div>
+    <div class="foot-actions">
+      ${editing?'<button class="btn ghost" id="cancelEditBtn">Cancel</button>':''}
+      <button class="btn gold" id="addStaffBtn">${editing?'Save changes':'Add staff'}</button>
+    </div>
   </div>
 
   <div class="card">
@@ -613,17 +618,24 @@ function renderStaff(main){
     if(!name){ alert('Enter a name'); return; }
     const rates={};
     state.products.forEach(p=> rates[p.code]=Number(document.getElementById('rate-'+p.code).value)||0);
-    const id = uid();
-    state.staff[id] = {
+    const info = {
       name, jobTitle: document.getElementById('nJob').value.trim(),
       idNumber: document.getElementById('nId').value.trim(),
       account: document.getElementById('nAcc').value.trim(),
       email: document.getElementById('nEmail').value.trim(),
       rates
     };
+    if(editingStaffId){
+      state.staff[editingStaffId] = info;
+      editingStaffId = null;
+    } else {
+      state.staff[uid()] = info;
+    }
     saveState('staff', state.staff);
     render();
   };
+  const cancelBtn = document.getElementById('cancelEditBtn');
+  if(cancelBtn) cancelBtn.onclick = ()=>{ editingStaffId=null; render(); };
   document.querySelectorAll('.delStaff').forEach(b=>b.onclick=()=>{
     if(confirm('Remove this staff member? Past production records will be kept but unlinked.')){
       delete state.staff[b.dataset.id];
@@ -632,15 +644,9 @@ function renderStaff(main){
     }
   });
   document.querySelectorAll('.editRate').forEach(b=>b.onclick=()=>{
-    const s = state.staff[b.dataset.id];
-    const newEmail = prompt(`Email for ${s.name} (used for "Email payslip")`, s.email||'');
-    if(newEmail!==null) s.email = newEmail.trim();
-    state.products.forEach(p=>{
-      const v = prompt(`New rate for ${s.name} — ${p.label} (${p.code})`, (s.rates&&s.rates[p.code])||0);
-      if(v!==null && !isNaN(Number(v))) s.rates[p.code]=Number(v);
-    });
-    saveState('staff', state.staff);
+    editingStaffId = b.dataset.id;
     render();
+    main.scrollIntoView({behavior:'smooth'});
   });
   document.getElementById('addProdBtn').onclick = ()=>{
     const code = document.getElementById('pCode').value.trim().toUpperCase();
@@ -763,8 +769,9 @@ function renderLoans(main){
     <div class="grid cols-4">
       <div><label>Staff</label><select id="lStaff">${staffList.map(s=>`<option value="${s.id}">${s.name}</option>`).join('')}</select></div>
       <div><label>Type</label><select id="lType">
-        <option value="fine">Loan / Fine (owed)</option>
-        <option value="payment">Loan payment (paid)</option>
+        <option value="loan">New loan given</option>
+        <option value="fine">Fine / penalty</option>
+        <option value="payment">Loan payment received</option>
         <option value="cashfund_add">Cash fund contribution</option>
         <option value="cashfund_deduct">Cash fund deduction/payout</option>
       </select></div>
@@ -776,26 +783,50 @@ function renderLoans(main){
   </div>
 
   <div class="card">
-    <h2>Balances</h2>
+    <h2>Balances overview</h2>
     <div class="table-wrap"><table>
-      <thead><tr><th>Staff</th><th>Loan owed (₱)</th><th>Cash fund (₱)</th></tr></thead>
+      <thead><tr><th>Staff</th><th>Total loaned + fines</th><th>Total paid</th><th>Balance owed</th><th>Cash fund</th></tr></thead>
       <tbody>
       ${staffList.length? staffList.map(s=>{
         const b = ledgerBalance(s.id);
         return `<tr><td>${s.name}</td>
+          <td>₱${fmt(b.totalOwedRaised)}</td>
+          <td>₱${fmt(b.totalPaid)}</td>
           <td>${b.loanOwed>0?`<span class="pill bad">₱${fmt(b.loanOwed)}</span>`:'<span class="pill good">₱0.00</span>'}</td>
           <td>₱${fmt(b.cashFund)}</td></tr>`;
-      }).join('') : `<tr><td colspan="3" class="empty">No staff yet.</td></tr>`}
+      }).join('') : `<tr><td colspan="5" class="empty">No staff yet.</td></tr>`}
       </tbody>
     </table></div>
   </div>
 
+  ${staffList.map(s=>{
+    const history = staffLoanHistory(s.id);
+    if(!history.length) return '';
+    return `
+    <div class="card">
+      <h2>${s.name} — loan &amp; payment history</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Running balance</th><th>Note</th><th></th></tr></thead>
+        <tbody>
+          ${history.map(h=>`<tr>
+            <td>${h.date}</td>
+            <td>${h.typeLabel}</td>
+            <td>${h.sign}₱${fmt(h.amount)}</td>
+            <td><strong>₱${fmt(h.balance)}</strong></td>
+            <td>${h.note||''}</td>
+            <td><span class="tag-rm delLedger" data-key="${s.id}||${h.id}">✕</span></td>
+          </tr>`).join('')}
+        </tbody>
+      </table></div>
+    </div>`;
+  }).join('')}
+
   <div class="card">
-    <h2>Ledger history</h2>
+    <h2>Cash fund ledger (all staff)</h2>
     <div class="table-wrap"><table>
       <thead><tr><th>Date</th><th>Staff</th><th>Type</th><th>Amount</th><th>Note</th><th></th></tr></thead>
       <tbody>
-      ${renderLedgerRows()}
+      ${renderCashFundRows()}
       </tbody>
     </table></div>
   </div>
@@ -820,16 +851,27 @@ function renderLoans(main){
     render();
   });
 }
-function renderLedgerRows(){
+function staffLoanHistory(staffId){
+  const entries = (state.ledger[staffId]||[]).filter(e=>e.type==='loan'||e.type==='fine'||e.type==='payment');
+  const sorted = entries.slice().sort((a,b)=> a.date<b.date?-1:(a.date>b.date?1:0));
+  let running = 0;
+  const typeLabels = {loan:'New loan', fine:'Fine / penalty', payment:'Payment'};
+  return sorted.map(e=>{
+    if(e.type==='payment') running -= Number(e.amount); else running += Number(e.amount);
+    return {...e, typeLabel:typeLabels[e.type]||e.type, sign: e.type==='payment'?'−':'+', balance: running};
+  });
+}
+function renderCashFundRows(){
   const rows=[];
   Object.entries(state.ledger).forEach(([sid,entries])=>{
     const name = state.staff[sid]?state.staff[sid].name:'(removed staff)';
     (entries||[]).forEach(e=>{
-      const typeLabel = {fine:'Loan/Fine',payment:'Loan payment',cashfund_add:'Cash fund +',cashfund_deduct:'Cash fund −'}[e.type]||e.type;
+      if(e.type!=='cashfund_add' && e.type!=='cashfund_deduct') return;
+      const typeLabel = {cashfund_add:'Cash fund +',cashfund_deduct:'Cash fund −'}[e.type];
       rows.push({date:e.date, html:`<tr><td>${e.date}</td><td>${name}</td><td>${typeLabel}</td><td>₱${fmt(e.amount)}</td><td>${e.note||''}</td><td><span class="tag-rm delLedger" data-key="${sid}||${e.id}">✕</span></td></tr>`});
     });
   });
-  if(!rows.length) return `<tr><td colspan="6" class="empty">No ledger entries yet.</td></tr>`;
+  if(!rows.length) return `<tr><td colspan="6" class="empty">No cash fund entries yet.</td></tr>`;
   rows.sort((a,b)=> a.date<b.date?1:-1);
   return rows.map(r=>r.html).join('');
 }
@@ -873,18 +915,22 @@ function renderPayslip(main){
     const phil = Number(document.getElementById('psPhil').value)||0;
     const pagibig = Number(document.getElementById('psPagibig').value)||0;
 
-    // loan/CA/fine/cashfund entries dated within this cutoff's date range
+    // this cutoff's actual deductions: loan PAYMENTS being withheld + any fines dated this cutoff
+    // (a "new loan given" is cash handed out, not a payroll deduction — it only becomes a
+    // deduction later, on whichever cutoff(s) a "Loan payment" entry is logged against it)
     const dates = new Set(cutoffDatesForKey(ck));
     const entries = (state.ledger[sid]||[]).filter(e=>dates.has(e.date));
-    const loan = entries.filter(e=>e.type==='fine').reduce((a,e)=>a+Number(e.amount),0);
+    const loanPayment = entries.filter(e=>e.type==='payment').reduce((a,e)=>a+Number(e.amount),0);
+    const fine = entries.filter(e=>e.type==='fine').reduce((a,e)=>a+Number(e.amount),0);
     const cashfund = entries.filter(e=>e.type==='cashfund_deduct').reduce((a,e)=>a+Number(e.amount),0);
+    const currentBalance = ledgerBalance(sid).loanOwed;
     let caTotal = 0;
     cutoffDatesForKey(ck).forEach(d=>{
       const day = state.production[d];
       if(day && day.ca) caTotal += Number(day.ca[sid]||0);
     });
 
-    const totalDeduction = sss+phil+pagibig+loan+caTotal+cashfund;
+    const totalDeduction = sss+phil+pagibig+loanPayment+fine+caTotal+cashfund;
     const net = gross - totalDeduction;
 
     document.getElementById('payslipOut').innerHTML = `
@@ -913,14 +959,15 @@ function renderPayslip(main){
           <tr><td>PhilHealth</td><td>₱${fmt(phil)}</td></tr>
           <tr><td>Pag-IBIG</td><td>₱${fmt(pagibig)}</td></tr>
           <tr><td>Cash Advance</td><td>₱${fmt(caTotal)}</td></tr>
-          <tr><td>Loan / Fine</td><td>₱${fmt(loan)}</td></tr>
+          <tr><td>Loan payment</td><td>₱${fmt(loanPayment)}</td></tr>
+          <tr><td>Fine / penalty</td><td>₱${fmt(fine)}</td></tr>
           <tr><td>Cash Fund payout</td><td>₱${fmt(cashfund)}</td></tr>
           <tr class="total-row"><td>Total Deductions</td><td>₱${fmt(totalDeduction)}</td></tr>
         </table>
         <table style="width:100%">
           <tr class="total-row"><td>NET SALARY</td><td>₱${fmt(net)}</td></tr>
         </table>
-        <div class="sub" style="margin-top:10px">Account: ${s.account||'—'} &nbsp;•&nbsp; Generated ${new Date().toLocaleDateString()}</div>
+        <div class="sub" style="margin-top:10px">Account: ${s.account||'—'} &nbsp;•&nbsp; Remaining loan balance: ₱${fmt(currentBalance)} &nbsp;•&nbsp; Generated ${new Date().toLocaleDateString()}</div>
       </div>
       <div class="foot-actions no-print">
         <button class="btn ghost" onclick="window.print()">Print / Save PDF</button>
@@ -957,13 +1004,19 @@ function renderPayslip(main){
       lines.push(`  PhilHealth: ₱${fmt(phil)}`);
       lines.push(`  Pag-IBIG: ₱${fmt(pagibig)}`);
       lines.push(`  Cash Advance: ₱${fmt(caTotal)}`);
-      lines.push(`  Loan / Fine: ₱${fmt(loan)}`);
+      lines.push(`  Loan payment: ₱${fmt(loanPayment)}`);
+      lines.push(`  Fine / penalty: ₱${fmt(fine)}`);
       lines.push(`  Cash Fund payout: ₱${fmt(cashfund)}`);
       lines.push(`  Total Deductions: ₱${fmt(totalDeduction)}`);
       lines.push('');
       lines.push(`NET SALARY: ₱${fmt(net)}`);
       lines.push('');
       lines.push(`Account: ${s.account||'—'}`);
+      lines.push(`Remaining loan balance: ₱${fmt(currentBalance)}`);
+      lines.push('');
+      lines.push('---');
+      lines.push('If you have no concerns or questions about this payslip, please reply to this email');
+      lines.push('with a photo of your Bank/GCash QR code so we can process your payment.');
       const subject = `Chowtime Production Payslip — ${cutoffLabel(ck)}`;
       const body = lines.join('\n');
       window.location.href = `mailto:${encodeURIComponent(s.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
@@ -975,7 +1028,8 @@ function renderPayslip(main){
         gross: Number(gross.toFixed(2)), deductions: Number(totalDeduction.toFixed(2)),
         net: Number(net.toFixed(2)), account: s.account||'',
         breakdown: {production: Number(total.toFixed(2)), sideJobs: Number(side.toFixed(2)),
-          sss, philhealth: phil, pagibig, cashAdvance: caTotal, loanFine: loan, cashFundPayout: cashfund},
+          sss, philhealth: phil, pagibig, cashAdvance: caTotal, loanPayment, fine, cashFundPayout: cashfund},
+        remainingLoanBalance: Number(currentBalance.toFixed(2)),
         cutoffLabel: cutoffLabel(ck), pushedAt: new Date().toISOString()
       });
     };
