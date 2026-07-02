@@ -770,6 +770,12 @@ function staffDebts(staffId){
     return {...d, typeLabel:typeLabels[d.type]||d.type, paid, balance: Number(d.amount)-paid};
   }).sort((a,b)=> a.date<b.date?1:-1);
 }
+function staffDebtBalancesByType(staffId){
+  const debts = staffDebts(staffId);
+  const out = {loan:0, fine:0, ca:0};
+  debts.forEach(d=>{ if(out[d.type]!=null) out[d.type]+=d.balance; });
+  return out;
+}
 function renderLoans(main){
   const staffList = activeStaffList();
   const lType = renderLoans._lastType || 'loan';
@@ -967,12 +973,22 @@ function renderPayslip(main){
     const pagibig = Number(document.getElementById('psPagibig').value)||0;
 
     // this cutoff's actual deduction is whatever "Payment received" was logged this cutoff —
-    // covers whatever mix of loan/fine/cash-advance balance it's going toward. Issuing a loan,
+    // categorized by which debt (loan/fine/CA) each payment was tagged to. Issuing a loan,
     // fine, or cash advance itself doesn't touch payroll; only a logged payment does, whenever
     // and however much it's actually paid.
     const dates = new Set(cutoffDatesForKey(ck));
     const entries = (state.ledger[sid]||[]).filter(e=>dates.has(e.date));
-    const deductionPayment = entries.filter(e=>e.type==='payment').reduce((a,e)=>a+Number(e.amount),0);
+    const allDebts = staffDebts(sid);
+    const debtsById = {}; allDebts.forEach(d=>{ debtsById[d.id]=d; });
+    const paymentsThisCutoff = entries.filter(e=>e.type==='payment');
+    const payByType = {loan:0, fine:0, ca:0, unlinked:0};
+    paymentsThisCutoff.forEach(p=>{
+      const d = debtsById[p.debtId];
+      if(d && payByType[d.type]!=null) payByType[d.type]+=Number(p.amount);
+      else payByType.unlinked+=Number(p.amount);
+    });
+    const deductionPayment = paymentsThisCutoff.reduce((a,e)=>a+Number(e.amount),0);
+    const balByType = staffDebtBalancesByType(sid);
     const cashfund = entries.filter(e=>e.type==='cashfund_deduct').reduce((a,e)=>a+Number(e.amount),0);
     const currentBalance = ledgerBalance(sid).loanOwed;
     let caTotal = 0;
@@ -983,6 +999,12 @@ function renderPayslip(main){
 
     const totalDeduction = sss+phil+pagibig+deductionPayment+caTotal+cashfund;
     const net = gross - totalDeduction;
+
+    const deductionRows = [
+      {label:'Loan payment', pay:payByType.loan, bal:balByType.loan},
+      {label:'Fine / penalty payment', pay:payByType.fine, bal:balByType.fine},
+      {label:'Cash advance payment', pay:payByType.ca, bal:balByType.ca}
+    ].filter(r=>r.pay>0.004 || r.bal>0.004);
 
     document.getElementById('payslipOut').innerHTML = `
     <div class="card">
@@ -1010,14 +1032,18 @@ function renderPayslip(main){
           <tr><td>PhilHealth</td><td>₱${fmt(phil)}</td></tr>
           <tr><td>Pag-IBIG</td><td>₱${fmt(pagibig)}</td></tr>
           <tr><td>Cash Advance (same-day)</td><td>₱${fmt(caTotal)}</td></tr>
-          <tr><td>Loan / Fine / CA payment</td><td>₱${fmt(deductionPayment)}</td></tr>
+          ${deductionRows.map(r=>`
+            <tr><td>${r.label}</td><td>₱${fmt(r.pay)}</td></tr>
+            <tr><td style="padding-left:16px;font-size:11px;color:#8a7a5a">→ remaining balance</td><td style="font-size:11px;color:#8a7a5a">₱${fmt(r.bal)}</td></tr>
+          `).join('')}
+          ${payByType.unlinked>0?`<tr><td>Other payment (unlinked)</td><td>₱${fmt(payByType.unlinked)}</td></tr>`:''}
           <tr><td>Cash Fund payout</td><td>₱${fmt(cashfund)}</td></tr>
           <tr class="total-row"><td>Total Deductions</td><td>₱${fmt(totalDeduction)}</td></tr>
         </table>
         <table style="width:100%">
           <tr class="total-row"><td>NET SALARY</td><td>₱${fmt(net)}</td></tr>
         </table>
-        <div class="sub" style="margin-top:10px">Account: ${s.account||'—'} &nbsp;•&nbsp; Remaining deduction balance: ₱${fmt(currentBalance)} &nbsp;•&nbsp; Generated ${new Date().toLocaleDateString()}</div>
+        <div class="sub" style="margin-top:10px">Account: ${s.account||'—'} &nbsp;•&nbsp; Total remaining balance (all deductions): ₱${fmt(currentBalance)} &nbsp;•&nbsp; Generated ${new Date().toLocaleDateString()}</div>
       </div>
       <div class="foot-actions no-print">
         <button class="btn ghost" onclick="window.print()">Print / Save PDF</button>
@@ -1054,14 +1080,17 @@ function renderPayslip(main){
       lines.push(`  PhilHealth: ₱${fmt(phil)}`);
       lines.push(`  Pag-IBIG: ₱${fmt(pagibig)}`);
       lines.push(`  Cash Advance (same-day): ₱${fmt(caTotal)}`);
-      lines.push(`  Loan / Fine / CA payment: ₱${fmt(deductionPayment)}`);
+      deductionRows.forEach(r=>{
+        lines.push(`  ${r.label}: ₱${fmt(r.pay)}  (remaining balance: ₱${fmt(r.bal)})`);
+      });
+      if(payByType.unlinked>0) lines.push(`  Other payment (unlinked): ₱${fmt(payByType.unlinked)}`);
       lines.push(`  Cash Fund payout: ₱${fmt(cashfund)}`);
       lines.push(`  Total Deductions: ₱${fmt(totalDeduction)}`);
       lines.push('');
       lines.push(`NET SALARY: ₱${fmt(net)}`);
       lines.push('');
       lines.push(`Account: ${s.account||'—'}`);
-      lines.push(`Remaining loan balance: ₱${fmt(currentBalance)}`);
+      lines.push(`Total remaining balance (all deductions): ₱${fmt(currentBalance)}`);
       lines.push('');
       lines.push('---');
       lines.push('If you have no concerns or questions about this payslip, please reply to this email');
@@ -1077,7 +1106,8 @@ function renderPayslip(main){
         gross: Number(gross.toFixed(2)), deductions: Number(totalDeduction.toFixed(2)),
         net: Number(net.toFixed(2)), account: s.account||'',
         breakdown: {production: Number(total.toFixed(2)), sideJobs: Number(side.toFixed(2)),
-          sss, philhealth: phil, pagibig, cashAdvance: caTotal, deductionPayment, cashFundPayout: cashfund},
+          sss, philhealth: phil, pagibig, cashAdvance: caTotal, loanPayment: payByType.loan, finePayment: payByType.fine, caPayment: payByType.ca, cashFundPayout: cashfund},
+        remainingBalanceByType: {loan: Number(balByType.loan.toFixed(2)), fine: Number(balByType.fine.toFixed(2)), ca: Number(balByType.ca.toFixed(2))},
         remainingDeductionBalance: Number(currentBalance.toFixed(2)),
         cutoffLabel: cutoffLabel(ck), pushedAt: new Date().toISOString()
       });
