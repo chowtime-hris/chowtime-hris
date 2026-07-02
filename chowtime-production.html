@@ -761,24 +761,43 @@ function renderMaterials(main){
 }
 
 /* ---------- LOANS & CASH FUND ---------- */
+function staffDebts(staffId){
+  const entries = state.ledger[staffId] || [];
+  const debts = entries.filter(e=>e.type==='loan'||e.type==='fine'||e.type==='ca');
+  const typeLabels = {loan:'Loan', fine:'Fine / penalty', ca:'Cash advance'};
+  return debts.map(d=>{
+    const paid = entries.filter(e=>e.type==='payment' && e.debtId===d.id).reduce((a,e)=>a+Number(e.amount),0);
+    return {...d, typeLabel:typeLabels[d.type]||d.type, paid, balance: Number(d.amount)-paid};
+  }).sort((a,b)=> a.date<b.date?1:-1);
+}
 function renderLoans(main){
   const staffList = activeStaffList();
+  const lType = renderLoans._lastType || 'loan';
+  const lStaffSel = renderLoans._lastStaff || (staffList[0] && staffList[0].id) || '';
+  const openDebts = lStaffSel ? staffDebts(lStaffSel).filter(d=>d.balance>0.004) : [];
+
   main.innerHTML = `
   <div class="card">
     <h2>Add deduction entry</h2>
-    <div class="msg info">Loan, Fine, and Cash Advance all work the same way here: logging one adds it to that staff member's balance, and it only comes out of their pay when you log an actual "Payment received" — in one lump sum or spread across several cutoffs, however it's actually being paid back.</div>
+    <div class="msg info">Log each Loan, Fine, or Cash Advance separately — each becomes its own tracked debt. When you log a Payment, you'll pick exactly which debt it's paying off, so nothing gets mixed up.</div>
     <div class="grid cols-4">
-      <div><label>Staff</label><select id="lStaff">${staffList.map(s=>`<option value="${s.id}">${s.name}</option>`).join('')}</select></div>
+      <div><label>Staff</label><select id="lStaff">${staffList.map(s=>`<option value="${s.id}" ${s.id===lStaffSel?'selected':''}>${s.name}</option>`).join('')}</select></div>
       <div><label>Type</label><select id="lType">
-        <option value="loan">New loan given</option>
-        <option value="fine">Fine / penalty</option>
-        <option value="ca">Cash advance given</option>
-        <option value="payment">Payment received (reduces balance)</option>
-        <option value="cashfund_add">Cash fund contribution</option>
-        <option value="cashfund_deduct">Cash fund deduction/payout</option>
+        <option value="loan" ${lType==='loan'?'selected':''}>New loan given</option>
+        <option value="fine" ${lType==='fine'?'selected':''}>Fine / penalty</option>
+        <option value="ca" ${lType==='ca'?'selected':''}>Cash advance given</option>
+        <option value="payment" ${lType==='payment'?'selected':''}>Payment received (pick which debt below)</option>
+        <option value="cashfund_add" ${lType==='cashfund_add'?'selected':''}>Cash fund contribution</option>
+        <option value="cashfund_deduct" ${lType==='cashfund_deduct'?'selected':''}>Cash fund deduction/payout</option>
       </select></div>
       <div><label>Amount (₱)</label><input id="lAmt" type="number" step="any" min="0"></div>
       <div><label>Date</label><input id="lDate" type="date" value="${todayISO()}"></div>
+    </div>
+    <div id="debtPickerWrap" style="margin-top:8px;display:${lType==='payment'?'block':'none'}">
+      <label>Which debt is this payment for?</label>
+      <select id="lDebtId">
+        ${openDebts.length? openDebts.map(d=>`<option value="${d.id}">${d.typeLabel} — ₱${fmt(d.amount)} given ${d.date} — balance ₱${fmt(d.balance)}</option>`).join('') : '<option value="">No open debts for this staff</option>'}
+      </select>
     </div>
     <div style="margin-top:8px"><label>Note</label><input id="lNote" placeholder="optional"></div>
     <div class="foot-actions"><button class="btn gold" id="addLedgerBtn">Add entry</button></div>
@@ -802,26 +821,37 @@ function renderLoans(main){
   </div>
 
   ${staffList.map(s=>{
-    const history = staffLoanHistory(s.id);
-    if(!history.length) return '';
+    const debts = staffDebts(s.id);
+    if(!debts.length) return '';
     return `
     <div class="card">
-      <h2>${s.name} — deduction history</h2>
+      <h2>${s.name} — debts</h2>
       <div class="table-wrap"><table>
-        <thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Running balance</th><th>Note</th><th></th></tr></thead>
+        <thead><tr><th>Type</th><th>Date given</th><th>Original amount</th><th>Paid so far</th><th>Balance</th><th>Note</th><th></th></tr></thead>
         <tbody>
-          ${history.map(h=>`<tr>
-            <td>${h.date}</td>
-            <td>${h.typeLabel}</td>
-            <td>${h.sign}₱${fmt(h.amount)}</td>
-            <td><strong>₱${fmt(h.balance)}</strong></td>
-            <td>${h.note||''}</td>
-            <td><span class="tag-rm delLedger" data-key="${s.id}||${h.id}">✕</span></td>
+          ${debts.map(d=>`<tr>
+            <td>${d.typeLabel}</td>
+            <td>${d.date}</td>
+            <td>₱${fmt(d.amount)}</td>
+            <td>₱${fmt(d.paid)}</td>
+            <td>${d.balance>0.004?`<span class="pill bad">₱${fmt(d.balance)}</span>`:'<span class="pill good">paid off</span>'}</td>
+            <td>${d.note||''}</td>
+            <td><span class="tag-rm delLedger" data-key="${s.id}||${d.id}">✕</span></td>
           </tr>`).join('')}
         </tbody>
       </table></div>
     </div>`;
   }).join('')}
+
+  <div class="card">
+    <h2>Payment history (all staff)</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Date</th><th>Staff</th><th>Paid toward</th><th>Amount</th><th>Note</th><th></th></tr></thead>
+      <tbody>
+      ${renderPaymentRows()}
+      </tbody>
+    </table></div>
+  </div>
 
   <div class="card">
     <h2>Cash fund ledger (all staff)</h2>
@@ -834,34 +864,53 @@ function renderLoans(main){
   </div>
   `;
 
+  document.getElementById('lStaff').onchange = e=>{ renderLoans._lastStaff = e.target.value; renderLoans(main); };
+  document.getElementById('lType').onchange = e=>{ renderLoans._lastType = e.target.value; renderLoans(main); };
+
   document.getElementById('addLedgerBtn').onclick = ()=>{
     const staffId = document.getElementById('lStaff').value;
     const type = document.getElementById('lType').value;
     const amount = Number(document.getElementById('lAmt').value)||0;
     if(!staffId || amount<=0){ alert('Choose staff and enter a valid amount'); return; }
     const entry = {id:uid(), type, amount, date:document.getElementById('lDate').value, note:document.getElementById('lNote').value.trim()};
+    if(type==='payment'){
+      const debtId = document.getElementById('lDebtId').value;
+      if(!debtId){ alert('Pick which debt this payment is for. If there are no open debts listed, this staff has nothing outstanding.'); return; }
+      entry.debtId = debtId;
+    }
     if(!state.ledger[staffId]) state.ledger[staffId]=[];
     state.ledger[staffId].push(entry);
     saveState('ledger', state.ledger);
+    renderLoans._lastStaff = staffId;
     render();
   };
 
   document.querySelectorAll('.delLedger').forEach(b=>b.onclick=()=>{
     const [sid,eid]=b.dataset.key.split('||');
-    state.ledger[sid] = (state.ledger[sid]||[]).filter(e=>e.id!==eid);
-    saveState('ledger', state.ledger);
-    render();
+    if(confirm('Remove this entry? If it\'s a loan/fine/CA with payments already tagged to it, those payment records will stay but no longer be linked to anything.')){
+      state.ledger[sid] = (state.ledger[sid]||[]).filter(e=>e.id!==eid);
+      saveState('ledger', state.ledger);
+      render();
+    }
   });
 }
-function staffLoanHistory(staffId){
-  const entries = (state.ledger[staffId]||[]).filter(e=>e.type==='loan'||e.type==='fine'||e.type==='ca'||e.type==='payment');
-  const sorted = entries.slice().sort((a,b)=> a.date<b.date?-1:(a.date>b.date?1:0));
-  let running = 0;
-  const typeLabels = {loan:'New loan', fine:'Fine / penalty', ca:'Cash advance', payment:'Payment'};
-  return sorted.map(e=>{
-    if(e.type==='payment') running -= Number(e.amount); else running += Number(e.amount);
-    return {...e, typeLabel:typeLabels[e.type]||e.type, sign: e.type==='payment'?'−':'+', balance: running};
+function renderPaymentRows(){
+  const rows=[];
+  Object.entries(state.ledger).forEach(([sid,entries])=>{
+    const name = state.staff[sid]?state.staff[sid].name:'(removed staff)';
+    const debtsById = {};
+    (entries||[]).forEach(e=>{ if(e.type==='loan'||e.type==='fine'||e.type==='ca') debtsById[e.id]=e; });
+    (entries||[]).forEach(e=>{
+      if(e.type!=='payment') return;
+      const debt = debtsById[e.debtId];
+      const typeLabels = {loan:'Loan', fine:'Fine / penalty', ca:'Cash advance'};
+      const target = debt? `${typeLabels[debt.type]||debt.type} (${debt.date})` : '<span style="color:#c77">unlinked</span>';
+      rows.push({date:e.date, html:`<tr><td>${e.date}</td><td>${name}</td><td>${target}</td><td>₱${fmt(e.amount)}</td><td>${e.note||''}</td><td><span class="tag-rm delLedger" data-key="${sid}||${e.id}">✕</span></td></tr>`});
+    });
   });
+  if(!rows.length) return `<tr><td colspan="6" class="empty">No payments logged yet.</td></tr>`;
+  rows.sort((a,b)=> a.date<b.date?1:-1);
+  return rows.map(r=>r.html).join('');
 }
 function renderCashFundRows(){
   const rows=[];
