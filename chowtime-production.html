@@ -1,0 +1,1042 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Chowtime Production System</title>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+<style>
+:root{
+  --maroon:#5c0f1e;
+  --maroon-dark:#3d0a14;
+  --gold:#c99a2e;
+  --gold-light:#e8c874;
+  --cream:#faf6ee;
+  --paper:#ffffff;
+  --ink:#2a1c1c;
+  --line:#e6dcc8;
+  --good:#2f7a4f;
+  --bad:#a5333e;
+}
+*{box-sizing:border-box;}
+body{margin:0;font-family:'Segoe UI',Arial,sans-serif;background:var(--cream);color:var(--ink);}
+header.app{background:linear-gradient(135deg,var(--maroon),var(--maroon-dark));color:#fff;padding:14px 18px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50;box-shadow:0 2px 8px rgba(0,0,0,.25);}
+header.app .brand{display:flex;align-items:center;gap:10px;}
+header.app .brand .mark{width:36px;height:36px;border-radius:8px;background:var(--gold);color:var(--maroon-dark);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px;}
+header.app h1{font-size:16px;margin:0;letter-spacing:.3px;}
+header.app .sub{font-size:11px;opacity:.8;}
+nav.tabs{display:flex;overflow-x:auto;background:var(--maroon-dark);position:sticky;top:60px;z-index:49;-webkit-overflow-scrolling:touch;}
+nav.tabs button{flex:0 0 auto;background:none;border:none;color:#e9d9b8;padding:12px 16px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;border-bottom:3px solid transparent;}
+nav.tabs button.active{color:#fff;border-bottom:3px solid var(--gold);background:rgba(255,255,255,.06);}
+main{max-width:1100px;margin:0 auto;padding:16px;padding-bottom:60px;}
+.card{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,.04);}
+.card h2{margin:0 0 12px;font-size:15px;color:var(--maroon);border-bottom:2px solid var(--gold-light);padding-bottom:8px;}
+.grid{display:grid;gap:10px;}
+.grid.cols-2{grid-template-columns:1fr 1fr;}
+.grid.cols-3{grid-template-columns:repeat(3,1fr);}
+.grid.cols-4{grid-template-columns:repeat(4,1fr);}
+@media(max-width:640px){.grid.cols-2,.grid.cols-3,.grid.cols-4{grid-template-columns:1fr;}}
+label{display:block;font-size:11px;font-weight:700;color:#6b5a3a;text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px;}
+input,select{width:100%;padding:10px;border:1px solid var(--line);border-radius:6px;font-size:14px;background:#fffdf9;}
+input:focus,select:focus{outline:2px solid var(--gold);border-color:var(--gold);}
+button.btn{background:var(--maroon);color:#fff;border:none;padding:10px 16px;border-radius:6px;font-weight:700;font-size:13px;cursor:pointer;}
+button.btn:hover{background:var(--maroon-dark);}
+button.btn.gold{background:var(--gold);color:var(--maroon-dark);}
+button.btn.gold:hover{background:var(--gold-light);}
+button.btn.ghost{background:none;border:1px solid var(--line);color:var(--ink);}
+button.btn.danger{background:var(--bad);}
+button.btn.sm{padding:6px 10px;font-size:12px;}
+table{width:100%;border-collapse:collapse;font-size:12.5px;}
+th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap;}
+th{background:#f6efdf;color:var(--maroon-dark);font-size:11px;text-transform:uppercase;letter-spacing:.3px;position:sticky;top:0;}
+tbody tr:hover{background:#fbf6ea;}
+.table-wrap{overflow-x:auto;}
+.pill{display:inline-block;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700;}
+.pill.good{background:#e4f3e8;color:var(--good);}
+.pill.bad{background:#fbe6e7;color:var(--bad);}
+.pill.gold{background:#f8edd0;color:#8a6a10;}
+.kpi{display:flex;flex-direction:column;gap:2px;}
+.kpi .num{font-size:22px;font-weight:800;color:var(--maroon);}
+.kpi .lbl{font-size:11px;color:#8a7a5a;text-transform:uppercase;font-weight:700;}
+.row{display:flex;gap:10px;align-items:end;flex-wrap:wrap;}
+.msg{padding:10px 14px;border-radius:6px;font-size:13px;margin-bottom:12px;}
+.msg.info{background:#eef3fb;color:#2b5590;}
+.msg.warn{background:#fdf3d8;color:#8a6a10;}
+.msg.err{background:#fbe6e7;color:var(--bad);}
+.tag-rm{cursor:pointer;color:var(--bad);font-weight:800;margin-left:8px;}
+.foot-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:10px;}
+.empty{text-align:center;padding:30px;color:#9a8a6a;font-size:13px;}
+.payslip{border:2px solid var(--maroon);border-radius:8px;padding:18px;max-width:480px;margin:0 auto;background:#fffdf7;}
+.payslip h3{color:var(--maroon);text-align:center;margin:0 0 4px;letter-spacing:1px;}
+.payslip .sub{text-align:center;font-size:11px;color:#8a7a5a;margin-bottom:14px;}
+.payslip table td{padding:4px 6px;font-size:12.5px;}
+.payslip .total-row td{font-weight:800;border-top:2px solid var(--maroon);}
+@media print{
+  header.app,nav.tabs,.no-print{display:none!important;}
+  main{padding:0;max-width:100%;}
+  .card{box-shadow:none;border:none;}
+}
+.badge-conn{font-size:10px;padding:3px 8px;border-radius:12px;font-weight:700;}
+.badge-conn.on{background:#2f7a4f33;color:#c9e8d3;}
+.badge-conn.off{background:#a5333e33;color:#f5c6ca;}
+</style>
+</head>
+<body>
+
+<header class="app">
+  <div class="brand">
+    <div class="mark">CT</div>
+    <div>
+      <h1>Chowtime Production System</h1>
+      <div class="sub">Piece-rate output &amp; payroll tracker</div>
+    </div>
+  </div>
+  <span id="connBadge" class="badge-conn off">Offline (local)</span>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button data-tab="dashboard" class="active">Dashboard</button>
+  <button data-tab="entry">Production Entry</button>
+  <button data-tab="staff">Staff &amp; Rates</button>
+  <button data-tab="materials">Materials &amp; Side Jobs</button>
+  <button data-tab="loans">Loans &amp; Cash Fund</button>
+  <button data-tab="payslip">Payslip</button>
+  <button data-tab="settings">Settings</button>
+</nav>
+
+<main id="main"></main>
+
+<script>
+/* ================= DATA LAYER ================= */
+const DEFAULT_PRODUCTS = [
+  {code:'NGT', label:'C. Nuggets'},
+  {code:'LS',  label:'Longganisa Strips'},
+  {code:'DP',  label:'Dumplings'},
+  {code:'FILLET', label:'Chicken Fillet'},
+  {code:'NGW', label:'Nugget Wrap'}
+];
+const DEFAULT_SKUS = [
+  {code:'CUP', rate:0.15},{code:'BOX', rate:0.25},{code:'SOY', rate:5},
+  {code:'BUFF', rate:5},{code:'GA', rate:5},{code:'CHEESE', rate:5},
+  {code:'SHM', rate:5},{code:'SC', rate:5},{code:'TERI', rate:5},
+  {code:'BBQ', rate:5},{code:'CHILI PASTE', rate:12.5},{code:'JUICE', rate:5}
+];
+
+let DB = null;
+let USE_FIREBASE = false;
+
+let state = {
+  staff: {},        // id -> {name, jobTitle, idNumber, account, rates:{code:rate}}
+  products: DEFAULT_PRODUCTS,
+  production: {},   // "YYYY-MM-DD" -> { staffId: {NGT:qty,...} }
+  skus: DEFAULT_SKUS,
+  materials: {},    // cutoffKey -> { skuCode: qty }
+  sideJobs: {},     // cutoffKey -> { staffId: amount }
+  ledger: {},        // staffId -> [ {id,type:'fine'|'payment'|'cashfund_add'|'cashfund_deduct',amount,date,note} ]
+  deductions: {}     // cutoffKey -> { staffId: {sss,philhealth,pagibig} }
+};
+
+function loadLocal(){
+  try{ const s = localStorage.getItem('__unused'); }catch(e){}
+}
+function persist(){
+  saveState('staff', state.staff);
+  saveState('products', state.products);
+  saveState('production', state.production);
+  saveState('skus', state.skus);
+  saveState('materials', state.materials);
+  saveState('sideJobs', state.sideJobs);
+  saveState('ledger', state.ledger);
+  saveState('deductions', state.deductions);
+}
+let memStore = {}; // in-memory fallback (no browser storage per artifact rules)
+function saveState(key, val){
+  memStore[key] = val;
+  if(USE_FIREBASE && DB){
+    DB.ref('chowtimeProduction/'+key).set(val || {});
+  }
+}
+function initFirebase(cfgStr){
+  try{
+    const cfg = JSON.parse(cfgStr);
+    if(firebase.apps.length) firebase.app().delete();
+    firebase.initializeApp(cfg);
+    DB = firebase.database();
+    USE_FIREBASE = true;
+    document.getElementById('connBadge').textContent = 'Connected (synced)';
+    document.getElementById('connBadge').className = 'badge-conn on';
+    DB.ref('chowtimeProduction').on('value', snap=>{
+      const v = snap.val() || {};
+      state.staff = v.staff || {};
+      state.products = v.products || DEFAULT_PRODUCTS;
+      state.production = v.production || {};
+      state.skus = v.skus || DEFAULT_SKUS;
+      state.materials = v.materials || {};
+      state.sideJobs = v.sideJobs || {};
+      state.ledger = v.ledger || {};
+      state.deductions = v.deductions || {};
+      render();
+    });
+    return true;
+  }catch(e){
+    alert('Invalid Firebase config: '+e.message);
+    return false;
+  }
+}
+
+/* ================= HELPERS ================= */
+function uid(){ return 'x'+Math.random().toString(36).slice(2,10); }
+function fmt(n){ n = Number(n)||0; return n.toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function todayISO(){ const d=new Date(); return d.toISOString().slice(0,10); }
+function cutoffKeyFor(dateISO){
+  const [y,m,d] = dateISO.split('-').map(Number);
+  const half = d<=15 ? '1' : '2';
+  return `${y}-${String(m).padStart(2,'0')}-C${half}`;
+}
+function cutoffLabel(key){
+  const [y,m,half] = key.split('-');
+  const monthName = new Date(Number(y), Number(m)-1, 1).toLocaleString('en-US',{month:'short'});
+  return half==='C1' ? `${monthName} 1–15, ${y}` : `${monthName} 16–end, ${y}`;
+}
+function creditedQtyForStaff(dayData, productCode, staffId){
+  if(!dayData || !dayData.products || !dayData.products[productCode]) return 0;
+  const p = dayData.products[productCode];
+  const staffOnBatch = p.staff || [];
+  if(!staffOnBatch.includes(staffId)) return 0;
+  if(!staffOnBatch.length) return 0;
+  return (Number(p.qty)||0) / staffOnBatch.length;
+}
+function dailyIncomeForStaff(dayData, staffId){
+  const s = state.staff[staffId]; if(!s) return 0;
+  let total = 0;
+  state.products.forEach(p=>{
+    const qty = creditedQtyForStaff(dayData, p.code, staffId);
+    const rate = Number((s.rates && s.rates[p.code]) || 0);
+    total += qty*rate;
+  });
+  return total;
+}
+function cutoffDatesForKey(key){
+  const [y,m,half] = key.split('-');
+  const year=Number(y), month=Number(m);
+  const start = half==='C1' ? 1 : 16;
+  const end = half==='C1' ? 15 : new Date(year, month, 0).getDate();
+  const dates=[];
+  for(let d=start; d<=end; d++){
+    dates.push(`${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`);
+  }
+  return dates;
+}
+function staffCutoffProduction(staffId, cutoffKey){
+  const dates = cutoffDatesForKey(cutoffKey);
+  let total = 0; const byProduct = {};
+  state.products.forEach(p=>byProduct[p.code]=0);
+  dates.forEach(dISO=>{
+    const day = state.production[dISO];
+    if(!day) return;
+    state.products.forEach(p=>{
+      byProduct[p.code] += creditedQtyForStaff(day, p.code, staffId);
+    });
+    total += dailyIncomeForStaff(day, staffId);
+  });
+  return {total, byProduct};
+}
+function ledgerBalance(staffId){
+  const entries = state.ledger[staffId] || [];
+  let loanOwed=0, cashFund=0;
+  entries.forEach(e=>{
+    if(e.type==='fine') loanOwed += Number(e.amount);
+    if(e.type==='payment') loanOwed -= Number(e.amount);
+    if(e.type==='cashfund_add') cashFund += Number(e.amount);
+    if(e.type==='cashfund_deduct') cashFund -= Number(e.amount);
+  });
+  return {loanOwed, cashFund};
+}
+function activeStaffList(){
+  return Object.entries(state.staff).map(([id,s])=>({id,...s}));
+}
+function allCutoffKeysWithData(){
+  const keys = new Set();
+  Object.keys(state.production).forEach(d=>keys.add(cutoffKeyFor(d)));
+  Object.keys(state.materials).forEach(k=>keys.add(k));
+  Object.keys(state.sideJobs).forEach(k=>keys.add(k));
+  return Array.from(keys).sort().reverse();
+}
+
+/* ================= RENDER ================= */
+let activeTab='dashboard';
+document.getElementById('tabs').addEventListener('click', e=>{
+  if(e.target.tagName==='BUTTON'){
+    activeTab = e.target.dataset.tab;
+    document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('active', b.dataset.tab===activeTab));
+    render();
+  }
+});
+
+function render(){
+  const main = document.getElementById('main');
+  main.innerHTML='';
+  if(activeTab==='dashboard') renderDashboard(main);
+  if(activeTab==='entry') renderEntry(main);
+  if(activeTab==='staff') renderStaff(main);
+  if(activeTab==='materials') renderMaterials(main);
+  if(activeTab==='loans') renderLoans(main);
+  if(activeTab==='payslip') renderPayslip(main);
+  if(activeTab==='settings') renderSettings(main);
+}
+
+/* ---------- DASHBOARD ---------- */
+function renderDashboard(main){
+  const keys = allCutoffKeysWithData();
+  const currentKey = cutoffKeyFor(todayISO());
+  const staffList = activeStaffList();
+
+  let totalGross=0, totalQty=0, topStaff=null, topAmt=-1;
+  const prodTotals = {}; state.products.forEach(p=>prodTotals[p.code]=0);
+
+  staffList.forEach(s=>{
+    const {total, byProduct} = staffCutoffProduction(s.id, currentKey);
+    totalGross += total;
+    Object.keys(byProduct).forEach(k=>{ prodTotals[k]+=byProduct[k]; totalQty+=byProduct[k]; });
+    if(total>topAmt){ topAmt=total; topStaff=s.name; }
+  });
+
+  main.innerHTML = `
+  <div class="msg info">Current cutoff: <strong>${cutoffLabel(currentKey)}</strong> — figures below auto-total from daily entries.</div>
+  <div class="grid cols-4">
+    <div class="card kpi"><div class="num">₱${fmt(totalGross)}</div><div class="lbl">Production payroll (this cutoff)</div></div>
+    <div class="card kpi"><div class="num">${fmt(totalQty).split('.')[0]}</div><div class="lbl">Units produced</div></div>
+    <div class="card kpi"><div class="num">${staffList.length}</div><div class="lbl">Active staff</div></div>
+    <div class="card kpi"><div class="num">${topStaff||'—'}</div><div class="lbl">Top producer</div></div>
+  </div>
+
+  <div class="card">
+    <h2>Production by item — ${cutoffLabel(currentKey)}</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Item</th>${state.products.map(p=>'').join('')}<th>Qty</th><th>Value (₱)</th></tr></thead>
+      <tbody>
+        ${state.products.map(p=>{
+          const qty = prodTotals[p.code]||0;
+          return `<tr><td>${p.label} <span style="color:#9a8a6a">(${p.code})</span></td><td>${fmt(qty)}</td><td>—</td></tr>`;
+        }).join('')}
+      </tbody>
+    </table></div>
+  </div>
+
+  <div class="card">
+    <h2>Cutoff summary — all staff</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Staff</th><th>Role</th>${state.products.map(p=>`<th>${p.code}</th>`).join('')}<th>Production ₱</th><th>Loan owed</th><th>Cash fund</th></tr></thead>
+      <tbody>
+        ${staffList.length? staffList.map(s=>{
+          const {total, byProduct} = staffCutoffProduction(s.id, currentKey);
+          const bal = ledgerBalance(s.id);
+          return `<tr>
+            <td><strong>${s.name}</strong></td><td>${s.jobTitle||''}</td>
+            ${state.products.map(p=>`<td>${fmt(byProduct[p.code]||0).split('.')[0]}</td>`).join('')}
+            <td>₱${fmt(total)}</td>
+            <td>${bal.loanOwed>0?`<span class="pill bad">₱${fmt(bal.loanOwed)}</span>`:'<span class="pill good">clear</span>'}</td>
+            <td>₱${fmt(bal.cashFund)}</td>
+          </tr>`;
+        }).join('') : `<tr><td colspan="${4+state.products.length}" class="empty">No staff yet — add staff in the Staff &amp; Rates tab.</td></tr>`}
+      </tbody>
+    </table></div>
+  </div>
+
+  <div class="card">
+    <h2>Past cutoffs on record</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Cutoff</th><th>Total production payroll (₱)</th></tr></thead>
+      <tbody>
+        ${keys.length? keys.map(k=>{
+          let sum=0; staffList.forEach(s=> sum += staffCutoffProduction(s.id,k).total );
+          return `<tr><td>${cutoffLabel(k)}</td><td>₱${fmt(sum)}</td></tr>`;
+        }).join('') : `<tr><td colspan="2" class="empty">No records yet.</td></tr>`}
+      </tbody>
+    </table></div>
+  </div>
+  `;
+}
+
+/* ---------- PRODUCTION ENTRY ---------- */
+let entryDate = todayISO();
+function renderEntry(main){
+  const staffList = activeStaffList();
+  const day = state.production[entryDate] || {attendance:{}, ca:{}, products:{}};
+  // default: if no attendance saved yet for this date, treat everyone as present
+  const hasAttendance = day.attendance && Object.keys(day.attendance).length>0;
+  const attendance = {};
+  staffList.forEach(s=> attendance[s.id] = hasAttendance ? !!day.attendance[s.id] : true);
+
+  main.innerHTML = `
+  <div class="card">
+    <h2>Daily production entry</h2>
+    <div class="row">
+      <div style="min-width:200px"><label>Date</label><input type="date" id="entryDateInput" value="${entryDate}"></div>
+      <div><label>Cutoff period</label><input type="text" value="${cutoffLabel(cutoffKeyFor(entryDate))}" readonly style="background:#f6efdf;font-weight:700;color:var(--maroon)"></div>
+    </div>
+  </div>
+  ${staffList.length? `
+  <div class="card">
+    <h2>Who's in today</h2>
+    <div class="msg info">This attendance list is the default group that shares each batch below. Uncheck anyone who was off, or uncheck someone per-item further down if they didn't work on that particular product.</div>
+    <div class="grid cols-4">
+      ${staffList.map(s=>`
+        <label style="display:flex;align-items:center;gap:6px;text-transform:none;font-weight:600;color:var(--ink);font-size:13px">
+          <input type="checkbox" class="attCheck" data-staff="${s.id}" ${attendance[s.id]?'checked':''} style="width:auto"> ${s.name}
+        </label>
+      `).join('')}
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Batches produced today</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Item</th><th>Total qty made</th><th>Credited to</th></tr></thead>
+      <tbody>
+        ${state.products.map(p=>{
+          const pd = (day.products && day.products[p.code]) || {};
+          const qty = pd.qty!=null ? pd.qty : '';
+          const creditedSet = pd.staff ? new Set(pd.staff) : new Set(staffList.filter(s=>attendance[s.id]).map(s=>s.id));
+          return `<tr>
+            <td><strong>${p.label}</strong><br><span style="font-size:10px;color:#9a8a6a">${p.code}</span></td>
+            <td><input type="number" min="0" step="any" style="width:100px" class="batchQty" data-code="${p.code}" value="${qty}" placeholder="0"></td>
+            <td>
+              <div style="display:flex;flex-wrap:wrap;gap:8px">
+              ${staffList.map(s=>`
+                <label style="display:flex;align-items:center;gap:4px;text-transform:none;font-weight:500;font-size:12px">
+                  <input type="checkbox" class="creditCheck" data-code="${p.code}" data-staff="${s.id}" ${creditedSet.has(s.id)?'checked':''} style="width:auto"> ${s.name}
+                </label>
+              `).join('')}
+              </div>
+            </td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table></div>
+  </div>
+
+  <div class="card">
+    <h2>Cash advance today</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Staff</th><th>CA (₱)</th></tr></thead>
+      <tbody>
+        ${staffList.map(s=>{
+          const ca = (day.ca && day.ca[s.id]) || '';
+          return `<tr><td>${s.name}</td><td><input type="number" min="0" step="any" style="width:100px" class="caInput" data-staff="${s.id}" value="${ca}" placeholder="0"></td></tr>`;
+        }).join('')}
+      </tbody>
+    </table></div>
+  </div>
+
+  <div class="card">
+    <h2>Computed income for ${entryDate} (preview)</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Staff</th><th>Credited qty × rate</th><th>Day income</th></tr></thead>
+      <tbody id="previewBody"></tbody>
+    </table></div>
+    <div class="foot-actions">
+      <button class="btn gold" id="saveEntryBtn">Save entry for ${entryDate}</button>
+    </div>
+  </div>
+  ` : `<div class="card"><div class="empty">Add staff first in the Staff &amp; Rates tab before recording production.</div></div>`}
+  `;
+
+  if(!staffList.length) return;
+
+  document.getElementById('entryDateInput').onchange = e=>{ entryDate = e.target.value; renderEntry(main); };
+
+  document.querySelectorAll('.attCheck').forEach(cb=>{
+    cb.addEventListener('change', ()=>{
+      // when attendance changes, re-check any product row that hasn't been manually customized yet is left as-is;
+      // simplest: just refresh preview, leave per-item checkboxes as the user set them
+      refreshPreview();
+    });
+  });
+  document.querySelectorAll('.batchQty,.creditCheck').forEach(el=>{
+    el.addEventListener('input', refreshPreview);
+    el.addEventListener('change', refreshPreview);
+  });
+
+  function collectDayData(){
+    const data = {attendance:{}, ca:{}, products:{}};
+    document.querySelectorAll('.attCheck').forEach(cb=>{ data.attendance[cb.dataset.staff]=cb.checked; });
+    document.querySelectorAll('.caInput').forEach(i=>{ const v=Number(i.value)||0; if(v>0) data.ca[i.dataset.staff]=v; });
+    state.products.forEach(p=>{
+      const qtyEl = document.querySelector(`.batchQty[data-code="${p.code}"]`);
+      const qty = Number(qtyEl.value)||0;
+      const staffIds = Array.from(document.querySelectorAll(`.creditCheck[data-code="${p.code}"]:checked`)).map(c=>c.dataset.staff);
+      data.products[p.code] = {qty, staff: staffIds};
+    });
+    return data;
+  }
+  function refreshPreview(){
+    const data = collectDayData();
+    const tbody = document.getElementById('previewBody');
+    tbody.innerHTML = staffList.map(s=>{
+      const parts = [];
+      let income=0;
+      state.products.forEach(p=>{
+        const cq = creditedQtyForStaff(data, p.code, s.id);
+        if(cq>0){
+          const rate = (s.rates&&s.rates[p.code])||0;
+          income += cq*rate;
+          parts.push(`${p.code}: ${cq.toFixed(1)}×₱${rate}`);
+        }
+      });
+      const ca = data.ca[s.id]||0;
+      return `<tr><td>${s.name}</td><td style="font-size:11px;color:#6b5a3a">${parts.join(', ')||'—'}</td><td><strong>₱${fmt(income)}</strong>${ca?` <span class="pill gold">CA ₱${fmt(ca)}</span>`:''}</td></tr>`;
+    }).join('');
+  }
+  refreshPreview();
+
+  document.getElementById('saveEntryBtn').onclick = ()=>{
+    const emptyBatches = state.products.filter(p=>{
+      const qty = Number(document.querySelector(`.batchQty[data-code="${p.code}"]`).value)||0;
+      const staffCount = document.querySelectorAll(`.creditCheck[data-code="${p.code}"]:checked`).length;
+      return qty>0 && staffCount===0;
+    });
+    if(emptyBatches.length){
+      alert('These items have a quantity but no one credited: '+emptyBatches.map(p=>p.label).join(', ')+'. Check at least one staff box for each, or clear the quantity.');
+      return;
+    }
+    state.production[entryDate] = collectDayData();
+    saveState('production', state.production);
+    alert('Saved production for '+entryDate);
+    render();
+  };
+}
+
+/* ---------- STAFF & RATES ---------- */
+function renderStaff(main){
+  const staffList = activeStaffList();
+  main.innerHTML = `
+  <div class="card">
+    <h2>Add staff member</h2>
+    <div class="grid cols-4">
+      <div><label>Name</label><input id="nName"></div>
+      <div><label>Role / Job title</label><input id="nJob"></div>
+      <div><label>ID number</label><input id="nId" placeholder="CT-0007"></div>
+      <div><label>Bank / account no.</label><input id="nAcc"></div>
+      <div><label>Email (for payslips)</label><input id="nEmail" type="email" placeholder="name@example.com"></div>
+    </div>
+    <h2 style="margin-top:16px">Piece rates (₱ per unit)</h2>
+    <div class="grid cols-4">
+      ${state.products.map(p=>`<div><label>${p.label} (${p.code})</label><input id="rate-${p.code}" type="number" step="any" min="0" value="0.60"></div>`).join('')}
+    </div>
+    <div class="foot-actions"><button class="btn gold" id="addStaffBtn">Add staff</button></div>
+  </div>
+
+  <div class="card">
+    <h2>Current staff (${staffList.length})</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>ID</th><th>Name</th><th>Role</th><th>Email</th>${state.products.map(p=>`<th>${p.code}</th>`).join('')}<th></th></tr></thead>
+      <tbody>
+      ${staffList.length? staffList.map(s=>`
+        <tr>
+          <td>${s.idNumber||'—'}</td>
+          <td><strong>${s.name}</strong></td>
+          <td>${s.jobTitle||''}</td>
+          <td>${s.email||'<span style="color:#c77">not set</span>'}</td>
+          ${state.products.map(p=>`<td>₱${fmt((s.rates&&s.rates[p.code])||0)}</td>`).join('')}
+          <td><button class="btn ghost sm editRate" data-id="${s.id}">Edit</button> <button class="btn danger sm delStaff" data-id="${s.id}">Remove</button></td>
+        </tr>
+      `).join('') : `<tr><td colspan="${5+state.products.length}" class="empty">No staff added yet.</td></tr>`}
+      </tbody>
+    </table></div>
+  </div>
+
+  <div class="card">
+    <h2>Product master list</h2>
+    <div class="row">
+      <div><label>New product code</label><input id="pCode" style="width:120px" placeholder="e.g. WRAP"></div>
+      <div><label>Label</label><input id="pLabel" style="width:180px" placeholder="e.g. Spring Roll Wrap"></div>
+      <button class="btn ghost" id="addProdBtn">Add product</button>
+    </div>
+    <div class="table-wrap" style="margin-top:10px"><table>
+      <thead><tr><th>Code</th><th>Label</th><th></th></tr></thead>
+      <tbody>
+      ${state.products.map((p,i)=>`<tr><td>${p.code}</td><td>${p.label}</td><td><span class="tag-rm" data-i="${i}">✕ remove</span></td></tr>`).join('')}
+      </tbody>
+    </table></div>
+    <div class="msg warn" style="margin-top:10px">Removing a product does not delete past production records for it, but it will no longer appear in entry forms.</div>
+  </div>
+  `;
+
+  document.getElementById('addStaffBtn').onclick = ()=>{
+    const name = document.getElementById('nName').value.trim();
+    if(!name){ alert('Enter a name'); return; }
+    const rates={};
+    state.products.forEach(p=> rates[p.code]=Number(document.getElementById('rate-'+p.code).value)||0);
+    const id = uid();
+    state.staff[id] = {
+      name, jobTitle: document.getElementById('nJob').value.trim(),
+      idNumber: document.getElementById('nId').value.trim(),
+      account: document.getElementById('nAcc').value.trim(),
+      email: document.getElementById('nEmail').value.trim(),
+      rates
+    };
+    saveState('staff', state.staff);
+    render();
+  };
+  document.querySelectorAll('.delStaff').forEach(b=>b.onclick=()=>{
+    if(confirm('Remove this staff member? Past production records will be kept but unlinked.')){
+      delete state.staff[b.dataset.id];
+      saveState('staff', state.staff);
+      render();
+    }
+  });
+  document.querySelectorAll('.editRate').forEach(b=>b.onclick=()=>{
+    const s = state.staff[b.dataset.id];
+    const newEmail = prompt(`Email for ${s.name} (used for "Email payslip")`, s.email||'');
+    if(newEmail!==null) s.email = newEmail.trim();
+    state.products.forEach(p=>{
+      const v = prompt(`New rate for ${s.name} — ${p.label} (${p.code})`, (s.rates&&s.rates[p.code])||0);
+      if(v!==null && !isNaN(Number(v))) s.rates[p.code]=Number(v);
+    });
+    saveState('staff', state.staff);
+    render();
+  });
+  document.getElementById('addProdBtn').onclick = ()=>{
+    const code = document.getElementById('pCode').value.trim().toUpperCase();
+    const label = document.getElementById('pLabel').value.trim();
+    if(!code||!label){ alert('Enter code and label'); return; }
+    if(state.products.some(p=>p.code===code)){ alert('Code already exists'); return; }
+    state.products.push({code,label});
+    saveState('products', state.products);
+    render();
+  };
+  document.querySelectorAll('.tag-rm').forEach(t=>t.onclick=()=>{
+    state.products.splice(Number(t.dataset.i),1);
+    saveState('products', state.products);
+    render();
+  });
+}
+
+/* ---------- MATERIALS & SIDE JOBS ---------- */
+let matCutoff = cutoffKeyFor(todayISO());
+function renderMaterials(main){
+  const keys = Array.from(new Set([matCutoff, ...allCutoffKeysWithData()]));
+  const mat = state.materials[matCutoff] || {};
+  const side = state.sideJobs[matCutoff] || {};
+  const staffList = activeStaffList();
+  const matTotal = state.skus.reduce((sum,sku)=> sum + (Number(mat[sku.code])||0)*sku.rate, 0);
+
+  main.innerHTML = `
+  <div class="card">
+    <h2>Materials pull-out / SKU usage</h2>
+    <div class="row"><div><label>Cutoff period</label>
+      <select id="matCutoffSel">${keys.map(k=>`<option value="${k}" ${k===matCutoff?'selected':''}>${cutoffLabel(k)}</option>`).join('')}</select>
+    </div></div>
+    <div class="table-wrap" style="margin-top:10px"><table>
+      <thead><tr><th>SKU</th><th>Rate (₱)</th><th>Qty used</th><th>Total (₱)</th></tr></thead>
+      <tbody>
+      ${state.skus.map(sku=>{
+        const qty = Number(mat[sku.code])||0;
+        return `<tr>
+          <td>${sku.code}</td>
+          <td><input type="number" step="any" min="0" style="width:80px" class="skuRate" data-code="${sku.code}" value="${sku.rate}"></td>
+          <td><input type="number" step="any" min="0" style="width:90px" class="skuQty" data-code="${sku.code}" value="${qty||''}" placeholder="0"></td>
+          <td>₱${fmt(qty*sku.rate)}</td>
+        </tr>`;
+      }).join('')}
+      </tbody>
+      <tfoot><tr><td colspan="3" style="text-align:right;font-weight:800">Total materials value</td><td style="font-weight:800">₱${fmt(matTotal)}</td></tr></tfoot>
+    </table></div>
+    <div class="foot-actions"><button class="btn gold" id="saveMatBtn">Save materials for this cutoff</button></div>
+  </div>
+
+  <div class="card">
+    <h2>Side jobs / income share pool</h2>
+    <div class="msg info">Split extra earnings (e.g. packaging, boxing, wrapper pull-out income) among selected staff for this cutoff.</div>
+    <div class="row">
+      <div><label>Pool amount (₱)</label><input id="poolAmt" type="number" step="any" style="width:140px" placeholder="0"></div>
+      <button class="btn ghost" id="splitEvenBtn">Split evenly among checked staff</button>
+    </div>
+    <div class="table-wrap" style="margin-top:10px"><table>
+      <thead><tr><th></th><th>Staff</th><th>Share (₱)</th></tr></thead>
+      <tbody>
+      ${staffList.length? staffList.map(s=>`
+        <tr>
+          <td><input type="checkbox" class="poolCheck" data-id="${s.id}" checked></td>
+          <td>${s.name}</td>
+          <td><input type="number" step="any" min="0" style="width:100px" class="sideAmt" data-id="${s.id}" value="${side[s.id]||''}" placeholder="0"></td>
+        </tr>`).join('') : `<tr><td colspan="3" class="empty">No staff yet.</td></tr>`}
+      </tbody>
+    </table></div>
+    <div class="foot-actions"><button class="btn gold" id="saveSideBtn">Save side job shares</button></div>
+  </div>
+  `;
+
+  document.getElementById('matCutoffSel').onchange = e=>{ matCutoff = e.target.value; renderMaterials(main); };
+
+  document.getElementById('saveMatBtn').onclick = ()=>{
+    const newSkus = state.skus.map(sku=>{
+      const rateEl = document.querySelector(`.skuRate[data-code="${CSS.escape(sku.code)}"]`);
+      return {code:sku.code, rate:Number(rateEl.value)||0};
+    });
+    const newMat = {};
+    document.querySelectorAll('.skuQty').forEach(i=>{ newMat[i.dataset.code]=Number(i.value)||0; });
+    state.skus = newSkus;
+    state.materials[matCutoff] = newMat;
+    saveState('skus', state.skus);
+    saveState('materials', state.materials);
+    alert('Materials saved for '+cutoffLabel(matCutoff));
+    render();
+  };
+
+  document.getElementById('splitEvenBtn').onclick = ()=>{
+    const pool = Number(document.getElementById('poolAmt').value)||0;
+    const checked = Array.from(document.querySelectorAll('.poolCheck:checked')).map(c=>c.dataset.id);
+    if(!checked.length){ alert('Check at least one staff member'); return; }
+    const share = pool/checked.length;
+    checked.forEach(id=>{
+      const el = document.querySelector(`.sideAmt[data-id="${id}"]`);
+      if(el) el.value = share.toFixed(2);
+    });
+  };
+
+  document.getElementById('saveSideBtn').onclick = ()=>{
+    const newSide = {};
+    document.querySelectorAll('.sideAmt').forEach(i=>{
+      const v = Number(i.value)||0;
+      if(v>0) newSide[i.dataset.id]=v;
+    });
+    state.sideJobs[matCutoff]=newSide;
+    saveState('sideJobs', state.sideJobs);
+    alert('Side job shares saved for '+cutoffLabel(matCutoff));
+    render();
+  };
+}
+
+/* ---------- LOANS & CASH FUND ---------- */
+function renderLoans(main){
+  const staffList = activeStaffList();
+  main.innerHTML = `
+  <div class="card">
+    <h2>Add ledger entry</h2>
+    <div class="grid cols-4">
+      <div><label>Staff</label><select id="lStaff">${staffList.map(s=>`<option value="${s.id}">${s.name}</option>`).join('')}</select></div>
+      <div><label>Type</label><select id="lType">
+        <option value="fine">Loan / Fine (owed)</option>
+        <option value="payment">Loan payment (paid)</option>
+        <option value="cashfund_add">Cash fund contribution</option>
+        <option value="cashfund_deduct">Cash fund deduction/payout</option>
+      </select></div>
+      <div><label>Amount (₱)</label><input id="lAmt" type="number" step="any" min="0"></div>
+      <div><label>Date</label><input id="lDate" type="date" value="${todayISO()}"></div>
+    </div>
+    <div style="margin-top:8px"><label>Note</label><input id="lNote" placeholder="optional"></div>
+    <div class="foot-actions"><button class="btn gold" id="addLedgerBtn">Add entry</button></div>
+  </div>
+
+  <div class="card">
+    <h2>Balances</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Staff</th><th>Loan owed (₱)</th><th>Cash fund (₱)</th></tr></thead>
+      <tbody>
+      ${staffList.length? staffList.map(s=>{
+        const b = ledgerBalance(s.id);
+        return `<tr><td>${s.name}</td>
+          <td>${b.loanOwed>0?`<span class="pill bad">₱${fmt(b.loanOwed)}</span>`:'<span class="pill good">₱0.00</span>'}</td>
+          <td>₱${fmt(b.cashFund)}</td></tr>`;
+      }).join('') : `<tr><td colspan="3" class="empty">No staff yet.</td></tr>`}
+      </tbody>
+    </table></div>
+  </div>
+
+  <div class="card">
+    <h2>Ledger history</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Date</th><th>Staff</th><th>Type</th><th>Amount</th><th>Note</th><th></th></tr></thead>
+      <tbody>
+      ${renderLedgerRows()}
+      </tbody>
+    </table></div>
+  </div>
+  `;
+
+  document.getElementById('addLedgerBtn').onclick = ()=>{
+    const staffId = document.getElementById('lStaff').value;
+    const type = document.getElementById('lType').value;
+    const amount = Number(document.getElementById('lAmt').value)||0;
+    if(!staffId || amount<=0){ alert('Choose staff and enter a valid amount'); return; }
+    const entry = {id:uid(), type, amount, date:document.getElementById('lDate').value, note:document.getElementById('lNote').value.trim()};
+    if(!state.ledger[staffId]) state.ledger[staffId]=[];
+    state.ledger[staffId].push(entry);
+    saveState('ledger', state.ledger);
+    render();
+  };
+
+  document.querySelectorAll('.delLedger').forEach(b=>b.onclick=()=>{
+    const [sid,eid]=b.dataset.key.split('||');
+    state.ledger[sid] = (state.ledger[sid]||[]).filter(e=>e.id!==eid);
+    saveState('ledger', state.ledger);
+    render();
+  });
+}
+function renderLedgerRows(){
+  const rows=[];
+  Object.entries(state.ledger).forEach(([sid,entries])=>{
+    const name = state.staff[sid]?state.staff[sid].name:'(removed staff)';
+    (entries||[]).forEach(e=>{
+      const typeLabel = {fine:'Loan/Fine',payment:'Loan payment',cashfund_add:'Cash fund +',cashfund_deduct:'Cash fund −'}[e.type]||e.type;
+      rows.push({date:e.date, html:`<tr><td>${e.date}</td><td>${name}</td><td>${typeLabel}</td><td>₱${fmt(e.amount)}</td><td>${e.note||''}</td><td><span class="tag-rm delLedger" data-key="${sid}||${e.id}">✕</span></td></tr>`});
+    });
+  });
+  if(!rows.length) return `<tr><td colspan="6" class="empty">No ledger entries yet.</td></tr>`;
+  rows.sort((a,b)=> a.date<b.date?1:-1);
+  return rows.map(r=>r.html).join('');
+}
+
+/* ---------- PAYSLIP ---------- */
+function renderPayslip(main){
+  const staffList = activeStaffList();
+  const keys = allCutoffKeysWithData();
+  if(!keys.includes(cutoffKeyFor(todayISO()))) keys.unshift(cutoffKeyFor(todayISO()));
+
+  main.innerHTML = `
+  <div class="card no-print">
+    <h2>Generate payslip</h2>
+    <div class="grid cols-2">
+      <div><label>Staff</label><select id="psStaff">${staffList.map(s=>`<option value="${s.id}">${s.name}</option>`).join('')}</select></div>
+      <div><label>Cutoff period</label><select id="psCutoff">${keys.map(k=>`<option value="${k}">${cutoffLabel(k)}</option>`).join('')}</select></div>
+    </div>
+    <h2 style="margin-top:14px">Statutory &amp; other deductions</h2>
+    <div class="grid cols-3">
+      <div><label>SSS</label><input id="psSss" type="number" step="any" value="0"></div>
+      <div><label>PhilHealth</label><input id="psPhil" type="number" step="any" value="0"></div>
+      <div><label>Pag-IBIG</label><input id="psPagibig" type="number" step="any" value="0"></div>
+    </div>
+    <div class="foot-actions"><button class="btn gold" id="genBtn">Generate</button></div>
+  </div>
+  <div id="payslipOut"></div>
+  `;
+
+  document.getElementById('genBtn').onclick = ()=>genPayslip();
+  function genPayslip(){
+    const sid = document.getElementById('psStaff').value;
+    const ck = document.getElementById('psCutoff').value;
+    const s = state.staff[sid];
+    if(!s) return;
+    const {total, byProduct} = staffCutoffProduction(sid, ck);
+    const side = (state.sideJobs[ck]||{})[sid] || 0;
+    const gross = total + side;
+    const sss = Number(document.getElementById('psSss').value)||0;
+    const phil = Number(document.getElementById('psPhil').value)||0;
+    const pagibig = Number(document.getElementById('psPagibig').value)||0;
+
+    // loan/CA/fine/cashfund entries dated within this cutoff's date range
+    const dates = new Set(cutoffDatesForKey(ck));
+    const entries = (state.ledger[sid]||[]).filter(e=>dates.has(e.date));
+    const loan = entries.filter(e=>e.type==='fine').reduce((a,e)=>a+Number(e.amount),0);
+    const cashfund = entries.filter(e=>e.type==='cashfund_deduct').reduce((a,e)=>a+Number(e.amount),0);
+    let caTotal = 0;
+    cutoffDatesForKey(ck).forEach(d=>{
+      const day = state.production[d];
+      if(day && day.ca) caTotal += Number(day.ca[sid]||0);
+    });
+
+    const totalDeduction = sss+phil+pagibig+loan+caTotal+cashfund;
+    const net = gross - totalDeduction;
+
+    document.getElementById('payslipOut').innerHTML = `
+    <div class="card">
+      <div class="payslip">
+        <h3>CHOWTIME PRODUCTION</h3>
+        <div class="sub">Official Payslip — ${cutoffLabel(ck)}</div>
+        <table style="width:100%">
+          <tr><td>Employee ID</td><td>${s.idNumber||'—'}</td></tr>
+          <tr><td>Name</td><td><strong>${s.name}</strong></td></tr>
+          <tr><td>Position</td><td>${s.jobTitle||''}</td></tr>
+        </table>
+        <h4 style="color:var(--maroon);margin:12px 0 4px">Production earnings</h4>
+        <table style="width:100%">
+          ${state.products.map(p=>{
+            const qty = byProduct[p.code]||0;
+            const rate = (s.rates&&s.rates[p.code])||0;
+            return `<tr><td>${p.label}</td><td>${fmt(qty)}</td><td>₱${fmt(rate)}</td><td>₱${fmt(qty*rate)}</td></tr>`;
+          }).join('')}
+          ${side>0?`<tr><td colspan="3">Side job / income share</td><td>₱${fmt(side)}</td></tr>`:''}
+          <tr class="total-row"><td colspan="3">Gross Salary</td><td>₱${fmt(gross)}</td></tr>
+        </table>
+        <h4 style="color:var(--maroon);margin:12px 0 4px">Deductions</h4>
+        <table style="width:100%">
+          <tr><td>SSS</td><td>₱${fmt(sss)}</td></tr>
+          <tr><td>PhilHealth</td><td>₱${fmt(phil)}</td></tr>
+          <tr><td>Pag-IBIG</td><td>₱${fmt(pagibig)}</td></tr>
+          <tr><td>Cash Advance</td><td>₱${fmt(caTotal)}</td></tr>
+          <tr><td>Loan / Fine</td><td>₱${fmt(loan)}</td></tr>
+          <tr><td>Cash Fund payout</td><td>₱${fmt(cashfund)}</td></tr>
+          <tr class="total-row"><td>Total Deductions</td><td>₱${fmt(totalDeduction)}</td></tr>
+        </table>
+        <table style="width:100%">
+          <tr class="total-row"><td>NET SALARY</td><td>₱${fmt(net)}</td></tr>
+        </table>
+        <div class="sub" style="margin-top:10px">Account: ${s.account||'—'} &nbsp;•&nbsp; Generated ${new Date().toLocaleDateString()}</div>
+      </div>
+      <div class="foot-actions no-print">
+        <button class="btn ghost" onclick="window.print()">Print / Save PDF</button>
+        <button class="btn ghost" id="emailBtn">Email payslip</button>
+        <button class="btn gold" id="pushFeedBtn">Send to HRIS feed</button>
+      </div>
+      <div id="feedStatus" class="msg info no-print" style="display:none;margin-top:10px"></div>
+    </div>`;
+
+    document.getElementById('emailBtn').onclick = ()=>{
+      if(!s.email){
+        alert(`No email on file for ${s.name}. Add one in the Staff & Rates tab (tap "Edit" next to their name), then try again.`);
+        return;
+      }
+      const lines = [];
+      lines.push(`CHOWTIME PRODUCTION — PAYSLIP`);
+      lines.push(cutoffLabel(ck));
+      lines.push('');
+      lines.push(`Employee ID: ${s.idNumber||'—'}`);
+      lines.push(`Name: ${s.name}`);
+      lines.push(`Position: ${s.jobTitle||''}`);
+      lines.push('');
+      lines.push('PRODUCTION EARNINGS');
+      state.products.forEach(p=>{
+        const qty = byProduct[p.code]||0;
+        const rate = (s.rates&&s.rates[p.code])||0;
+        if(qty>0) lines.push(`  ${p.label}: ${fmt(qty)} x ₱${fmt(rate)} = ₱${fmt(qty*rate)}`);
+      });
+      if(side>0) lines.push(`  Side job / income share: ₱${fmt(side)}`);
+      lines.push(`  Gross Salary: ₱${fmt(gross)}`);
+      lines.push('');
+      lines.push('DEDUCTIONS');
+      lines.push(`  SSS: ₱${fmt(sss)}`);
+      lines.push(`  PhilHealth: ₱${fmt(phil)}`);
+      lines.push(`  Pag-IBIG: ₱${fmt(pagibig)}`);
+      lines.push(`  Cash Advance: ₱${fmt(caTotal)}`);
+      lines.push(`  Loan / Fine: ₱${fmt(loan)}`);
+      lines.push(`  Cash Fund payout: ₱${fmt(cashfund)}`);
+      lines.push(`  Total Deductions: ₱${fmt(totalDeduction)}`);
+      lines.push('');
+      lines.push(`NET SALARY: ₱${fmt(net)}`);
+      lines.push('');
+      lines.push(`Account: ${s.account||'—'}`);
+      const subject = `Chowtime Production Payslip — ${cutoffLabel(ck)}`;
+      const body = lines.join('\n');
+      window.location.href = `mailto:${encodeURIComponent(s.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    };
+
+    document.getElementById('pushFeedBtn').onclick = ()=>{
+      pushToHrisFeed(sid, ck, {
+        staffName: s.name, idNumber: s.idNumber||'', jobTitle: s.jobTitle||'',
+        gross: Number(gross.toFixed(2)), deductions: Number(totalDeduction.toFixed(2)),
+        net: Number(net.toFixed(2)), account: s.account||'',
+        breakdown: {production: Number(total.toFixed(2)), sideJobs: Number(side.toFixed(2)),
+          sss, philhealth: phil, pagibig, cashAdvance: caTotal, loanFine: loan, cashFundPayout: cashfund},
+        cutoffLabel: cutoffLabel(ck), pushedAt: new Date().toISOString()
+      });
+    };
+  }
+  genPayslip();
+}
+
+/* Publishes a read-only summary to a NEW, isolated Firebase node so it never
+   touches or overwrites anything the existing HRIS files (chowtime-payroll.html,
+   chowtime-kiosk.html, chowtime-setup.html) already read or write. Nothing in
+   those files needs to change for this to be safe — it only becomes "connected"
+   the day you choose to add a small read-only lookup to the HRIS payroll page. */
+function pushToHrisFeed(staffId, cutoffKey, payload){
+  const statusEl = document.getElementById('feedStatus');
+  statusEl.style.display='block';
+  if(!USE_FIREBASE || !DB){
+    statusEl.className='msg warn no-print';
+    statusEl.textContent = 'Not connected to Firebase yet — go to Settings and paste your firebaseConfig first, then this figure can be sent to the shared database.';
+    return;
+  }
+  DB.ref(`hrisProductionFeed/${cutoffKey}/${staffId}`).set(payload)
+    .then(()=>{
+      statusEl.className='msg info no-print';
+      statusEl.textContent = `Sent — saved under hrisProductionFeed/${cutoffKey}/${staffId} in Firebase. This is a separate node; your existing HRIS payroll page is untouched unless you later add a lookup for it.`;
+    })
+    .catch(err=>{
+      statusEl.className='msg err no-print';
+      statusEl.textContent = 'Could not send: '+err.message;
+    });
+}
+
+/* ---------- SETTINGS ---------- */
+function renderSettings(main){
+  main.innerHTML = `
+  <div class="card">
+    <h2>Sync with Firebase (same database as HRIS, optional)</h2>
+    <div class="msg info">This system stores data under a separate <code>chowtimeProduction</code> node, so it will not collide with the existing payroll/kiosk/setup HRIS data even if you use the same Firebase project. Paste the same <code>firebaseConfig</code> you use in <code>chowtime-setup.html</code> to keep everything in one database, or leave blank to run this device standalone (data stays in this browser session only).</div>
+    <label>Firebase config (JSON)</label>
+    <textarea id="cfgInput" rows="6" style="width:100%;font-family:monospace;font-size:12px;padding:8px;border:1px solid var(--line);border-radius:6px;" placeholder='{"apiKey":"...","databaseURL":"https://...firebaseio.com",...}'></textarea>
+    <div class="foot-actions"><button class="btn gold" id="connectBtn">Connect</button></div>
+  </div>
+  <div class="card">
+    <h2>Export data</h2>
+    <div class="foot-actions" style="justify-content:flex-start">
+      <button class="btn ghost" id="exportCsvBtn">Export production log (CSV)</button>
+      <button class="btn ghost" id="exportJsonBtn">Export full backup (JSON)</button>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Running this alongside your HRIS on one tablet</h2>
+    <p style="font-size:13.5px;line-height:1.6">
+    Both apps are just web pages, so yes — one tablet can run both. Practical setup:</p>
+    <ul style="font-size:13.5px;line-height:1.7">
+      <li>Host this file on the same GitHub Pages site as <code>chowtime-payroll.html</code>, <code>chowtime-kiosk.html</code>, and <code>chowtime-setup.html</code> — e.g. as <code>chowtime-production.html</code>.</li>
+      <li>On the tablet's browser, open each page once and "Add to Home Screen" — this creates a separate app icon for each, so staff tap the right one directly without navigating menus.</li>
+      <li>If the tablet is locked into single-app kiosk mode for attendance, keep the kiosk app pinned for attendance, and use this Production system from a second icon or a supervisor-only browser tab — it isn't meant to be tapped by every crew member the way the attendance kiosk is.</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h2>Connecting to HRIS — safely, without editing it</h2>
+    <p style="font-size:13.5px;line-height:1.6">
+    Your existing <code>chowtime-payroll.html</code> is not touched by this app in any way — its computation logic stays exactly as it is. This system only writes to a brand-new, separate spot in your Firebase database called <code>hrisProductionFeed</code>. Nothing reads from it yet, so there is nothing to break.</p>
+    <p style="font-size:13.5px;line-height:1.6">
+    On the Payslip tab, once you're connected to Firebase, a <strong>"Send to HRIS feed"</strong> button saves that staff member's finished net salary for the cutoff to:</p>
+    <div style="font-family:monospace;font-size:12px;background:#f6efdf;padding:8px 10px;border-radius:6px;">hrisProductionFeed / [cutoff, e.g. 2026-07-C1] / [staffId] → name, gross, deductions, net, account</div>
+    <p style="font-size:13.5px;line-height:1.6;margin-top:10px">
+    That's as far as this app goes on its own. When — and only when — you're comfortable, you (or I, in a separate future session working directly on <code>chowtime-payroll.html</code>) can add a small, additive, read-only lookup there that displays these numbers next to the manual entry fields, as a reference or a one-click "copy in" — without replacing any of the existing payroll formulas. Until that step is taken, this feed just sits there unused and 100% risk-free to your current payroll.</p>
+  </div>
+  `;
+  document.getElementById('connectBtn').onclick = ()=>{
+    const v = document.getElementById('cfgInput').value.trim();
+    if(!v){ alert('Paste a config first, or leave this page to keep working offline.'); return; }
+    initFirebase(v);
+  };
+  document.getElementById('exportCsvBtn').onclick = exportCsv;
+  document.getElementById('exportJsonBtn').onclick = exportJson;
+}
+
+function exportCsv(){
+  const rows = [['Date','Staff', ...state.products.map(p=>p.code+' (credited qty)'),'CA','Day Income']];
+  Object.keys(state.production).sort().forEach(dISO=>{
+    const day = state.production[dISO];
+    activeStaffList().forEach(s=>{
+      const credited = state.products.map(p=>creditedQtyForStaff(day, p.code, s.id).toFixed(2));
+      const ca = (day.ca && day.ca[s.id]) || 0;
+      const income = dailyIncomeForStaff(day, s.id);
+      if(income===0 && ca===0) return; // skip staff with nothing recorded that day
+      rows.push([dISO, s.name, ...credited, ca, income.toFixed(2)]);
+    });
+  });
+  const csv = rows.map(r=>r.map(c=>`"${c}"`).join(',')).join('\n');
+  downloadBlob(csv, 'chowtime_production_log.csv', 'text/csv');
+}
+function exportJson(){
+  downloadBlob(JSON.stringify(state,null,2), 'chowtime_production_backup.json', 'application/json');
+}
+function downloadBlob(content, filename, type){
+  const blob = new Blob([content], {type});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/* ================= BOOT ================= */
+render();
+</script>
+</body>
+</html>
