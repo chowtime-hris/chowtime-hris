@@ -169,18 +169,37 @@ function initFirebase(cfgStr, fromSaved){
     document.getElementById('connBadge').textContent = 'Connected (synced)';
     document.getElementById('connBadge').className = 'badge-conn on';
     try{ localStorage.setItem(LS_CFG_KEY, cfgStr); }catch(e){}
-    DB.ref('chowtimeProduction').on('value', snap=>{
-      const v = snap.val() || {};
-      state.staff = v.staff || {};
-      state.products = v.products || DEFAULT_PRODUCTS;
-      state.production = v.production || {};
-      state.skus = v.skus || DEFAULT_SKUS;
-      state.materials = v.materials || {};
-      state.sideJobs = v.sideJobs || {};
-      state.ledger = v.ledger || {};
-      state.deductions = v.deductions || {};
-      persistLocalState();
-      render();
+
+    // Reconcile once before listening live: if the cloud copy is empty (or missing whole
+    // sections) but this device already has local data, push the local copy up FIRST so a
+    // fresh/empty cloud database never wipes out data that only ever lived on this device.
+    DB.ref('chowtimeProduction').once('value').then(snap=>{
+      const cloud = snap.val() || {};
+      const sections = ['staff','products','production','skus','materials','sideJobs','ledger','deductions'];
+      const updates = {};
+      sections.forEach(key=>{
+        const cloudHas = cloud[key] && Object.keys(cloud[key]).length>0;
+        const localHas = state[key] && Object.keys(state[key]).length>0;
+        if(!cloudHas && localHas) updates[key] = state[key];
+      });
+      const pushLocal = Object.keys(updates).length
+        ? DB.ref('chowtimeProduction').update(updates)
+        : Promise.resolve();
+      pushLocal.finally(()=>{
+        DB.ref('chowtimeProduction').on('value', snap2=>{
+          const v = snap2.val() || {};
+          state.staff = v.staff || {};
+          state.products = v.products || DEFAULT_PRODUCTS;
+          state.production = v.production || {};
+          state.skus = v.skus || DEFAULT_SKUS;
+          state.materials = v.materials || {};
+          state.sideJobs = v.sideJobs || {};
+          state.ledger = v.ledger || {};
+          state.deductions = v.deductions || {};
+          persistLocalState();
+          render();
+        });
+      });
     });
     return true;
   }catch(e){
