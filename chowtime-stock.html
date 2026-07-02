@@ -131,7 +131,7 @@
 <body>
 
 <header>
-  <h1 id="pageTitle">🥩 Chowtime Stock</h1>
+  <h1 id="pageTitle">Chowtime Stock</h1>
   <span class="branch" id="branchLabel"></span>
   <button class="switch-branch" id="changeBranchBtn" style="display:none;" onclick="changeBranch()">Change Branch</button>
   <button class="exit" id="exitBtn" style="display:none;" onclick="goHome()">⟵ Switch</button>
@@ -294,6 +294,7 @@
       <input id="shortageRateInput" type="number" min="0" step="any" placeholder="69">
       <p class="hint">Applied per unit when POS stock is higher than the physical freezer count. Overages at the same rate get deducted from total charges.</p>
       <button class="btn-primary" style="margin-top:12px;" onclick="saveBranch()">Save Settings</button>
+      <div class="status-line" id="branchSaveStatus"></div>
     </div>
 
     <div class="card">
@@ -601,9 +602,11 @@ function saveBranch(){
   const name = document.getElementById('branchName').value.trim();
   const pin = document.getElementById('ownerPinInput').value.trim();
   const rate = parseFloat(document.getElementById('shortageRateInput').value);
-  if(!name){ toast('Enter a branch name'); return; }
-  if(!/^\d{8}$/.test(pin)){ toast('Owner PIN must be exactly 8 digits'); return; }
-  if(isNaN(rate) || rate < 0){ toast('Enter a valid shortage rate'); return; }
+  const statusEl = document.getElementById('branchSaveStatus');
+  statusEl.style.color = 'var(--danger)';
+  if(!name){ toast('Enter a branch name'); statusEl.textContent = 'Not saved: branch name is empty.'; return; }
+  if(!/^\d{8}$/.test(pin)){ toast('Owner PIN must be exactly 8 digits'); statusEl.textContent = `Not saved: PIN must be exactly 8 digits (you entered ${pin.length}).`; return; }
+  if(isNaN(rate) || rate < 0){ toast('Enter a valid shortage rate'); statusEl.textContent = 'Not saved: shortage rate is invalid.'; return; }
   Promise.all([
     bref('config/branchName').set(name),
     bref('config/ownerPin').set(pin),
@@ -616,6 +619,10 @@ function saveBranch(){
     document.getElementById('rateDisplay').textContent = rate;
     document.getElementById('defaultRateHint').textContent = rate;
     toast('Settings saved');
+    statusEl.style.color = 'var(--good)';
+    statusEl.textContent = '✓ Saved at ' + new Date().toLocaleTimeString();
+  }).catch(e=>{
+    statusEl.textContent = 'Not saved: ' + e.message;
   });
 }
 
@@ -946,6 +953,7 @@ function getWasteForCheckpoint(cp, cb){
   });
 }
 function submitCount(){
+  const statusEl = document.getElementById('countStatusLine');
   const posInputs = document.querySelectorAll('#itemsList input[data-field="pos"]');
   const values={}; let filled=0;
   posInputs.forEach(inp=>{
@@ -954,16 +962,23 @@ function submitCount(){
     const posV = inp.value, frzV = freezerInp.value;
     if(posV!==''&&frzV!==''){ values[id] = {pos: parseFloat(posV), freezer: parseFloat(frzV)}; filled++; }
   });
-  if(filled===0){ toast('Enter at least one item'); return; }
-  if(filled < posInputs.length){ if(!confirm(`You only completed ${filled} of ${posInputs.length} items. Submit anyway?`)) return; }
+  if(filled===0){ toast('Enter at least one item'); statusEl.textContent = 'Not submitted: no items filled in yet.'; return; }
+  if(filled < posInputs.length){
+    const ok = confirm(`You only completed ${filled} of ${posInputs.length} items. Submit anyway?`);
+    if(!ok){ statusEl.textContent = 'Not submitted — cancelled. Fill in the rest and press Submit again.'; return; }
+  }
+  statusEl.textContent = 'Submitting…';
   const payload = { items: values, countedBy: currentCrew.id, countedByName: currentCrew.name, timestamp: Date.now() };
   bref('counts/'+todayStr()+'/'+activeCheckpoint).set(payload).then(()=>{
     toast('Count submitted');
     submittedCheckpoints[activeCheckpoint]=true;
     renderCheckpoints();
-    document.getElementById('countStatusLine').textContent = 'Submitted at '+new Date().toLocaleTimeString();
+    statusEl.textContent = '✓ Submitted at '+new Date().toLocaleTimeString();
     showResult(values);
-  }).catch(e=>toast('Error: '+e.message));
+  }).catch(e=>{
+    toast('Error: '+e.message);
+    statusEl.textContent = '✗ Not submitted — error: ' + e.message;
+  });
 }
 function showResult(values){
   getWasteForCheckpoint(activeCheckpoint, wasteMap=>{
