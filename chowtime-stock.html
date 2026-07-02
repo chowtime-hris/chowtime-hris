@@ -1,0 +1,962 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chowtime Stock Management</title>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<style>
+  :root{
+    --maroon:#6B0F1A; --maroon-dark:#4A0A12; --maroon-light:#8C1B29;
+    --gold:#C9A227; --gold-light:#E8C766;
+    --bg:#F6F4F1; --card:#FFFFFF; --ink:#2A1A1D; --muted:#8A7A7D;
+    --danger:#B3261E; --danger-bg:#FBEAEA; --good:#2E7D32; --good-bg:#E7F3E8;
+    --warn:#B8860B; --warn-bg:#FFF6E0; --border:#E7E1DA;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink);}
+  header{background:linear-gradient(135deg,var(--maroon),var(--maroon-dark));color:#fff;padding:20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;}
+  header h1{margin:0;font-size:19px;}
+  header .branch{font-size:12px;opacity:.85;}
+  header .exit{background:rgba(255,255,255,.15);color:#fff;border:none;padding:7px 14px;border-radius:20px;font-size:12px;font-weight:700;cursor:pointer;}
+  main{max-width:1000px;margin:0 auto;padding:20px 16px 90px;}
+  main.narrow{max-width:560px;}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px;margin-bottom:18px;box-shadow:0 1px 3px rgba(0,0,0,.04);}
+  .card h2{margin:0 0 4px;font-size:16px;color:var(--maroon-dark);}
+  .card .sub{margin:0 0 14px;font-size:13px;color:var(--muted);}
+  label{display:block;font-size:12px;font-weight:600;color:var(--muted);margin-bottom:6px;margin-top:12px;text-transform:uppercase;letter-spacing:.4px;}
+  input,select,textarea{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:#fff;color:var(--ink);}
+  textarea{font-family:monospace;font-size:12px;min-height:100px;}
+  button{cursor:pointer;border:none;border-radius:8px;padding:10px 16px;font-size:13px;font-weight:700;letter-spacing:.2px;}
+  .btn-primary{background:var(--maroon);color:#fff;width:100%;padding:13px 16px;font-size:14px;}
+  .btn-primary:hover{background:var(--maroon-dark);}
+  .btn-gold{background:var(--gold);color:var(--maroon-dark);}
+  .btn-ghost{background:transparent;border:1px solid var(--border);color:var(--ink);}
+  .btn-danger{background:#fff;color:var(--danger);border:1px solid var(--danger);}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;}
+  .row > *{flex:1;min-width:110px;}
+  table{width:100%;border-collapse:collapse;margin-top:10px;font-size:13px;}
+  th{text-align:left;font-size:11px;text-transform:uppercase;color:var(--muted);padding:8px 6px;border-bottom:2px solid var(--border);white-space:nowrap;}
+  td{padding:9px 6px;border-bottom:1px solid var(--border);vertical-align:middle;white-space:nowrap;}
+  tr:last-child td{border-bottom:none;}
+  .num{text-align:right;font-variant-numeric:tabular-nums;}
+  .pin{font-family:monospace;letter-spacing:2px;font-weight:700;}
+  .item-actions button{padding:5px 10px;font-size:11px;}
+  .empty{color:var(--muted);font-size:13px;padding:14px 0;text-align:center;}
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--maroon-dark);color:#fff;padding:11px 20px;border-radius:30px;font-size:13px;font-weight:600;opacity:0;transition:opacity .25s;pointer-events:none;z-index:99;}
+  .toast.show{opacity:1;}
+  .hint{font-size:11.5px;color:var(--muted);margin-top:6px;}
+  code{background:#F0EBE4;padding:1px 5px;border-radius:4px;font-size:12px;}
+
+  /* role picker */
+  .role-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+  @media(max-width:520px){.role-grid{grid-template-columns:1fr;}}
+  .role-btn{background:#fff;border:2px solid var(--border);border-radius:16px;padding:28px 18px;text-align:center;cursor:pointer;}
+  .role-btn:hover{border-color:var(--maroon);}
+  .role-btn .emoji{font-size:34px;}
+  .role-btn .t{font-weight:800;font-size:16px;color:var(--maroon-dark);margin-top:8px;}
+  .role-btn .d{font-size:12px;color:var(--muted);margin-top:4px;}
+
+  /* pinpad */
+  .pinpad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px;}
+  .pinpad button{background:#F0EBE4;color:var(--ink);font-size:20px;padding:16px 0;}
+  .pindisplay{display:flex;justify-content:center;gap:10px;margin:10px 0;}
+  .pindisplay span{width:16px;height:16px;border-radius:50%;border:2px solid var(--maroon);}
+  .pindisplay span.filled{background:var(--maroon);}
+
+  /* crew checkpoint */
+  .checkrow{display:flex;gap:8px;margin-bottom:14px;}
+  .checkbtn{flex:1;padding:14px 6px;border-radius:10px;border:2px solid var(--border);background:#fff;text-align:center;cursor:pointer;}
+  .checkbtn.active{border-color:var(--maroon);background:#FBEFF0;}
+  .checkbtn .lbl{font-weight:700;font-size:13px;color:var(--maroon-dark);}
+  .checkbtn .time{font-size:11px;color:var(--muted);}
+  .checkbtn.done{opacity:.55;}
+  .checkbtn .done-mark{color:var(--good);font-size:11px;font-weight:700;}
+  .straight{display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:14px;background:#FFF8E8;padding:10px 12px;border-radius:8px;}
+  .item-block{padding:12px 0;border-bottom:1px solid var(--border);}
+  .item-block:last-child{border-bottom:none;}
+  .item-block .name{font-size:14px;font-weight:600;margin-bottom:2px;}
+  .item-block .unit{font-size:11px;color:var(--muted);font-weight:400;}
+  .dual-input{display:flex;gap:10px;margin-top:6px;}
+  .dual-input .field{flex:1;}
+  .dual-input .field label{margin-top:0;font-size:10.5px;}
+  .dual-input input{text-align:center;padding:9px;font-size:15px;}
+  .waste-item{background:#FFF6F5;border:1px solid #F3D6D3;border-radius:10px;padding:12px;margin-bottom:10px;}
+  .whoami{display:flex;justify-content:space-between;align-items:center;font-size:13px;background:#F0EBE4;padding:10px 14px;border-radius:10px;margin-bottom:14px;}
+  .whoami button{width:auto;padding:6px 12px;font-size:12px;background:transparent;color:var(--danger);border:1px solid var(--danger);}
+  .status-line{font-size:12px;color:var(--muted);margin-top:4px;}
+  .result-card{border:2px solid var(--border);}
+  .result-row{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border);font-size:13.5px;}
+  .result-row:last-child{border-bottom:none;}
+  .result-tag{font-weight:700;padding:3px 10px;border-radius:20px;font-size:12px;}
+  .tag-ok{background:var(--good-bg);color:var(--good);}
+  .tag-short{background:var(--danger-bg);color:var(--danger);}
+  .tag-over{background:var(--warn-bg);color:var(--warn);}
+  .note-small{font-size:11.5px;color:var(--muted);margin-top:10px;}
+
+  /* owner */
+  .tabs{display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap;}
+  .tab{padding:9px 16px;border-radius:20px;border:1px solid var(--border);background:#fff;font-size:13px;font-weight:600;cursor:pointer;}
+  .tab.active{background:var(--maroon);color:#fff;border-color:var(--maroon);}
+  .variance-ok{color:var(--good);font-weight:700;}
+  .variance-short{background:var(--danger-bg);color:var(--danger);font-weight:700;border-radius:6px;padding:3px 8px;}
+  .variance-over{background:var(--warn-bg);color:var(--warn);font-weight:700;border-radius:6px;padding:3px 8px;}
+  .badge{display:inline-block;font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:20px;text-transform:uppercase;background:#F0EBE4;color:var(--maroon-dark);}
+  .checkpoint-summary{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;}
+  .cp-box{flex:1;min-width:140px;background:#FAF8F5;border:1px solid var(--border);border-radius:10px;padding:12px;}
+  .cp-box .t{font-size:11px;text-transform:uppercase;color:var(--muted);font-weight:700;}
+  .cp-box .who{font-size:13px;margin-top:4px;}
+  .cp-box .time{font-size:11px;color:var(--muted);}
+  .waste-row{font-size:12.5px;color:var(--ink);padding:6px 0;border-bottom:1px dashed var(--border);}
+  .flex-between{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;}
+  .totals-bar{display:flex;gap:10px;margin:14px 0;flex-wrap:wrap;}
+  .totals-bar .box{flex:1;min-width:150px;text-align:center;padding:16px;border-radius:10px;}
+  .totals-bar .box.charge{background:var(--danger-bg);}
+  .totals-bar .box.credit{background:var(--good-bg);}
+  .totals-bar .box.net{background:var(--gold-light);}
+  .totals-bar .box .amt{font-size:22px;font-weight:800;}
+  .totals-bar .box .lbl{font-size:11px;text-transform:uppercase;color:var(--muted);margin-top:2px;}
+  .rate-pill{display:inline-block;background:#F0EBE4;color:var(--maroon-dark);font-size:12px;font-weight:700;padding:5px 12px;border-radius:20px;}
+
+  /* branch picker */
+  .branch-row{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border:1px solid var(--border);border-radius:10px;margin-bottom:10px;cursor:pointer;}
+  .branch-row:hover{border-color:var(--maroon);}
+  .branch-row .code{font-weight:800;color:var(--maroon-dark);font-size:14px;}
+  .branch-row .nm{font-size:12px;color:var(--muted);margin-top:2px;}
+  .branch-row .go{font-size:18px;color:var(--maroon);}
+  .switch-branch{background:transparent;color:#fff;border:1px solid rgba(255,255,255,.4);padding:6px 12px;border-radius:20px;font-size:12px;font-weight:700;cursor:pointer;}
+</style>
+</head>
+<body>
+
+<header>
+  <h1 id="pageTitle">🥩 Chowtime Stock</h1>
+  <span class="branch" id="branchLabel"></span>
+  <button class="switch-branch" id="changeBranchBtn" style="display:none;" onclick="changeBranch()">Change Branch</button>
+  <button class="exit" id="exitBtn" style="display:none;" onclick="goHome()">⟵ Switch</button>
+</header>
+
+<main id="mainConnect" class="narrow">
+  <div class="card">
+    <h2>Connect</h2>
+    <p class="sub">Paste your Firebase project config (Project Settings → General → Your apps → SDK config).</p>
+    <textarea id="fbConfig" placeholder='{"apiKey":"...","databaseURL":"https://xxxx.firebaseio.com", ...}'></textarea>
+    <button class="btn-primary" style="margin-top:10px;" onclick="connectFirebase()">Connect</button>
+  </div>
+</main>
+
+<main id="mainBranchPicker" class="narrow" style="display:none;">
+  <div class="card">
+    <h2>Select Branch</h2>
+    <p class="sub">Choose which branch this device is for.</p>
+    <div id="branchListBox"></div>
+    <div id="branchListEmpty" class="empty" style="display:none;">No branches yet — add the first one below.</div>
+  </div>
+  <div class="card">
+    <h2>+ Add Branch</h2>
+    <label>Branch code</label>
+    <input id="newBranchCode" placeholder="e.g. CT-WSFP">
+    <label>Branch name</label>
+    <input id="newBranchName" placeholder="e.g. Chowtime West Front">
+    <button class="btn-primary" style="margin-top:12px;" onclick="addBranch()">Add Branch</button>
+  </div>
+</main>
+
+<main id="mainRole" class="narrow" style="display:none;">
+  <div class="card" style="text-align:center;">
+    <h2>Welcome to <span id="roleBranchName">Chowtime</span></h2>
+    <p class="sub">Choose how you're using this device.</p>
+  </div>
+  <div class="role-grid">
+    <div class="role-btn" onclick="enterCrew()">
+      <div class="emoji">👷</div>
+      <div class="t">Crew Count</div>
+      <div class="d">Log freezer counts &amp; waste</div>
+    </div>
+    <div class="role-btn" onclick="enterOwnerPinGate()">
+      <div class="emoji">🔐</div>
+      <div class="t">Owner Dashboard</div>
+      <div class="d">Setup, audit &amp; charges</div>
+    </div>
+  </div>
+</main>
+
+<main id="mainOwnerPin" class="narrow" style="display:none;">
+  <div class="card" style="text-align:center;">
+    <h2>Owner PIN</h2>
+    <p class="sub">Enter your owner PIN to continue.</p>
+    <div class="pindisplay" id="ownerPinDisplay"><span></span><span></span><span></span><span></span></div>
+    <div class="pinpad" id="ownerPinpad"></div>
+  </div>
+</main>
+
+<!-- ============ CREW SCREEN ============ -->
+<main id="mainCrew" class="narrow" style="display:none;">
+
+  <div class="card" id="loginCard">
+    <h2>Who's counting?</h2>
+    <p class="sub">Enter your 4-digit PIN.</p>
+    <div class="pindisplay" id="pindisplay"><span></span><span></span><span></span><span></span></div>
+    <div class="pinpad" id="pinpad"></div>
+  </div>
+
+  <div id="mainFlow" style="display:none;">
+    <div class="whoami">
+      <span>👤 <strong id="crewNameLabel"></strong> · <span id="crewShiftLabel"></span> shift</span>
+      <button onclick="logoutCrew()">Switch user</button>
+    </div>
+
+    <div class="card">
+      <h2>Checkpoint</h2>
+      <p class="sub" id="dateLabel"></p>
+      <div class="checkrow" id="checkRow"></div>
+      <div class="straight">
+        <input type="checkbox" id="straightDuty" style="width:auto;" onchange="renderCheckpoints()">
+        <label style="margin:0;text-transform:none;font-weight:500;color:var(--ink);" for="straightDuty">Straight duty today (partner is off — skip Handoff)</label>
+      </div>
+    </div>
+
+    <div class="card" id="countCard" style="display:none;">
+      <h2>Count — <span id="activeCheckpointLabel"></span></h2>
+      <p class="sub">For each item: check the POS stock number, then physically count the freezer/chiller.</p>
+      <div id="itemsList"></div>
+      <button class="btn-primary" style="margin-top:16px;" onclick="submitCount()">Submit Count</button>
+      <div class="status-line" id="countStatusLine"></div>
+    </div>
+
+    <div class="card result-card" id="resultCard" style="display:none;">
+      <h2>Result</h2>
+      <p class="sub">This is what got recorded for this checkpoint.</p>
+      <div id="resultList"></div>
+      <div class="totals-bar">
+        <div class="box charge"><div class="amt" id="totalChargeAmt">₱0</div><div class="lbl">Shortage charge</div></div>
+        <div class="box credit"><div class="amt" id="totalCreditAmt">₱0</div><div class="lbl">Overage credit</div></div>
+      </div>
+      <p class="note-small">Waste logged after this count may still adjust these numbers slightly — final figures are on the Owner Dashboard.</p>
+    </div>
+
+    <div class="card">
+      <h2>🗑️ Log Waste / Spoilage</h2>
+      <p class="sub">Log anything thrown out, expired, dropped, or damaged — this gets subtracted before any shortage charge.</p>
+      <div class="row" style="display:flex;gap:8px;">
+        <select id="wasteItemSelect" style="flex:2;"></select>
+        <input id="wasteQty" type="number" min="0" step="any" placeholder="Qty" style="flex:1;">
+      </div>
+      <select id="wasteReason" style="margin-top:8px;">
+        <option value="expired">Expired</option>
+        <option value="spoiled">Spoiled</option>
+        <option value="dropped">Dropped / damaged</option>
+        <option value="prep_error">Prep error</option>
+        <option value="other">Other</option>
+      </select>
+      <textarea id="wasteNote" placeholder="Optional note" style="font-family:inherit;min-height:50px;margin-top:8px;"></textarea>
+      <button class="btn-gold" style="margin-top:10px;width:100%;" onclick="logWaste()">+ Log Waste Entry</button>
+      <div id="wasteLogToday" style="margin-top:14px;"></div>
+    </div>
+  </div>
+</main>
+
+<!-- ============ OWNER SCREEN ============ -->
+<main id="mainOwner" style="display:none;">
+
+  <div class="tabs">
+    <div class="tab active" data-tab="setup" onclick="switchOwnerTab('setup')">Setup</div>
+    <div class="tab" data-tab="daily" onclick="switchOwnerTab('daily')">Daily Audit</div>
+    <div class="tab" data-tab="history" onclick="switchOwnerTab('history')">Charge Ledger</div>
+  </div>
+
+  <div id="ownerTab-setup">
+    <div class="card">
+      <h2>Branch &amp; Charge Settings</h2>
+      <label>Branch name</label>
+      <input id="branchName" placeholder="e.g. Chowtime SM Pampanga">
+      <label>Owner PIN (protects this dashboard)</label>
+      <input id="ownerPinInput" maxlength="6" inputmode="numeric" placeholder="4–6 digits">
+      <label>Shortage charge (₱ per unit lost)</label>
+      <input id="shortageRateInput" type="number" min="0" step="any" placeholder="69">
+      <p class="hint">Applied per unit when POS stock is higher than the physical freezer count. Overages at the same rate get deducted from total charges.</p>
+      <button class="btn-primary" style="margin-top:12px;" onclick="saveBranch()">Save Settings</button>
+    </div>
+
+    <div class="card">
+      <h2>Freezer Item Catalog</h2>
+      <div class="row">
+        <div><label>Item name</label><input id="itemName" placeholder="e.g. Chicken Thigh (raw)"></div>
+        <div><label>Unit</label>
+          <select id="itemUnit"><option>pcs</option><option>kg</option><option>pack</option><option>tray</option><option>box</option><option>L</option><option>g</option></select>
+        </div>
+        <div><label>Category</label><input id="itemCategory" placeholder="e.g. Meat"></div>
+        <div style="flex:0 0 auto;"><button class="btn-primary" style="width:auto;" onclick="addItem()">+ Add Item</button></div>
+      </div>
+      <table><thead><tr><th>Item</th><th>Unit</th><th>Category</th><th></th></tr></thead><tbody id="itemsTbody"></tbody></table>
+      <div id="itemsEmpty" class="empty">No items yet.</div>
+    </div>
+
+    <div class="card">
+      <h2>Crew PINs</h2>
+      <p class="sub">Each crew member's 4-digit PIN identifies who submitted a count.</p>
+      <div class="row">
+        <div><label>Crew name</label><input id="crewName" placeholder="e.g. Juan Dela Cruz"></div>
+        <div><label>Shift</label>
+          <select id="crewShift"><option value="AM">AM (9AM–6PM)</option><option value="PM">PM (12PM–9PM)</option><option value="Both">Both / Rotating</option></select>
+        </div>
+        <div><label>4-digit PIN</label><input id="crewPin" maxlength="4" inputmode="numeric" placeholder="1234"></div>
+        <div style="flex:0 0 auto;"><button class="btn-primary" style="width:auto;" onclick="addCrew()">+ Add Crew</button></div>
+      </div>
+      <table><thead><tr><th>Name</th><th>Shift</th><th>PIN</th><th></th></tr></thead><tbody id="crewTbody"></tbody></table>
+      <div id="crewEmpty" class="empty">No crew added yet.</div>
+    </div>
+  </div>
+
+  <div id="ownerTab-daily" style="display:none;">
+    <div class="card">
+      <div class="flex-between">
+        <div><label>Date</label><input type="date" id="datePicker" onchange="loadDay()"></div>
+        <span class="rate-pill">₱<span id="rateDisplay">69</span> / unit shortage</span>
+        <div id="straightBadge"></div>
+      </div>
+      <div class="checkpoint-summary" id="checkpointSummary"></div>
+    </div>
+    <div class="card">
+      <h2>Variance Report</h2>
+      <p class="sub">Variance = POS Stock − Freezer Count − waste logged for that checkpoint. Red = shortage (charged). Orange = overage (credited).</p>
+      <table><thead><tr><th>Item</th><th>Checkpoint</th><th class="num">POS</th><th class="num">Freezer</th><th class="num">Waste</th><th class="num">Variance</th><th class="num">Charge</th></tr></thead><tbody id="varianceTbody"></tbody></table>
+      <div id="varianceEmpty" class="empty" style="display:none;">Crew hasn't submitted counts for this date yet.</div>
+      <div class="totals-bar">
+        <div class="box charge"><div class="amt" id="totalChargeAmt2">₱0</div><div class="lbl">Total shortage charge</div></div>
+        <div class="box credit"><div class="amt" id="totalCreditAmt2">₱0</div><div class="lbl">Total overage credit</div></div>
+        <div class="box net"><div class="amt" id="netChargeAmt">₱0</div><div class="lbl">Net payable (day)</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Waste / Spoilage Log</h2>
+      <div id="wasteLogBox"></div>
+    </div>
+  </div>
+
+  <div id="ownerTab-history" style="display:none;">
+    <div class="card">
+      <div class="flex-between">
+        <div><label>From</label><input type="date" id="histFrom"></div>
+        <div><label>To</label><input type="date" id="histTo"></div>
+        <div style="align-self:flex-end;"><button class="btn-primary" style="width:auto;" onclick="loadHistory()">Run Report</button></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Charge Ledger</h2>
+      <p class="sub">Net payable per day = shortage charges minus overage credits (floored at ₱0).</p>
+      <div class="totals-bar">
+        <div class="box charge"><div class="amt" id="histTotalCharge">₱0</div><div class="lbl">Total charges (range)</div></div>
+        <div class="box credit"><div class="amt" id="histTotalCredit">₱0</div><div class="lbl">Total credits (range)</div></div>
+        <div class="box net"><div class="amt" id="histNet">₱0</div><div class="lbl">Net payable (range)</div></div>
+      </div>
+      <table><thead><tr><th>Date</th><th class="num">Shortage Charge</th><th class="num">Overage Credit</th><th class="num">Net</th></tr></thead><tbody id="histTbody"></tbody></table>
+      <div id="histEmpty" class="empty" style="display:none;">No data for this range yet.</div>
+    </div>
+    <div class="card">
+      <h2>By Item</h2>
+      <table><thead><tr><th>Item</th><th class="num">Total Shortage Charge</th><th class="num">Times Flagged</th></tr></thead><tbody id="histItemTbody"></tbody></table>
+      <div id="histItemEmpty" class="empty" style="display:none;">No data for this range yet.</div>
+    </div>
+  </div>
+
+</main>
+
+<div id="toast" class="toast"></div>
+
+<script>
+let db = null;
+let items = {};
+let crewList = {};
+let shortageRate = 69;
+let ownerPin = null;
+let currentBranchId = null;
+let currentBranchName = '';
+
+let currentCrew = null, pinBuffer = '', activeCheckpoint = null, submittedCheckpoints = {};
+let ownerPinBuffer = '';
+let dayCounts = {}, dayWaste = {};
+
+function bref(path){
+  return db.ref('branches/'+currentBranchId+(path ? '/'+path : ''));
+}
+
+function toast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), 2200);
+}
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+function fmt(n){ if(n===null||n===undefined||isNaN(n)) return '—'; return (Math.round(n*100)/100).toString(); }
+function peso(n){ return '₱' + fmt(Math.round(n*100)/100); }
+function todayStr(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+
+function showMain(id){
+  ['mainConnect','mainBranchPicker','mainRole','mainOwnerPin','mainCrew','mainOwner'].forEach(m=>{
+    document.getElementById(m).style.display = (m===id) ? 'block' : 'none';
+  });
+  document.getElementById('exitBtn').style.display = (id==='mainOwnerPin'||id==='mainCrew'||id==='mainOwner') ? 'inline-block' : 'none';
+  document.getElementById('changeBranchBtn').style.display = (id==='mainRole') ? 'inline-block' : 'none';
+}
+
+function goHome(){
+  currentCrew = null; pinBuffer=''; activeCheckpoint=null; ownerPinBuffer='';
+  showMain('mainRole');
+}
+
+function changeBranch(){
+  currentBranchId = null; currentBranchName = '';
+  localStorage.removeItem('chowtimeStockLastBranch');
+  document.getElementById('branchLabel').textContent = '';
+  showMain('mainBranchPicker');
+  loadBranchList();
+}
+
+/* ---------- CONNECT ---------- */
+function connectFirebase(){
+  const raw = document.getElementById('fbConfig').value.trim();
+  if(!raw){ toast('Paste Firebase config first'); return; }
+  let cfg;
+  try{ cfg = JSON.parse(raw); } catch(e){ toast('Invalid JSON'); return; }
+  try{
+    if(!firebase.apps.length){ firebase.initializeApp(cfg); }
+    db = firebase.database();
+    localStorage.setItem('chowtimeStockFirebaseConfig', raw);
+    showMain('mainBranchPicker');
+    loadBranchList();
+  }catch(e){ toast('Connection failed: '+e.message); }
+}
+
+/* ---------- BRANCH PICKER ---------- */
+function loadBranchList(){
+  db.ref('branchList').once('value').then(snap=>{
+    const val = snap.val() || {};
+    const box = document.getElementById('branchListBox');
+    box.innerHTML = '';
+    const keys = Object.keys(val);
+    document.getElementById('branchListEmpty').style.display = keys.length ? 'none' : 'block';
+    keys.sort().forEach(code=>{
+      const b = val[code];
+      const row = document.createElement('div');
+      row.className = 'branch-row';
+      row.onclick = ()=>selectBranch(code);
+      row.innerHTML = `<div><div class="code">${escapeHtml(code)}</div><div class="nm">${escapeHtml(b.name||'')}</div></div><div class="go">→</div>`;
+      box.appendChild(row);
+    });
+  });
+}
+
+function sanitizeBranchCode(raw){
+  return raw.trim().toUpperCase().replace(/[.#$\[\]\/\s]+/g,'-');
+}
+
+function addBranch(){
+  const codeRaw = document.getElementById('newBranchCode').value;
+  const name = document.getElementById('newBranchName').value.trim();
+  const code = sanitizeBranchCode(codeRaw);
+  if(!code){ toast('Enter a branch code'); return; }
+  if(!name){ toast('Enter a branch name'); return; }
+  db.ref('branchList/'+code).once('value').then(snap=>{
+    if(snap.exists()){ toast('That branch code already exists — select it below'); return; }
+    db.ref('branchList/'+code).set({name, createdAt: Date.now()}).then(()=>{
+      db.ref('branches/'+code+'/config/branchName').set(name).then(()=>{
+        toast('Branch added');
+        document.getElementById('newBranchCode').value='';
+        document.getElementById('newBranchName').value='';
+        selectBranch(code);
+      });
+    });
+  });
+}
+
+function selectBranch(code){
+  currentBranchId = code;
+  localStorage.setItem('chowtimeStockLastBranch', code);
+  Promise.all([
+    bref('config/branchName').once('value'),
+    bref('config/shortageRate').once('value'),
+    bref('config/ownerPin').once('value'),
+    bref('items').once('value'),
+    bref('crew').once('value')
+  ]).then(([bSnap, rSnap, pSnap, iSnap, cSnap])=>{
+    const branchName = bSnap.val();
+    currentBranchName = branchName || code;
+    shortageRate = rSnap.exists() ? rSnap.val() : 69;
+    ownerPin = pSnap.exists() ? pSnap.val() : null;
+    items = iSnap.val() || {};
+    crewList = cSnap.val() || {};
+    document.getElementById('branchLabel').textContent = currentBranchName + ' (' + code + ')';
+    document.getElementById('rateDisplay').textContent = shortageRate;
+    document.getElementById('branchName').value = branchName || '';
+    document.getElementById('shortageRateInput').value = shortageRate;
+    document.getElementById('ownerPinInput').value = ownerPin || '';
+
+    if(!ownerPin){
+      document.getElementById('roleBranchName').textContent = currentBranchName;
+      enterOwner();
+      toast('Welcome! Set your owner PIN to finish setting up this branch.');
+    } else {
+      document.getElementById('roleBranchName').textContent = currentBranchName;
+      showMain('mainRole');
+    }
+  });
+}
+
+/* ---------- ROLE PICKER ---------- */
+function enterCrew(){
+  showMain('mainCrew');
+  document.getElementById('dateLabel').textContent = new Date().toLocaleDateString('en-PH',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
+  buildPinpad();
+  refreshTodayStatus();
+}
+
+function enterOwnerPinGate(){
+  if(!ownerPin){ enterOwner(); return; }
+  ownerPinBuffer='';
+  showMain('mainOwnerPin');
+  buildOwnerPinpad();
+}
+
+function enterOwner(){
+  showMain('mainOwner');
+  loadItemsTable();
+  loadCrewTable();
+  document.getElementById('datePicker').value = todayStr();
+  const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate()-6);
+  document.getElementById('histFrom').value = weekAgo.toISOString().slice(0,10);
+  document.getElementById('histTo').value = todayStr();
+  switchOwnerTab('setup');
+  loadDay();
+}
+
+/* ---------- OWNER PIN GATE ---------- */
+function buildOwnerPinpad(){
+  const pad = document.getElementById('ownerPinpad');
+  pad.innerHTML='';
+  ['1','2','3','4','5','6','7','8','9','⌫','0','OK'].forEach(k=>{
+    const b=document.createElement('button'); b.textContent=k;
+    b.onclick=()=>ownerPinPress(k);
+    pad.appendChild(b);
+  });
+}
+function ownerPinPress(k){
+  if(k==='⌫'){ ownerPinBuffer = ownerPinBuffer.slice(0,-1); }
+  else if(k==='OK'){ checkOwnerPin(); return; }
+  else if(ownerPinBuffer.length < 6){ ownerPinBuffer += k; }
+  renderOwnerPinDisplay();
+  if(ownerPinBuffer.length === String(ownerPin).length) checkOwnerPin();
+}
+function renderOwnerPinDisplay(){
+  const box = document.getElementById('ownerPinDisplay');
+  box.innerHTML = '';
+  const len = Math.max(4, ownerPinBuffer.length);
+  for(let i=0;i<len;i++){
+    const s = document.createElement('span');
+    if(i < ownerPinBuffer.length) s.classList.add('filled');
+    box.appendChild(s);
+  }
+}
+function checkOwnerPin(){
+  if(ownerPinBuffer === String(ownerPin)){
+    enterOwner();
+  } else if(ownerPinBuffer.length >= String(ownerPin).length){
+    toast('Incorrect PIN');
+    setTimeout(()=>{ ownerPinBuffer=''; renderOwnerPinDisplay(); }, 500);
+  }
+}
+
+/* ---------- OWNER: SETUP TAB ---------- */
+function switchOwnerTab(name){
+  document.querySelectorAll('#mainOwner .tab').forEach(t=>t.classList.toggle('active', t.dataset.tab===name));
+  ['setup','daily','history'].forEach(t=>{
+    document.getElementById('ownerTab-'+t).style.display = (t===name)?'block':'none';
+  });
+}
+
+function saveBranch(){
+  const name = document.getElementById('branchName').value.trim();
+  const pin = document.getElementById('ownerPinInput').value.trim();
+  const rate = parseFloat(document.getElementById('shortageRateInput').value);
+  if(!name){ toast('Enter a branch name'); return; }
+  if(!/^\d{4,6}$/.test(pin)){ toast('Owner PIN must be 4–6 digits'); return; }
+  if(isNaN(rate) || rate < 0){ toast('Enter a valid shortage rate'); return; }
+  Promise.all([
+    bref('config/branchName').set(name),
+    bref('config/ownerPin').set(pin),
+    bref('config/shortageRate').set(rate),
+    db.ref('branchList/'+currentBranchId+'/name').set(name)
+  ]).then(()=>{
+    ownerPin = pin; shortageRate = rate; currentBranchName = name;
+    document.getElementById('branchLabel').textContent = name + ' (' + currentBranchId + ')';
+    document.getElementById('roleBranchName').textContent = name;
+    document.getElementById('rateDisplay').textContent = rate;
+    toast('Settings saved');
+  });
+}
+
+function loadItemsTable(){
+  bref('items').on('value', snap=>{
+    items = snap.val() || {};
+    const tbody = document.getElementById('itemsTbody');
+    tbody.innerHTML='';
+    const keys = Object.keys(items);
+    document.getElementById('itemsEmpty').style.display = keys.length?'none':'block';
+    keys.forEach(id=>{
+      const it = items[id];
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${escapeHtml(it.name)}</td><td>${escapeHtml(it.unit)}</td><td>${escapeHtml(it.category||'—')}</td>
+        <td class="item-actions"><button class="btn-danger" onclick="deleteItem('${id}')">Delete</button></td>`;
+      tbody.appendChild(tr);
+    });
+  });
+}
+function addItem(){
+  const name = document.getElementById('itemName').value.trim();
+  const unit = document.getElementById('itemUnit').value;
+  const category = document.getElementById('itemCategory').value.trim();
+  if(!name){ toast('Enter an item name'); return; }
+  bref('items').push().set({name, unit, category, createdAt: Date.now()}).then(()=>{
+    document.getElementById('itemName').value=''; document.getElementById('itemCategory').value='';
+    toast('Item added');
+  });
+}
+function deleteItem(id){
+  if(!confirm('Delete this item?')) return;
+  bref('items/'+id).remove().then(()=>toast('Item deleted'));
+}
+
+function loadCrewTable(){
+  bref('crew').on('value', snap=>{
+    crewList = snap.val() || {};
+    const tbody = document.getElementById('crewTbody');
+    tbody.innerHTML='';
+    const keys = Object.keys(crewList);
+    document.getElementById('crewEmpty').style.display = keys.length?'none':'block';
+    keys.forEach(id=>{
+      const c = crewList[id];
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${escapeHtml(c.name)}</td><td>${escapeHtml(c.shift)}</td><td class="pin">${escapeHtml(c.pin)}</td>
+        <td class="item-actions"><button class="btn-danger" onclick="deleteCrew('${id}')">Delete</button></td>`;
+      tbody.appendChild(tr);
+    });
+  });
+}
+function addCrew(){
+  const name = document.getElementById('crewName').value.trim();
+  const shift = document.getElementById('crewShift').value;
+  const pin = document.getElementById('crewPin').value.trim();
+  if(!name){ toast('Enter crew name'); return; }
+  if(!/^\d{4}$/.test(pin)){ toast('PIN must be exactly 4 digits'); return; }
+  bref('crew').push().set({name, shift, pin, createdAt: Date.now()}).then(()=>{
+    document.getElementById('crewName').value=''; document.getElementById('crewPin').value='';
+    toast('Crew added');
+  });
+}
+function deleteCrew(id){
+  if(!confirm('Delete this crew member?')) return;
+  bref('crew/'+id).remove().then(()=>toast('Crew deleted'));
+}
+
+/* ---------- OWNER: DAILY AUDIT TAB ---------- */
+function crewName(id){ return (crewList[id]&&crewList[id].name) || id || '—'; }
+
+function loadDay(){
+  const date = document.getElementById('datePicker').value;
+  Promise.all([bref('counts/'+date).once('value'), bref('waste/'+date).once('value')])
+  .then(([cSnap,wSnap])=>{
+    dayCounts = cSnap.val()||{}; dayWaste = wSnap.val()||{};
+    renderCheckpointSummary(); renderVarianceOwner(); renderWasteLogOwner();
+  });
+}
+function renderCheckpointSummary(){
+  const box = document.getElementById('checkpointSummary'); box.innerHTML='';
+  const straight = !dayCounts.handoff;
+  document.getElementById('straightBadge').innerHTML = straight && (dayCounts.open||dayCounts.close) ? '<span class="badge">Straight duty day</span>' : '';
+  ['open','handoff','close'].forEach(cp=>{
+    const d = dayCounts[cp];
+    const div = document.createElement('div'); div.className='cp-box';
+    div.innerHTML = d
+      ? `<div class="t">${cp}</div><div class="who">✓ ${escapeHtml(d.countedByName||crewName(d.countedBy))}</div><div class="time">${new Date(d.timestamp).toLocaleTimeString()}</div>`
+      : `<div class="t">${cp}</div><div class="who" style="color:var(--muted);">Not submitted</div>`;
+    box.appendChild(div);
+  });
+}
+function wasteMapForCheckpoint(cp){
+  const map={};
+  Object.values(dayWaste).forEach(w=>{ if(w.checkpoint===cp) map[w.itemId]=(map[w.itemId]||0)+parseFloat(w.qty||0); });
+  return map;
+}
+function renderVarianceOwner(){
+  const tbody = document.getElementById('varianceTbody'); tbody.innerHTML='';
+  let totalCharge=0, totalCredit=0, anyRows=false;
+  ['open','handoff','close'].forEach(cp=>{
+    const cpData = dayCounts[cp]; if(!cpData) return;
+    const wasteMap = wasteMapForCheckpoint(cp);
+    Object.entries(cpData.items||{}).forEach(([id,v])=>{
+      anyRows = true;
+      const waste = wasteMap[id]||0;
+      const net = (v.pos - v.freezer) - waste;
+      let cell, charge=0;
+      if(Math.abs(net)<0.001){ cell='<span class="variance-ok">0</span>'; }
+      else if(net>0){ cell=`<span class="variance-short">SHORT ${fmt(net)}</span>`; charge=net*shortageRate; totalCharge+=charge; }
+      else { cell=`<span class="variance-over">OVER ${fmt(-net)}</span>`; totalCredit += (-net)*shortageRate; }
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${escapeHtml(items[id]?items[id].name:id)}</td><td style="text-transform:capitalize;">${cp}</td>
+        <td class="num">${fmt(v.pos)}</td><td class="num">${fmt(v.freezer)}</td><td class="num">${fmt(waste)}</td>
+        <td class="num">${cell}</td><td class="num">${charge!==0?peso(charge):'—'}</td>`;
+      tbody.appendChild(tr);
+    });
+  });
+  document.getElementById('varianceEmpty').style.display = anyRows?'none':'block';
+  document.getElementById('totalChargeAmt2').textContent = peso(totalCharge);
+  document.getElementById('totalCreditAmt2').textContent = peso(totalCredit);
+  document.getElementById('netChargeAmt').textContent = peso(Math.max(0,totalCharge-totalCredit));
+}
+function renderWasteLogOwner(){
+  const box = document.getElementById('wasteLogBox');
+  const entries = Object.values(dayWaste).sort((a,b)=>a.timestamp-b.timestamp);
+  if(!entries.length){ box.innerHTML='<div class="empty">No waste logged for this date.</div>'; return; }
+  box.innerHTML = entries.map(w=>`<div class="waste-row"><strong>${escapeHtml(w.itemName)}</strong> — ${fmt(w.qty)} · ${escapeHtml(w.reason)} · ${escapeHtml(w.checkpoint||'')} · logged by ${escapeHtml(w.loggedByName)} at ${new Date(w.timestamp).toLocaleTimeString()}${w.note?' · "'+escapeHtml(w.note)+'"':''}</div>`).join('');
+}
+
+/* ---------- OWNER: HISTORY TAB ---------- */
+function dateRange(from,to){
+  const dates=[]; let d=new Date(from); const end=new Date(to);
+  while(d<=end){ dates.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')); d.setDate(d.getDate()+1); }
+  return dates;
+}
+function loadHistory(){
+  const from = document.getElementById('histFrom').value, to = document.getElementById('histTo').value;
+  if(!from||!to){ toast('Pick both dates'); return; }
+  const dates = dateRange(from,to);
+  const perDay={}, perItem={};
+  Promise.all(dates.map(date=>
+    Promise.all([bref('counts/'+date).once('value'), bref('waste/'+date).once('value')])
+    .then(([cSnap,wSnap])=>{
+      const counts=cSnap.val()||{}, wasteRaw=wSnap.val()||{};
+      let dayCharge=0, dayCredit=0;
+      ['open','handoff','close'].forEach(cp=>{
+        const cpData=counts[cp]; if(!cpData) return;
+        const wasteMap={};
+        Object.values(wasteRaw).forEach(w=>{ if(w.checkpoint===cp) wasteMap[w.itemId]=(wasteMap[w.itemId]||0)+parseFloat(w.qty||0); });
+        Object.entries(cpData.items||{}).forEach(([id,v])=>{
+          const waste = wasteMap[id]||0;
+          const net = (v.pos - v.freezer) - waste;
+          if(net>0.001){
+            const charge=net*shortageRate; dayCharge+=charge;
+            if(!perItem[id]) perItem[id]={charge:0,count:0};
+            perItem[id].charge+=charge; perItem[id].count+=1;
+          } else if(net<-0.001){ dayCredit += (-net)*shortageRate; }
+        });
+      });
+      if(dayCharge>0||dayCredit>0) perDay[date]={charge:dayCharge, credit:dayCredit};
+    })
+  )).then(()=>{
+    const tbody=document.getElementById('histTbody'); tbody.innerHTML='';
+    let totalCharge=0, totalCredit=0;
+    const rows = Object.entries(perDay).sort((a,b)=> a[0]<b[0]?-1:1);
+    document.getElementById('histEmpty').style.display = rows.length?'none':'block';
+    rows.forEach(([date,d])=>{
+      totalCharge+=d.charge; totalCredit+=d.credit;
+      const net = Math.max(0, d.charge-d.credit);
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${date}</td><td class="num variance-short">${peso(d.charge)}</td><td class="num variance-over">${peso(d.credit)}</td><td class="num"><strong>${peso(net)}</strong></td>`;
+      tbody.appendChild(tr);
+    });
+    document.getElementById('histTotalCharge').textContent = peso(totalCharge);
+    document.getElementById('histTotalCredit').textContent = peso(totalCredit);
+    document.getElementById('histNet').textContent = peso(Math.max(0,totalCharge-totalCredit));
+
+    const itemTbody = document.getElementById('histItemTbody'); itemTbody.innerHTML='';
+    const itemRows = Object.entries(perItem).sort((a,b)=>b[1].charge-a[1].charge);
+    document.getElementById('histItemEmpty').style.display = itemRows.length?'none':'block';
+    itemRows.forEach(([id,d])=>{
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${escapeHtml(items[id]?items[id].name:id)}</td><td class="num variance-short">${peso(d.charge)}</td><td class="num">${d.count}</td>`;
+      itemTbody.appendChild(tr);
+    });
+  });
+}
+
+/* ---------- CREW: PIN LOGIN ---------- */
+function buildPinpad(){
+  const pad = document.getElementById('pinpad'); pad.innerHTML='';
+  ['1','2','3','4','5','6','7','8','9','⌫','0','OK'].forEach(k=>{
+    const b=document.createElement('button'); b.textContent=k; b.onclick=()=>pinPress(k); pad.appendChild(b);
+  });
+}
+function pinPress(k){
+  if(k==='⌫'){ pinBuffer = pinBuffer.slice(0,-1); }
+  else if(k==='OK'){ tryLogin(); return; }
+  else if(pinBuffer.length<4){ pinBuffer += k; }
+  renderPinDisplay();
+  if(pinBuffer.length===4) tryLogin();
+}
+function renderPinDisplay(){
+  document.querySelectorAll('#pindisplay span').forEach((s,i)=> s.classList.toggle('filled', i<pinBuffer.length));
+}
+function tryLogin(){
+  const found = Object.entries(crewList).find(([id,c])=>c.pin===pinBuffer);
+  if(found){
+    currentCrew = {id: found[0], ...found[1]};
+    document.getElementById('loginCard').style.display='none';
+    document.getElementById('mainFlow').style.display='block';
+    document.getElementById('crewNameLabel').textContent = currentCrew.name;
+    document.getElementById('crewShiftLabel').textContent = currentCrew.shift;
+    renderCheckpoints();
+  } else if(pinBuffer.length===4){
+    toast('PIN not recognized');
+    setTimeout(()=>{ pinBuffer=''; renderPinDisplay(); }, 500);
+  }
+}
+function logoutCrew(){
+  currentCrew=null; pinBuffer=''; activeCheckpoint=null;
+  renderPinDisplay();
+  document.getElementById('loginCard').style.display='block';
+  document.getElementById('mainFlow').style.display='none';
+  document.getElementById('countCard').style.display='none';
+  document.getElementById('resultCard').style.display='none';
+}
+
+/* ---------- CREW: CHECKPOINTS ---------- */
+function suggestedCheckpoint(){ const h=new Date().getHours(); if(h<12) return 'open'; if(h<18) return 'handoff'; return 'close'; }
+function refreshTodayStatus(){
+  bref('counts/'+todayStr()).once('value').then(s=>{
+    const val = s.val()||{}; submittedCheckpoints={};
+    Object.keys(val).forEach(cp=>submittedCheckpoints[cp]=true);
+    renderCheckpoints();
+  });
+}
+function renderCheckpoints(){
+  const straight = document.getElementById('straightDuty').checked;
+  const row = document.getElementById('checkRow'); row.innerHTML='';
+  let cps = [{id:'open',lbl:'Open',time:'~9:00 AM'},{id:'handoff',lbl:'Handoff',time:'~6:00 PM'},{id:'close',lbl:'Close',time:'~9:00 PM'}];
+  if(straight) cps = cps.filter(c=>c.id!=='handoff');
+  const suggested = suggestedCheckpoint();
+  cps.forEach(c=>{
+    const isDone = !!submittedCheckpoints[c.id];
+    const div = document.createElement('div');
+    div.className = 'checkbtn'+(activeCheckpoint===c.id?' active':'')+(isDone?' done':'');
+    div.innerHTML = `<div class="lbl">${c.lbl}</div><div class="time">${c.time}</div>${isDone?'<div class="done-mark">✓ Submitted</div>':''}`;
+    div.onclick = ()=>selectCheckpoint(c.id);
+    row.appendChild(div);
+  });
+  if(!activeCheckpoint) selectCheckpoint(suggested==='handoff'&&straight?'close':suggested);
+}
+function selectCheckpoint(id){
+  activeCheckpoint = id;
+  renderCheckpoints();
+  const labels = {open:'Open (9AM)', handoff:'Handoff (6PM)', close:'Close (9PM)'};
+  document.getElementById('activeCheckpointLabel').textContent = labels[id]||id;
+  document.getElementById('countCard').style.display='block';
+  document.getElementById('resultCard').style.display='none';
+  renderItemsList();
+}
+function renderItemsList(){
+  const list = document.getElementById('itemsList'); list.innerHTML='';
+  const keys = Object.keys(items);
+  if(!keys.length){ list.innerHTML='<p class="sub">No items in catalog yet. Ask the owner to add items in Setup.</p>'; return; }
+  keys.forEach(id=>{
+    const it = items[id];
+    const block = document.createElement('div'); block.className='item-block';
+    block.innerHTML = `<div class="name">${escapeHtml(it.name)} <span class="unit">(${escapeHtml(it.unit)})</span></div>
+      <div class="dual-input">
+        <div class="field"><label>POS Stock</label><input type="number" min="0" step="any" data-item="${id}" data-field="pos" placeholder="0"></div>
+        <div class="field"><label>Freezer Count</label><input type="number" min="0" step="any" data-item="${id}" data-field="freezer" placeholder="0"></div>
+      </div>`;
+    list.appendChild(block);
+  });
+  const sel = document.getElementById('wasteItemSelect');
+  sel.innerHTML = keys.map(id=>`<option value="${id}">${escapeHtml(items[id].name)}</option>`).join('');
+  renderWasteLogCrew();
+}
+function getWasteForCheckpoint(cp, cb){
+  bref('waste/'+todayStr()).once('value').then(s=>{
+    const val = s.val()||{}; const map={};
+    Object.values(val).forEach(w=>{ if(w.checkpoint===cp) map[w.itemId]=(map[w.itemId]||0)+parseFloat(w.qty||0); });
+    cb(map);
+  });
+}
+function submitCount(){
+  const posInputs = document.querySelectorAll('#itemsList input[data-field="pos"]');
+  const values={}; let filled=0;
+  posInputs.forEach(inp=>{
+    const id = inp.dataset.item;
+    const freezerInp = document.querySelector(`#itemsList input[data-item="${id}"][data-field="freezer"]`);
+    const posV = inp.value, frzV = freezerInp.value;
+    if(posV!==''&&frzV!==''){ values[id] = {pos: parseFloat(posV), freezer: parseFloat(frzV)}; filled++; }
+  });
+  if(filled===0){ toast('Enter at least one item'); return; }
+  if(filled < posInputs.length){ if(!confirm(`You only completed ${filled} of ${posInputs.length} items. Submit anyway?`)) return; }
+  const payload = { items: values, countedBy: currentCrew.id, countedByName: currentCrew.name, timestamp: Date.now() };
+  bref('counts/'+todayStr()+'/'+activeCheckpoint).set(payload).then(()=>{
+    toast('Count submitted');
+    submittedCheckpoints[activeCheckpoint]=true;
+    renderCheckpoints();
+    document.getElementById('countStatusLine').textContent = 'Submitted at '+new Date().toLocaleTimeString();
+    showResult(values);
+  }).catch(e=>toast('Error: '+e.message));
+}
+function showResult(values){
+  getWasteForCheckpoint(activeCheckpoint, wasteMap=>{
+    const list = document.getElementById('resultList'); list.innerHTML='';
+    let totalCharge=0, totalCredit=0;
+    Object.entries(values).forEach(([id,v])=>{
+      const waste = wasteMap[id]||0;
+      const net = (v.pos-v.freezer)-waste;
+      let tag, cls;
+      if(Math.abs(net)<0.001){ tag='OK'; cls='tag-ok'; }
+      else if(net>0){ tag='SHORT '+fmt(net); cls='tag-short'; totalCharge += net*shortageRate; }
+      else { tag='OVER '+fmt(-net); cls='tag-over'; totalCredit += (-net)*shortageRate; }
+      const row = document.createElement('div'); row.className='result-row';
+      row.innerHTML = `<div>${escapeHtml(items[id].name)}</div><div class="result-tag ${cls}">${tag}</div>`;
+      list.appendChild(row);
+    });
+    document.getElementById('totalChargeAmt').textContent = '₱'+fmt(totalCharge);
+    document.getElementById('totalCreditAmt').textContent = '₱'+fmt(totalCredit);
+    document.getElementById('resultCard').style.display='block';
+  });
+}
+function logWaste(){
+  const itemId = document.getElementById('wasteItemSelect').value;
+  const qty = parseFloat(document.getElementById('wasteQty').value);
+  const reason = document.getElementById('wasteReason').value;
+  const note = document.getElementById('wasteNote').value.trim();
+  if(!itemId){ toast('No item selected'); return; }
+  if(!qty||qty<=0){ toast('Enter a valid quantity'); return; }
+  bref('waste/'+todayStr()).push().set({
+    itemId, itemName: items[itemId]?items[itemId].name:itemId, qty, reason, note,
+    checkpoint: activeCheckpoint, loggedBy: currentCrew.id, loggedByName: currentCrew.name, timestamp: Date.now()
+  }).then(()=>{
+    toast('Waste logged');
+    document.getElementById('wasteQty').value=''; document.getElementById('wasteNote').value='';
+    renderWasteLogCrew();
+  });
+}
+function renderWasteLogCrew(){
+  bref('waste/'+todayStr()).once('value').then(s=>{
+    const val = s.val()||{}; const box = document.getElementById('wasteLogToday');
+    const entries = Object.entries(val).sort((a,b)=>b[1].timestamp-a[1].timestamp);
+    if(!entries.length){ box.innerHTML='<p class="sub">No waste logged today yet.</p>'; return; }
+    box.innerHTML = '<p class="sub" style="margin-bottom:8px;">Today\'s waste log:</p>' + entries.map(([id,w])=>
+      `<div class="waste-item"><strong>${escapeHtml(w.itemName)}</strong> — ${w.qty} (${escapeHtml(w.reason)})<br><small>${escapeHtml(w.loggedByName)} · ${new Date(w.timestamp).toLocaleTimeString()}${w.note?' · '+escapeHtml(w.note):''}</small></div>`
+    ).join('');
+  });
+}
+
+/* ---------- BOOT ---------- */
+window.addEventListener('load', ()=>{
+  const saved = localStorage.getItem('chowtimeStockFirebaseConfig');
+  if(saved){
+    document.getElementById('fbConfig').value = saved;
+    connectFirebase();
+    const lastBranch = localStorage.getItem('chowtimeStockLastBranch');
+    if(lastBranch && db){ selectBranch(lastBranch); }
+  }
+});
+</script>
+</body>
+</html>
