@@ -126,6 +126,17 @@
   .branch-row .nm{font-size:12px;color:var(--muted);margin-top:2px;}
   .branch-row .go{font-size:18px;color:var(--maroon);}
   .switch-branch{background:transparent;color:#fff;border:1px solid rgba(255,255,255,.4);padding:6px 12px;border-radius:20px;font-size:12px;font-weight:700;cursor:pointer;}
+
+  /* per-cutoff report */
+  .cutoff-section{border:1px solid var(--border);border-radius:12px;margin-bottom:16px;overflow:hidden;}
+  .cutoff-head{background:#FAF8F5;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;border-bottom:1px solid var(--border);}
+  .cutoff-head .cp-name{font-weight:800;color:var(--maroon-dark);font-size:14px;text-transform:uppercase;letter-spacing:.4px;}
+  .cutoff-head .cp-who{font-size:12.5px;color:var(--muted);}
+  .cutoff-body{padding:6px 16px;}
+  .edit-input{width:70px;padding:6px;font-size:13px;text-align:center;}
+  .cutoff-foot{padding:10px 16px;display:flex;justify-content:space-between;align-items:center;background:#FAF8F5;border-top:1px solid var(--border);}
+  .cutoff-foot .save-btn{width:auto;padding:8px 16px;font-size:12.5px;}
+  .cutoff-foot .cp-status{font-size:11.5px;color:var(--muted);}
 </style>
 </head>
 <body>
@@ -186,8 +197,9 @@
   <div class="card" style="text-align:center;">
     <h2>Owner PIN</h2>
     <p class="sub">Enter your owner PIN to continue.</p>
-    <div class="pindisplay" id="ownerPinDisplay"><span></span><span></span><span></span><span></span></div>
-    <div class="pinpad" id="ownerPinpad"></div>
+    <input id="ownerPinGateInput" maxlength="8" placeholder="8 characters" style="text-align:center;font-size:18px;letter-spacing:3px;" onkeydown="if(event.key==='Enter') checkOwnerPin();">
+    <button class="btn-primary" style="margin-top:14px;" onclick="checkOwnerPin()">Unlock</button>
+    <p class="hint" id="ownerPinGateStatus" style="color:var(--danger);"></p>
   </div>
 </main>
 
@@ -289,7 +301,7 @@
       <label>Branch name</label>
       <input id="branchName" placeholder="e.g. Chowtime SM Pampanga">
       <label>Owner PIN (protects this dashboard)</label>
-      <input id="ownerPinInput" maxlength="8" inputmode="numeric" placeholder="8 digits">
+      <input id="ownerPinInput" maxlength="8" placeholder="8 characters, letters or numbers">
       <label>Shortage charge (₱ per unit lost)</label>
       <input id="shortageRateInput" type="number" min="0" step="any" placeholder="69">
       <p class="hint">Applied per unit when POS stock is higher than the physical freezer count. Overages at the same rate get deducted from total charges.</p>
@@ -340,9 +352,9 @@
       <div class="checkpoint-summary" id="checkpointSummary"></div>
     </div>
     <div class="card">
-      <h2>Variance Report</h2>
-      <p class="sub">Variance = POS Stock − Freezer Count − waste logged for that checkpoint. Red = shortage (charged). Orange = overage (credited).</p>
-      <table><thead><tr><th>Item</th><th>Checkpoint</th><th class="num">POS</th><th class="num">Freezer</th><th class="num">Waste</th><th class="num">Variance</th><th class="num">Charge</th></tr></thead><tbody id="varianceTbody"></tbody></table>
+      <h2>Variance Report — Per Cutoff</h2>
+      <p class="sub">Variance = POS Stock − Freezer Count − waste logged for that checkpoint. Red = shortage (charged). Orange = overage (credited). Numbers are editable if a crew member mis-typed something — edit and press Save Corrections.</p>
+      <div id="varianceContainer"></div>
       <div id="varianceEmpty" class="empty" style="display:none;">Crew hasn't submitted counts for this date yet.</div>
       <div class="totals-bar">
         <div class="box charge"><div class="amt" id="totalChargeAmt2">₱0</div><div class="lbl">Total shortage charge</div></div>
@@ -537,9 +549,10 @@ function enterCrew(){
 
 function enterOwnerPinGate(){
   if(!ownerPin){ enterOwner(); return; }
-  ownerPinBuffer='';
   showMain('mainOwnerPin');
-  buildOwnerPinpad();
+  document.getElementById('ownerPinGateInput').value = '';
+  document.getElementById('ownerPinGateStatus').textContent = '';
+  setTimeout(()=>document.getElementById('ownerPinGateInput').focus(), 100);
 }
 
 function enterOwner(){
@@ -555,38 +568,14 @@ function enterOwner(){
 }
 
 /* ---------- OWNER PIN GATE ---------- */
-function buildOwnerPinpad(){
-  const pad = document.getElementById('ownerPinpad');
-  pad.innerHTML='';
-  ['1','2','3','4','5','6','7','8','9','⌫','0','OK'].forEach(k=>{
-    const b=document.createElement('button'); b.textContent=k;
-    b.onclick=()=>ownerPinPress(k);
-    pad.appendChild(b);
-  });
-}
-function ownerPinPress(k){
-  if(k==='⌫'){ ownerPinBuffer = ownerPinBuffer.slice(0,-1); }
-  else if(k==='OK'){ checkOwnerPin(); return; }
-  else if(ownerPinBuffer.length < 8){ ownerPinBuffer += k; }
-  renderOwnerPinDisplay();
-  if(ownerPinBuffer.length === String(ownerPin).length) checkOwnerPin();
-}
-function renderOwnerPinDisplay(){
-  const box = document.getElementById('ownerPinDisplay');
-  box.innerHTML = '';
-  const len = Math.max(4, ownerPinBuffer.length);
-  for(let i=0;i<len;i++){
-    const s = document.createElement('span');
-    if(i < ownerPinBuffer.length) s.classList.add('filled');
-    box.appendChild(s);
-  }
-}
 function checkOwnerPin(){
-  if(ownerPinBuffer === String(ownerPin)){
+  const entered = document.getElementById('ownerPinGateInput').value;
+  if(entered === String(ownerPin)){
     enterOwner();
-  } else if(ownerPinBuffer.length >= String(ownerPin).length){
-    toast('Incorrect PIN');
-    setTimeout(()=>{ ownerPinBuffer=''; renderOwnerPinDisplay(); }, 500);
+  } else {
+    document.getElementById('ownerPinGateStatus').textContent = 'Incorrect PIN — try again.';
+    document.getElementById('ownerPinGateInput').value = '';
+    document.getElementById('ownerPinGateInput').focus();
   }
 }
 
@@ -605,7 +594,7 @@ function saveBranch(){
   const statusEl = document.getElementById('branchSaveStatus');
   statusEl.style.color = 'var(--danger)';
   if(!name){ toast('Enter a branch name'); statusEl.textContent = 'Not saved: branch name is empty.'; return; }
-  if(!/^\d{8}$/.test(pin)){ toast('Owner PIN must be exactly 8 digits'); statusEl.textContent = `Not saved: PIN must be exactly 8 digits (you entered ${pin.length}).`; return; }
+  if(!/^[A-Za-z0-9]{8}$/.test(pin)){ toast('Owner PIN must be exactly 8 characters (letters and/or numbers)'); statusEl.textContent = `Not saved: PIN must be exactly 8 letters/numbers, no spaces or symbols (you entered "${pin}").`; return; }
   if(isNaN(rate) || rate < 0){ toast('Enter a valid shortage rate'); statusEl.textContent = 'Not saved: shortage rate is invalid.'; return; }
   Promise.all([
     bref('config/branchName').set(name),
@@ -735,30 +724,76 @@ function wasteMapForCheckpoint(cp){
   return map;
 }
 function renderVarianceOwner(){
-  const tbody = document.getElementById('varianceTbody'); tbody.innerHTML='';
-  let totalCharge=0, totalCredit=0, anyRows=false;
+  const container = document.getElementById('varianceContainer'); container.innerHTML='';
+  let totalCharge=0, totalCredit=0, anySections=false;
+  const cpLabels = {open:'Open (9AM)', handoff:'Handoff (6PM)', close:'Close (9PM)'};
+
   ['open','handoff','close'].forEach(cp=>{
     const cpData = dayCounts[cp]; if(!cpData) return;
+    anySections = true;
     const wasteMap = wasteMapForCheckpoint(cp);
+    const section = document.createElement('div');
+    section.className = 'cutoff-section';
+
+    let rowsHtml = `<table><thead><tr><th>Item</th><th class="num">POS</th><th class="num">Freezer</th><th class="num">Waste</th><th class="num">Variance</th><th class="num">Charge</th></tr></thead><tbody>`;
     Object.entries(cpData.items||{}).forEach(([id,v])=>{
-      anyRows = true;
       const waste = wasteMap[id]||0;
       const net = (v.pos - v.freezer) - waste;
       let cell, charge=0;
       if(Math.abs(net)<0.001){ cell='<span class="variance-ok">0</span>'; }
       else if(net>0){ cell=`<span class="variance-short">SHORT ${fmt(net)}</span>`; charge=net*itemRate(id); totalCharge+=charge; }
       else { cell=`<span class="variance-over">OVER ${fmt(-net)}</span>`; totalCredit += (-net)*itemRate(id); }
-      const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${escapeHtml(items[id]?items[id].name:id)}</td><td style="text-transform:capitalize;">${cp}</td>
-        <td class="num">${fmt(v.pos)}</td><td class="num">${fmt(v.freezer)}</td><td class="num">${fmt(waste)}</td>
-        <td class="num">${cell}</td><td class="num">${charge!==0?peso(charge):'—'}</td>`;
-      tbody.appendChild(tr);
+      rowsHtml += `<tr>
+        <td>${escapeHtml(items[id]?items[id].name:id)}</td>
+        <td class="num"><input class="edit-input" type="number" step="any" data-cp="${cp}" data-item="${id}" data-field="pos" value="${v.pos}"></td>
+        <td class="num"><input class="edit-input" type="number" step="any" data-cp="${cp}" data-item="${id}" data-field="freezer" value="${v.freezer}"></td>
+        <td class="num">${fmt(waste)}</td>
+        <td class="num">${cell}</td>
+        <td class="num">${charge!==0?peso(charge):'—'}</td>
+      </tr>`;
     });
+    rowsHtml += `</tbody></table>`;
+
+    section.innerHTML = `
+      <div class="cutoff-head">
+        <div><div class="cp-name">${cpLabels[cp]||cp}</div><div class="cp-who">Counted by ${escapeHtml(cpData.countedByName||crewName(cpData.countedBy))} at ${new Date(cpData.timestamp).toLocaleTimeString()}${cpData.corrected?' · corrected by owner at '+new Date(cpData.correctedAt).toLocaleTimeString():''}</div></div>
+      </div>
+      <div class="cutoff-body">${rowsHtml}</div>
+      <div class="cutoff-foot">
+        <button class="btn-gold save-btn" onclick="saveCorrections('${cp}')">Save Corrections</button>
+        <span class="cp-status" id="cpStatus-${cp}"></span>
+      </div>`;
+    container.appendChild(section);
   });
-  document.getElementById('varianceEmpty').style.display = anyRows?'none':'block';
+
+  document.getElementById('varianceEmpty').style.display = anySections?'none':'block';
   document.getElementById('totalChargeAmt2').textContent = peso(totalCharge);
   document.getElementById('totalCreditAmt2').textContent = peso(totalCredit);
   document.getElementById('netChargeAmt').textContent = peso(Math.max(0,totalCharge-totalCredit));
+}
+
+function saveCorrections(cp){
+  const statusEl = document.getElementById('cpStatus-'+cp);
+  const inputs = document.querySelectorAll(`.edit-input[data-cp="${cp}"]`);
+  const newItems = {};
+  inputs.forEach(inp=>{
+    const id = inp.dataset.item, field = inp.dataset.field;
+    if(!newItems[id]) newItems[id] = {};
+    newItems[id][field] = parseFloat(inp.value);
+  });
+  const invalid = Object.values(newItems).some(v => isNaN(v.pos) || isNaN(v.freezer));
+  if(invalid){ statusEl.textContent = 'Not saved: all POS/Freezer fields must be numbers.'; statusEl.style.color='var(--danger)'; return; }
+  statusEl.textContent = 'Saving…'; statusEl.style.color='var(--muted)';
+  Promise.all([
+    bref('counts/'+document.getElementById('datePicker').value+'/'+cp+'/items').set(newItems),
+    bref('counts/'+document.getElementById('datePicker').value+'/'+cp+'/corrected').set(true),
+    bref('counts/'+document.getElementById('datePicker').value+'/'+cp+'/correctedAt').set(Date.now())
+  ]).then(()=>{
+    statusEl.textContent = '✓ Corrections saved'; statusEl.style.color='var(--good)';
+    loadDay();
+  }).catch(e=>{
+    statusEl.textContent = 'Error: '+e.message; statusEl.style.color='var(--danger)';
+  });
 }
 function renderWasteLogOwner(){
   const box = document.getElementById('wasteLogBox');
