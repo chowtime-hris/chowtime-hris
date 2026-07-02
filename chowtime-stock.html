@@ -322,7 +322,8 @@
         <div><label>Pricing: units per charge</label><input id="itemPackSize" type="number" min="1" step="any" placeholder="e.g. 5" value="1"></div>
         <div><label>Pricing: ₱ per charge</label><input id="itemPackCost" type="number" min="0" step="any" placeholder="e.g. 69"></div>
         <div><label>Freezer: units per physical pack</label><input id="itemFreezerPackSize" type="number" min="1" step="any" placeholder="e.g. 10 (blank = no packs)"></div>
-        <div style="flex:0 0 auto;"><button class="btn-primary" style="width:auto;" onclick="addItem()">+ Add Item</button></div>
+        <div style="flex:0 0 auto;"><button class="btn-primary" id="addItemBtn" style="width:auto;" onclick="addItem()">+ Add Item</button></div>
+        <div style="flex:0 0 auto;display:none;" id="cancelEditWrap"><button class="btn-ghost" style="width:auto;" onclick="cancelEditItem()">Cancel Edit</button></div>
       </div>
       <p class="hint">
         <strong>Pricing</strong> (for charges): e.g. Chicken Nuggets, 5 units = ₱69 → charges ₱13.80 per piece short. Leave ₱ blank to use the default rate (₱<span id="defaultRateHint">69</span>/unit).<br>
@@ -406,6 +407,7 @@
 
 <script>
 let db = null;
+let editingItemId = null;
 let items = {};
 let crewList = {};
 let shortageRate = 69;
@@ -647,10 +649,34 @@ function loadItemsTable(){
       tr.innerHTML = `<td>${escapeHtml(it.name)}${it.archived?' <small style="color:var(--muted);">(archived)</small>':''}</td><td>${escapeHtml(it.unit)}</td><td>${escapeHtml(it.category||'—')}</td>
         <td class="num">₱${fmt(rate)}${isCustom?'':' <small style="color:var(--muted);">(default)</small>'}</td>
         <td class="num">${fps>1 ? fps+' '+escapeHtml(it.unit)+'/pack' : '—'}</td>
-        <td class="item-actions">${it.archived ? `<button class="btn-ghost" onclick="restoreItem('${id}')">Restore</button>` : `<button class="btn-danger" onclick="deleteItem('${id}')">Archive</button>`}</td>`;
+        <td class="item-actions">
+          <button class="btn-ghost" onclick="editItem('${id}')">Edit</button>
+          ${it.archived ? `<button class="btn-ghost" onclick="restoreItem('${id}')">Restore</button>` : `<button class="btn-danger" onclick="deleteItem('${id}')">Archive</button>`}
+        </td>`;
       tbody.appendChild(tr);
     });
   });
+}
+function editItem(id){
+  const it = items[id];
+  editingItemId = id;
+  document.getElementById('itemName').value = it.name || '';
+  document.getElementById('itemUnit').value = it.unit || 'pcs';
+  document.getElementById('itemCategory').value = it.category || '';
+  document.getElementById('itemPackSize').value = it.packSize || 1;
+  document.getElementById('itemPackCost').value = (it.packCost !== undefined && it.packCost !== null) ? it.packCost : '';
+  document.getElementById('itemFreezerPackSize').value = (it.freezerPackSize !== undefined && it.freezerPackSize !== null) ? it.freezerPackSize : '';
+  document.getElementById('addItemBtn').textContent = 'Save Changes';
+  document.getElementById('cancelEditWrap').style.display = 'block';
+  document.getElementById('itemName').scrollIntoView({behavior:'smooth', block:'center'});
+}
+function cancelEditItem(){
+  editingItemId = null;
+  document.getElementById('itemName').value=''; document.getElementById('itemCategory').value='';
+  document.getElementById('itemPackSize').value='1'; document.getElementById('itemPackCost').value='';
+  document.getElementById('itemFreezerPackSize').value='';
+  document.getElementById('addItemBtn').textContent = '+ Add Item';
+  document.getElementById('cancelEditWrap').style.display = 'none';
 }
 function addItem(){
   const name = document.getElementById('itemName').value.trim();
@@ -662,6 +688,16 @@ function addItem(){
   const freezerPackSizeRaw = document.getElementById('itemFreezerPackSize').value;
   const freezerPackSize = freezerPackSizeRaw !== '' ? parseFloat(freezerPackSizeRaw) : null;
   if(!name){ toast('Enter an item name'); return; }
+
+  if(editingItemId){
+    const id = editingItemId;
+    bref('items/'+id).update({name, unit, category, packSize, packCost, freezerPackSize}).then(()=>{
+      toast('Item updated');
+      cancelEditItem();
+    });
+    return;
+  }
+
   bref('items').push().set({name, unit, category, packSize, packCost, freezerPackSize, archived: false, createdAt: Date.now()}).then(()=>{
     document.getElementById('itemName').value=''; document.getElementById('itemCategory').value='';
     document.getElementById('itemPackSize').value='1'; document.getElementById('itemPackCost').value='';
