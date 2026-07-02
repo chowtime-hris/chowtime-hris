@@ -310,6 +310,16 @@
     </div>
 
     <div class="card">
+      <h2>Copy Items from Another Branch</h2>
+      <p class="sub">If your branches share the same item catalog, copy it here instead of retyping everything. Existing items with the same name are skipped — this won't duplicate.</p>
+      <div class="row">
+        <div style="flex:2;"><label>Copy from</label><select id="copyFromBranchSelect"><option value="">Loading branches…</option></select></div>
+        <div style="flex:0 0 auto;"><button class="btn-primary" style="width:auto;" onclick="copyItemsFromBranch()">Copy Items</button></div>
+      </div>
+      <div class="status-line" id="copyItemsStatus"></div>
+    </div>
+
+    <div class="card">
       <h2>Freezer Item Catalog</h2>
       <div class="row">
         <div><label>Item name</label><input id="itemName" placeholder="e.g. Chicken Nuggets"></div>
@@ -567,6 +577,7 @@ function enterOwner(){
   showMain('mainOwner');
   loadItemsTable();
   loadCrewTable();
+  loadCopyFromBranchOptions();
   document.getElementById('datePicker').value = todayStr();
   const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate()-6);
   document.getElementById('histFrom').value = weekAgo.toISOString().slice(0,10);
@@ -711,6 +722,41 @@ function deleteItem(id){
 }
 function restoreItem(id){
   bref('items/'+id+'/archived').set(false).then(()=>toast('Item restored'));
+}
+
+function loadCopyFromBranchOptions(){
+  const sel = document.getElementById('copyFromBranchSelect');
+  db.ref('branchList').once('value').then(snap=>{
+    const val = snap.val() || {};
+    const codes = Object.keys(val).filter(c => c !== currentBranchId).sort();
+    if(!codes.length){ sel.innerHTML = '<option value="">No other branches yet</option>'; return; }
+    sel.innerHTML = '<option value="">Select a branch…</option>' + codes.map(c=>`<option value="${c}">${escapeHtml(val[c].name||c)} (${c})</option>`).join('');
+  });
+}
+
+function copyItemsFromBranch(){
+  const fromCode = document.getElementById('copyFromBranchSelect').value;
+  const statusEl = document.getElementById('copyItemsStatus');
+  if(!fromCode){ statusEl.style.color='var(--danger)'; statusEl.textContent = 'Pick a branch to copy from first.'; return; }
+  statusEl.style.color='var(--muted)'; statusEl.textContent = 'Copying…';
+  db.ref('branches/'+fromCode+'/items').once('value').then(snap=>{
+    const sourceItems = snap.val() || {};
+    const existingNames = new Set(Object.values(items).map(it => (it.name||'').trim().toLowerCase()));
+    const toCopy = Object.values(sourceItems).filter(it => !it.archived && !existingNames.has((it.name||'').trim().toLowerCase()));
+    if(!toCopy.length){ statusEl.style.color='var(--muted)'; statusEl.textContent = 'Nothing to copy — all items already exist here, or the source branch has no active items.'; return; }
+    const writes = toCopy.map(it => bref('items').push().set({
+      name: it.name, unit: it.unit, category: it.category || '',
+      packSize: it.packSize || 1, packCost: (it.packCost !== undefined ? it.packCost : null),
+      freezerPackSize: (it.freezerPackSize !== undefined ? it.freezerPackSize : null),
+      archived: false, createdAt: Date.now()
+    }));
+    Promise.all(writes).then(()=>{
+      statusEl.style.color='var(--good)';
+      statusEl.textContent = `✓ Copied ${toCopy.length} item(s). ${Object.keys(sourceItems).length - toCopy.length ? (Object.keys(sourceItems).length - toCopy.length) + ' skipped (already existed or archived).' : ''}`;
+    }).catch(e=>{
+      statusEl.style.color='var(--danger)'; statusEl.textContent = 'Error: '+e.message;
+    });
+  });
 }
 
 function loadCrewTable(){
