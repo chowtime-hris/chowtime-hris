@@ -204,7 +204,24 @@
   <div id="mainFlow" style="display:none;">
     <div class="whoami">
       <span>👤 <strong id="crewNameLabel"></strong> · <span id="crewShiftLabel"></span> shift</span>
-      <button onclick="logoutCrew()">Switch user</button>
+      <div style="display:flex;gap:6px;">
+        <button onclick="toggleChangePin()" style="color:var(--maroon-dark);border-color:var(--maroon-dark);">Change PIN</button>
+        <button onclick="logoutCrew()">Switch user</button>
+      </div>
+    </div>
+
+    <div class="card" id="changePinCard" style="display:none;">
+      <h2>Change My PIN</h2>
+      <p class="sub">Pick a new 4-digit PIN. The owner can still see it in Setup.</p>
+      <label>New PIN</label>
+      <input id="newPinInput" type="tel" maxlength="4" inputmode="numeric" placeholder="1234">
+      <label>Confirm New PIN</label>
+      <input id="confirmPinInput" type="tel" maxlength="4" inputmode="numeric" placeholder="1234">
+      <div class="row" style="margin-top:12px;">
+        <button class="btn-primary" onclick="saveNewPin()">Save New PIN</button>
+        <button class="btn-ghost" onclick="toggleChangePin()">Cancel</button>
+      </div>
+      <div class="status-line" id="changePinStatus"></div>
     </div>
 
     <div class="card">
@@ -272,7 +289,7 @@
       <label>Branch name</label>
       <input id="branchName" placeholder="e.g. Chowtime SM Pampanga">
       <label>Owner PIN (protects this dashboard)</label>
-      <input id="ownerPinInput" maxlength="6" inputmode="numeric" placeholder="4–6 digits">
+      <input id="ownerPinInput" maxlength="8" inputmode="numeric" placeholder="8 digits">
       <label>Shortage charge (₱ per unit lost)</label>
       <input id="shortageRateInput" type="number" min="0" step="any" placeholder="69">
       <p class="hint">Applied per unit when POS stock is higher than the physical freezer count. Overages at the same rate get deducted from total charges.</p>
@@ -282,14 +299,17 @@
     <div class="card">
       <h2>Freezer Item Catalog</h2>
       <div class="row">
-        <div><label>Item name</label><input id="itemName" placeholder="e.g. Chicken Thigh (raw)"></div>
+        <div><label>Item name</label><input id="itemName" placeholder="e.g. Chicken Nuggets"></div>
         <div><label>Unit</label>
           <select id="itemUnit"><option>pcs</option><option>kg</option><option>pack</option><option>tray</option><option>box</option><option>L</option><option>g</option></select>
         </div>
         <div><label>Category</label><input id="itemCategory" placeholder="e.g. Meat"></div>
+        <div><label>Pack size (units)</label><input id="itemPackSize" type="number" min="1" step="any" placeholder="e.g. 5" value="1"></div>
+        <div><label>Pack cost (₱)</label><input id="itemPackCost" type="number" min="0" step="any" placeholder="e.g. 69"></div>
         <div style="flex:0 0 auto;"><button class="btn-primary" style="width:auto;" onclick="addItem()">+ Add Item</button></div>
       </div>
-      <table><thead><tr><th>Item</th><th>Unit</th><th>Category</th><th></th></tr></thead><tbody id="itemsTbody"></tbody></table>
+      <p class="hint">Example: Chicken Nuggets, pack size 5, pack cost ₱69 → charges ₱13.80 per piece short. Leave pack cost blank to use the default rate (₱<span id="defaultRateHint">69</span>/unit) instead.</p>
+      <table><thead><tr><th>Item</th><th>Unit</th><th>Category</th><th class="num">₱/unit</th><th></th></tr></thead><tbody id="itemsTbody"></tbody></table>
       <div id="itemsEmpty" class="empty">No items yet.</div>
     </div>
 
@@ -490,6 +510,7 @@ function selectBranch(code){
     crewList = cSnap.val() || {};
     document.getElementById('branchLabel').textContent = currentBranchName + ' (' + code + ')';
     document.getElementById('rateDisplay').textContent = shortageRate;
+    document.getElementById('defaultRateHint').textContent = shortageRate;
     document.getElementById('branchName').value = branchName || '';
     document.getElementById('shortageRateInput').value = shortageRate;
     document.getElementById('ownerPinInput').value = ownerPin || '';
@@ -545,7 +566,7 @@ function buildOwnerPinpad(){
 function ownerPinPress(k){
   if(k==='⌫'){ ownerPinBuffer = ownerPinBuffer.slice(0,-1); }
   else if(k==='OK'){ checkOwnerPin(); return; }
-  else if(ownerPinBuffer.length < 6){ ownerPinBuffer += k; }
+  else if(ownerPinBuffer.length < 8){ ownerPinBuffer += k; }
   renderOwnerPinDisplay();
   if(ownerPinBuffer.length === String(ownerPin).length) checkOwnerPin();
 }
@@ -581,7 +602,7 @@ function saveBranch(){
   const pin = document.getElementById('ownerPinInput').value.trim();
   const rate = parseFloat(document.getElementById('shortageRateInput').value);
   if(!name){ toast('Enter a branch name'); return; }
-  if(!/^\d{4,6}$/.test(pin)){ toast('Owner PIN must be 4–6 digits'); return; }
+  if(!/^\d{8}$/.test(pin)){ toast('Owner PIN must be exactly 8 digits'); return; }
   if(isNaN(rate) || rate < 0){ toast('Enter a valid shortage rate'); return; }
   Promise.all([
     bref('config/branchName').set(name),
@@ -593,8 +614,18 @@ function saveBranch(){
     document.getElementById('branchLabel').textContent = name + ' (' + currentBranchId + ')';
     document.getElementById('roleBranchName').textContent = name;
     document.getElementById('rateDisplay').textContent = rate;
+    document.getElementById('defaultRateHint').textContent = rate;
     toast('Settings saved');
   });
+}
+
+function itemRate(id){
+  const it = items[id];
+  if(!it) return shortageRate;
+  const size = parseFloat(it.packSize);
+  const cost = parseFloat(it.packCost);
+  if(size > 0 && cost >= 0 && !isNaN(cost)) return cost / size;
+  return shortageRate;
 }
 
 function loadItemsTable(){
@@ -607,7 +638,10 @@ function loadItemsTable(){
     keys.forEach(id=>{
       const it = items[id];
       const tr = document.createElement('tr');
+      const rate = itemRate(id);
+      const isCustom = it.packCost !== undefined && it.packCost !== null && it.packCost !== '';
       tr.innerHTML = `<td>${escapeHtml(it.name)}</td><td>${escapeHtml(it.unit)}</td><td>${escapeHtml(it.category||'—')}</td>
+        <td class="num">₱${fmt(rate)}${isCustom?'':' <small style="color:var(--muted);">(default)</small>'}</td>
         <td class="item-actions"><button class="btn-danger" onclick="deleteItem('${id}')">Delete</button></td>`;
       tbody.appendChild(tr);
     });
@@ -617,9 +651,13 @@ function addItem(){
   const name = document.getElementById('itemName').value.trim();
   const unit = document.getElementById('itemUnit').value;
   const category = document.getElementById('itemCategory').value.trim();
+  const packSize = parseFloat(document.getElementById('itemPackSize').value) || 1;
+  const packCostRaw = document.getElementById('itemPackCost').value;
+  const packCost = packCostRaw !== '' ? parseFloat(packCostRaw) : null;
   if(!name){ toast('Enter an item name'); return; }
-  bref('items').push().set({name, unit, category, createdAt: Date.now()}).then(()=>{
+  bref('items').push().set({name, unit, category, packSize, packCost, createdAt: Date.now()}).then(()=>{
     document.getElementById('itemName').value=''; document.getElementById('itemCategory').value='';
+    document.getElementById('itemPackSize').value='1'; document.getElementById('itemPackCost').value='';
     toast('Item added');
   });
 }
@@ -701,8 +739,8 @@ function renderVarianceOwner(){
       const net = (v.pos - v.freezer) - waste;
       let cell, charge=0;
       if(Math.abs(net)<0.001){ cell='<span class="variance-ok">0</span>'; }
-      else if(net>0){ cell=`<span class="variance-short">SHORT ${fmt(net)}</span>`; charge=net*shortageRate; totalCharge+=charge; }
-      else { cell=`<span class="variance-over">OVER ${fmt(-net)}</span>`; totalCredit += (-net)*shortageRate; }
+      else if(net>0){ cell=`<span class="variance-short">SHORT ${fmt(net)}</span>`; charge=net*itemRate(id); totalCharge+=charge; }
+      else { cell=`<span class="variance-over">OVER ${fmt(-net)}</span>`; totalCredit += (-net)*itemRate(id); }
       const tr = document.createElement('tr');
       tr.innerHTML = `<td>${escapeHtml(items[id]?items[id].name:id)}</td><td style="text-transform:capitalize;">${cp}</td>
         <td class="num">${fmt(v.pos)}</td><td class="num">${fmt(v.freezer)}</td><td class="num">${fmt(waste)}</td>
@@ -746,10 +784,10 @@ function loadHistory(){
           const waste = wasteMap[id]||0;
           const net = (v.pos - v.freezer) - waste;
           if(net>0.001){
-            const charge=net*shortageRate; dayCharge+=charge;
+            const charge=net*itemRate(id); dayCharge+=charge;
             if(!perItem[id]) perItem[id]={charge:0,count:0};
             perItem[id].charge+=charge; perItem[id].count+=1;
-          } else if(net<-0.001){ dayCredit += (-net)*shortageRate; }
+          } else if(net<-0.001){ dayCredit += (-net)*itemRate(id); }
         });
       });
       if(dayCharge>0||dayCredit>0) perDay[date]={charge:dayCharge, credit:dayCredit};
@@ -819,9 +857,36 @@ function logoutCrew(){
   document.getElementById('mainFlow').style.display='none';
   document.getElementById('countCard').style.display='none';
   document.getElementById('resultCard').style.display='none';
+  document.getElementById('changePinCard').style.display='none';
 }
 
 /* ---------- CREW: CHECKPOINTS ---------- */
+function toggleChangePin(){
+  const card = document.getElementById('changePinCard');
+  const show = card.style.display === 'none';
+  card.style.display = show ? 'block' : 'none';
+  if(show){
+    document.getElementById('newPinInput').value = '';
+    document.getElementById('confirmPinInput').value = '';
+    document.getElementById('changePinStatus').textContent = '';
+  }
+}
+function saveNewPin(){
+  const p1 = document.getElementById('newPinInput').value.trim();
+  const p2 = document.getElementById('confirmPinInput').value.trim();
+  if(!/^\d{4}$/.test(p1)){ toast('PIN must be exactly 4 digits'); return; }
+  if(p1 !== p2){ toast('PINs do not match'); return; }
+  const taken = Object.entries(crewList).some(([id,c]) => c.pin === p1 && id !== currentCrew.id);
+  if(taken){ toast('That PIN is already used by someone else'); return; }
+  bref('crew/'+currentCrew.id+'/pin').set(p1).then(()=>{
+    currentCrew.pin = p1;
+    crewList[currentCrew.id].pin = p1;
+    toast('PIN updated');
+    document.getElementById('changePinStatus').textContent = 'Saved. Use your new PIN next time you log in.';
+    setTimeout(()=>toggleChangePin(), 1200);
+  }).catch(e=>toast('Error: '+e.message));
+}
+
 function suggestedCheckpoint(){ const h=new Date().getHours(); if(h<12) return 'open'; if(h<18) return 'handoff'; return 'close'; }
 function refreshTodayStatus(){
   bref('counts/'+todayStr()).once('value').then(s=>{
@@ -909,8 +974,8 @@ function showResult(values){
       const net = (v.pos-v.freezer)-waste;
       let tag, cls;
       if(Math.abs(net)<0.001){ tag='OK'; cls='tag-ok'; }
-      else if(net>0){ tag='SHORT '+fmt(net); cls='tag-short'; totalCharge += net*shortageRate; }
-      else { tag='OVER '+fmt(-net); cls='tag-over'; totalCredit += (-net)*shortageRate; }
+      else if(net>0){ tag='SHORT '+fmt(net); cls='tag-short'; totalCharge += net*itemRate(id); }
+      else { tag='OVER '+fmt(-net); cls='tag-over'; totalCredit += (-net)*itemRate(id); }
       const row = document.createElement('div'); row.className='result-row';
       row.innerHTML = `<div>${escapeHtml(items[id].name)}</div><div class="result-tag ${cls}">${tag}</div>`;
       list.appendChild(row);
