@@ -537,7 +537,7 @@ function renderEntry(main){
       <button class="btn gold" id="saveEntryBtn">Save entry for ${entryDate}</button>
     </div>
   </div>
-  ` : `<div class="card"><div class="empty">Add staff first in the Staff &amp; Rates tab before recording production.</div></div>`}
+  ` : `<div class="card"><div class="empty">${SUPERVISOR_MODE ? 'No staff found on this device yet. Ask the admin to connect this device to Firebase in Settings first (see the normal, non-supervisor link).' : 'Add staff first in the Staff &amp; Rates tab before recording production.'}</div></div>`}
   `;
 
   if(!staffList.length) return;
@@ -1250,11 +1250,11 @@ function renderSettings(main){
   </div>
   <div class="card">
     <h2>Sync with Firebase</h2>
-    <div class="msg info">Your data now auto-saves in this browser, so refreshing the page won't lose anything even offline. Connecting Firebase below adds cloud backup and lets multiple tablets/devices share the same data in real time. Once connected, it'll stay connected automatically — you won't need to paste this again after a refresh.</div>
-    <label>Firebase config (JSON)</label>
+    <div class="msg info">This app now connects to its Firebase database automatically on every device that opens it — no setup needed, including for your supervisor's link. The box below is only for switching to a <em>different</em> Firebase project if you ever need to (e.g. testing); otherwise, leave it alone.</div>
+    <label>Firebase config (JSON) — optional override</label>
     <textarea id="cfgInput" rows="6" style="width:100%;font-family:monospace;font-size:12px;padding:8px;border:1px solid var(--line);border-radius:6px;" placeholder='{"apiKey":"...","databaseURL":"https://...firebaseio.com",...}'>${savedCfg}</textarea>
     <div class="foot-actions">
-      ${savedCfg?'<button class="btn ghost" id="disconnectBtn">Disconnect / forget this device</button>':''}
+      ${savedCfg?'<button class="btn ghost" id="disconnectBtn">Reset to default database</button>':''}
       <button class="btn gold" id="connectBtn">Connect</button>
     </div>
   </div>
@@ -1295,16 +1295,15 @@ function renderSettings(main){
   };
   document.getElementById('connectBtn').onclick = ()=>{
     const v = document.getElementById('cfgInput').value.trim();
-    if(!v){ alert('Paste a config first, or leave this page to keep working offline.'); return; }
-    if(initFirebase(v)) alert('Connected. This device will now reconnect automatically on every visit.');
+    if(!v){ alert('Paste a config first if you want to switch databases, or leave this alone — you\'re already connected to the default one.'); return; }
+    if(initFirebase(v)) alert('Connected to the new config. This device will use it automatically from now on.');
   };
   const disBtn = document.getElementById('disconnectBtn');
   if(disBtn) disBtn.onclick = ()=>{
-    if(confirm('Stop syncing this device to Firebase? Your data stays saved locally on this device either way.')){
+    if(confirm('Reset this device back to the default Chowtime Production database? Any custom override config will be forgotten.')){
       try{ localStorage.removeItem(LS_CFG_KEY); }catch(e){}
-      USE_FIREBASE = false; DB = null;
-      document.getElementById('connBadge').textContent = 'Offline (local)';
-      document.getElementById('connBadge').className = 'badge-conn off';
+      initFirebase(JSON.stringify(BUILTIN_FIREBASE_CONFIG), true);
+      alert('Reset to default database.');
       render();
     }
   };
@@ -1340,11 +1339,25 @@ function downloadBlob(content, filename, type){
 }
 
 /* ================= BOOT ================= */
+// This app's own Firebase project config — not a secret credential, just an app identifier
+// (real protection comes from Firebase security rules, not from hiding this). Baking it in
+// means every device that opens this page — including a supervisor's — connects automatically,
+// with no Settings step required.
+const BUILTIN_FIREBASE_CONFIG = {
+  "apiKey": "AIzaSyAsWieHXURlP3k8AfZ4Wsb8Sp_1fathXvk",
+  "authDomain": "chowtime-production.firebaseapp.com",
+  "databaseURL": "https://chowtime-production-default-rtdb.asia-southeast1.firebasedatabase.app",
+  "projectId": "chowtime-production",
+  "storageBucket": "chowtime-production.firebasestorage.app",
+  "messagingSenderId": "418692832705",
+  "appId": "1:418692832705:web:d38d297de3282191ebe340"
+};
+
 loadLocalState();
 render();
 try{
   const savedCfg = localStorage.getItem(LS_CFG_KEY);
-  if(savedCfg) initFirebase(savedCfg, true);
+  initFirebase(savedCfg || JSON.stringify(BUILTIN_FIREBASE_CONFIG), true);
 }catch(e){}
 </script>
 </body>
