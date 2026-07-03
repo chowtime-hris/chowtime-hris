@@ -849,8 +849,13 @@ function renderVarianceOwner(){
       if(Math.abs(net)<0.001){ cell='<span class="variance-ok">0</span>'; }
       else if(net>0){ cell=`<span class="variance-short">SHORT ${fmt(net)}</span>`; charge=net*itemRate(id); totalCharge+=charge; }
       else { cell=`<span class="variance-over">OVER ${fmt(-net)}</span>`; totalCredit += (-net)*itemRate(id); }
+      const itemCell = items[id]
+        ? escapeHtml(items[id].name)
+        : `<span style="color:var(--danger);font-size:12px;">Unknown item</span><br>
+           <input type="text" class="edit-input" style="width:130px;margin-top:4px;" placeholder="Type real name" id="relabel-${id}">
+           <button class="btn-gold" style="padding:4px 8px;font-size:11px;margin-top:4px;" onclick="relabelItem('${id}')">Save Name</button>`;
       rowsHtml += `<tr>
-        <td>${escapeHtml(items[id]?items[id].name:id)}</td>
+        <td>${itemCell}</td>
         <td class="num"><input class="edit-input" type="number" step="any" data-cp="${cp}" data-item="${id}" data-field="pos" value="${v.pos}"></td>
         <td class="num"><input class="edit-input" type="number" step="any" data-cp="${cp}" data-item="${id}" data-field="freezer" value="${v.freezer}"></td>
         <td class="num">${fmt(waste)}</td>
@@ -900,6 +905,18 @@ function saveCorrections(cp){
   }).catch(e=>{
     statusEl.textContent = 'Error: '+e.message; statusEl.style.color='var(--danger)';
   });
+}
+function relabelItem(id){
+  const input = document.getElementById('relabel-'+id);
+  const name = input.value.trim();
+  if(!name){ toast('Type the real item name first'); return; }
+  bref('items/'+id).set({
+    name, unit: 'pcs', category: '', packSize: 1, packCost: null, freezerPackSize: null,
+    archived: true, createdAt: Date.now(), relabeled: true
+  }).then(()=>{
+    toast('Item renamed to "'+name+'" — it will now show correctly everywhere');
+    loadDay();
+  }).catch(e=>toast('Error: '+e.message));
 }
 function renderWasteLogOwner(){
   const box = document.getElementById('wasteLogBox');
