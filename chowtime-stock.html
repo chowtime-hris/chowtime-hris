@@ -162,9 +162,18 @@
     <h2>Select Branch</h2>
     <p class="sub">Choose which branch this device is for.</p>
     <div id="branchListBox"></div>
-    <div id="branchListEmpty" class="empty" style="display:none;">No branches yet — add the first one below.</div>
+    <div id="branchListEmpty" class="empty" style="display:none;">No branches yet — owner can add one via the link below.</div>
   </div>
-  <div class="card">
+  <p style="text-align:center;margin:-6px 0 16px;">
+    <a href="#" onclick="revealAddBranch();return false;" style="font-size:12px;color:var(--muted);">Owner: + Add New Branch</a>
+  </p>
+  <div class="card" id="addBranchGate" style="display:none;">
+    <label>Master Password</label>
+    <input id="masterPasswordInput" type="password" placeholder="Owner only">
+    <button class="btn-primary" style="margin-top:12px;" onclick="checkMasterPassword()">Unlock</button>
+    <p class="hint" id="masterPasswordStatus" style="color:var(--danger);"></p>
+  </div>
+  <div class="card" id="addBranchForm" style="display:none;">
     <h2>+ Add Branch</h2>
     <label>Branch code</label>
     <input id="newBranchCode" placeholder="e.g. CT-WSFP">
@@ -416,6 +425,7 @@
 <div id="toast" class="toast"></div>
 
 <script>
+const MASTER_BRANCH_PASSWORD = "chowtime2026owner";
 const EMBEDDED_FIREBASE_CONFIG = {
   "apiKey": "AIzaSyCG4qaF3H7kg8TSCW6HoGPnkZApRHTNvAQ",
   "authDomain": "chowtime-stocks.firebaseapp.com",
@@ -491,6 +501,22 @@ function connectFirebase(){
 }
 
 /* ---------- BRANCH PICKER ---------- */
+function revealAddBranch(){
+  document.getElementById('addBranchGate').style.display = 'block';
+  document.getElementById('masterPasswordInput').value = '';
+  document.getElementById('masterPasswordStatus').textContent = '';
+  document.getElementById('addBranchGate').scrollIntoView({behavior:'smooth', block:'center'});
+}
+function checkMasterPassword(){
+  const entered = document.getElementById('masterPasswordInput').value;
+  if(entered === MASTER_BRANCH_PASSWORD){
+    document.getElementById('addBranchGate').style.display = 'none';
+    document.getElementById('addBranchForm').style.display = 'block';
+  } else {
+    document.getElementById('masterPasswordStatus').textContent = 'Incorrect password.';
+    document.getElementById('masterPasswordInput').value = '';
+  }
+}
 function loadBranchList(){
   db.ref('branchList').once('value').then(snap=>{
     const val = snap.val() || {};
@@ -871,7 +897,10 @@ function renderVarianceOwner(){
       </div>
       <div class="cutoff-body">${rowsHtml}</div>
       <div class="cutoff-foot">
-        <button class="btn-gold save-btn" onclick="saveCorrections('${cp}')">Save Corrections</button>
+        <div style="display:flex;gap:8px;">
+          <button class="btn-gold save-btn" onclick="saveCorrections('${cp}')">Save Corrections</button>
+          <button class="btn-danger save-btn" onclick="deleteCheckpointCount('${cp}')">Delete This Count</button>
+        </div>
         <span class="cp-status" id="cpStatus-${cp}"></span>
       </div>`;
     container.appendChild(section);
@@ -906,6 +935,14 @@ function saveCorrections(cp){
     statusEl.textContent = 'Error: '+e.message; statusEl.style.color='var(--danger)';
   });
 }
+function deleteCheckpointCount(cp){
+  const date = document.getElementById('datePicker').value;
+  if(!confirm(`Delete the ${cp.toUpperCase()} count for ${date}? This removes it completely — crew will need to submit it again. This can't be undone.`)) return;
+  bref('counts/'+date+'/'+cp).remove().then(()=>{
+    toast('Count deleted');
+    loadDay();
+  }).catch(e=>toast('Error: '+e.message));
+}
 function relabelItem(id){
   const input = document.getElementById('relabel-'+id);
   const name = input.value.trim();
@@ -920,9 +957,20 @@ function relabelItem(id){
 }
 function renderWasteLogOwner(){
   const box = document.getElementById('wasteLogBox');
-  const entries = Object.values(dayWaste).sort((a,b)=>a.timestamp-b.timestamp);
+  const entries = Object.entries(dayWaste).sort((a,b)=>a[1].timestamp-b[1].timestamp);
   if(!entries.length){ box.innerHTML='<div class="empty">No waste logged for this date.</div>'; return; }
-  box.innerHTML = entries.map(w=>`<div class="waste-row"><strong>${escapeHtml(w.itemName)}</strong> — ${fmt(w.qty)} · ${escapeHtml(w.reason)} · ${escapeHtml(w.checkpoint||'')} · logged by ${escapeHtml(w.loggedByName)} at ${new Date(w.timestamp).toLocaleTimeString()}${w.note?' · "'+escapeHtml(w.note)+'"':''}</div>`).join('');
+  box.innerHTML = entries.map(([wid,w])=>`<div class="waste-row" style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
+    <span><strong>${escapeHtml(w.itemName)}</strong> — ${fmt(w.qty)} · ${escapeHtml(w.reason)} · ${escapeHtml(w.checkpoint||'')} · logged by ${escapeHtml(w.loggedByName)} at ${new Date(w.timestamp).toLocaleTimeString()}${w.note?' · "'+escapeHtml(w.note)+'"':''}</span>
+    <button class="btn-danger" style="padding:4px 10px;font-size:11px;flex:0 0 auto;" onclick="deleteWasteEntry('${wid}')">Delete</button>
+  </div>`).join('');
+}
+function deleteWasteEntry(wid){
+  const date = document.getElementById('datePicker').value;
+  if(!confirm('Delete this waste log entry? This can\'t be undone.')) return;
+  bref('waste/'+date+'/'+wid).remove().then(()=>{
+    toast('Waste entry deleted');
+    loadDay();
+  }).catch(e=>toast('Error: '+e.message));
 }
 
 /* ---------- OWNER: HISTORY TAB ---------- */
