@@ -89,21 +89,13 @@ tbody tr:hover{background:#fbf6ea;}
     <div class="mark">CT</div>
     <div>
       <h1>Chowtime Production System</h1>
-      <div class="sub">Piece-rate output &amp; payroll tracker</div>
+      <div class="sub" id="headerSub">Piece-rate output &amp; payroll tracker</div>
     </div>
   </div>
   <span id="connBadge" class="badge-conn off">Offline (local)</span>
 </header>
 
-<nav class="tabs" id="tabs">
-  <button data-tab="dashboard" class="active">Dashboard</button>
-  <button data-tab="entry">Production Entry</button>
-  <button data-tab="staff">Staff &amp; Rates</button>
-  <button data-tab="materials">Materials &amp; Side Jobs</button>
-  <button data-tab="loans">Deductions</button>
-  <button data-tab="payslip">Payslip</button>
-  <button data-tab="settings">Settings</button>
-</nav>
+<nav class="tabs" id="tabs"></nav>
 
 <main id="main"></main>
 
@@ -157,6 +149,18 @@ function saveState(key, val){
   persistLocalState();
   if(USE_FIREBASE && DB){
     DB.ref('chowtimeProduction/'+key).set(val || {});
+  }
+}
+// Use this instead of multiple saveState() calls in a row when several sections change together
+// (e.g. renaming a product code touches staff rates + production history + the product list at
+// once). Multiple separate saveState() calls each fire the live listener as soon as they land,
+// and a still-in-flight write can get silently overwritten by a snapshot taken between writes.
+// A single update() writes everything atomically so the listener only ever sees the final result.
+function saveStateMulti(updates){
+  Object.keys(updates).forEach(k=>{ state[k]=updates[k]; });
+  persistLocalState();
+  if(USE_FIREBASE && DB){
+    DB.ref('chowtimeProduction').update(updates);
   }
 }
 function initFirebase(cfgStr, fromSaved){
@@ -288,7 +292,28 @@ function allCutoffKeysWithData(){
 }
 
 /* ================= RENDER ================= */
-let activeTab='dashboard';
+const SUPERVISOR_MODE = new URLSearchParams(window.location.search).get('mode') === 'supervisor';
+if(SUPERVISOR_MODE){
+  const hs = document.getElementById('headerSub');
+  if(hs) hs.textContent = 'Supervisor view — production entry only';
+}
+const ALL_TABS = [
+  {tab:'dashboard', label:'Dashboard'},
+  {tab:'entry', label:'Production Entry'},
+  {tab:'staff', label:'Staff & Rates'},
+  {tab:'materials', label:'Materials & Side Jobs'},
+  {tab:'loans', label:'Deductions'},
+  {tab:'payslip', label:'Payslip'},
+  {tab:'settings', label:'Settings'}
+];
+const SUPERVISOR_ALLOWED_TABS = ['entry','materials'];
+const VISIBLE_TABS = SUPERVISOR_MODE ? ALL_TABS.filter(t=>SUPERVISOR_ALLOWED_TABS.includes(t.tab)) : ALL_TABS;
+let activeTab = SUPERVISOR_MODE ? 'entry' : 'dashboard';
+function renderNav(){
+  const nav = document.getElementById('tabs');
+  nav.innerHTML = VISIBLE_TABS.map(t=>`<button data-tab="${t.tab}" class="${t.tab===activeTab?'active':''}">${t.label}</button>`).join('');
+}
+renderNav();
 document.getElementById('tabs').addEventListener('click', e=>{
   if(e.target.tagName==='BUTTON'){
     activeTab = e.target.dataset.tab;
@@ -298,6 +323,10 @@ document.getElementById('tabs').addEventListener('click', e=>{
 });
 
 function render(){
+  if(SUPERVISOR_MODE && !SUPERVISOR_ALLOWED_TABS.includes(activeTab)){
+    activeTab = 'entry';
+    renderNav();
+  }
   const main = document.getElementById('main');
   main.innerHTML='';
   if(activeTab==='dashboard') renderDashboard(main);
@@ -494,11 +523,16 @@ function renderEntry(main){
   </div>
 
   <div class="card">
-    <h2>Computed income for ${entryDate} (preview)</h2>
-    <div class="table-wrap"><table>
-      <thead><tr><th>Staff</th><th>Credited qty × rate</th><th>Day income</th></tr></thead>
-      <tbody id="previewBody"></tbody>
-    </table></div>
+    ${SUPERVISOR_MODE? `
+      <h2>Ready to save</h2>
+      <div class="msg info">Batch quantities and attendance above will be saved for ${entryDate}.</div>
+    ` : `
+      <h2>Computed income for ${entryDate} (preview)</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Staff</th><th>Credited qty × rate</th><th>Day income</th></tr></thead>
+        <tbody id="previewBody"></tbody>
+      </table></div>
+    `}
     <div class="foot-actions">
       <button class="btn gold" id="saveEntryBtn">Save entry for ${entryDate}</button>
     </div>
@@ -535,8 +569,9 @@ function renderEntry(main){
     return data;
   }
   function refreshPreview(){
-    const data = collectDayData();
     const tbody = document.getElementById('previewBody');
+    if(!tbody) return;
+    const data = collectDayData();
     tbody.innerHTML = staffList.map(s=>{
       const parts = [];
       let income=0;
@@ -690,26 +725,29 @@ function renderStaff(main){
       alert('Another product already uses that code'); return;
     }
     const oldCode = p.code;
-    state.products[i] = {code:newCode, label:newLabelTrim};
+    const newProducts = state.products.slice();
+    newProducts[i] = {code:newCode, label:newLabelTrim};
     if(newCode!==oldCode){
       // migrate rates on every staff member
-      Object.values(state.staff).forEach(s=>{
+      const newStaff = JSON.parse(JSON.stringify(state.staff));
+      Object.values(newStaff).forEach(s=>{
         if(s.rates && Object.prototype.hasOwnProperty.call(s.rates, oldCode)){
           s.rates[newCode] = s.rates[oldCode];
           delete s.rates[oldCode];
         }
       });
       // migrate production history
-      Object.values(state.production).forEach(day=>{
+      const newProduction = JSON.parse(JSON.stringify(state.production));
+      Object.values(newProduction).forEach(day=>{
         if(day.products && Object.prototype.hasOwnProperty.call(day.products, oldCode)){
           day.products[newCode] = day.products[oldCode];
           delete day.products[oldCode];
         }
       });
-      saveState('staff', state.staff);
-      saveState('production', state.production);
+      saveStateMulti({staff:newStaff, production:newProduction, products:newProducts});
+    } else {
+      saveState('products', newProducts);
     }
-    saveState('products', state.products);
     render();
   });
   document.querySelectorAll('.tag-rm:not(.editProd)').forEach(t=>t.onclick=()=>{
@@ -735,23 +773,24 @@ function renderMaterials(main){
       <select id="matCutoffSel">${keys.map(k=>`<option value="${k}" ${k===matCutoff?'selected':''}>${cutoffLabel(k)}</option>`).join('')}</select>
     </div></div>
     <div class="table-wrap" style="margin-top:10px"><table>
-      <thead><tr><th>SKU</th><th>Rate (₱)</th><th>Qty used</th><th>Total (₱)</th></tr></thead>
+      <thead><tr><th>SKU</th>${SUPERVISOR_MODE?'':'<th>Rate (₱)</th>'}<th>Qty used</th>${SUPERVISOR_MODE?'':'<th>Total (₱)</th>'}</tr></thead>
       <tbody>
       ${state.skus.map(sku=>{
         const qty = Number(mat[sku.code])||0;
         return `<tr>
           <td>${sku.code}</td>
-          <td><input type="number" step="any" min="0" style="width:80px" class="skuRate" data-code="${sku.code}" value="${sku.rate}"></td>
+          ${SUPERVISOR_MODE?'':`<td><input type="number" step="any" min="0" style="width:80px" class="skuRate" data-code="${sku.code}" value="${sku.rate}"></td>`}
           <td><input type="number" step="any" min="0" style="width:90px" class="skuQty" data-code="${sku.code}" value="${qty||''}" placeholder="0"></td>
-          <td>₱${fmt(qty*sku.rate)}</td>
+          ${SUPERVISOR_MODE?'':`<td>₱${fmt(qty*sku.rate)}</td>`}
         </tr>`;
       }).join('')}
       </tbody>
-      <tfoot><tr><td colspan="3" style="text-align:right;font-weight:800">Total materials value</td><td style="font-weight:800">₱${fmt(matTotal)}</td></tr></tfoot>
+      ${SUPERVISOR_MODE?'':`<tfoot><tr><td colspan="3" style="text-align:right;font-weight:800">Total materials value</td><td style="font-weight:800">₱${fmt(matTotal)}</td></tr></tfoot>`}
     </table></div>
     <div class="foot-actions"><button class="btn gold" id="saveMatBtn">Save materials for this cutoff</button></div>
   </div>
 
+  ${SUPERVISOR_MODE ? '' : `
   <div class="card">
     <h2>Side jobs / income share pool</h2>
     <div class="msg info">Split extra earnings (e.g. packaging, boxing, wrapper pull-out income) among selected staff for this cutoff.</div>
@@ -772,6 +811,7 @@ function renderMaterials(main){
     </table></div>
     <div class="foot-actions"><button class="btn gold" id="saveSideBtn">Save side job shares</button></div>
   </div>
+  `}
   `;
 
   document.getElementById('matCutoffSel').onchange = e=>{ matCutoff = e.target.value; renderMaterials(main); };
@@ -779,19 +819,18 @@ function renderMaterials(main){
   document.getElementById('saveMatBtn').onclick = ()=>{
     const newSkus = state.skus.map(sku=>{
       const rateEl = document.querySelector(`.skuRate[data-code="${CSS.escape(sku.code)}"]`);
-      return {code:sku.code, rate:Number(rateEl.value)||0};
+      return {code:sku.code, rate: rateEl ? (Number(rateEl.value)||0) : sku.rate};
     });
     const newMat = {};
     document.querySelectorAll('.skuQty').forEach(i=>{ newMat[i.dataset.code]=Number(i.value)||0; });
-    state.skus = newSkus;
-    state.materials[matCutoff] = newMat;
-    saveState('skus', state.skus);
-    saveState('materials', state.materials);
+    const newMaterials = {...state.materials, [matCutoff]: newMat};
+    saveStateMulti({skus:newSkus, materials:newMaterials});
     alert('Materials saved for '+cutoffLabel(matCutoff));
     render();
   };
 
-  document.getElementById('splitEvenBtn').onclick = ()=>{
+  const splitBtn = document.getElementById('splitEvenBtn');
+  if(splitBtn) splitBtn.onclick = ()=>{
     const pool = Number(document.getElementById('poolAmt').value)||0;
     const checked = Array.from(document.querySelectorAll('.poolCheck:checked')).map(c=>c.dataset.id);
     if(!checked.length){ alert('Check at least one staff member'); return; }
@@ -802,7 +841,8 @@ function renderMaterials(main){
     });
   };
 
-  document.getElementById('saveSideBtn').onclick = ()=>{
+  const saveSideBtn = document.getElementById('saveSideBtn');
+  if(saveSideBtn) saveSideBtn.onclick = ()=>{
     const newSide = {};
     document.querySelectorAll('.sideAmt').forEach(i=>{
       const v = Number(i.value)||0;
@@ -1199,7 +1239,15 @@ function pushToHrisFeed(staffId, cutoffKey, payload){
 function renderSettings(main){
   let savedCfg = '';
   try{ savedCfg = localStorage.getItem(LS_CFG_KEY) || ''; }catch(e){}
+  const supervisorUrl = window.location.origin + window.location.pathname + '?mode=supervisor';
   main.innerHTML = `
+  <div class="card">
+    <h2>Link for your production supervisor</h2>
+    <div class="msg info">This is a restricted view — it only shows Production Entry and Materials (batch quantities and attendance), with all ₱ figures, rates, Staff & Rates, Deductions, Payslip, and Settings hidden and inaccessible from the menu. Send this link instead of your own.</div>
+    <input readonly value="${supervisorUrl}" style="font-family:monospace;font-size:12px" onclick="this.select()">
+    <div class="foot-actions"><button class="btn gold" id="copySupBtn">Copy link</button></div>
+    <div class="msg warn" style="margin-top:10px">Honest note: this hides those screens from someone using the app normally — it is not the same as a real login system. Your Firebase database rules are currently open ("test mode"), so anyone who obtained your actual Firebase config directly (not just this link) could still read or write data by other means. If you want this properly locked down with real accounts and permissions, that's a separate setup — ask me and I'll walk you through it.</div>
+  </div>
   <div class="card">
     <h2>Sync with Firebase</h2>
     <div class="msg info">Your data now auto-saves in this browser, so refreshing the page won't lose anything even offline. Connecting Firebase below adds cloud backup and lets multiple tablets/devices share the same data in real time. Once connected, it'll stay connected automatically — you won't need to paste this again after a refresh.</div>
@@ -1238,6 +1286,13 @@ function renderSettings(main){
     That's as far as this app goes on its own. When — and only when — you're comfortable, you (or I, in a separate future session working directly on <code>chowtime-payroll.html</code>) can add a small, additive, read-only lookup there that displays these numbers next to the manual entry fields, as a reference or a one-click "copy in" — without replacing any of the existing payroll formulas. Until that step is taken, this feed just sits there unused and 100% risk-free to your current payroll.</p>
   </div>
   `;
+  document.getElementById('copySupBtn').onclick = ()=>{
+    navigator.clipboard.writeText(supervisorUrl).then(()=>{
+      alert('Link copied. Paste it into a message to your supervisor.');
+    }).catch(()=>{
+      alert('Could not auto-copy — tap the link box above, select all, and copy manually.');
+    });
+  };
   document.getElementById('connectBtn').onclick = ()=>{
     const v = document.getElementById('cfgInput').value.trim();
     if(!v){ alert('Paste a config first, or leave this page to keep working offline.'); return; }
