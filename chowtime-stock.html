@@ -416,6 +416,15 @@
 <div id="toast" class="toast"></div>
 
 <script>
+const EMBEDDED_FIREBASE_CONFIG = {
+  "apiKey": "AIzaSyCG4qaF3H7kg8TSCW6HoGPnkZApRHTNvAQ",
+  "authDomain": "chowtime-stocks.firebaseapp.com",
+  "databaseURL": "https://chowtime-stocks-default-rtdb.asia-southeast1.firebasedatabase.app",
+  "projectId": "chowtime-stocks",
+  "storageBucket": "chowtime-stocks.firebasestorage.app",
+  "messagingSenderId": "728384209029",
+  "appId": "1:728384209029:web:19059a1f3426c6f0fd29ec"
+};
 let db = null;
 let editingItemId = null;
 let items = {};
@@ -1202,6 +1211,19 @@ function renderWasteLogCrew(){
 
 /* ---------- BOOT ---------- */
 window.addEventListener('load', ()=>{
+  if(EMBEDDED_FIREBASE_CONFIG && EMBEDDED_FIREBASE_CONFIG.apiKey){
+    try{
+      if(!firebase.apps.length){ firebase.initializeApp(EMBEDDED_FIREBASE_CONFIG); }
+      db = firebase.database();
+      showMain('mainBranchPicker');
+      loadBranchList();
+      const lastBranch = localStorage.getItem('chowtimeStockLastBranch');
+      if(lastBranch){ selectBranch(lastBranch); }
+      return;
+    }catch(e){
+      toast('Auto-connect failed: '+e.message);
+    }
+  }
   const saved = localStorage.getItem('chowtimeStockFirebaseConfig');
   if(saved){
     document.getElementById('fbConfig').value = saved;
