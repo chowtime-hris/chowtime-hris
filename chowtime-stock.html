@@ -1168,14 +1168,22 @@ function submitCount(){
   }
   statusEl.textContent = 'Submitting…';
   const payload = { items: values, countedBy: currentCrew.id, countedByName: currentCrew.name, timestamp: Date.now() };
+  const timeoutWarn = setTimeout(()=>{
+    statusEl.textContent = 'Still submitting… this usually means weak WiFi/signal. Keep this screen open — it will finish once connection is back. If it doesn\'t finish after a minute, ask the owner to check the internet at this branch.';
+    statusEl.style.color = 'var(--warn)';
+  }, 8000);
   bref('counts/'+todayStr()+'/'+activeCheckpoint).set(payload).then(()=>{
+    clearTimeout(timeoutWarn);
     toast('Count submitted');
     submittedCheckpoints[activeCheckpoint]=true;
     renderCheckpoints();
+    statusEl.style.color = '';
     statusEl.textContent = '✓ Submitted at '+new Date().toLocaleTimeString();
     showResult(values);
   }).catch(e=>{
+    clearTimeout(timeoutWarn);
     toast('Error: '+e.message);
+    statusEl.style.color = '';
     statusEl.textContent = '✗ Not submitted — error: ' + e.message;
   });
 }
