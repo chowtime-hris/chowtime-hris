@@ -425,7 +425,7 @@
 <div id="toast" class="toast"></div>
 
 <script>
-const MASTER_BRANCH_PASSWORD = "00042190";
+const MASTER_BRANCH_PASSWORD = "chowtime2026owner";
 const EMBEDDED_FIREBASE_CONFIG = {
   "apiKey": "AIzaSyCG4qaF3H7kg8TSCW6HoGPnkZApRHTNvAQ",
   "authDomain": "chowtime-stocks.firebaseapp.com",
@@ -855,6 +855,20 @@ function wasteMapForCheckpoint(cp){
   Object.values(dayWaste).forEach(w=>{ if(w.checkpoint===cp) map[w.itemId]=(map[w.itemId]||0)+parseFloat(w.qty||0); });
   return map;
 }
+function packDisplay(id, total){
+  const it = items[id];
+  const fps = it ? parseFloat(it.freezerPackSize) : NaN;
+  if(!fps || fps <= 1 || isNaN(total)) return '';
+  const packs = Math.floor(total / fps);
+  const loose = fmt(total - packs*fps);
+  return `= ${packs} pack${packs===1?'':'s'} + ${loose} loose`;
+}
+function updateCorrectionPackHint(cp, id, field){
+  const inp = document.querySelector(`.edit-input[data-cp="${cp}"][data-item="${id}"][data-field="${field}"]`);
+  const hintEl = document.getElementById(`packHint-${cp}-${id}-${field}`);
+  if(!hintEl) return;
+  hintEl.textContent = packDisplay(id, parseFloat(inp.value));
+}
 function renderVarianceOwner(){
   const container = document.getElementById('varianceContainer'); container.innerHTML='';
   let totalCharge=0, totalCredit=0, anySections=false;
@@ -882,8 +896,8 @@ function renderVarianceOwner(){
            <button class="btn-gold" style="padding:4px 8px;font-size:11px;margin-top:4px;" onclick="relabelItem('${id}')">Save Name</button>`;
       rowsHtml += `<tr>
         <td>${itemCell}</td>
-        <td class="num"><input class="edit-input" type="number" step="any" data-cp="${cp}" data-item="${id}" data-field="pos" value="${v.pos}"></td>
-        <td class="num"><input class="edit-input" type="number" step="any" data-cp="${cp}" data-item="${id}" data-field="freezer" value="${v.freezer}"></td>
+        <td class="num"><input class="edit-input" type="number" step="any" data-cp="${cp}" data-item="${id}" data-field="pos" value="${v.pos}" oninput="updateCorrectionPackHint('${cp}','${id}','pos')"><div class="hint" id="packHint-${cp}-${id}-pos" style="margin:2px 0 0;">${packDisplay(id, v.pos)}</div></td>
+        <td class="num"><input class="edit-input" type="number" step="any" data-cp="${cp}" data-item="${id}" data-field="freezer" value="${v.freezer}" oninput="updateCorrectionPackHint('${cp}','${id}','freezer')"><div class="hint" id="packHint-${cp}-${id}-freezer" style="margin:2px 0 0;">${packDisplay(id, v.freezer)}</div></td>
         <td class="num">${fmt(waste)}</td>
         <td class="num">${cell}</td>
         <td class="num">${charge!==0?peso(charge):'—'}</td>
