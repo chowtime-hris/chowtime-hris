@@ -2488,12 +2488,18 @@ function deleteLoan(i){
   renderLoans();
 }
 function resetLoanBalance(i){
-  loans[i].status='Active';
-  loans[i].balance=loans[i].amount;
-  save('loans',loans);
-  if(window._fbDB&&window._fbFns){window._fbFns.set(window._fbFns.ref(window._fbDB,'loans'),loans).catch(e=>console.warn(e));}
-  renderLoans();
-  showToastAdmin && showToastAdmin('✅ Loan balance reset to principal.');
+  const principal = +(loans[i].amount || 0);
+  loans[i].status  = 'Active';
+  loans[i].balance = principal;
+  save('loans', loans);
+  if(window._fbDB&&window._fbFns){
+    window._fbFns.set(window._fbFns.ref(window._fbDB,'loans'), loans)
+      .then(()=>{ renderLoans(); showToastAdmin && showToastAdmin(`✅ Reset to ₱${principal.toFixed(2)}`); })
+      .catch(e=>{ console.warn(e); renderLoans(); showToastAdmin && showToastAdmin(`✅ Reset locally`); });
+  } else {
+    renderLoans();
+    showToastAdmin && showToastAdmin(`✅ Reset to ₱${principal.toFixed(2)}`);
+  }
 }
 window.resetLoanBalance = resetLoanBalance;
 
@@ -2999,6 +3005,16 @@ onValue(ref(db,'paymentHistory'), snap => {
     save('paymentHistory', paymentHistory);
     const active = document.querySelector('.page.active');
     if (active?.id === 'page-dashboard') renderDashboard();
+  }
+});
+
+onValue(ref(db,'loans'), snap => {
+  const data = snap.val();
+  if (data && Array.isArray(data)) {
+    loans = data;
+    save('loans', loans);
+    const active = document.querySelector('.page.active');
+    if (active?.id === 'page-loans') renderLoans();
   }
 });
 
