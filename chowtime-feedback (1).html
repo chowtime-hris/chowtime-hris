@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chowtime — How was your visit?</title>
+<style>
+  :root{
+    --maroon:#7A1E2E;
+    --maroon-dark:#5C1522;
+    --gold:#C9A227;
+    --gold-light:#E8C55A;
+    --cream:#FDF8F0;
+    --cream-card:#FFFFFF;
+    --tan:#F3EAD8;
+    --ink:#2B1A1D;
+    --muted:#8A7A6D;
+    --line:#E8DFCF;
+    font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--cream);
+    color:var(--ink);
+  }
+  .wrap{
+    max-width:480px;
+    margin:0 auto;
+    min-height:100vh;
+    display:flex;
+    flex-direction:column;
+  }
+  header{
+    background:var(--maroon);
+    color:#fff;
+    padding:22px 20px 20px;
+    text-align:center;
+    position:relative;
+  }
+  header::after{
+    content:'';
+    position:absolute;
+    bottom:0; left:0; right:0;
+    height:4px;
+    background:var(--gold);
+  }
+  .logo-badge{
+    width:44px;
+    height:44px;
+    background:var(--gold);
+    color:var(--maroon-dark);
+    border-radius:9px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-weight:800;
+    font-size:17px;
+    margin:0 auto 10px;
+  }
+  header h1{
+    margin:0;
+    font-size:20px;
+    font-weight:700;
+  }
+  header p{
+    margin:4px 0 0;
+    font-size:13px;
+    opacity:.85;
+  }
+
+  main{
+    padding:20px 18px 30px;
+  }
+
+  .store-tag{
+    text-align:center;
+    font-size:13px;
+    color:var(--muted);
+    margin-bottom:18px;
+  }
+  .store-tag b{
+    color:var(--maroon);
+  }
+
+  .card{
+    background:var(--cream-card);
+    border:1px solid var(--line);
+    border-radius:12px;
+    padding:20px 18px;
+    margin-bottom:16px;
+    box-shadow:0 1px 3px rgba(122,30,46,.06);
+  }
+
+  .rate-group{
+    margin-bottom:22px;
+  }
+  .rate-group:last-child{margin-bottom:0;}
+  .rate-label{
+    font-size:14.5px;
+    font-weight:700;
+    color:var(--maroon-dark);
+    margin-bottom:8px;
+  }
+  .stars{
+    display:flex;
+    gap:6px;
+    justify-content:center;
+  }
+  .stars button{
+    background:none;
+    border:none;
+    font-size:34px;
+    line-height:1;
+    cursor:pointer;
+    color:#E0D5C5;
+    padding:2px;
+    transition:transform .1s;
+  }
+  .stars button.filled{
+    color:var(--gold);
+  }
+  .stars button:active{
+    transform:scale(1.15);
+  }
+
+  .field{
+    margin-bottom:14px;
+  }
+  .field label{
+    display:block;
+    font-size:12px;
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:.4px;
+    color:var(--muted);
+    margin-bottom:6px;
+  }
+  .field textarea, .field input, .field select{
+    width:100%;
+    padding:11px 13px;
+    border:1px solid var(--line);
+    border-radius:8px;
+    font-size:14.5px;
+    font-family:inherit;
+    background:#fff;
+    color:var(--ink);
+  }
+  .field textarea{
+    min-height:70px;
+    resize:vertical;
+  }
+
+  .btn-submit{
+    width:100%;
+    background:var(--maroon);
+    color:#fff;
+    border:none;
+    padding:14px;
+    border-radius:9px;
+    font-size:16px;
+    font-weight:700;
+    cursor:pointer;
+    margin-top:6px;
+  }
+  .btn-submit:active{background:var(--maroon-dark);}
+
+  .thankyou{
+    text-align:center;
+    padding:60px 24px;
+  }
+  .thankyou .icon{
+    width:70px;
+    height:70px;
+    background:var(--gold);
+    color:var(--maroon-dark);
+    border-radius:50%;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:34px;
+    margin:0 auto 20px;
+  }
+  .thankyou h2{
+    color:var(--maroon);
+    margin:0 0 8px;
+  }
+  .thankyou p{
+    color:var(--muted);
+    font-size:14.5px;
+    margin:0;
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap" id="customerView">
+  <header>
+    <div class="logo-badge">CT</div>
+    <h1>How was your visit?</h1>
+    <p>Chowtime Fast Food Chain</p>
+  </header>
+  <main>
+    <div class="store-tag">You're rating <b id="storeNameTag">this store</b></div>
+
+    <div id="feedbackForm">
+      <div class="card">
+        <div class="rate-group">
+          <div class="rate-label">🍽️ Food Taste</div>
+          <div class="stars" data-rate="food"></div>
+        </div>
+        <div class="rate-group">
+          <div class="rate-label">🙋 Service</div>
+          <div class="stars" data-rate="service"></div>
+        </div>
+        <div class="rate-group">
+          <div class="rate-label">✨ Cleanliness</div>
+          <div class="stars" data-rate="clean"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="field">
+          <label>Tell us more (optional)</label>
+          <textarea id="comment" placeholder="What did you like, or what can we improve?"></textarea>
+        </div>
+        <div class="field">
+          <label>Name / Contact (optional)</label>
+          <input type="text" id="contact" placeholder="So we can follow up, if needed">
+        </div>
+        <button class="btn-submit" id="submitFeedback">Submit Feedback</button>
+      </div>
+    </div>
+
+    <div id="thankyouScreen" class="thankyou" style="display:none;">
+      <div class="icon">✓</div>
+      <h2>Salamat po!</h2>
+      <p>Your feedback helps us serve you better.</p>
+    </div>
+  </main>
+</div>
+
+<script>
+const STORES = ['WSFP','WMBL','Store 3','Store 4','Store 5'];
+const params = new URLSearchParams(window.location.search);
+const storeParam = params.get('store');
+const currentStore = STORES.includes(storeParam) ? storeParam : (STORES[0]);
+document.getElementById('storeNameTag').textContent = currentStore;
+
+const ratings = { food: 0, service: 0, clean: 0 };
+
+function renderStars(){
+  document.querySelectorAll('.stars').forEach(group=>{
+    const key = group.dataset.rate;
+    group.innerHTML = '';
+    for (let i=1;i<=5;i++){
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = '★';
+      btn.className = i <= ratings[key] ? 'filled' : '';
+      btn.addEventListener('click', ()=>{
+        ratings[key] = i;
+        renderStars();
+      });
+      group.appendChild(btn);
+    }
+  });
+}
+renderStars();
+
+async function waitForStorage(){
+  let tries = 0;
+  while (!window.storage && tries < 50){
+    await new Promise(r=>setTimeout(r, 100));
+    tries++;
+  }
+  if (!window.storage) throw new Error('Database connection not ready');
+}
+
+document.getElementById('submitFeedback').addEventListener('click', async ()=>{
+  if (ratings.food === 0 || ratings.service === 0 || ratings.clean === 0){
+    alert('Please rate all three categories before submitting.');
+    return;
+  }
+  const record = {
+    id: 'feedback_' + Date.now(),
+    store: currentStore,
+    food: ratings.food,
+    service: ratings.service,
+    clean: ratings.clean,
+    avg: Math.round(((ratings.food + ratings.service + ratings.clean) / 3) * 10) / 10,
+    comment: document.getElementById('comment').value.trim(),
+    contact: document.getElementById('contact').value.trim(),
+    createdAt: new Date().toISOString()
+  };
+  try {
+    await waitForStorage();
+    await window.storage.set(record.id, JSON.stringify(record), true);
+    document.getElementById('feedbackForm').style.display = 'none';
+    document.getElementById('thankyouScreen').style.display = 'block';
+  } catch(e){
+    alert('Something went wrong submitting your feedback. Please try again.');
+    console.error(e);
+  }
+});
+</script>
+
+<!-- Firebase sync — connects this feedback form to the Chowtime HRIS database -->
+<div id="fb-status-badge" style="position:fixed;top:8px;right:8px;z-index:999;font-size:10px;padding:3px 8px;border-radius:10px;background:rgba(0,0,0,.4);color:#fff;">Connecting…</div>
+<script type="module">
+import { initializeApp, getApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+import { getDatabase, ref, set, get, remove } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js';
+
+const HARDCODED_FB_CFG = {
+  apiKey:      'AIzaSyB8PlWl-qfmAn2GDdrJ1Y5pZQs4RAjhTo4',
+  projectId:   'chowtime-hris',
+  databaseURL: 'https://chowtime-hris-default-rtdb.asia-southeast1.firebasedatabase.app',
+  appId:       '1:443134962503:web:7959dc5a6c9cbc967d7a62',
+};
+
+function setBadge(ok){
+  const b = document.getElementById('fb-status-badge');
+  if (!b) return;
+  b.textContent = ok ? '☁️ Connected' : '📴 Offline';
+  b.style.background = ok ? 'rgba(45,125,58,.75)' : 'rgba(192,57,43,.75)';
+}
+
+let app;
+try { app = initializeApp(HARDCODED_FB_CFG); }
+catch(e) { app = getApp(); }
+const db = getDatabase(app);
+
+function nodeFor(key){ return key.startsWith('feedback_') ? 'feedback' : 'audits'; }
+
+window.storage = {
+  async set(key, value, shared){
+    const data = typeof value === 'string' ? JSON.parse(value) : value;
+    await set(ref(db, nodeFor(key) + '/' + key), data);
+    return { key, value, shared };
+  },
+  async get(key, shared){
+    const snap = await get(ref(db, nodeFor(key) + '/' + key));
+    if (!snap.exists()) return null;
+    return { key, value: JSON.stringify(snap.val()), shared };
+  },
+  async list(prefix, shared){
+    const node = (prefix && prefix.startsWith('feedback')) ? 'feedback' : 'audits';
+    const snap = await get(ref(db, node));
+    const keys = snap.exists() ? Object.keys(snap.val()) : [];
+    return { keys, prefix, shared };
+  },
+  async delete(key, shared){
+    await remove(ref(db, nodeFor(key) + '/' + key));
+    return { key, deleted:true, shared };
+  }
+};
+
+setBadge(true);
+</script>
+</body>
+</html>
