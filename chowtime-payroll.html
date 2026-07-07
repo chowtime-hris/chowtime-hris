@@ -974,6 +974,7 @@ let shiftDefs  = load('shiftDefs') || [];  // declared early — used in getDTRT
 let empShifts  = load('empShifts') || {};  // declared early — used in getEmpShiftForDay
 let leaves     = load('leaves')    || [];
 let loans      = load('loans')     || [];
+let _loanSaving = false; // prevents Firebase listener from overwriting during save
 let memos      = load('memos')     || [];
 let salaryLog  = load('salaryLog') || [];
 let settings   = load('settings')  || {
@@ -2474,32 +2475,32 @@ function saveLoan(){
 }
 function markLoanPaid(i){
   if(!confirm('Mark this loan as fully paid?')) return;
-  loans[i].status='Paid';
-  loans[i].balance=0;
-  save('loans',loans);
-  if(window._fbDB&&window._fbFns){window._fbFns.set(window._fbFns.ref(window._fbDB,'loans'),loans).catch(e=>console.warn(e));}
-  renderLoans();
+  loans[i].status='Paid'; loans[i].balance=0;
+  save('loans',loans); _loanSaving=true;
+  if(window._fbDB&&window._fbFns){
+    window._fbFns.set(window._fbFns.ref(window._fbDB,'loans'),loans)
+      .then(()=>{ setTimeout(()=>{_loanSaving=false;},3000); renderLoans(); })
+      .catch(e=>{ _loanSaving=false; console.warn(e); renderLoans(); });
+  } else { setTimeout(()=>{_loanSaving=false;},3000); renderLoans(); }
 }
 function deleteLoan(i){
   if(!confirm('Delete this loan record?')) return;
-  loans.splice(i,1);
-  save('loans',loans);
-  if(window._fbDB&&window._fbFns){window._fbFns.set(window._fbFns.ref(window._fbDB,'loans'),loans).catch(e=>console.warn(e));}
-  renderLoans();
+  loans.splice(i,1); save('loans',loans); _loanSaving=true;
+  if(window._fbDB&&window._fbFns){
+    window._fbFns.set(window._fbFns.ref(window._fbDB,'loans'),loans)
+      .then(()=>{ setTimeout(()=>{_loanSaving=false;},3000); renderLoans(); })
+      .catch(e=>{ _loanSaving=false; console.warn(e); renderLoans(); });
+  } else { setTimeout(()=>{_loanSaving=false;},3000); renderLoans(); }
 }
 function resetLoanBalance(i){
   const principal = +(loans[i].amount || 0);
-  loans[i].status  = 'Active';
-  loans[i].balance = principal;
-  save('loans', loans);
+  loans[i].status='Active'; loans[i].balance=principal;
+  save('loans',loans); _loanSaving=true;
   if(window._fbDB&&window._fbFns){
-    window._fbFns.set(window._fbFns.ref(window._fbDB,'loans'), loans)
-      .then(()=>{ renderLoans(); showToastAdmin && showToastAdmin(`✅ Reset to ₱${principal.toFixed(2)}`); })
-      .catch(e=>{ console.warn(e); renderLoans(); showToastAdmin && showToastAdmin(`✅ Reset locally`); });
-  } else {
-    renderLoans();
-    showToastAdmin && showToastAdmin(`✅ Reset to ₱${principal.toFixed(2)}`);
-  }
+    window._fbFns.set(window._fbFns.ref(window._fbDB,'loans'),loans)
+      .then(()=>{ setTimeout(()=>{_loanSaving=false;},3000); renderLoans(); showToastAdmin&&showToastAdmin(`✅ Reset to ₱${principal.toFixed(2)}`); })
+      .catch(e=>{ _loanSaving=false; console.warn(e); renderLoans(); });
+  } else { setTimeout(()=>{_loanSaving=false;},3000); renderLoans(); showToastAdmin&&showToastAdmin(`✅ Reset to ₱${principal.toFixed(2)}`); }
 }
 window.resetLoanBalance = resetLoanBalance;
 
@@ -2532,12 +2533,20 @@ function deductLoanBalances() {
 
   save('loans', loans);
   localStorage.setItem(deductedKey, '1');
-  // Sync to Firebase — save entire loans array
+  _loanSaving = true;
   if (window._fbDB && window._fbFns) {
     window._fbFns.set(window._fbFns.ref(window._fbDB,'loans'), loans)
-      .then(()=>{ showToastAdmin && showToastAdmin(`✅ Loan balances updated for ${p.label||p.key}!`); })
-      .catch(e=>{ console.warn(e); showToastAdmin && showToastAdmin(`✅ Saved locally — Firebase sync pending`); });
+      .then(()=>{
+        setTimeout(()=>{ _loanSaving = false; }, 3000);
+        showToastAdmin && showToastAdmin(`✅ Loan balances updated for ${p.label||p.key}!`);
+      })
+      .catch(e=>{
+        _loanSaving = false;
+        console.warn(e);
+        showToastAdmin && showToastAdmin(`✅ Saved locally`);
+      });
   } else {
+    setTimeout(()=>{ _loanSaving = false; }, 3000);
     showToastAdmin && showToastAdmin(`✅ Loan balances updated for ${p.label||p.key}!`);
   }
   renderLoans();
@@ -3008,13 +3017,18 @@ onValue(ref(db,'paymentHistory'), snap => {
   }
 });
 
+// ── Loan save lock — prevents onValue from overwriting during save ──
 onValue(ref(db,'loans'), snap => {
+  if (_loanSaving) return; // skip — we just saved, don't overwrite
   const data = snap.val();
-  if (data && Array.isArray(data)) {
-    loans = data;
-    save('loans', loans);
-    const active = document.querySelector('.page.active');
-    if (active?.id === 'page-loans') renderLoans();
+  if (data !== null && data !== undefined) {
+    const arr = Array.isArray(data) ? data : Object.values(data);
+    if (arr.length > 0) {
+      loans = arr;
+      save('loans', loans);
+      const active = document.querySelector('.page.active');
+      if (active?.id === 'page-loans') renderLoans();
+    }
   }
 });
 
