@@ -436,24 +436,15 @@ async function populateStorePicker(){
   const sel = document.getElementById('storePickerSelect');
   try {
     await waitForStorage();
-    const [auditKeys, feedbackKeys] = await Promise.all([
-      window.storage.list('audit_', true),
-      window.storage.list('feedback_', true)
-    ]);
-    const stores = new Set();
-    for (const k of (auditKeys?.keys || [])){
+    const keys = await window.storage.list('branch_', true);
+    const branches = [];
+    for (const k of (keys?.keys || [])){
       try {
         const res = await window.storage.get(k, true);
-        if (res?.value) stores.add(JSON.parse(res.value).store);
+        if (res?.value) branches.push(JSON.parse(res.value).name);
       } catch(e){}
     }
-    for (const k of (feedbackKeys?.keys || [])){
-      try {
-        const res = await window.storage.get(k, true);
-        if (res?.value) stores.add(JSON.parse(res.value).store);
-      } catch(e){}
-    }
-    const sorted = [...stores].filter(Boolean).sort();
+    const sorted = branches.filter(Boolean).sort();
     sorted.forEach(s=>{
       const opt = document.createElement('option');
       opt.textContent = s;
@@ -678,7 +669,11 @@ try { app = initializeApp(HARDCODED_FB_CFG); }
 catch(e) { app = getApp(); }
 const db = getDatabase(app);
 
-function nodeFor(key){ return key.startsWith('feedback_') ? 'feedback' : 'audits'; }
+function nodeFor(key){
+  if (key.startsWith('feedback_')) return 'feedback';
+  if (key.startsWith('branch_')) return 'branches';
+  return 'audits';
+}
 
 window.storage = {
   async set(key, value, shared){
@@ -692,7 +687,9 @@ window.storage = {
     return { key, value: JSON.stringify(snap.val()), shared };
   },
   async list(prefix, shared){
-    const node = (prefix && prefix.startsWith('feedback')) ? 'feedback' : 'audits';
+    let node = 'audits';
+    if (prefix && prefix.startsWith('feedback')) node = 'feedback';
+    if (prefix && prefix.startsWith('branch')) node = 'branches';
     const snap = await get(ref(db, node));
     const keys = snap.exists() ? Object.keys(snap.val()) : [];
     return { keys, prefix, shared };

@@ -378,6 +378,23 @@
     padding:50px 20px;
     font-size:14px;
   }
+  .branch-item{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    padding:9px 0;
+    border-bottom:1px solid var(--line);
+    font-size:14px;
+  }
+  .branch-item:last-child{border-bottom:none;}
+  .branch-item button{
+    background:none;
+    border:none;
+    color:var(--fail);
+    font-size:13px;
+    cursor:pointer;
+    padding:2px 8px;
+  }
   .stat-grid{
     display:grid;
     grid-template-columns:repeat(3,1fr);
@@ -424,11 +441,9 @@
       <div class="row2">
         <div class="field">
           <label>Store</label>
-          <input type="text" id="storeSelect" list="storeDatalist" placeholder="Type or select branch">
-          <datalist id="storeDatalist">
-            <option>WSFP</option>
-            <option>WMBL</option>
-          </datalist>
+          <select id="storeSelect">
+            <option value="">Loading branches...</option>
+          </select>
         </div>
         <div class="field">
           <label>Date</label>
@@ -472,6 +487,16 @@
     </div>
 
     <div id="historyContent" style="display:none;">
+      <div class="section-title"><div class="letter">+</div><h2>Manage Branches</h2></div>
+      <div class="card">
+        <div style="font-size:12.5px;color:var(--muted);margin-bottom:10px;">Official branch list — used by both the Audit form and the Feedback form. Keeping this managed here avoids typos/duplicates.</div>
+        <div class="row2">
+          <input type="text" id="newBranchInput" placeholder="e.g. Store 6 - Malolos">
+          <button type="button" class="btn" id="addBranchBtn">+ Add Branch</button>
+        </div>
+        <div id="branchList" style="margin-top:14px;"></div>
+      </div>
+
       <div class="stat-grid" id="statGrid"></div>
       <div class="hist-filters">
         <select id="filterStore">
@@ -894,9 +919,88 @@ function showHistoryContent(){
   document.getElementById('historyGate').style.display = 'none';
   document.getElementById('historyContent').style.display = 'block';
   loadHistory();
+  loadBranches(false);
 }
 
 document.getElementById('filterStore').addEventListener('change', loadHistory);
+
+// ---------- Branch Management ----------
+function sanitizeBranchKey(name){
+  return 'branch_' + name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
+
+async function loadBranches(forSelectOnly){
+  try {
+    await waitForStorage();
+    const keys = await window.storage.list('branch_', true);
+    const branches = [];
+    for (const k of (keys?.keys || [])){
+      try {
+        const res = await window.storage.get(k, true);
+        if (res?.value) branches.push({ key: k, ...JSON.parse(res.value) });
+      } catch(e){}
+    }
+    branches.sort((a,b)=> a.name.localeCompare(b.name));
+
+    const sel = document.getElementById('storeSelect');
+    const prevVal = sel.value;
+    if (branches.length === 0){
+      sel.innerHTML = '<option value="">No branches yet — add one in History tab</option>';
+    } else {
+      sel.innerHTML = branches.map(b=>`<option${b.name===prevVal?' selected':''}>${b.name}</option>`).join('');
+    }
+
+    if (!forSelectOnly){
+      const listEl = document.getElementById('branchList');
+      if (branches.length === 0){
+        listEl.innerHTML = '<div class="empty" style="padding:20px;">No branches added yet.</div>';
+      } else {
+        listEl.innerHTML = branches.map(b=>`
+          <div class="branch-item">
+            <span>${b.name}</span>
+            <button type="button" data-removebranch="${b.key}">Remove</button>
+          </div>
+        `).join('');
+        listEl.querySelectorAll('[data-removebranch]').forEach(btn=>{
+          btn.addEventListener('click', async ()=>{
+            if (!confirm('Remove this branch from the list? (Past audit records are not affected)')) return;
+            try {
+              await window.storage.delete(btn.dataset.removebranch, true);
+              loadBranches(false);
+            } catch(e){
+              showToast('Could not remove branch.');
+            }
+          });
+        });
+      }
+    }
+  } catch(e){
+    console.error('Could not load branches', e);
+  }
+}
+
+document.getElementById('addBranchBtn').addEventListener('click', async ()=>{
+  const input = document.getElementById('newBranchInput');
+  const name = input.value.trim();
+  if (!name){ showToast('Enter a branch name first'); return; }
+  const key = sanitizeBranchKey(name);
+  try {
+    await waitForStorage();
+    await window.storage.set(key, JSON.stringify({ name, createdAt: new Date().toISOString() }), true);
+    input.value = '';
+    showToast('Branch added ✓');
+    loadBranches(false);
+  } catch(e){
+    showToast('Could not add branch. Try again.');
+    console.error(e);
+  }
+});
+document.getElementById('newBranchInput').addEventListener('keydown', (e)=>{
+  if (e.key === 'Enter') document.getElementById('addBranchBtn').click();
+});
+
+// Populate the store dropdown on initial load (New Audit tab)
+loadBranches(true);
 
 async function loadHistory(){
   const listEl = document.getElementById('histList');
@@ -1050,7 +1154,11 @@ try { app = initializeApp(HARDCODED_FB_CFG); }
 catch(e) { app = getApp(); }
 const db = getDatabase(app);
 
-function nodeFor(key){ return key.startsWith('feedback_') ? 'feedback' : 'audits'; }
+function nodeFor(key){
+  if (key.startsWith('feedback_')) return 'feedback';
+  if (key.startsWith('branch_')) return 'branches';
+  return 'audits';
+}
 
 window.storage = {
   async set(key, value, shared){
@@ -1064,7 +1172,9 @@ window.storage = {
     return { key, value: JSON.stringify(snap.val()), shared };
   },
   async list(prefix, shared){
-    const node = (prefix && prefix.startsWith('feedback')) ? 'feedback' : 'audits';
+    let node = 'audits';
+    if (prefix && prefix.startsWith('feedback')) node = 'feedback';
+    if (prefix && prefix.startsWith('branch')) node = 'branches';
     const snap = await get(ref(db, node));
     const keys = snap.exists() ? Object.keys(snap.val()) : [];
     return { keys, prefix, shared };
