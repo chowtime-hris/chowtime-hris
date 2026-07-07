@@ -1204,7 +1204,13 @@ function buildPayrollRow(emp, periodKey) {
   const tax      = gross > 0 ? Math.round(computeTax(annualT)/24) : 0;
 
   // ── Per-category loan/deduction breakdown ───────────────────
-  const activeLoans = gross > 0 ? loans.filter(l=>l.emp===emp.id && l.status!=='Paid') : [];
+  const pDet = getPeriodDetails(periodKey);
+  const pEndStr = `${pDet.year}-${String(pDet.month+1).padStart(2,'0')}-${String(pDet.end).padStart(2,'0')}`;
+  const activeLoans = gross > 0 ? loans.filter(l=>
+    l.emp===emp.id &&
+    l.status!=='Paid' &&
+    (!l.start || l.start <= pEndStr)  // include if starts on or before period end
+  ) : [];
   const loanByCategory = {};
   const LOAN_CATS = ['Cash Bond','Company Loan','Cash Advance','SSS Loan','Pag-Ibig Loan','Fine / Disciplinary','Uniform / Equipment','Other Deduction'];
   LOAN_CATS.forEach(cat => { loanByCategory[cat] = 0; });
@@ -2526,8 +2532,12 @@ function deductLoanBalances() {
   let changed = 0;
   loans.forEach((l,i) => {
     if (l.status === 'Paid') return;
-    // Check start date — don't deduct before start
-    if (l.start && l.start > p.key) return;
+    // Skip if loan starts AFTER this period ends
+    // e.g. loan starts July 15 → included in July 1-15 period (ends July 15) ✅
+    // e.g. loan starts July 16 → excluded from July 1-15 period (ends July 15) ✅
+    const pDetails = getPeriodDetails(p.key);
+    const periodEndStr = `${pDetails.year}-${String(pDetails.month+1).padStart(2,'0')}-${String(pDetails.end).padStart(2,'0')}`;
+    if (l.start && l.start > periodEndStr) return;
     const deduction = +(l.monthly || 0);
     const newBalance = Math.max(0, (l.balance||l.amount) - deduction);
     loans[i].balance = newBalance;
