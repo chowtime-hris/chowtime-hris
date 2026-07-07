@@ -2421,7 +2421,10 @@ function renderLoans(){
         <td style="font-weight:600;">₱${fmt(l.balance||l.amount)}</td><td>${l.start||'—'}</td>
         <td><span class="tag ${l.status==='Paid'?'tag-green':'tag-orange'}">${l.status||'Active'}</span>
             <button class="btn btn-sm btn-secondary" style="margin-left:4px;" onclick="editLoan(${i})">✏️</button>
-            <button class="btn btn-sm btn-success" style="margin-left:3px;" onclick="markLoanPaid(${i})">✓ Paid</button>
+            ${l.status==='Paid'
+              ? `<button class="btn btn-sm btn-secondary" style="margin-left:3px;" onclick="resetLoanBalance(${i})">↩️ Reset</button>`
+              : `<button class="btn btn-sm btn-success" style="margin-left:3px;" onclick="markLoanPaid(${i})">✓ Paid</button>`
+            }
             <button class="btn btn-sm btn-danger" style="margin-left:3px;" onclick="deleteLoan(${i})">🗑</button></td>
     </tr>`).join('')||'<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--muted);">No loans recorded.</td></tr>';
 }
@@ -2469,8 +2472,30 @@ function saveLoan(){
   editingLoanIdx = -1;
   save('loans',loans);closeModal('loan-modal');renderLoans();
 }
-function markLoanPaid(i){loans[i].status='Paid';save('loans',loans);if(window._fbDB&&window._fbFns){window._fbFns.set(window._fbFns.ref(window._fbDB,'loans'),loans).catch(e=>console.warn(e));}renderLoans();}
-function deleteLoan(i){loans.splice(i,1);save('loans',loans);if(window._fbDB&&window._fbFns){window._fbFns.set(window._fbFns.ref(window._fbDB,'loans'),loans).catch(e=>console.warn(e));}renderLoans();}
+function markLoanPaid(i){
+  if(!confirm('Mark this loan as fully paid?')) return;
+  loans[i].status='Paid';
+  loans[i].balance=0;
+  save('loans',loans);
+  if(window._fbDB&&window._fbFns){window._fbFns.set(window._fbFns.ref(window._fbDB,'loans'),loans).catch(e=>console.warn(e));}
+  renderLoans();
+}
+function deleteLoan(i){
+  if(!confirm('Delete this loan record?')) return;
+  loans.splice(i,1);
+  save('loans',loans);
+  if(window._fbDB&&window._fbFns){window._fbFns.set(window._fbFns.ref(window._fbDB,'loans'),loans).catch(e=>console.warn(e));}
+  renderLoans();
+}
+function resetLoanBalance(i){
+  loans[i].status='Active';
+  loans[i].balance=loans[i].amount;
+  save('loans',loans);
+  if(window._fbDB&&window._fbFns){window._fbFns.set(window._fbFns.ref(window._fbDB,'loans'),loans).catch(e=>console.warn(e));}
+  renderLoans();
+  showToastAdmin && showToastAdmin('✅ Loan balance reset to principal.');
+}
+window.resetLoanBalance = resetLoanBalance;
 
 // ── Deduct loan balances after payroll is released ───────────
 // Call this once per cut-off after confirming payroll is correct
@@ -2501,11 +2526,15 @@ function deductLoanBalances() {
 
   save('loans', loans);
   localStorage.setItem(deductedKey, '1');
+  // Sync to Firebase — save entire loans array
   if (window._fbDB && window._fbFns) {
-    window._fbFns.set(window._fbFns.ref(window._fbDB,'loans'), loans).catch(e=>console.warn(e));
+    window._fbFns.set(window._fbFns.ref(window._fbDB,'loans'), loans)
+      .then(()=>{ showToastAdmin && showToastAdmin(`✅ Loan balances updated for ${p.label||p.key}!`); })
+      .catch(e=>{ console.warn(e); showToastAdmin && showToastAdmin(`✅ Saved locally — Firebase sync pending`); });
+  } else {
+    showToastAdmin && showToastAdmin(`✅ Loan balances updated for ${p.label||p.key}!`);
   }
   renderLoans();
-  showToastAdmin && showToastAdmin(`✅ Loan balances updated for ${p.label||p.key}!`);
 }
 window.deductLoanBalances = deductLoanBalances;
 
