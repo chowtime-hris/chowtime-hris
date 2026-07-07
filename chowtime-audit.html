@@ -370,6 +370,8 @@
     color:var(--fail);
     margin:3px 0;
   }
+  .hist-photos{display:flex;gap:6px;margin:6px 0;flex-wrap:wrap;}
+  .hist-photos img{width:52px;height:52px;object-fit:cover;border-radius:6px;border:1px solid var(--line);cursor:pointer;}
   .empty{
     text-align:center;
     color:var(--muted);
@@ -422,13 +424,11 @@
       <div class="row2">
         <div class="field">
           <label>Store</label>
-          <select id="storeSelect">
+          <input type="text" id="storeSelect" list="storeDatalist" placeholder="Type or select branch">
+          <datalist id="storeDatalist">
             <option>WSFP</option>
             <option>WMBL</option>
-            <option>Store 3</option>
-            <option>Store 4</option>
-            <option>Store 5</option>
-          </select>
+          </datalist>
         </div>
         <div class="field">
           <label>Date</label>
@@ -458,20 +458,28 @@
     </div>
   </div>
 
-  <!-- HISTORY TAB -->
+  <!-- HISTORY TAB (PIN protected) -->
   <div id="tab-history" style="display:none;">
-    <div class="stat-grid" id="statGrid"></div>
-    <div class="hist-filters">
-      <select id="filterStore">
-        <option value="">All Stores</option>
-        <option>WSFP</option>
-        <option>WMBL</option>
-        <option>Store 3</option>
-        <option>Store 4</option>
-        <option>Store 5</option>
-      </select>
+    <div id="historyGate" style="text-align:center;padding:60px 20px;">
+      <div style="width:52px;height:52px;background:var(--accent);color:var(--brand-dark);border-radius:11px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:20px;margin:0 auto 16px;">CT</div>
+      <div style="font-weight:700;color:var(--brand);font-size:17px;margin-bottom:6px;">Owner Access Only</div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:20px;">Enter PIN to view audit history.</div>
+      <input type="password" inputmode="numeric" maxlength="8" id="historyPinInput" placeholder="••••••••"
+        style="width:100%;max-width:280px;padding:12px 10px;font-size:19px;letter-spacing:5px;text-align:center;border:1.5px solid var(--line);border-radius:10px;margin-bottom:12px;">
+      <br>
+      <button type="button" class="btn" id="historyPinSubmit">Unlock</button>
+      <div id="historyPinError" style="color:var(--fail);font-size:13px;margin-top:10px;min-height:18px;"></div>
     </div>
-    <div id="histList"></div>
+
+    <div id="historyContent" style="display:none;">
+      <div class="stat-grid" id="statGrid"></div>
+      <div class="hist-filters">
+        <select id="filterStore">
+          <option value="">All Stores</option>
+        </select>
+      </div>
+      <div id="histList"></div>
+    </div>
   </div>
 
 </main>
@@ -733,16 +741,18 @@ function totalItems(){
 }
 
 function updateScore(){
-  const customAnswered = customItems.filter(c=>c.result).length;
-  const customPassed = customItems.filter(c=>c.result==='pass').length;
+  const meaningfulCustom = customItems.filter(c=>c.text.trim());
+  const customAnswered = meaningfulCustom.filter(c=>c.result).length;
+  const customPassed = meaningfulCustom.filter(c=>c.result==='pass').length;
   const answered = Object.values(state).filter(v=>v).length + customAnswered;
   const passed = Object.values(state).filter(v=>v==='pass').length + customPassed;
+  const total = totalItems() + meaningfulCustom.length;
   const scoreEl = document.getElementById('liveScore');
   if (answered === 0){
-    scoreEl.textContent = '—';
+    scoreEl.textContent = `0/${total} checked`;
   } else {
-    const pct = Math.round((passed/answered)*100);
-    scoreEl.textContent = `${passed}/${answered} answered · ${pct}%`;
+    const pct = Math.round((passed/total)*100);
+    scoreEl.textContent = `${answered}/${total} checked · ${pct}% score`;
   }
 }
 
@@ -762,21 +772,50 @@ async function waitForStorage(){
   if (!window.storage) throw new Error('Database connection not ready');
 }
 
+function scrollToFirstUnanswered(){
+  let targetKey = null;
+  outer:
+  for (let sIdx=0; sIdx<SECTIONS.length; sIdx++){
+    for (let iIdx=0; iIdx<SECTIONS[sIdx].items.length; iIdx++){
+      const key = itemKey(sIdx, iIdx);
+      if (!state[key]){ targetKey = key; break outer; }
+    }
+  }
+  let el = null;
+  if (targetKey){
+    el = document.querySelector(`.toggle button[data-key="${targetKey}"]`)?.closest('.item');
+  } else {
+    const unansweredCustom = customItems.find(ci=>!ci.result);
+    if (unansweredCustom){
+      el = document.querySelector(`[data-customtoggle="${unansweredCustom.id}"]`)?.closest('.item');
+    }
+  }
+  if (el){
+    el.scrollIntoView({ behavior:'smooth', block:'center' });
+    el.style.transition = 'background-color 0.3s';
+    el.style.backgroundColor = '#ffe0e0';
+    setTimeout(()=>{ el.style.backgroundColor = ''; }, 1200);
+  }
+}
+
 async function submitAudit(){
   const store = document.getElementById('storeSelect').value;
   const date = document.getElementById('auditDate').value || new Date().toISOString().slice(0,10);
   const auditor = document.getElementById('auditorName').value || '(unspecified)';
   const overallNotes = document.getElementById('overallNotes').value;
 
-  const customAnswered = customItems.filter(c=>c.result).length;
-  const customPassed = customItems.filter(c=>c.result==='pass').length;
+  const meaningfulCustom = customItems.filter(c=>c.text.trim());
+  const customAnswered = meaningfulCustom.filter(c=>c.result).length;
+  const customPassed = meaningfulCustom.filter(c=>c.result==='pass').length;
   const answered = Object.values(state).filter(v=>v).length + customAnswered;
-  const total = totalItems() + customItems.length;
+  const total = totalItems() + meaningfulCustom.length;
   if (answered < total){
-    if (!confirm(`You've only answered ${answered}/${total} items. Submit anyway?`)) return;
+    showToast(`⚠️ Complete all items first (${answered}/${total} checked)`);
+    scrollToFirstUnanswered();
+    return;
   }
   const passed = Object.values(state).filter(v=>v==='pass').length + customPassed;
-  const pct = answered > 0 ? Math.round((passed/answered)*100) : 0;
+  const pct = total > 0 ? Math.round((passed/total)*100) : 0;
 
   const failedItems = [];
   SECTIONS.forEach((sec, sIdx)=>{
@@ -810,7 +849,6 @@ async function submitAudit(){
     await window.storage.set(record.id, JSON.stringify(record), true);
     showToast('Audit submitted ✓');
     resetForm();
-    loadHistory();
   } catch(e){
     showToast('Error saving audit. Try again.');
     console.error(e);
@@ -834,7 +872,32 @@ function showToast(msg){
   setTimeout(()=>t.classList.remove('show'), 2200);
 }
 
-// ---------- History ----------
+// ---------- History (PIN protected) ----------
+const HISTORY_PIN = '12345678'; // change this to whatever 8-digit PIN you want the owner to use
+
+function checkHistoryPin(){
+  const val = document.getElementById('historyPinInput').value.trim();
+  if (val === HISTORY_PIN){
+    sessionStorage.setItem('chowtime_history_unlocked', '1');
+    showHistoryContent();
+  } else {
+    document.getElementById('historyPinError').textContent = 'Incorrect PIN. Try again.';
+    document.getElementById('historyPinInput').value = '';
+  }
+}
+document.getElementById('historyPinSubmit').addEventListener('click', checkHistoryPin);
+document.getElementById('historyPinInput').addEventListener('keydown', (e)=>{
+  if (e.key === 'Enter') checkHistoryPin();
+});
+
+function showHistoryContent(){
+  document.getElementById('historyGate').style.display = 'none';
+  document.getElementById('historyContent').style.display = 'block';
+  loadHistory();
+}
+
+document.getElementById('filterStore').addEventListener('change', loadHistory);
+
 async function loadHistory(){
   const listEl = document.getElementById('histList');
   const statEl = document.getElementById('statGrid');
@@ -843,7 +906,7 @@ async function loadHistory(){
     await waitForStorage();
     const keys = await window.storage.list('audit_', true);
     if (!keys || !keys.keys || keys.keys.length === 0){
-      listEl.innerHTML = '<div class="empty">No audits submitted yet.<br>Complete a "New Audit" to see it here.</div>';
+      listEl.innerHTML = '<div class="empty">No audits submitted yet.</div>';
       statEl.innerHTML = '';
       return;
     }
@@ -856,10 +919,14 @@ async function loadHistory(){
     }
     records.sort((a,b)=> new Date(b.createdAt) - new Date(a.createdAt));
 
+    const distinctStores = [...new Set(records.map(r=>r.store))].sort();
+    const filterEl = document.getElementById('filterStore');
+    const currentFilterVal = filterEl.value;
+    filterEl.innerHTML = '<option value="">All Stores</option>' + distinctStores.map(s=>`<option${s===currentFilterVal ? ' selected':''}>${s}</option>`).join('');
+
     const filterStore = document.getElementById('filterStore').value;
     const filtered = filterStore ? records.filter(r=>r.store === filterStore) : records;
 
-    // stats
     if (records.length > 0){
       const avg = Math.round(records.reduce((s,r)=>s+r.score,0)/records.length);
       const lastWeek = records.filter(r => (Date.now() - new Date(r.createdAt)) < 7*24*3600*1000);
@@ -936,12 +1003,20 @@ document.querySelectorAll('nav button').forEach(btn=>{
     document.getElementById('tab-audit').style.display = tab === 'audit' ? 'block' : 'none';
     document.getElementById('tab-history').style.display = tab === 'history' ? 'block' : 'none';
     document.getElementById('scoreBar').style.display = tab === 'audit' ? 'flex' : 'none';
-    if (tab === 'history') loadHistory();
+    if (tab === 'history'){
+      if (sessionStorage.getItem('chowtime_history_unlocked') === '1'){
+        showHistoryContent();
+      } else {
+        document.getElementById('historyGate').style.display = 'block';
+        document.getElementById('historyContent').style.display = 'none';
+        document.getElementById('historyPinInput').value = '';
+        document.getElementById('historyPinError').textContent = '';
+      }
+    }
   });
 });
 
 document.getElementById('submitBtn').addEventListener('click', submitAudit);
-document.getElementById('filterStore').addEventListener('change', loadHistory);
 document.getElementById('addCustomBtn').addEventListener('click', addCustomItem);
 document.getElementById('auditDate').value = new Date().toISOString().slice(0,10);
 
