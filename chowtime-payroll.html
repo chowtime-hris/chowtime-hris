@@ -2471,7 +2471,16 @@ function saveLoan(){
     loans.push(record);
   }
   editingLoanIdx = -1;
-  save('loans',loans);closeModal('loan-modal');renderLoans();
+  save('loans',loans);
+  _loanSaving = true;
+  if(window._fbDB&&window._fbFns){
+    window._fbFns.set(window._fbFns.ref(window._fbDB,'loans'),loans)
+      .then(()=>{ setTimeout(()=>{_loanSaving=false;},8000); closeModal('loan-modal'); renderLoans(); })
+      .catch(e=>{ _loanSaving=false; console.warn(e); closeModal('loan-modal'); renderLoans(); });
+  } else {
+    setTimeout(()=>{_loanSaving=false;},8000);
+    closeModal('loan-modal'); renderLoans();
+  }
 }
 function markLoanPaid(i){
   if(!confirm('Mark this loan as fully paid?')) return;
@@ -2479,18 +2488,18 @@ function markLoanPaid(i){
   save('loans',loans); _loanSaving=true;
   if(window._fbDB&&window._fbFns){
     window._fbFns.set(window._fbFns.ref(window._fbDB,'loans'),loans)
-      .then(()=>{ setTimeout(()=>{_loanSaving=false;},3000); renderLoans(); })
+      .then(()=>{ setTimeout(()=>{_loanSaving=false;},8000); renderLoans(); })
       .catch(e=>{ _loanSaving=false; console.warn(e); renderLoans(); });
-  } else { setTimeout(()=>{_loanSaving=false;},3000); renderLoans(); }
+  } else { setTimeout(()=>{_loanSaving=false;},8000); renderLoans(); }
 }
 function deleteLoan(i){
   if(!confirm('Delete this loan record?')) return;
   loans.splice(i,1); save('loans',loans); _loanSaving=true;
   if(window._fbDB&&window._fbFns){
     window._fbFns.set(window._fbFns.ref(window._fbDB,'loans'),loans)
-      .then(()=>{ setTimeout(()=>{_loanSaving=false;},3000); renderLoans(); })
+      .then(()=>{ setTimeout(()=>{_loanSaving=false;},8000); renderLoans(); })
       .catch(e=>{ _loanSaving=false; console.warn(e); renderLoans(); });
-  } else { setTimeout(()=>{_loanSaving=false;},3000); renderLoans(); }
+  } else { setTimeout(()=>{_loanSaving=false;},8000); renderLoans(); }
 }
 function resetLoanBalance(i){
   const principal = +(loans[i].amount || 0);
@@ -2498,9 +2507,9 @@ function resetLoanBalance(i){
   save('loans',loans); _loanSaving=true;
   if(window._fbDB&&window._fbFns){
     window._fbFns.set(window._fbFns.ref(window._fbDB,'loans'),loans)
-      .then(()=>{ setTimeout(()=>{_loanSaving=false;},3000); renderLoans(); showToastAdmin&&showToastAdmin(`✅ Reset to ₱${principal.toFixed(2)}`); })
+      .then(()=>{ setTimeout(()=>{_loanSaving=false;},8000); renderLoans(); showToastAdmin&&showToastAdmin(`✅ Reset to ₱${principal.toFixed(2)}`); })
       .catch(e=>{ _loanSaving=false; console.warn(e); renderLoans(); });
-  } else { setTimeout(()=>{_loanSaving=false;},3000); renderLoans(); showToastAdmin&&showToastAdmin(`✅ Reset to ₱${principal.toFixed(2)}`); }
+  } else { setTimeout(()=>{_loanSaving=false;},8000); renderLoans(); showToastAdmin&&showToastAdmin(`✅ Reset to ₱${principal.toFixed(2)}`); }
 }
 window.resetLoanBalance = resetLoanBalance;
 
@@ -2537,7 +2546,7 @@ function deductLoanBalances() {
   if (window._fbDB && window._fbFns) {
     window._fbFns.set(window._fbFns.ref(window._fbDB,'loans'), loans)
       .then(()=>{
-        setTimeout(()=>{ _loanSaving = false; }, 3000);
+        setTimeout(()=>{ _loanSaving = false; }, 8000);
         showToastAdmin && showToastAdmin(`✅ Loan balances updated for ${p.label||p.key}!`);
       })
       .catch(e=>{
@@ -2546,7 +2555,7 @@ function deductLoanBalances() {
         showToastAdmin && showToastAdmin(`✅ Saved locally`);
       });
   } else {
-    setTimeout(()=>{ _loanSaving = false; }, 3000);
+    setTimeout(()=>{ _loanSaving = false; }, 8000);
     showToastAdmin && showToastAdmin(`✅ Loan balances updated for ${p.label||p.key}!`);
   }
   renderLoans();
@@ -3019,7 +3028,7 @@ onValue(ref(db,'paymentHistory'), snap => {
 
 // ── Loan save lock — prevents onValue from overwriting during save ──
 onValue(ref(db,'loans'), snap => {
-  if (_loanSaving) return; // skip — we just saved, don't overwrite
+  if (_loanSaving) return; // blocked — save in progress
   const data = snap.val();
   if (data !== null && data !== undefined) {
     const arr = Array.isArray(data) ? data : Object.values(data);
