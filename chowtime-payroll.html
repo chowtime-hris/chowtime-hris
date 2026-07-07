@@ -2419,7 +2419,7 @@ function renderLoans(){
   document.getElementById('loan-tbody').innerHTML=loans.map((l,i)=>`
     <tr><td>${l.empName}</td><td><span class="tag tag-blue">${l.type}</span></td>
         <td>₱${fmt(l.amount)}</td><td>₱${fmt(l.monthly)}</td>
-        <td style="font-weight:600;">₱${fmt(l.balance||l.amount)}</td><td>${l.start||'—'}</td>
+        <td style="font-weight:600;">₱${fmt(l.status==='Paid' ? 0 : (l.balance||l.amount))}</td><td>${l.start||'—'}</td>
         <td><span class="tag ${l.status==='Paid'?'tag-green':'tag-orange'}">${l.status||'Active'}</span>
             <button class="btn btn-sm btn-secondary" style="margin-left:4px;" onclick="editLoan(${i})">✏️</button>
             ${l.status==='Paid'
