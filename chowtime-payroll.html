@@ -404,6 +404,7 @@ tbody td{padding:9px 11px;}
   <div class="panel">
     <div class="panel-title"><span>🏦</span> Loan & Deduction Register</div>
     <button class="btn btn-primary" style="margin-bottom:14px;" onclick="openLoanModal()">+ Add Loan</button>
+    <button class="btn btn-secondary" style="margin-bottom:14px;margin-left:8px;" onclick="deductLoanBalances()">💳 Deduct Balances This Cut-off</button>
     <div class="table-wrap">
       <table>
         <thead><tr><th>Employee</th><th>Loan Type</th><th>Principal</th><th>Per Cut-off Ded.</th><th>Balance</th><th>Start</th><th>Status</th></tr></thead>
@@ -2465,8 +2466,45 @@ function saveLoan(){
   editingLoanIdx = -1;
   save('loans',loans);closeModal('loan-modal');renderLoans();
 }
-function markLoanPaid(i){loans[i].status='Paid';save('loans',loans);renderLoans();}
-function deleteLoan(i){loans.splice(i,1);save('loans',loans);renderLoans();}
+function markLoanPaid(i){loans[i].status='Paid';save('loans',loans);if(window._fbDB&&window._fbFns){window._fbFns.set(window._fbFns.ref(window._fbDB,'loans'),loans).catch(e=>console.warn(e));}renderLoans();}
+function deleteLoan(i){loans.splice(i,1);save('loans',loans);if(window._fbDB&&window._fbFns){window._fbFns.set(window._fbFns.ref(window._fbDB,'loans'),loans).catch(e=>console.warn(e));}renderLoans();}
+
+// ── Deduct loan balances after payroll is released ───────────
+// Call this once per cut-off after confirming payroll is correct
+function deductLoanBalances() {
+  const p = getPeriod();
+  // Check if already deducted this period
+  const deductedKey = 'loanDeducted_' + p.key;
+  if (localStorage.getItem(deductedKey)) {
+    if (!confirm(`Loan balances for ${p.label||p.key} were already deducted.\nDeduct again?`)) return;
+  }
+
+  let changed = 0;
+  loans.forEach((l,i) => {
+    if (l.status === 'Paid') return;
+    // Check start date — don't deduct before start
+    if (l.start && l.start > p.key) return;
+    const deduction = +(l.monthly || 0);
+    const newBalance = Math.max(0, (l.balance||l.amount) - deduction);
+    loans[i].balance = newBalance;
+    if (newBalance <= 0) {
+      loans[i].status = 'Paid';
+      loans[i].balance = 0;
+    }
+    changed++;
+  });
+
+  if (!changed) { showToastAdmin && showToastAdmin('No active loans to deduct.'); return; }
+
+  save('loans', loans);
+  localStorage.setItem(deductedKey, '1');
+  if (window._fbDB && window._fbFns) {
+    window._fbFns.set(window._fbFns.ref(window._fbDB,'loans'), loans).catch(e=>console.warn(e));
+  }
+  renderLoans();
+  showToastAdmin && showToastAdmin(`✅ Loan balances updated for ${p.label||p.key}!`);
+}
+window.deductLoanBalances = deductLoanBalances;
 
 // ══════════════════════════════════════════════════════════
 //  13TH MONTH
