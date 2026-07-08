@@ -302,6 +302,16 @@
       <div class="status-line" id="countStatusLine"></div>
     </div>
 
+    <div class="card" id="varianceWarningCard" style="display:none;border:2px solid var(--warn);">
+      <h2>⚠️ Please Double-Check</h2>
+      <p class="sub">These items look off — big variance, or suspiciously close to a full pack. Please recheck the freezer before submitting.</p>
+      <div id="varianceWarningList"></div>
+      <div class="row" style="margin-top:14px;">
+        <button class="btn-primary" onclick="confirmSubmitAnyway()">Yes, I Rechecked — Submit Anyway</button>
+        <button class="btn-ghost" onclick="cancelPendingSubmit()">Go Back, Let Me Recheck</button>
+      </div>
+    </div>
+
     <div class="card result-card" id="resultCard" style="display:none;">
       <h2>Result</h2>
       <p class="sub">This is what got recorded for this checkpoint.</p>
@@ -355,6 +365,9 @@
       <label>Shortage charge (₱ per unit lost)</label>
       <input id="shortageRateInput" type="number" min="0" step="any" placeholder="69">
       <p class="hint">Applied per unit when POS stock is higher than the physical freezer count. Overages at the same rate get deducted from total charges.</p>
+      <label>Variance warning threshold (units)</label>
+      <input id="varianceThresholdInput" type="number" min="0" step="any" placeholder="5">
+      <p class="hint">Crew gets a "please double-check" notice if a count's variance is at or above this number, or if it's suspiciously close to a full pack off (possible pack miscounting). Default 5 if left blank.</p>
       <button class="btn-primary" style="margin-top:12px;" onclick="saveBranch()">Save Settings</button>
       <div class="status-line" id="branchSaveStatus"></div>
     </div>
@@ -488,6 +501,7 @@ let editingItemId = null;
 let items = {};
 let crewList = {};
 let shortageRate = 69;
+let varianceThreshold = 5;
 let ownerPin = null;
 let auditorPin = null;
 let currentBranchId = null;
@@ -615,14 +629,16 @@ function selectBranch(code){
     bref('config/shortageRate').once('value'),
     bref('config/ownerPin').once('value'),
     bref('config/auditorPin').once('value'),
+    bref('config/varianceThreshold').once('value'),
     bref('items').once('value'),
     bref('crew').once('value')
-  ]).then(([bSnap, rSnap, pSnap, aSnap, iSnap, cSnap])=>{
+  ]).then(([bSnap, rSnap, pSnap, aSnap, vSnap, iSnap, cSnap])=>{
     const branchName = bSnap.val();
     currentBranchName = branchName || code;
     shortageRate = rSnap.exists() ? rSnap.val() : 69;
     ownerPin = pSnap.exists() ? pSnap.val() : null;
     auditorPin = aSnap.exists() ? aSnap.val() : null;
+    varianceThreshold = vSnap.exists() ? vSnap.val() : 5;
     items = iSnap.val() || {};
     crewList = cSnap.val() || {};
     document.getElementById('branchLabel').textContent = currentBranchName + ' (' + code + ')';
@@ -632,6 +648,7 @@ function selectBranch(code){
     document.getElementById('shortageRateInput').value = shortageRate;
     document.getElementById('ownerPinInput').value = ownerPin || '';
     document.getElementById('auditorPinInput').value = auditorPin || '';
+    document.getElementById('varianceThresholdInput').value = varianceThreshold;
 
     if(!ownerPin){
       document.getElementById('roleBranchName').textContent = currentBranchName;
@@ -793,20 +810,24 @@ function saveBranch(){
   const pin = document.getElementById('ownerPinInput').value.trim();
   const auditPin = document.getElementById('auditorPinInput').value.trim();
   const rate = parseFloat(document.getElementById('shortageRateInput').value);
+  const threshInput = document.getElementById('varianceThresholdInput').value;
+  const thresh = threshInput !== '' ? parseFloat(threshInput) : 5;
   const statusEl = document.getElementById('branchSaveStatus');
   statusEl.style.color = 'var(--danger)';
   if(!name){ toast('Enter a branch name'); statusEl.textContent = 'Not saved: branch name is empty.'; return; }
   if(!/^[A-Za-z0-9]{8}$/.test(pin)){ toast('Owner PIN must be exactly 8 characters (letters and/or numbers)'); statusEl.textContent = `Not saved: PIN must be exactly 8 letters/numbers, no spaces or symbols (you entered "${pin}").`; return; }
   if(auditPin && !/^[A-Za-z0-9]{4,8}$/.test(auditPin)){ statusEl.textContent = 'Not saved: Auditor PIN must be 4-8 letters/numbers, or leave it blank.'; return; }
   if(isNaN(rate) || rate < 0){ toast('Enter a valid shortage rate'); statusEl.textContent = 'Not saved: shortage rate is invalid.'; return; }
+  if(isNaN(thresh) || thresh < 0){ statusEl.textContent = 'Not saved: variance warning threshold is invalid.'; return; }
   Promise.all([
     bref('config/branchName').set(name),
     bref('config/ownerPin').set(pin),
     bref('config/auditorPin').set(auditPin || null),
     bref('config/shortageRate').set(rate),
+    bref('config/varianceThreshold').set(thresh),
     db.ref('branchList/'+currentBranchId+'/name').set(name)
   ]).then(()=>{
-    ownerPin = pin; auditorPin = auditPin || null; shortageRate = rate; currentBranchName = name;
+    ownerPin = pin; auditorPin = auditPin || null; shortageRate = rate; varianceThreshold = thresh; currentBranchName = name;
     document.getElementById('branchLabel').textContent = name + ' (' + currentBranchId + ')';
     document.getElementById('roleBranchName').textContent = name;
     document.getElementById('rateDisplay').textContent = rate;
@@ -1444,8 +1465,25 @@ function getWasteForCheckpoint(cp, cb){
     cb(map);
   });
 }
+function detectVarianceWarnings(id, rawVariance){
+  const it = items[id] || {};
+  const warnings = [];
+  if(Math.abs(rawVariance) >= varianceThreshold){
+    warnings.push(`Variance of ${fmt(rawVariance)} ${it.unit||''} is at or above the ${fmt(varianceThreshold)} unit warning threshold.`);
+  }
+  const fps = parseFloat(it.freezerPackSize);
+  if(fps && fps > 1 && Math.abs(rawVariance) >= fps - 1){
+    const nearestMultiple = Math.round(rawVariance / fps) * fps;
+    if(Math.abs(rawVariance - nearestMultiple) <= 1){
+      warnings.push(`Variance of ${fmt(rawVariance)} is close to a full pack (${fps}/pack) — did you miscount a whole pack?`);
+    }
+  }
+  return warnings;
+}
+
 function submitCount(){
   const statusEl = document.getElementById('countStatusLine');
+  document.getElementById('varianceWarningCard').style.display = 'none';
   const posInputs = document.querySelectorAll('#itemsList input[data-field="pos"]');
   const values={}; let filled=0;
   posInputs.forEach(inp=>{
@@ -1478,37 +1516,80 @@ function submitCount(){
     const ok = confirm(`You only completed ${filled} of ${posInputs.length} items. Submit anyway?`);
     if(!ok){ statusEl.textContent = 'Not submitted — cancelled. Fill in the rest and press Submit again.'; return; }
   }
-  statusEl.textContent = 'Submitting…';
-  const timeoutWarn = setTimeout(()=>{
-    statusEl.textContent = 'Still submitting… this usually means weak WiFi/signal. Keep this screen open — it will finish once connection is back. If it doesn\'t finish after a minute, ask the owner to check the internet at this branch.';
-    statusEl.style.color = 'var(--warn)';
-  }, 8000);
+  statusEl.textContent = 'Checking…'; statusEl.style.color = 'var(--muted)';
 
   Promise.all([
     bref('varianceBaseline').once('value'),
     new Promise(resolve => getWasteForCheckpoint(activeCheckpoint, resolve))
   ]).then(([baselineSnap, wasteMap])=>{
     const baselines = baselineSnap.val() || {};
-    const newBaselines = {};
+    const flagged = [];
     Object.keys(values).forEach(id=>{
       const v = values[id];
       const waste = wasteMap[id] || 0;
       const rawVariance = (v.pos - v.freezer) - waste;
-      const baselineBefore = baselines[id] || 0;
-      const delta = rawVariance - baselineBefore;
-      v.waste = waste;
-      v.baselineBefore = baselineBefore;
-      v.delta = delta;
-      v.charge = delta > 0.001 ? delta*itemRate(id) : 0;
-      v.credit = delta < -0.001 ? (-delta)*itemRate(id) : 0;
-      newBaselines[id] = rawVariance;
+      const reasons = detectVarianceWarnings(id, rawVariance);
+      if(reasons.length) flagged.push({id, rawVariance, reasons});
     });
-    const payload = { items: values, countedBy: currentCrew.id, countedByName: currentCrew.name, timestamp: Date.now() };
-    return Promise.all([
-      bref('counts/'+todayStr()+'/'+activeCheckpoint).set(payload),
-      bref('varianceBaseline').update(newBaselines)
-    ]);
-  }).then(()=>{
+    if(flagged.length){
+      showVarianceWarning(flagged, values, baselines, wasteMap);
+    } else {
+      finalizeSubmit(values, baselines, wasteMap);
+    }
+  });
+}
+
+function showVarianceWarning(flagged, values, baselines, wasteMap){
+  const statusEl = document.getElementById('countStatusLine');
+  const card = document.getElementById('varianceWarningCard');
+  const list = document.getElementById('varianceWarningList');
+  list.innerHTML = flagged.map(f => `<div class="waste-item"><strong>${escapeHtml(items[f.id]?items[f.id].name:f.id)}</strong> — variance ${fmt(f.rawVariance)}<br><small>${f.reasons.map(escapeHtml).join(' · ')}</small></div>`).join('');
+  card.style.display = 'block';
+  card.scrollIntoView({behavior:'smooth', block:'center'});
+  window._pendingSubmit = {values, baselines, wasteMap};
+  statusEl.style.color = 'var(--warn)';
+  statusEl.textContent = '⚠️ Please review the notice above before submitting.';
+}
+function confirmSubmitAnyway(){
+  document.getElementById('varianceWarningCard').style.display = 'none';
+  const p = window._pendingSubmit;
+  if(p) finalizeSubmit(p.values, p.baselines, p.wasteMap);
+}
+function cancelPendingSubmit(){
+  document.getElementById('varianceWarningCard').style.display = 'none';
+  const statusEl = document.getElementById('countStatusLine');
+  statusEl.style.color = '';
+  statusEl.textContent = 'Not submitted — go recheck the freezer, then press Submit again.';
+}
+
+function finalizeSubmit(values, baselines, wasteMap){
+  const statusEl = document.getElementById('countStatusLine');
+  statusEl.style.color = '';
+  statusEl.textContent = 'Submitting…';
+  const timeoutWarn = setTimeout(()=>{
+    statusEl.textContent = 'Still submitting… this usually means weak WiFi/signal. Keep this screen open — it will finish once connection is back. If it doesn\'t finish after a minute, ask the owner to check the internet at this branch.';
+    statusEl.style.color = 'var(--warn)';
+  }, 8000);
+
+  const newBaselines = {};
+  Object.keys(values).forEach(id=>{
+    const v = values[id];
+    const waste = wasteMap[id] || 0;
+    const rawVariance = (v.pos - v.freezer) - waste;
+    const baselineBefore = baselines[id] || 0;
+    const delta = rawVariance - baselineBefore;
+    v.waste = waste;
+    v.baselineBefore = baselineBefore;
+    v.delta = delta;
+    v.charge = delta > 0.001 ? delta*itemRate(id) : 0;
+    v.credit = delta < -0.001 ? (-delta)*itemRate(id) : 0;
+    newBaselines[id] = rawVariance;
+  });
+  const payload = { items: values, countedBy: currentCrew.id, countedByName: currentCrew.name, timestamp: Date.now() };
+  Promise.all([
+    bref('counts/'+todayStr()+'/'+activeCheckpoint).set(payload),
+    bref('varianceBaseline').update(newBaselines)
+  ]).then(()=>{
     clearTimeout(timeoutWarn);
     toast('Count submitted');
     submittedCheckpoints[activeCheckpoint]=true;
