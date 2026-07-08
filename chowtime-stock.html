@@ -1485,7 +1485,7 @@ function submitCount(){
   const statusEl = document.getElementById('countStatusLine');
   document.getElementById('varianceWarningCard').style.display = 'none';
   const posInputs = document.querySelectorAll('#itemsList input[data-field="pos"]');
-  const values={}; let filled=0;
+  const values={}; let filled=0; const missingNames=[];
   posInputs.forEach(inp=>{
     const id = inp.dataset.item;
     const posV = inp.value;
@@ -1509,12 +1509,15 @@ function submitCount(){
       values[id] = {pos: parseFloat(posV), freezer: freezerVal};
       if(usesPack){ values[id].freezerPacks = freezerPacks; values[id].freezerLoose = freezerLoose; }
       filled++;
+    } else {
+      missingNames.push(it.name || id);
     }
   });
-  if(filled===0){ toast('Enter at least one item'); statusEl.textContent = 'Not submitted: no items filled in yet.'; return; }
   if(filled < posInputs.length){
-    const ok = confirm(`You only completed ${filled} of ${posInputs.length} items. Submit anyway?`);
-    if(!ok){ statusEl.textContent = 'Not submitted — cancelled. Fill in the rest and press Submit again.'; return; }
+    statusEl.style.color = 'var(--danger)';
+    statusEl.textContent = `Not submitted — ALL items must be filled before you can submit. Missing: ${missingNames.join(', ')}`;
+    toast('Fill up all items first');
+    return;
   }
   statusEl.textContent = 'Checking…'; statusEl.style.color = 'var(--muted)';
 
