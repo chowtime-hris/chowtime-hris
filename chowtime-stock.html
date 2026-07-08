@@ -188,17 +188,32 @@
     <h2>Welcome to <span id="roleBranchName">Chowtime</span></h2>
     <p class="sub">Choose how you're using this device.</p>
   </div>
-  <div class="role-grid">
+  <div class="role-grid" style="grid-template-columns:1fr 1fr 1fr;">
     <div class="role-btn" onclick="enterCrew()">
       <div class="emoji">👷</div>
       <div class="t">Crew Count</div>
       <div class="d">Log freezer counts &amp; waste</div>
+    </div>
+    <div class="role-btn" onclick="enterAuditorPinGate()">
+      <div class="emoji">🧾</div>
+      <div class="t">Auditor Count</div>
+      <div class="d">Official POS vs Freezer audit</div>
     </div>
     <div class="role-btn" onclick="enterOwnerPinGate()">
       <div class="emoji">🔐</div>
       <div class="t">Owner Dashboard</div>
       <div class="d">Setup, audit &amp; charges</div>
     </div>
+  </div>
+</main>
+
+<main id="mainAuditorPin" class="narrow" style="display:none;">
+  <div class="card" style="text-align:center;">
+    <h2>Auditor PIN</h2>
+    <p class="sub">Enter the branch auditor PIN to continue.</p>
+    <input id="auditorPinGateInput" maxlength="8" placeholder="Auditor PIN" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" style="text-align:center;font-size:18px;letter-spacing:3px;" onkeydown="if(event.key==='Enter') checkAuditorPin();">
+    <button class="btn-primary" style="margin-top:14px;" onclick="checkAuditorPin()">Unlock</button>
+    <p class="hint" id="auditorPinGateStatus" style="color:var(--danger);"></p>
   </div>
 </main>
 
@@ -209,6 +224,30 @@
     <input id="ownerPinGateInput" maxlength="8" placeholder="8 characters" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" style="text-align:center;font-size:18px;letter-spacing:3px;" onkeydown="if(event.key==='Enter') checkOwnerPin();">
     <button class="btn-primary" style="margin-top:14px;" onclick="checkOwnerPin()">Unlock</button>
     <p class="hint" id="ownerPinGateStatus" style="color:var(--danger);"></p>
+  </div>
+</main>
+
+<!-- ============ AUDITOR SCREEN ============ -->
+<main id="mainAuditor" class="narrow" style="display:none;">
+  <div class="card">
+    <h2>Auditor Count</h2>
+    <p class="sub" id="auditorDateLabel"></p>
+    <label>Auditor name</label>
+    <input id="auditorNameInput" placeholder="Your name">
+  </div>
+
+  <div class="card">
+    <h2>Verify Each Item</h2>
+    <p class="sub">Check the current POS stock number, then physically count the freezer/chiller. This is the official audit — submitting will reset the running baseline, so make sure counts are accurate.</p>
+    <div id="auditorItemsList"></div>
+    <button class="btn-primary" style="margin-top:16px;" onclick="submitAudit()">Submit Audit</button>
+    <div class="status-line" id="auditorStatusLine"></div>
+  </div>
+
+  <div class="card result-card" id="auditorResultCard" style="display:none;">
+    <h2>Audit Result</h2>
+    <p class="sub">This audit resets each item's baseline to 0 — crew counts from here on will only flag new gaps.</p>
+    <div id="auditorResultList"></div>
   </div>
 </main>
 
@@ -311,11 +350,20 @@
       <input id="branchName" placeholder="e.g. Chowtime SM Pampanga">
       <label>Owner PIN (protects this dashboard)</label>
       <input id="ownerPinInput" maxlength="8" placeholder="8 characters, letters or numbers" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false">
+      <label>Auditor PIN (for official audit counts)</label>
+      <input id="auditorPinInput" maxlength="8" placeholder="Leave blank to disable Auditor Count" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false">
       <label>Shortage charge (₱ per unit lost)</label>
       <input id="shortageRateInput" type="number" min="0" step="any" placeholder="69">
       <p class="hint">Applied per unit when POS stock is higher than the physical freezer count. Overages at the same rate get deducted from total charges.</p>
       <button class="btn-primary" style="margin-top:12px;" onclick="saveBranch()">Save Settings</button>
       <div class="status-line" id="branchSaveStatus"></div>
+    </div>
+
+    <div class="card">
+      <h2>After Auditor Visit — Reset Baselines</h2>
+      <p class="sub">Charges only apply to <strong>new</strong> shortage since the last checkpoint — the same standing gap won't be charged twice. Once your branch auditor visits and does an official POS stock adjustment, the old gap is resolved. Tap this to clear the running baseline so future counts start fresh from zero, and nothing old gets carried forward or accidentally credited back.</p>
+      <button class="btn-danger" style="width:auto;" onclick="resetAllBaselines()">Reset All Baselines to 0</button>
+      <div class="status-line" id="resetBaselineStatus"></div>
     </div>
 
     <div class="card">
@@ -379,7 +427,7 @@
     </div>
     <div class="card">
       <h2>Variance Report — Per Cutoff</h2>
-      <p class="sub">Variance = POS Stock − Freezer Count − waste logged for that checkpoint. Red = shortage (charged). Orange = overage (credited). Numbers are editable if a crew member mis-typed something — edit and press Save Corrections.</p>
+      <p class="sub">Only <strong>new</strong> shortage since the last checkpoint gets charged — the same standing gap (until POS is officially adjusted by the auditor) won't be charged twice. Red = new shortage (charged). Orange = recovered (credited). Numbers are editable if a crew member mis-typed something — edit and press Save Corrections.</p>
       <div id="varianceContainer"></div>
       <div id="varianceEmpty" class="empty" style="display:none;">Crew hasn't submitted counts for this date yet.</div>
       <div class="totals-bar">
@@ -441,6 +489,7 @@ let items = {};
 let crewList = {};
 let shortageRate = 69;
 let ownerPin = null;
+let auditorPin = null;
 let currentBranchId = null;
 let currentBranchName = '';
 
@@ -465,10 +514,10 @@ function peso(n){ return '₱' + fmt(Math.round(n*100)/100); }
 function todayStr(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 
 function showMain(id){
-  ['mainConnect','mainBranchPicker','mainRole','mainOwnerPin','mainCrew','mainOwner'].forEach(m=>{
+  ['mainConnect','mainBranchPicker','mainRole','mainOwnerPin','mainAuditorPin','mainAuditor','mainCrew','mainOwner'].forEach(m=>{
     document.getElementById(m).style.display = (m===id) ? 'block' : 'none';
   });
-  document.getElementById('exitBtn').style.display = (id==='mainOwnerPin'||id==='mainCrew'||id==='mainOwner') ? 'inline-block' : 'none';
+  document.getElementById('exitBtn').style.display = (id==='mainOwnerPin'||id==='mainAuditorPin'||id==='mainAuditor'||id==='mainCrew'||id==='mainOwner') ? 'inline-block' : 'none';
   document.getElementById('changeBranchBtn').style.display = (id==='mainRole') ? 'inline-block' : 'none';
 }
 
@@ -565,13 +614,15 @@ function selectBranch(code){
     bref('config/branchName').once('value'),
     bref('config/shortageRate').once('value'),
     bref('config/ownerPin').once('value'),
+    bref('config/auditorPin').once('value'),
     bref('items').once('value'),
     bref('crew').once('value')
-  ]).then(([bSnap, rSnap, pSnap, iSnap, cSnap])=>{
+  ]).then(([bSnap, rSnap, pSnap, aSnap, iSnap, cSnap])=>{
     const branchName = bSnap.val();
     currentBranchName = branchName || code;
     shortageRate = rSnap.exists() ? rSnap.val() : 69;
     ownerPin = pSnap.exists() ? pSnap.val() : null;
+    auditorPin = aSnap.exists() ? aSnap.val() : null;
     items = iSnap.val() || {};
     crewList = cSnap.val() || {};
     document.getElementById('branchLabel').textContent = currentBranchName + ' (' + code + ')';
@@ -580,6 +631,7 @@ function selectBranch(code){
     document.getElementById('branchName').value = branchName || '';
     document.getElementById('shortageRateInput').value = shortageRate;
     document.getElementById('ownerPinInput').value = ownerPin || '';
+    document.getElementById('auditorPinInput').value = auditorPin || '';
 
     if(!ownerPin){
       document.getElementById('roleBranchName').textContent = currentBranchName;
@@ -606,6 +658,101 @@ function enterOwnerPinGate(){
   document.getElementById('ownerPinGateInput').value = '';
   document.getElementById('ownerPinGateStatus').textContent = '';
   setTimeout(()=>document.getElementById('ownerPinGateInput').focus(), 100);
+}
+
+function enterAuditorPinGate(){
+  if(!auditorPin){ toast('No Auditor PIN set yet — owner needs to set one in Setup first.'); return; }
+  showMain('mainAuditorPin');
+  document.getElementById('auditorPinGateInput').value = '';
+  document.getElementById('auditorPinGateStatus').textContent = '';
+  setTimeout(()=>document.getElementById('auditorPinGateInput').focus(), 100);
+}
+function checkAuditorPin(){
+  const entered = document.getElementById('auditorPinGateInput').value;
+  if(entered.toLowerCase() === String(auditorPin).toLowerCase()){
+    enterAuditor();
+  } else {
+    document.getElementById('auditorPinGateStatus').textContent = 'Incorrect PIN — try again.';
+    document.getElementById('auditorPinGateInput').value = '';
+    document.getElementById('auditorPinGateInput').focus();
+  }
+}
+function enterAuditor(){
+  showMain('mainAuditor');
+  document.getElementById('auditorDateLabel').textContent = new Date().toLocaleDateString('en-PH',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
+  document.getElementById('auditorNameInput').value = '';
+  document.getElementById('auditorResultCard').style.display = 'none';
+  renderAuditorItemsList();
+}
+function renderAuditorItemsList(){
+  const list = document.getElementById('auditorItemsList'); list.innerHTML='';
+  const keys = Object.keys(items).filter(id => !items[id].archived);
+  if(!keys.length){ list.innerHTML='<p class="sub">No items in catalog yet.</p>'; return; }
+  bref('varianceBaseline').once('value').then(snap=>{
+    const baselines = snap.val() || {};
+    keys.forEach(id=>{
+      const it = items[id];
+      const baseline = baselines[id] || 0;
+      const block = document.createElement('div'); block.className='item-block';
+      block.innerHTML = `<div class="name">${escapeHtml(it.name)} <span class="unit">(${escapeHtml(it.unit)})</span>${Math.abs(baseline)>0.001?` <span class="hint" style="color:var(--muted);">(current known gap: ${fmt(baseline)})</span>`:''}</div>
+        <div class="dual-input">
+          <div class="field"><label>POS Stock</label><input type="number" min="0" step="any" data-item="${id}" data-field="pos" placeholder="0"></div>
+          <div class="field"><label>Freezer Count</label><input type="number" min="0" step="any" data-item="${id}" data-field="freezer" placeholder="0"></div>
+        </div>`;
+      list.appendChild(block);
+    });
+  });
+}
+function submitAudit(){
+  const statusEl = document.getElementById('auditorStatusLine');
+  const auditorName = document.getElementById('auditorNameInput').value.trim();
+  if(!auditorName){ toast('Enter the auditor name'); statusEl.textContent = 'Not submitted: auditor name is required.'; return; }
+  const posInputs = document.querySelectorAll('#auditorItemsList input[data-field="pos"]');
+  const values = {}; let filled = 0;
+  posInputs.forEach(inp=>{
+    const id = inp.dataset.item;
+    const freezerInp = document.querySelector(`#auditorItemsList input[data-item="${id}"][data-field="freezer"]`);
+    if(inp.value !== '' && freezerInp.value !== ''){
+      values[id] = {pos: parseFloat(inp.value), freezer: parseFloat(freezerInp.value)};
+      filled++;
+    }
+  });
+  if(filled === 0){ toast('Enter at least one item'); statusEl.textContent = 'Not submitted: no items filled in.'; return; }
+  statusEl.textContent = 'Submitting audit…'; statusEl.style.color = 'var(--muted)';
+  bref('varianceBaseline').once('value').then(snap=>{
+    const baselines = snap.val() || {};
+    const auditItems = {};
+    const newBaselines = {};
+    Object.entries(values).forEach(([id, v])=>{
+      const priorBaseline = baselines[id] || 0;
+      const variance = v.pos - v.freezer;
+      auditItems[id] = {pos: v.pos, freezer: v.freezer, priorBaseline, variance};
+      newBaselines[id] = 0;
+    });
+    const payload = { items: auditItems, auditedBy: auditorName, timestamp: Date.now() };
+    return Promise.all([
+      bref('audits/'+todayStr()+'/'+Date.now()).set(payload),
+      bref('varianceBaseline').update(newBaselines)
+    ]).then(()=>auditItems);
+  }).then(auditItems=>{
+    toast('Audit submitted — baselines reset for audited items');
+    statusEl.style.color = 'var(--good)';
+    statusEl.textContent = '✓ Audit submitted at '+new Date().toLocaleTimeString();
+    const list = document.getElementById('auditorResultList'); list.innerHTML='';
+    Object.entries(auditItems).forEach(([id,a])=>{
+      let tag, cls;
+      if(Math.abs(a.variance)<0.001){ tag='MATCHED'; cls='tag-ok'; }
+      else if(a.variance>0){ tag='FOUND SHORT '+fmt(a.variance); cls='tag-short'; }
+      else { tag='FOUND OVER '+fmt(-a.variance); cls='tag-over'; }
+      const row = document.createElement('div'); row.className='result-row';
+      row.innerHTML = `<div>${escapeHtml(items[id]?items[id].name:id)}</div><div class="result-tag ${cls}">${tag}</div>`;
+      list.appendChild(row);
+    });
+    document.getElementById('auditorResultCard').style.display = 'block';
+  }).catch(e=>{
+    statusEl.style.color = 'var(--danger)';
+    statusEl.textContent = '✗ Error: '+e.message;
+  });
 }
 
 function enterOwner(){
@@ -644,19 +791,22 @@ function switchOwnerTab(name){
 function saveBranch(){
   const name = document.getElementById('branchName').value.trim();
   const pin = document.getElementById('ownerPinInput').value.trim();
+  const auditPin = document.getElementById('auditorPinInput').value.trim();
   const rate = parseFloat(document.getElementById('shortageRateInput').value);
   const statusEl = document.getElementById('branchSaveStatus');
   statusEl.style.color = 'var(--danger)';
   if(!name){ toast('Enter a branch name'); statusEl.textContent = 'Not saved: branch name is empty.'; return; }
   if(!/^[A-Za-z0-9]{8}$/.test(pin)){ toast('Owner PIN must be exactly 8 characters (letters and/or numbers)'); statusEl.textContent = `Not saved: PIN must be exactly 8 letters/numbers, no spaces or symbols (you entered "${pin}").`; return; }
+  if(auditPin && !/^[A-Za-z0-9]{4,8}$/.test(auditPin)){ statusEl.textContent = 'Not saved: Auditor PIN must be 4-8 letters/numbers, or leave it blank.'; return; }
   if(isNaN(rate) || rate < 0){ toast('Enter a valid shortage rate'); statusEl.textContent = 'Not saved: shortage rate is invalid.'; return; }
   Promise.all([
     bref('config/branchName').set(name),
     bref('config/ownerPin').set(pin),
+    bref('config/auditorPin').set(auditPin || null),
     bref('config/shortageRate').set(rate),
     db.ref('branchList/'+currentBranchId+'/name').set(name)
   ]).then(()=>{
-    ownerPin = pin; shortageRate = rate; currentBranchName = name;
+    ownerPin = pin; auditorPin = auditPin || null; shortageRate = rate; currentBranchName = name;
     document.getElementById('branchLabel').textContent = name + ' (' + currentBranchId + ')';
     document.getElementById('roleBranchName').textContent = name;
     document.getElementById('rateDisplay').textContent = rate;
@@ -769,6 +919,23 @@ function loadCopyFromBranchOptions(){
   });
 }
 
+function resetAllBaselines(){
+  const statusEl = document.getElementById('resetBaselineStatus');
+  if(!confirm('Reset ALL item baselines to 0? Only do this right after the auditor has done an official physical count and POS stock adjustment. This does not charge or credit anything — it just clears the "known gap" so future counts start measuring from zero.')) return;
+  statusEl.style.color='var(--muted)'; statusEl.textContent = 'Resetting…';
+  bref('items').once('value').then(snap=>{
+    const its = snap.val() || {};
+    const resets = {};
+    Object.keys(its).forEach(id => resets[id] = 0);
+    return bref('varianceBaseline').set(resets);
+  }).then(()=>{
+    statusEl.style.color='var(--good)';
+    statusEl.textContent = '✓ All baselines reset to 0 at '+new Date().toLocaleTimeString();
+  }).catch(e=>{
+    statusEl.style.color='var(--danger)';
+    statusEl.textContent = 'Error: '+e.message;
+  });
+}
 function copyItemsFromBranch(){
   const fromCode = document.getElementById('copyFromBranchSelect').value;
   const statusEl = document.getElementById('copyItemsStatus');
@@ -831,11 +998,34 @@ function crewName(id){ return (crewList[id]&&crewList[id].name) || id || '—'; 
 
 function loadDay(){
   const date = document.getElementById('datePicker').value;
-  Promise.all([bref('counts/'+date).once('value'), bref('waste/'+date).once('value')])
-  .then(([cSnap,wSnap])=>{
+  Promise.all([bref('counts/'+date).once('value'), bref('waste/'+date).once('value'), bref('audits/'+date).once('value')])
+  .then(([cSnap,wSnap,aSnap])=>{
     dayCounts = cSnap.val()||{}; dayWaste = wSnap.val()||{};
-    renderCheckpointSummary(); renderVarianceOwner(); renderWasteLogOwner();
+    renderCheckpointSummary(); renderVarianceOwner(); renderWasteLogOwner(); renderAuditsForDay(aSnap.val()||{});
   });
+}
+function renderAuditsForDay(audits){
+  let box = document.getElementById('auditsForDayBox');
+  if(!box){
+    box = document.createElement('div');
+    box.id = 'auditsForDayBox';
+    document.getElementById('ownerTab-daily').insertBefore(box, document.getElementById('ownerTab-daily').children[1]);
+  }
+  const entries = Object.values(audits);
+  if(!entries.length){ box.innerHTML = ''; return; }
+  box.innerHTML = entries.map(a => `
+    <div class="card" style="border:2px solid var(--gold);">
+      <h2>🧾 Official Audit — by ${escapeHtml(a.auditedBy)} at ${new Date(a.timestamp).toLocaleTimeString()}</h2>
+      <table><thead><tr><th>Item</th><th class="num">POS</th><th class="num">Freezer</th><th class="num">Prior Gap</th><th class="num">Found Variance</th></tr></thead>
+      <tbody>${Object.entries(a.items).map(([id,it])=>{
+        let cell;
+        if(Math.abs(it.variance)<0.001) cell = '<span class="variance-ok">Matched</span>';
+        else if(it.variance>0) cell = `<span class="variance-short">SHORT ${fmt(it.variance)}</span>`;
+        else cell = `<span class="variance-over">OVER ${fmt(-it.variance)}</span>`;
+        return `<tr><td>${escapeHtml(items[id]?items[id].name:id)}</td><td class="num">${fmt(it.pos)}</td><td class="num">${fmt(it.freezer)}</td><td class="num">${fmt(it.priorBaseline)}</td><td class="num">${cell}</td></tr>`;
+      }).join('')}</tbody></table>
+    </div>
+  `).join('');
 }
 function renderCheckpointSummary(){
   const box = document.getElementById('checkpointSummary'); box.innerHTML='';
@@ -881,14 +1071,22 @@ function renderVarianceOwner(){
     const section = document.createElement('div');
     section.className = 'cutoff-section';
 
-    let rowsHtml = `<table><thead><tr><th>Item</th><th class="num">POS</th><th class="num">Freezer</th><th class="num">Waste</th><th class="num">Variance</th><th class="num">Charge</th></tr></thead><tbody>`;
+    let rowsHtml = `<table><thead><tr><th>Item</th><th class="num">POS</th><th class="num">Freezer</th><th class="num">Waste</th><th class="num">Baseline</th><th class="num">New Short/Recovered</th><th class="num">Charge</th></tr></thead><tbody>`;
     Object.entries(cpData.items||{}).forEach(([id,v])=>{
-      const waste = wasteMap[id]||0;
-      const net = (v.pos - v.freezer) - waste;
-      let cell, charge=0;
-      if(Math.abs(net)<0.001){ cell='<span class="variance-ok">0</span>'; }
-      else if(net>0){ cell=`<span class="variance-short">SHORT ${fmt(net)}</span>`; charge=net*itemRate(id); totalCharge+=charge; }
-      else { cell=`<span class="variance-over">OVER ${fmt(-net)}</span>`; totalCredit += (-net)*itemRate(id); }
+      const waste = wasteMap[id]!==undefined ? wasteMap[id] : (v.waste||0);
+      let baselineBefore = v.baselineBefore, delta = v.delta, charge = v.charge, credit = v.credit;
+      if(baselineBefore === undefined || delta === undefined){
+        const net = (v.pos - v.freezer) - waste;
+        baselineBefore = 0; delta = net;
+        charge = net>0.001 ? net*itemRate(id) : 0;
+        credit = net<-0.001 ? (-net)*itemRate(id) : 0;
+      }
+      charge = charge || 0; credit = credit || 0;
+      totalCharge += charge; totalCredit += credit;
+      let cell;
+      if(Math.abs(delta)<0.001){ cell='<span class="variance-ok">0</span>'; }
+      else if(delta>0){ cell=`<span class="variance-short">NEW SHORT ${fmt(delta)}</span>`; }
+      else { cell=`<span class="variance-over">RECOVERED ${fmt(-delta)}</span>`; }
       const itemCell = items[id]
         ? escapeHtml(items[id].name)
         : `<span style="color:var(--danger);font-size:12px;">Unknown item</span><br>
@@ -899,6 +1097,7 @@ function renderVarianceOwner(){
         <td class="num"><input class="edit-input" type="number" step="any" data-cp="${cp}" data-item="${id}" data-field="pos" value="${v.pos}" oninput="updateCorrectionPackHint('${cp}','${id}','pos')"><div class="hint" id="packHint-${cp}-${id}-pos" style="margin:2px 0 0;">${packDisplay(id, v.pos)}</div></td>
         <td class="num"><input class="edit-input" type="number" step="any" data-cp="${cp}" data-item="${id}" data-field="freezer" value="${v.freezer}" oninput="updateCorrectionPackHint('${cp}','${id}','freezer')"><div class="hint" id="packHint-${cp}-${id}-freezer" style="margin:2px 0 0;">${packDisplay(id, v.freezer)}</div></td>
         <td class="num">${fmt(waste)}</td>
+        <td class="num" style="color:var(--muted);">${fmt(baselineBefore)}</td>
         <td class="num">${cell}</td>
         <td class="num">${charge!==0?peso(charge):'—'}</td>
       </tr>`;
@@ -929,19 +1128,39 @@ function renderVarianceOwner(){
 function saveCorrections(cp){
   const statusEl = document.getElementById('cpStatus-'+cp);
   const inputs = document.querySelectorAll(`.edit-input[data-cp="${cp}"]`);
-  const newItems = {};
+  const newValues = {};
   inputs.forEach(inp=>{
     const id = inp.dataset.item, field = inp.dataset.field;
-    if(!newItems[id]) newItems[id] = {};
-    newItems[id][field] = parseFloat(inp.value);
+    if(!newValues[id]) newValues[id] = {};
+    newValues[id][field] = parseFloat(inp.value);
   });
-  const invalid = Object.values(newItems).some(v => isNaN(v.pos) || isNaN(v.freezer));
+  const invalid = Object.values(newValues).some(v => isNaN(v.pos) || isNaN(v.freezer));
   if(invalid){ statusEl.textContent = 'Not saved: all POS/Freezer fields must be numbers.'; statusEl.style.color='var(--danger)'; return; }
   statusEl.textContent = 'Saving…'; statusEl.style.color='var(--muted)';
+
+  const cpData = dayCounts[cp] || {items:{}};
+  const wasteMap = wasteMapForCheckpoint(cp);
+  const newBaselines = {};
+  Object.keys(newValues).forEach(id=>{
+    const old = cpData.items[id] || {};
+    const baselineBefore = (old.baselineBefore !== undefined) ? old.baselineBefore : 0;
+    const waste = wasteMap[id] !== undefined ? wasteMap[id] : (old.waste || 0);
+    const rawVariance = (newValues[id].pos - newValues[id].freezer) - waste;
+    const delta = rawVariance - baselineBefore;
+    newValues[id].waste = waste;
+    newValues[id].baselineBefore = baselineBefore;
+    newValues[id].delta = delta;
+    newValues[id].charge = delta > 0.001 ? delta*itemRate(id) : 0;
+    newValues[id].credit = delta < -0.001 ? (-delta)*itemRate(id) : 0;
+    newBaselines[id] = rawVariance;
+  });
+
+  const date = document.getElementById('datePicker').value;
   Promise.all([
-    bref('counts/'+document.getElementById('datePicker').value+'/'+cp+'/items').set(newItems),
-    bref('counts/'+document.getElementById('datePicker').value+'/'+cp+'/corrected').set(true),
-    bref('counts/'+document.getElementById('datePicker').value+'/'+cp+'/correctedAt').set(Date.now())
+    bref('counts/'+date+'/'+cp+'/items').set(newValues),
+    bref('counts/'+date+'/'+cp+'/corrected').set(true),
+    bref('counts/'+date+'/'+cp+'/correctedAt').set(Date.now()),
+    bref('varianceBaseline').update(newBaselines)
   ]).then(()=>{
     statusEl.textContent = '✓ Corrections saved'; statusEl.style.color='var(--good)';
     loadDay();
@@ -1008,13 +1227,21 @@ function loadHistory(){
         const wasteMap={};
         Object.values(wasteRaw).forEach(w=>{ if(w.checkpoint===cp) wasteMap[w.itemId]=(wasteMap[w.itemId]||0)+parseFloat(w.qty||0); });
         Object.entries(cpData.items||{}).forEach(([id,v])=>{
-          const waste = wasteMap[id]||0;
-          const net = (v.pos - v.freezer) - waste;
-          if(net>0.001){
-            const charge=net*itemRate(id); dayCharge+=charge;
-            if(!perItem[id]) perItem[id]={charge:0,count:0};
+          const waste = wasteMap[id]!==undefined ? wasteMap[id] : (v.waste||0);
+          let delta = v.delta, charge = v.charge, credit = v.credit;
+          if(delta === undefined){
+            const net = (v.pos - v.freezer) - waste;
+            delta = net;
+            charge = net>0.001 ? net*itemRate(id) : 0;
+            credit = net<-0.001 ? (-net)*itemRate(id) : 0;
+          }
+          charge = charge || 0; credit = credit || 0;
+          if(charge > 0.001){
+            dayCharge+=charge;
+            if(!perItem[id]) perItem[id]={charge:0,count:0,rows:[]};
             perItem[id].charge+=charge; perItem[id].count+=1;
-          } else if(net<-0.001){ dayCredit += (-net)*itemRate(id); }
+            perItem[id].rows.push({date, cp, pos:v.pos, freezer:v.freezer, waste, variance:delta, charge, countedBy: cpData.countedByName||crewName(cpData.countedBy)});
+          } else if(credit > 0.001){ dayCredit += credit; }
         });
       });
       if(dayCharge>0||dayCredit>0) perDay[date]={charge:dayCharge, credit:dayCredit};
@@ -1035,15 +1262,38 @@ function loadHistory(){
     document.getElementById('histTotalCredit').textContent = peso(totalCredit);
     document.getElementById('histNet').textContent = peso(Math.max(0,totalCharge-totalCredit));
 
+    window._historyPerItem = perItem;
     const itemTbody = document.getElementById('histItemTbody'); itemTbody.innerHTML='';
     const itemRows = Object.entries(perItem).sort((a,b)=>b[1].charge-a[1].charge);
     document.getElementById('histItemEmpty').style.display = itemRows.length?'none':'block';
     itemRows.forEach(([id,d])=>{
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${escapeHtml(items[id]?items[id].name:id)}</td><td class="num variance-short">${peso(d.charge)}</td><td class="num">${d.count}</td>`;
+      tr.style.cursor = 'pointer';
+      tr.innerHTML = `<td>▸ ${escapeHtml(items[id]?items[id].name:id)}</td><td class="num variance-short">${peso(d.charge)}</td><td class="num">${d.count}</td>`;
+      tr.onclick = ()=>toggleItemBreakdown(id, tr);
       itemTbody.appendChild(tr);
     });
   });
+}
+
+function toggleItemBreakdown(id, afterRow){
+  const existing = document.getElementById('breakdown-'+id);
+  if(existing){ existing.remove(); afterRow.firstChild.textContent = '▸ ' + afterRow.firstChild.textContent.slice(2); return; }
+  document.querySelectorAll('[id^="breakdown-"]').forEach(el=>el.remove());
+  afterRow.firstChild.textContent = '▾ ' + afterRow.firstChild.textContent.slice(2);
+  const d = window._historyPerItem[id];
+  const tr = document.createElement('tr');
+  tr.id = 'breakdown-'+id;
+  const detailRows = d.rows.sort((a,b)=> a.date<b.date?-1:1).map(r =>
+    `<tr><td>${r.date}</td><td style="text-transform:capitalize;">${r.cp}</td><td class="num">${fmt(r.pos)}</td><td class="num">${fmt(r.freezer)}</td><td class="num">${fmt(r.waste)}</td><td class="num variance-short">${fmt(r.variance)}</td><td class="num">${peso(r.charge)}</td><td>${escapeHtml(r.countedBy)}</td></tr>`
+  ).join('');
+  tr.innerHTML = `<td colspan="3" style="padding:0;">
+    <table style="margin:0;background:#FAF8F5;">
+      <thead><tr><th>Date</th><th>Checkpoint</th><th class="num">POS</th><th class="num">Freezer</th><th class="num">Waste</th><th class="num">Variance</th><th class="num">Charge</th><th>Counted By</th></tr></thead>
+      <tbody>${detailRows}</tbody>
+    </table>
+  </td>`;
+  afterRow.after(tr);
 }
 
 /* ---------- CREW: PIN LOGIN ---------- */
@@ -1229,12 +1479,36 @@ function submitCount(){
     if(!ok){ statusEl.textContent = 'Not submitted — cancelled. Fill in the rest and press Submit again.'; return; }
   }
   statusEl.textContent = 'Submitting…';
-  const payload = { items: values, countedBy: currentCrew.id, countedByName: currentCrew.name, timestamp: Date.now() };
   const timeoutWarn = setTimeout(()=>{
     statusEl.textContent = 'Still submitting… this usually means weak WiFi/signal. Keep this screen open — it will finish once connection is back. If it doesn\'t finish after a minute, ask the owner to check the internet at this branch.';
     statusEl.style.color = 'var(--warn)';
   }, 8000);
-  bref('counts/'+todayStr()+'/'+activeCheckpoint).set(payload).then(()=>{
+
+  Promise.all([
+    bref('varianceBaseline').once('value'),
+    new Promise(resolve => getWasteForCheckpoint(activeCheckpoint, resolve))
+  ]).then(([baselineSnap, wasteMap])=>{
+    const baselines = baselineSnap.val() || {};
+    const newBaselines = {};
+    Object.keys(values).forEach(id=>{
+      const v = values[id];
+      const waste = wasteMap[id] || 0;
+      const rawVariance = (v.pos - v.freezer) - waste;
+      const baselineBefore = baselines[id] || 0;
+      const delta = rawVariance - baselineBefore;
+      v.waste = waste;
+      v.baselineBefore = baselineBefore;
+      v.delta = delta;
+      v.charge = delta > 0.001 ? delta*itemRate(id) : 0;
+      v.credit = delta < -0.001 ? (-delta)*itemRate(id) : 0;
+      newBaselines[id] = rawVariance;
+    });
+    const payload = { items: values, countedBy: currentCrew.id, countedByName: currentCrew.name, timestamp: Date.now() };
+    return Promise.all([
+      bref('counts/'+todayStr()+'/'+activeCheckpoint).set(payload),
+      bref('varianceBaseline').update(newBaselines)
+    ]);
+  }).then(()=>{
     clearTimeout(timeoutWarn);
     toast('Count submitted');
     submittedCheckpoints[activeCheckpoint]=true;
@@ -1250,24 +1524,20 @@ function submitCount(){
   });
 }
 function showResult(values){
-  getWasteForCheckpoint(activeCheckpoint, wasteMap=>{
-    const list = document.getElementById('resultList'); list.innerHTML='';
-    let totalCharge=0, totalCredit=0;
-    Object.entries(values).forEach(([id,v])=>{
-      const waste = wasteMap[id]||0;
-      const net = (v.pos-v.freezer)-waste;
-      let tag, cls;
-      if(Math.abs(net)<0.001){ tag='OK'; cls='tag-ok'; }
-      else if(net>0){ tag='SHORT '+fmt(net); cls='tag-short'; totalCharge += net*itemRate(id); }
-      else { tag='OVER '+fmt(-net); cls='tag-over'; totalCredit += (-net)*itemRate(id); }
-      const row = document.createElement('div'); row.className='result-row';
-      row.innerHTML = `<div>${escapeHtml(items[id].name)}</div><div class="result-tag ${cls}">${tag}</div>`;
-      list.appendChild(row);
-    });
-    document.getElementById('totalChargeAmt').textContent = '₱'+fmt(totalCharge);
-    document.getElementById('totalCreditAmt').textContent = '₱'+fmt(totalCredit);
-    document.getElementById('resultCard').style.display='block';
+  const list = document.getElementById('resultList'); list.innerHTML='';
+  let totalCharge=0, totalCredit=0;
+  Object.entries(values).forEach(([id,v])=>{
+    let tag, cls;
+    if(Math.abs(v.delta)<0.001){ tag='OK'; cls='tag-ok'; }
+    else if(v.delta>0){ tag='NEW SHORT '+fmt(v.delta); cls='tag-short'; totalCharge += v.charge; }
+    else { tag='RECOVERED '+fmt(-v.delta); cls='tag-over'; totalCredit += v.credit; }
+    const row = document.createElement('div'); row.className='result-row';
+    row.innerHTML = `<div>${escapeHtml(items[id].name)}</div><div class="result-tag ${cls}">${tag}</div>`;
+    list.appendChild(row);
   });
+  document.getElementById('totalChargeAmt').textContent = '₱'+fmt(totalCharge);
+  document.getElementById('totalCreditAmt').textContent = '₱'+fmt(totalCredit);
+  document.getElementById('resultCard').style.display='block';
 }
 function logWaste(){
   const itemId = document.getElementById('wasteItemSelect').value;
