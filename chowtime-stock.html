@@ -518,6 +518,19 @@ let dayCounts = {}, dayWaste = {};
 function bref(path){
   return db.ref('branches/'+currentBranchId+(path ? '/'+path : ''));
 }
+function baselineValue(entry){
+  if(entry === undefined || entry === null) return 0;
+  if(typeof entry === 'object') return entry.value || 0;
+  return entry;
+}
+function writeBaselineIfNewer(id, value, timestamp){
+  return bref('varianceBaseline/'+id).transaction(current=>{
+    if(current === null || current === undefined) return {value, updatedAt: timestamp};
+    const currentUpdatedAt = (typeof current === 'object') ? (current.updatedAt || 0) : 0;
+    if(timestamp >= currentUpdatedAt) return {value, updatedAt: timestamp};
+    return current;
+  });
+}
 
 function toast(msg){
   const t = document.getElementById('toast');
@@ -713,7 +726,7 @@ function renderAuditorItemsList(){
     const baselines = snap.val() || {};
     keys.forEach(id=>{
       const it = items[id];
-      const baseline = baselines[id] || 0;
+      const baseline = baselineValue(baselines[id]);
       const block = document.createElement('div'); block.className='item-block';
       block.innerHTML = `<div class="name">${escapeHtml(it.name)} <span class="unit">(${escapeHtml(it.unit)})</span>${Math.abs(baseline)>0.001?` <span class="hint" style="color:var(--muted);">(current known gap: ${fmt(baseline)})</span>`:''}</div>
         <div class="dual-input">
@@ -743,17 +756,16 @@ function submitAudit(){
   bref('varianceBaseline').once('value').then(snap=>{
     const baselines = snap.val() || {};
     const auditItems = {};
-    const newBaselines = {};
+    const auditTimestamp = Date.now();
     Object.entries(values).forEach(([id, v])=>{
-      const priorBaseline = baselines[id] || 0;
+      const priorBaseline = baselineValue(baselines[id]);
       const variance = v.pos - v.freezer;
       auditItems[id] = {pos: v.pos, freezer: v.freezer, priorBaseline, variance};
-      newBaselines[id] = 0;
     });
-    const payload = { items: auditItems, auditedBy: auditorName, timestamp: Date.now() };
+    const payload = { items: auditItems, auditedBy: auditorName, timestamp: auditTimestamp };
     return Promise.all([
-      bref('audits/'+todayStr()+'/'+Date.now()).set(payload),
-      bref('varianceBaseline').update(newBaselines)
+      bref('audits/'+todayStr()+'/'+auditTimestamp).set(payload),
+      ...Object.keys(values).map(id => writeBaselineIfNewer(id, 0, auditTimestamp))
     ]).then(()=>auditItems);
   }).then(auditItems=>{
     toast('Audit submitted — baselines reset for audited items');
@@ -952,11 +964,12 @@ function resetAllBaselines(){
   statusEl.style.color='var(--muted)'; statusEl.textContent = 'Resetting…';
   bref('items').once('value').then(snap=>{
     const its = snap.val() || {};
+    const resetTimestamp = Date.now();
     const resets = {};
-    Object.keys(its).forEach(id => resets[id] = 0);
+    Object.keys(its).forEach(id => resets[id] = {value: 0, updatedAt: resetTimestamp});
     return Promise.all([
       bref('varianceBaseline').set(resets),
-      bref('baselineResetLog').push().set({timestamp: Date.now(), itemCount: Object.keys(its).length})
+      bref('baselineResetLog').push().set({timestamp: resetTimestamp, itemCount: Object.keys(its).length})
     ]);
   }).then(()=>{
     statusEl.style.color='var(--good)';
@@ -972,12 +985,12 @@ function loadCurrentBaselines(){
   tbody.innerHTML = '<tr><td colspan="2" style="text-align:center;color:var(--muted);">Loading…</td></tr>';
   bref('varianceBaseline').once('value').then(snap=>{
     const val = snap.val() || {};
-    const keys = Object.keys(val).filter(id => Math.abs(val[id]) > 0.001 || items[id]);
+    const keys = Object.keys(val).filter(id => Math.abs(baselineValue(val[id])) > 0.001 || items[id]);
     tbody.innerHTML = '';
     document.getElementById('currentBaselinesEmpty').style.display = keys.length ? 'none' : 'block';
-    keys.sort((a,b)=> Math.abs(val[b]||0) - Math.abs(val[a]||0)).forEach(id=>{
+    keys.sort((a,b)=> Math.abs(baselineValue(val[b])) - Math.abs(baselineValue(val[a]))).forEach(id=>{
       const tr = document.createElement('tr');
-      const v = val[id] || 0;
+      const v = baselineValue(val[id]);
       tr.innerHTML = `<td>${escapeHtml(items[id]?items[id].name:id)}</td><td class="num" style="${Math.abs(v)>0.001?'color:var(--maroon);font-weight:700;':''}">${fmt(v)}</td>`;
       tbody.appendChild(tr);
     });
@@ -1197,7 +1210,7 @@ function saveCorrections(cp){
 
   const cpData = dayCounts[cp] || {items:{}};
   const wasteMap = wasteMapForCheckpoint(cp);
-  const newBaselines = {};
+  const correctionTimestamp = Date.now();
   Object.keys(newValues).forEach(id=>{
     const old = cpData.items[id] || {};
     const baselineBefore = (old.baselineBefore !== undefined) ? old.baselineBefore : 0;
@@ -1209,15 +1222,14 @@ function saveCorrections(cp){
     newValues[id].delta = delta;
     newValues[id].charge = delta > 0.001 ? delta*itemRate(id) : 0;
     newValues[id].credit = delta < -0.001 ? (-delta)*itemRate(id) : 0;
-    newBaselines[id] = rawVariance;
   });
 
   const date = document.getElementById('datePicker').value;
   Promise.all([
     bref('counts/'+date+'/'+cp+'/items').set(newValues),
     bref('counts/'+date+'/'+cp+'/corrected').set(true),
-    bref('counts/'+date+'/'+cp+'/correctedAt').set(Date.now()),
-    bref('varianceBaseline').update(newBaselines)
+    bref('counts/'+date+'/'+cp+'/correctedAt').set(correctionTimestamp),
+    ...Object.keys(newValues).map(id => writeBaselineIfNewer(id, (newValues[id].pos-newValues[id].freezer)-newValues[id].waste, correctionTimestamp))
   ]).then(()=>{
     statusEl.textContent = '✓ Corrections saved'; statusEl.style.color='var(--good)';
     loadDay();
@@ -1610,21 +1622,22 @@ function finalizeSubmit(values, baselines, wasteMap){
     statusEl.style.color = 'var(--warn)';
   }, 8000);
 
-  const newBaselines = {};
+  const submitTimestamp = Date.now();
+  const rawVariances = {};
   Object.keys(values).forEach(id=>{
     const v = values[id];
     const waste = wasteMap[id] || 0;
     const rawVariance = (v.pos - v.freezer) - waste;
-    const baselineBefore = baselines[id] || 0;
+    const baselineBefore = baselineValue(baselines[id]);
     const delta = rawVariance - baselineBefore;
     v.waste = waste;
     v.baselineBefore = baselineBefore;
     v.delta = delta;
     v.charge = delta > 0.001 ? delta*itemRate(id) : 0;
     v.credit = delta < -0.001 ? (-delta)*itemRate(id) : 0;
-    newBaselines[id] = rawVariance;
+    rawVariances[id] = rawVariance;
   });
-  const payload = { items: values, countedBy: currentCrew.id, countedByName: currentCrew.name, timestamp: Date.now() };
+  const payload = { items: values, countedBy: currentCrew.id, countedByName: currentCrew.name, timestamp: submitTimestamp };
 
   bref('counts/'+todayStr()+'/'+activeCheckpoint).set(payload).then(()=>{
     clearTimeout(timeoutWarn);
@@ -1635,7 +1648,7 @@ function finalizeSubmit(values, baselines, wasteMap){
     statusEl.textContent = '✓ Submitted at '+new Date().toLocaleTimeString();
     showResult(values);
 
-    bref('varianceBaseline').update(newBaselines).catch(e=>{
+    Promise.all(Object.keys(values).map(id => writeBaselineIfNewer(id, rawVariances[id], submitTimestamp))).catch(e=>{
       statusEl.style.color = 'var(--danger)';
       statusEl.textContent += ' ⚠️ WARNING: count saved, but baseline update FAILED (' + e.message + '). Tell the owner to check Firebase Database Rules — this means tomorrow\'s count may charge this full gap again.';
       toast('Baseline update failed — tell the owner');
