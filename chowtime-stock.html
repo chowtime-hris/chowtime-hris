@@ -378,6 +378,9 @@
       <button class="btn-danger" style="width:auto;" onclick="resetAllBaselines()">Reset All Baselines to 0</button>
       <div class="status-line" id="resetBaselineStatus"></div>
       <p class="hint" id="lastResetInfo">Loading last reset info…</p>
+      <button class="btn-ghost" style="width:auto;margin-top:10px;" onclick="loadCurrentBaselines()">Refresh Current Baselines</button>
+      <table style="margin-top:10px;"><thead><tr><th>Item</th><th class="num">Current Baseline</th></tr></thead><tbody id="currentBaselinesTbody"></tbody></table>
+      <div id="currentBaselinesEmpty" class="empty" style="display:none;">No baseline data yet.</div>
     </div>
 
     <div class="card">
@@ -779,6 +782,7 @@ function enterOwner(){
   loadCrewTable();
   loadCopyFromBranchOptions();
   loadLastResetInfo();
+  loadCurrentBaselines();
   document.getElementById('datePicker').value = todayStr();
   const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate()-6);
   document.getElementById('histFrom').value = weekAgo.toISOString().slice(0,10);
@@ -961,6 +965,22 @@ function resetAllBaselines(){
   }).catch(e=>{
     statusEl.style.color='var(--danger)';
     statusEl.textContent = 'Error: '+e.message;
+  });
+}
+function loadCurrentBaselines(){
+  const tbody = document.getElementById('currentBaselinesTbody');
+  tbody.innerHTML = '<tr><td colspan="2" style="text-align:center;color:var(--muted);">Loading…</td></tr>';
+  bref('varianceBaseline').once('value').then(snap=>{
+    const val = snap.val() || {};
+    const keys = Object.keys(val).filter(id => Math.abs(val[id]) > 0.001 || items[id]);
+    tbody.innerHTML = '';
+    document.getElementById('currentBaselinesEmpty').style.display = keys.length ? 'none' : 'block';
+    keys.sort((a,b)=> Math.abs(val[b]||0) - Math.abs(val[a]||0)).forEach(id=>{
+      const tr = document.createElement('tr');
+      const v = val[id] || 0;
+      tr.innerHTML = `<td>${escapeHtml(items[id]?items[id].name:id)}</td><td class="num" style="${Math.abs(v)>0.001?'color:var(--maroon);font-weight:700;':''}">${fmt(v)}</td>`;
+      tbody.appendChild(tr);
+    });
   });
 }
 function loadLastResetInfo(){
