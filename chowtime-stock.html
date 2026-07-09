@@ -377,6 +377,7 @@
       <p class="sub">Charges only apply to <strong>new</strong> shortage since the last checkpoint — the same standing gap won't be charged twice. Once your branch auditor visits and does an official POS stock adjustment, the old gap is resolved. Tap this to clear the running baseline so future counts start fresh from zero, and nothing old gets carried forward or accidentally credited back.</p>
       <button class="btn-danger" style="width:auto;" onclick="resetAllBaselines()">Reset All Baselines to 0</button>
       <div class="status-line" id="resetBaselineStatus"></div>
+      <p class="hint" id="lastResetInfo">Loading last reset info…</p>
     </div>
 
     <div class="card">
@@ -777,6 +778,7 @@ function enterOwner(){
   loadItemsTable();
   loadCrewTable();
   loadCopyFromBranchOptions();
+  loadLastResetInfo();
   document.getElementById('datePicker').value = todayStr();
   const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate()-6);
   document.getElementById('histFrom').value = weekAgo.toISOString().slice(0,10);
@@ -948,13 +950,27 @@ function resetAllBaselines(){
     const its = snap.val() || {};
     const resets = {};
     Object.keys(its).forEach(id => resets[id] = 0);
-    return bref('varianceBaseline').set(resets);
+    return Promise.all([
+      bref('varianceBaseline').set(resets),
+      bref('baselineResetLog').push().set({timestamp: Date.now(), itemCount: Object.keys(its).length})
+    ]);
   }).then(()=>{
     statusEl.style.color='var(--good)';
     statusEl.textContent = '✓ All baselines reset to 0 at '+new Date().toLocaleTimeString();
+    loadLastResetInfo();
   }).catch(e=>{
     statusEl.style.color='var(--danger)';
     statusEl.textContent = 'Error: '+e.message;
+  });
+}
+function loadLastResetInfo(){
+  bref('baselineResetLog').once('value').then(snap=>{
+    const val = snap.val() || {};
+    const entries = Object.values(val).sort((a,b)=>b.timestamp-a.timestamp);
+    const el = document.getElementById('lastResetInfo');
+    if(!el) return;
+    if(!entries.length){ el.textContent = 'No baseline reset has ever been done for this branch.'; return; }
+    el.textContent = 'Last reset: ' + new Date(entries[0].timestamp).toLocaleString('en-PH');
   });
 }
 function copyItemsFromBranch(){
@@ -1589,10 +1605,8 @@ function finalizeSubmit(values, baselines, wasteMap){
     newBaselines[id] = rawVariance;
   });
   const payload = { items: values, countedBy: currentCrew.id, countedByName: currentCrew.name, timestamp: Date.now() };
-  Promise.all([
-    bref('counts/'+todayStr()+'/'+activeCheckpoint).set(payload),
-    bref('varianceBaseline').update(newBaselines)
-  ]).then(()=>{
+
+  bref('counts/'+todayStr()+'/'+activeCheckpoint).set(payload).then(()=>{
     clearTimeout(timeoutWarn);
     toast('Count submitted');
     submittedCheckpoints[activeCheckpoint]=true;
@@ -1600,6 +1614,12 @@ function finalizeSubmit(values, baselines, wasteMap){
     statusEl.style.color = '';
     statusEl.textContent = '✓ Submitted at '+new Date().toLocaleTimeString();
     showResult(values);
+
+    bref('varianceBaseline').update(newBaselines).catch(e=>{
+      statusEl.style.color = 'var(--danger)';
+      statusEl.textContent += ' ⚠️ WARNING: count saved, but baseline update FAILED (' + e.message + '). Tell the owner to check Firebase Database Rules — this means tomorrow\'s count may charge this full gap again.';
+      toast('Baseline update failed — tell the owner');
+    });
   }).catch(e=>{
     clearTimeout(timeoutWarn);
     toast('Error: '+e.message);
