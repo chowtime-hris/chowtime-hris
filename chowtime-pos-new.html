@@ -523,7 +523,7 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
     const po = {
       _type:"po", poNum:soNum,
       branch:branchId,
-      branchName:BRANCHES.find(b=>b.id===branchId)?.full||branchId,
+      branchName:branches.find(b=>b.id===branchId)?.full||branchId,
       items:ordered.map(i=>({id:i.id,name:i.name,unit:i.unit,qty:i.orderQty,note:i.note||"",price:0})),
       date:today,
       deliveryRequested:deliveryReq,
@@ -552,7 +552,7 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
           h("div",{style:{color:C.accent,fontSize:9,fontWeight:700,letterSpacing:2}},"PURCHASE ORDER / SALES ORDER"),
           h("div",{style:{color:"#fff",fontSize:16,fontWeight:900,marginTop:2}},soNum),
           h("div",{style:{color:"rgba(255,255,255,.5)",fontSize:10,marginTop:1}},
-            "From: "+( BRANCHES.find(b=>b.id===branchId)?.full||branchId)+" · Date: "+today)
+            "From: "+( branches.find(b=>b.id===branchId)?.full||branchId)+" · Date: "+today)
         ),
         h("button",{onClick:onClose,style:{background:"rgba(255,255,255,.15)",border:"none",color:"#fff",
           width:30,height:30,borderRadius:8,fontSize:18,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}},"×")
@@ -563,7 +563,7 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
         gridTemplateColumns:"1fr 1fr 1fr",gap:10,borderBottom:"1px solid #eee"}},
         h("div",null,
           h("div",{style:{fontSize:8,color:C.muted,fontWeight:700,letterSpacing:1,marginBottom:3}},"CUSTOMER"),
-          h("div",{style:{fontSize:11,fontWeight:700}},BRANCHES.find(b=>b.id===branchId)?.full||branchId)
+          h("div",{style:{fontSize:11,fontWeight:700}},branches.find(b=>b.id===branchId)?.full||branchId)
         ),
         h("div",null,
           h("div",{style:{fontSize:8,color:C.muted,fontWeight:700,letterSpacing:1,marginBottom:3}},"REQUESTED DELIVERY"),
@@ -958,7 +958,7 @@ function DRCheckForm({po,db,branchId,user,showT,INIT_INVENTORY,setAdvances,advan
     <div class="c"><b style="font-size:14px">DELIVERY RECEIPT</b><br>CHOWTIME COMMISSARY<br>${po.drNum||"DR-"+po.poNum}</div>
     <div class="hr"></div>
     <div class="row"><span>PO#: ${po.poNum}</span><span>${po.deliveryDate||po.date}</span></div>
-    <div class="row"><span>Branch: ${BRANCHES.find(b=>b.id===po.branch)?.full||po.branch}</span></div>
+    <div class="row"><span>Branch: ${branches.find(b=>b.id===po.branch)?.full||po.branch}</span></div>
     <div class="row"><span>Issued by: ${po.issuedBy||"Commissary"}</span></div>
     <div class="hr"></div>
     <div class="b">ITEMS DELIVERED:</div>
@@ -1657,7 +1657,7 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
       h("select",{value:filterBranch,onChange:e=>setFilterBranch(e.target.value),
         style:{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none"}},
         h("option",{value:"all"},"All Branches"),
-        ...BRANCHES.map(b=>h("option",{key:b.id,value:b.id},b.name))
+        ...branches.map(b=>h("option",{key:b.id,value:b.id},b.name))
       )
     ),
 
@@ -1680,7 +1680,7 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
           ),
           h("div",null,
             h("div",{style:{fontSize:11,fontWeight:700}},req.staffName),
-            h("div",{style:{fontSize:9,color:C.muted}},BRANCHES.find(b=>b.id===req.branch)?.name||req.branch),
+            h("div",{style:{fontSize:9,color:C.muted}},branches.find(b=>b.id===req.branch)?.name||req.branch),
             req.hrisEmpId
               ?h("div",{style:{fontSize:8,color:C.success,fontWeight:600}},"🔗 HRIS linked")
               :h("div",{style:{fontSize:8,color:C.warning,fontWeight:600}},"⚠️ No HRIS link")
@@ -3366,6 +3366,7 @@ function VoidBadge({branchId,db,setPage}){
 function App(){
   // Auth
   const [user,setUser]=useState(null);
+  const [branches,setBranches]=useState(BRANCHES);
   const [branchOverrides,setBranchOverrides]=useState({});
   const [branchPerms,setBranchPerms]=useState({});
   const [authLoading,setAuthLoading]=useState(true);
@@ -3600,6 +3601,16 @@ function App(){
     return()=>unsub();
   },[user?.branch]);
 
+  // ── LOAD SAVED BRANCHES ──────────────────────────────────
+  useEffect(()=>{
+    try{
+      const unsub=onSnapshot(doc(db,"settings","branches"),snap=>{
+        if(snap.exists()&&snap.data().branches)setBranches(snap.data().branches);
+      },()=>{});
+      return()=>unsub();
+    }catch(e){}
+  },[]);
+
   // ── LOAD STAFF FROM FIRESTORE ────────────────────────────
   useEffect(()=>{
     const unsub=onSnapshot(collection(db,"staff_accounts"),snap=>{
@@ -3620,7 +3631,7 @@ function App(){
   // ── COMPUTED FROM USER ────────────────────────────────────
   const role=user?ROLES[user.role]:null;
   const branchId=(user?.branch==="all"||user?.branch==="comm")?"ct-wsfp":(user?.branch||"ct-wsfp");
-  const curBranch=BRANCHES.find(b=>b.id===branchId)||BRANCHES[0];
+  const curBranch=branches.find(b=>b.id===branchId)||BRANCHES[0];
   const cartTotal=cart.reduce((s,i)=>s+i.lineTotal,0);
   const cartCount=cart.reduce((s,i)=>s+i.qty,0);
   const chkSub=cartTotal;
@@ -4056,7 +4067,7 @@ function App(){
           h("div",{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}},
             h(Stat,{label:"Total Sales Today",value:"₱"+BRANCHES.reduce((s,b)=>s+(b.sales||0),0).toLocaleString(),sub:"All branches",icon:"📈",color:C.primary}),
             h(Stat,{label:"Live Orders",value:orders.length,sub:"From Firebase",icon:"📋",color:C.info}),
-            h(Stat,{label:"Active Branches",value:BRANCHES.filter(b=>b.status!=="closed").length+"/"+BRANCHES.length,icon:"🏪",color:C.success}),
+            h(Stat,{label:"Active Branches",value:branches.filter(b=>b.status!=="closed").length+"/"+BRANCHES.length,icon:"🏪",color:C.success}),
             h(Stat,{label:"Pending Orders",value:orders.filter(o=>o.status==="pending").length,icon:"⚠️",color:C.warning})
           ),
           h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}},
@@ -4067,7 +4078,7 @@ function App(){
           h("div",{style:{display:"grid",gridTemplateColumns:"1.3fr 1fr",gap:10}},
             h("div",{style:{background:"#fff",borderRadius:13,padding:"13px 15px",border:"1px solid "+C.border}},
               h("div",{style:{fontWeight:800,fontSize:12,marginBottom:10}},"Branch Performance"),
-              BRANCHES.map(b=>h("div",{key:b.id,style:{display:"flex",alignItems:"center",gap:8,padding:"7px 0",borderBottom:"1px solid #f5f5f5"}},
+              branches.map(b=>h("div",{key:b.id,style:{display:"flex",alignItems:"center",gap:8,padding:"7px 0",borderBottom:"1px solid #f5f5f5"}},
                 h("div",{style:{width:26,height:26,background:"#FFF0F0",borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",fontSize:8,fontWeight:900,color:C.primary,flexShrink:0}},b.name.replace("CT-","")),
                 h("div",{style:{flex:1}},
                   h("div",{style:{fontSize:10,fontWeight:700}},b.full),
@@ -4101,7 +4112,7 @@ function App(){
         page==="branches"&&h("div",null,
           h(SectionHeader,{title:"Stores / Branches"}),
           h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10}},
-            BRANCHES.map(b=>{
+            branches.map(b=>{
               const bOrds=orders.filter(o=>o.branch===b.id);
               const bSales=bOrds.reduce((s,o)=>s+(o.total||0),0);
               return h("div",{key:b.id,style:{background:"#fff",borderRadius:12,padding:"14px",border:"1px solid "+C.border}},
@@ -4313,7 +4324,7 @@ function App(){
               h("div",{style:{width:32,height:32,background:"#FFEBEE",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}},"💸"),
               h("div",{style:{flex:1}},
                 h("div",{style:{fontSize:11,fontWeight:700}},e.desc),
-                h("div",{style:{fontSize:9,color:C.muted}},e.cat+" · "+e.by+" · "+e.date+" · "+(BRANCHES.find(b=>b.id===e.branch)?.name||e.branch))
+                h("div",{style:{fontSize:9,color:C.muted}},e.cat+" · "+e.by+" · "+e.date+" · "+(branches.find(b=>b.id===e.branch)?.name||e.branch))
               ),
               h("div",{style:{fontSize:12,fontWeight:800,color:C.danger,marginRight:7}},"₱"+(e.amount||0).toLocaleString()),
               h(Badge,{label:e.status,color:e.status==="approved"?C.success:C.warning}),
@@ -4353,7 +4364,7 @@ function App(){
           h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
             cashLog.filter(c=>user.role==="owner"||c.branch===branchId).map(c=>h("div",{key:c._docId,style:{display:"flex",alignItems:"center",gap:9,padding:"10px 14px",borderBottom:"1px solid #f9f9f9"}},
               h("div",{style:{width:32,height:32,background:c.type==="in"?"#E8F5E9":"#FFEBEE",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}},c.type==="in"?"⬇️":"⬆️"),
-              h("div",{style:{flex:1}},h("div",{style:{fontSize:11,fontWeight:700}},c.desc),h("div",{style:{fontSize:9,color:C.muted}},c.by+" · "+c.time+" · "+(BRANCHES.find(b=>b.id===c.branch)?.name||c.branch))),
+              h("div",{style:{flex:1}},h("div",{style:{fontSize:11,fontWeight:700}},c.desc),h("div",{style:{fontSize:9,color:C.muted}},c.by+" · "+c.time+" · "+(branches.find(b=>b.id===c.branch)?.name||c.branch))),
               h("div",{style:{fontWeight:800,fontSize:12,color:c.type==="in"?C.success:C.danger}},(c.type==="in"?"+":"-")+"₱"+(c.amount||0).toLocaleString())
             )),
             cashLog.length===0&&h("div",{style:{textAlign:"center",padding:"30px",color:C.muted,fontSize:12}},"No entries yet")
@@ -4416,7 +4427,7 @@ function App(){
         page==="cash_monitor"&&h("div",null,
           h(SectionHeader,{title:"Cash Monitoring — All Branches"}),
           h("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:10}},
-            BRANCHES.map(b=>{
+            branches.map(b=>{
               const bc=cashLog.filter(c=>c.branch===b.id);
               const bo=orders.filter(o=>o.branch===b.id);
               const opening=bc.filter(c=>c.type==="in"&&(c.desc||"").includes("Opening")).reduce((s,c)=>s+(c.amount||0),0);
@@ -4499,7 +4510,7 @@ function App(){
             h("div",{style:{background:"#fff",borderRadius:12,padding:"13px 15px",border:"1px solid "+C.border}},
               h("b",{style:{fontSize:12}},"Sales by Branch"),
               h("div",{style:{marginTop:9}},
-                BRANCHES.map(b=>{
+                branches.map(b=>{
                   const bs=orders.filter(o=>o.branch===b.id).reduce((s,o)=>s+(o.total||0),0);
                   return h("div",{key:b.id,style:{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f5f5f5"}},
                     h("span",{style:{fontSize:11,color:C.muted}},b.full),
@@ -4617,7 +4628,7 @@ function App(){
                 h("div",{style:{marginTop:9}},
                   staff.map(s=>{const r=ROLES[s.role];return h("div",{key:s.id,style:{display:"flex",alignItems:"center",gap:8,padding:"7px 0",borderBottom:"1px solid #f9f9f9"}},
                     h("div",{style:{width:28,height:28,borderRadius:7,background:`${r.color}18`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,flexShrink:0}},r.emoji),
-                    h("div",{style:{flex:1}},h("div",{style:{fontSize:10,fontWeight:700}},s.name),h("div",{style:{fontSize:8,color:r.color,fontWeight:600}},r.label+" · "+(s.branch==="all"?"All":s.branch==="comm"?"Commissary":BRANCHES.find(b=>b.id===s.branch)?.name||s.branch))),
+                    h("div",{style:{flex:1}},h("div",{style:{fontSize:10,fontWeight:700}},s.name),h("div",{style:{fontSize:8,color:r.color,fontWeight:600}},r.label+" · "+(s.branch==="all"?"All":s.branch==="comm"?"Commissary":branches.find(b=>b.id===s.branch)?.name||s.branch))),
                     h("button",{
                       onClick:()=>{setEditingStaff(s);setNewPin("");setNewPin2("");setModal("edit_pin");},
                       style:{fontSize:8,color:C.info,fontFamily:"monospace",background:"#E3F2FD",padding:"3px 7px",borderRadius:5,border:"none",cursor:"pointer",fontWeight:700}
@@ -4630,7 +4641,7 @@ function App(){
                 h("div",{style:{display:"grid",gap:8}},
                   h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:3,letterSpacing:1}},"FULL NAME"),h("input",{value:newStaff.name,onChange:e=>setNewStaff(p=>({...p,name:e.target.value})),placeholder:"Name",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box"}})),
                   h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:3,letterSpacing:1}},"ROLE"),h("select",{value:newStaff.role,onChange:e=>setNewStaff(p=>({...p,role:e.target.value})),style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none"}},Object.entries(ROLES).map(([k,r])=>h("option",{key:k,value:k},r.emoji+" "+r.label)))),
-                  h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:3,letterSpacing:1}},"BRANCH"),h("select",{value:newStaff.branch,onChange:e=>setNewStaff(p=>({...p,branch:e.target.value})),style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none"}},h("option",{value:"all"},"All Branches"),...BRANCHES.map(b=>h("option",{key:b.id,value:b.id},b.full)),h("option",{value:"comm"},"Commissary"))),
+                  h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:3,letterSpacing:1}},"BRANCH"),h("select",{value:newStaff.branch,onChange:e=>setNewStaff(p=>({...p,branch:e.target.value})),style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none"}},h("option",{value:"all"},"All Branches"),...branches.map(b=>h("option",{key:b.id,value:b.id},b.full)),h("option",{value:"comm"},"Commissary"))),
                   h("div",null,
                     h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:3,letterSpacing:1}},"WORK EMAIL"),
                     h("input",{type:"email",value:newStaff.email,onChange:e=>setNewStaff(p=>({...p,email:e.target.value})),
@@ -4807,8 +4818,58 @@ function App(){
 
 
         // ══ SETTINGS ══
-        page==="settings"&&h("div",{style:{maxWidth:520}},
+        page==="settings"&&h("div",{style:{maxWidth:600}},
           h(SectionHeader,{title:"Settings"}),
+          // Branch Editor
+          h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,padding:"16px",marginBottom:14}},
+            h("div",{style:{fontWeight:800,fontSize:13,marginBottom:12,color:C.primary}},"🏪 Branch Management"),
+            h("div",{style:{display:"grid",gap:8}},
+              branches.map((b,bi)=>h("div",{key:b.id,style:{display:"flex",gap:8,alignItems:"center",padding:"8px 10px",borderRadius:8,background:C.bg,border:"1px solid "+C.border}},
+                h("div",{style:{width:70,fontSize:10,fontWeight:700,color:C.primary}},b.name),
+                h("input",{
+                  value:b.full,
+                  onChange:e=>{
+                    const updated=[...branches];
+                    updated[bi]={...updated[bi],full:e.target.value};
+                    setBranches(updated);
+                  },
+                  placeholder:"Branch full name",
+                  style:{flex:1,padding:"6px 10px",border:"1px solid "+C.border,borderRadius:7,fontSize:12,outline:"none"}
+                }),
+                h("input",{
+                  value:b.loc,
+                  onChange:e=>{
+                    const updated=[...branches];
+                    updated[bi]={...updated[bi],loc:e.target.value};
+                    setBranches(updated);
+                  },
+                  placeholder:"Location",
+                  style:{flex:1,padding:"6px 10px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none",color:C.muted}
+                }),
+                h("select",{
+                  value:b.status||"active",
+                  onChange:e=>{
+                    const updated=[...branches];
+                    updated[bi]={...updated[bi],status:e.target.value};
+                    setBranches(updated);
+                  },
+                  style:{padding:"6px 8px",border:"1px solid "+C.border,borderRadius:7,fontSize:10,outline:"none"}
+                },
+                  h("option",{value:"active"},"Active"),
+                  h("option",{value:"closed"},"Closed")
+                )
+              ))
+            ),
+            h("button",{
+              onClick:async()=>{
+                try{
+                  await setDoc(doc(db,"settings","branches"),{branches,updatedBy:user.name,updatedAt:serverTimestamp()});
+                  showT("Branches saved ✓");
+                }catch(e){showT("Error saving","err");}
+              },
+              style:{marginTop:10,padding:"9px 20px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:8,color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}
+            },"💾 Save Branch Names")
+          ),
           [
             {title:"Business Info",fields:[["Business Name","Chowtime Fast-Food Chain"],["TIN","000-123-456-789"],["VAT Reg","000-123-456-000"],["Address","Pampanga, Philippines"]]},
             {title:"Receipt",fields:[["Header","CHOWTIME FAST-FOOD CHAIN"],["Footer","Salamat! Kain na! 😊"]]},
@@ -4890,7 +4951,7 @@ function App(){
                 h("div",{style:{fontSize:10,fontWeight:800,color:C.primary}},po.poNum||"—"),
                 h("div",null,
                   h("div",{style:{fontSize:10,fontWeight:700}},(po.items||[]).map(i=>i.qty+"x "+i.name).join(", ").slice(0,50)+(((po.items||[]).join("").length>50)?"...":"")),
-                  h("div",{style:{fontSize:9,color:C.muted}},po.requestedBy+" · "+BRANCHES.find(b=>b.id===po.branch)?.name)
+                  h("div",{style:{fontSize:9,color:C.muted}},po.requestedBy+" · "+branches.find(b=>b.id===po.branch)?.name)
                 ),
                 h("div",{style:{fontSize:10,color:C.muted}},po.date||"—"),
                 h("div",{style:{fontSize:10,fontWeight:po.deliveryDate?700:400,color:po.deliveryDate?C.info:C.muted}},po.deliveryDate||"Pending"),
@@ -4932,7 +4993,7 @@ function App(){
               :advances.filter(a=>a._type==="po").map(po=>h("div",{key:po._docId,style:{display:"grid",gridTemplateColumns:"90px 100px 1fr 110px 110px 100px 90px",padding:"10px 14px",borderBottom:"1px solid #f5f5f5",alignItems:"center"}},
                 h("div",{style:{fontSize:10,fontWeight:800,color:C.primary}},po.poNum||"—"),
                 h("div",null,
-                  h("div",{style:{fontSize:9,fontWeight:700}},BRANCHES.find(b=>b.id===po.branch)?.name||po.branch),
+                  h("div",{style:{fontSize:9,fontWeight:700}},branches.find(b=>b.id===po.branch)?.name||po.branch),
                 ),
                 h("div",{style:{fontSize:9,color:C.muted}},(po.items||[]).map(i=>i.qty+"x "+i.name).join(", ").slice(0,45)),
                 h("div",{style:{fontSize:9}},po.date||"—"),
@@ -4988,7 +5049,7 @@ function App(){
                   const items=inventory.filter(i=>i._order>0).map(i=>({name:i.name,qty:i._order,unit:i.unit}));
                   await addDoc(collection(db,"comm_orders"),{
                     branch:branchId,
-                    branchName:BRANCHES.find(b=>b.id===branchId)?.full||branchId,
+                    branchName:branches.find(b=>b.id===branchId)?.full||branchId,
                     items,status:"pending",
                     requestedBy:user.name,
                     timestamp:serverTimestamp()
