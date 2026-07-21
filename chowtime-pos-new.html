@@ -3367,6 +3367,7 @@ function App(){
   // Auth
   const [user,setUser]=useState(null);
   const [branchOverrides,setBranchOverrides]=useState({});
+  const [branchPerms,setBranchPerms]=useState({});
   const [authLoading,setAuthLoading]=useState(true);
   const [loginEmail,setLoginEmail]=useState("");
   const [loginPw,setLoginPw]=useState("");
@@ -3511,17 +3512,7 @@ function App(){
         snap=>setAdvances(snap.docs.map(d=>({...d.data(),_docId:d.id}))),()=>{}));
     }catch(e){}
 
-    // Branch permissions
-  const [branchPerms,setBranchPerms] = useState({});
-  useEffect(()=>{
-    if(!branchId||!db)return;
-    try{
-      const unsub = onSnapshot(doc(db,"branch_settings",branchId), snap=>{
-        if(snap.exists()) setBranchPerms(snap.data().permissions||{});
-      },()=>{});
-      return()=>unsub();
-    }catch(e){ console.warn("branchPerms:",e); }
-  },[branchId]);
+    // Branch permissions loaded via separate useEffect below
 
 
 
@@ -3598,6 +3589,17 @@ function App(){
     clearTimeout(timer);
     return()=>{ unsub(); clearTimeout(timer); };
   },[]);
+
+  // ── BRANCH PERMISSIONS ───────────────────────────────────
+  useEffect(()=>{
+    if(!branchId||!db)return;
+    try{
+      const unsub=onSnapshot(doc(db,"branch_settings",branchId),snap=>{
+        if(snap.exists())setBranchPerms(snap.data().permissions||{});
+      },()=>{});
+      return()=>unsub();
+    }catch(e){}
+  },[branchId]);
 
   // ── BRANCH MENU OVERRIDES ────────────────────────────────
   useEffect(()=>{
