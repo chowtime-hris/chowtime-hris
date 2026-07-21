@@ -975,6 +975,7 @@ let empShifts  = load('empShifts') || {};  // declared early — used in getEmpS
 let leaves     = load('leaves')    || [];
 let loans      = load('loans')     || [];
 let _loanSaving = false; // prevents Firebase listener from overwriting during save
+window._dtrDebug = true; // enable DTR computation debug logging
 let memos      = load('memos')     || [];
 let salaryLog  = load('salaryLog') || [];
 let settings   = load('settings')  || {
@@ -1024,8 +1025,9 @@ function minsToTime(m) { // 570 → "09:30"
 
 function computeDTRRow(entry, shiftSched) {
   const s = shiftSched || settings;
-  const shiftStart  = timeToMins(s.start || settings.start || '09:00');
-  const shiftEnd    = timeToMins(s.end   || settings.end   || '18:00');
+  // Safety: if no valid shift end, use a sensible default not settings (which may be wrong)
+  const shiftStart  = timeToMins(s.start || '09:00');
+  const shiftEnd    = timeToMins(s.end   || '18:00');
   const otBuffer    = 60;
   const grace       = +(s.grace !== undefined ? s.grace : settings.grace) || 5;
   const prepMinsSet = +(s.prep !== undefined ? s.prep : 30); // prep time in minutes
@@ -1076,18 +1078,19 @@ function computeDTRRow(entry, shiftSched) {
   const prepMin    = Math.max(0, shiftStart - inM);
 
   // ── OPTION B: Cap paid hours at shift end unless past OT buffer ──
-  // Between shift end and OT start = cap at shift end (no extra pay)
-  // Past OT buffer = pay from shift end + OT rate applies
+  // When OT applies: regular hours capped at shift end, OT counted separately
+  // When within buffer: capped at shift end (no extra pay)
   const otStartM = shiftEnd + otBuffer;
-  const effectiveOutM = outM > otStartM ? outM : Math.min(outM, shiftEnd);
+  const effectiveOutM = Math.min(outM, shiftEnd); // regular hours always capped at shift end
 
   const rawMins    = Math.max(0, effectiveOutM - paidStartM);
   const workedMins = Math.max(0, rawMins - breakMins);
   let workedHrs    = +(workedMins / 60).toFixed(2);
 
   const ut = (!isAuto && outM < shiftEnd) ? Math.max(0, shiftEnd - outM) : 0;
+  // OT = hours past the 1hr buffer after shift end
   let ot = outM > otStartM ? +((outM - otStartM) / 60).toFixed(2) : 0;
-  const nd = effectiveOutM > 22*60 ? +((effectiveOutM - 22*60) / 60).toFixed(2) : 0;
+  const nd = outM > 22*60 ? +((outM - 22*60) / 60).toFixed(2) : 0;
 
   // ── STRAIGHT DUTY OT: shift itself is longer than 8h + 1h buffer ──
   // e.g. Straight 09:00-21:00 = 12h shift. First 8h = regular,
@@ -1743,23 +1746,33 @@ function saveEmpShift() {
 
 function getEmpShiftForDay(empId,dow,dateStr) {
   const a=empShifts[empId]; if(!a) return null;
+  const defs = Array.isArray(shiftDefs) ? shiftDefs : Object.values(shiftDefs||{});
+
+  // Helper — validate shift has required fields
+  function validShift(s) {
+    return s && s.start && s.end && s.id;
+  }
 
   // ── Date-specific assignment takes priority ──────────────────
   if (dateStr && a.dates && a.dates[dateStr] !== undefined) {
     const val = a.dates[dateStr];
     if (val === 'REST') return 'REST';
     if (val === '') return null;
-    const defs = Array.isArray(shiftDefs) ? shiftDefs : Object.values(shiftDefs||{});
-    return defs.find(s=>s.id===val)||null;
+    const found = defs.find(s=>s.id===val);
+    if (validShift(found)) return found;
+    // Shift ID not found or invalid — fall through to rotation/fixed below
   }
 
-  // ── Fallback to old day-of-week pattern (for legacy data) ────
+  // ── Fallback to day-of-week pattern ────
   if(a.restDay!==null&&a.restDay!==undefined&&+a.restDay===dow) return 'REST';
-  const defs = Array.isArray(shiftDefs) ? shiftDefs : Object.values(shiftDefs||{});
-  if(a.type==='fixed') return defs.find(s=>s.id===a.shiftId)||null;
+  if(a.type==='fixed'){
+    const found = defs.find(s=>s.id===a.shiftId);
+    return validShift(found) ? found : null;
+  }
   if(a.type==='rotation'){
     const dk=['sun','mon','tue','wed','thu','fri','sat'][dow];
-    return defs.find(s=>s.id===a.rotation?.[dk])||null;
+    const found = defs.find(s=>s.id===a.rotation?.[dk]);
+    return validShift(found) ? found : null;
   }
   if(a.type==='dayoff') return 'OFF';
   return null;
@@ -2195,11 +2208,15 @@ function loadDTR() { // loadDTR — loads DTR for selected employee and period
 
     const entry=getDTREntry(periodKey, empId, dateStr);
     const c=computeDTRRow(entry, shiftSched);
+    // Temporary debug: show shift end time in console
+    if(entry.in && entry.out) {
+      console.log(`${dateStr}: shiftSched=${JSON.stringify(shiftSched)}, hrs=${c.hrs}, ot=${c.ot}`);
+    }
     const rowBg=isSun?'background:#fff0ec;':'';
 
     // Show shift label in row
     const shiftLabel = shiftSched
-      ? `<span style="background:${shiftSched.color||'#888'};color:#fff;padding:1px 6px;border-radius:8px;font-size:10px;">${shiftSched.label||shiftSched.name||''}</span>`
+      ? `<span style="background:${shiftSched.color||'#888'};color:#fff;padding:1px 6px;border-radius:8px;font-size:10px;">${shiftSched.label||shiftSched.name||''}</span><br><span style="font-size:9px;color:#666;">${shiftSched.start||'?'}-${shiftSched.end||'?'}</span>`
       : assignedShift==='REST' ? '<span style="font-size:11px;color:var(--muted);">🛌 Rest</span>' : '';
 
     rows+=`<tr style="${rowBg}">
