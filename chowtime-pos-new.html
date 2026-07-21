@@ -4690,6 +4690,80 @@ function App(){
         ),
 
         // ══ EDIT PIN MODAL ══
+        // Edit Staff Modal
+        modal==="edit_staff"&&editingStaff&&h("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:900}},
+          h("div",{style:{background:"#fff",width:380,borderRadius:16,padding:"22px",boxShadow:"0 20px 60px rgba(0,0,0,.3)"}},
+            h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:16}},
+              h("b",{style:{fontSize:14}},"✏️ Edit Staff"),
+              h("button",{onClick:()=>{setModal(null);setEditingStaff(null);},
+                style:{background:"none",border:"none",fontSize:20,cursor:"pointer"}},"×")
+            ),
+            // Name
+            h("div",{style:{marginBottom:10}},
+              h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"NAME"),
+              h("input",{
+                value:editingStaff.name,
+                onChange:e=>setEditingStaff(p=>({...p,name:e.target.value})),
+                style:{width:"100%",padding:"9px",border:"1px solid "+C.border,borderRadius:8,
+                  fontSize:13,fontWeight:700,outline:"none",boxSizing:"border-box"}
+              })
+            ),
+            // Role
+            h("div",{style:{marginBottom:10}},
+              h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"ROLE"),
+              h("select",{
+                value:editingStaff.role,
+                onChange:e=>setEditingStaff(p=>({...p,role:e.target.value})),
+                style:{width:"100%",padding:"9px",border:"1px solid "+C.border,borderRadius:8,
+                  fontSize:12,outline:"none"}
+              },
+                Object.entries(ROLES).map(([k,v])=>h("option",{key:k,value:k},v.emoji+" "+v.label))
+              )
+            ),
+            // Branch
+            h("div",{style:{marginBottom:16}},
+              h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"BRANCH"),
+              h("select",{
+                value:editingStaff.branch,
+                onChange:e=>setEditingStaff(p=>({...p,branch:e.target.value})),
+                style:{width:"100%",padding:"9px",border:"1px solid "+C.border,borderRadius:8,
+                  fontSize:12,outline:"none"}
+              },
+                h("option",{value:"all"},"👑 All Branches (Owner)"),
+                h("option",{value:"comm"},"🏭 Commissary"),
+                ...branches.map(b=>h("option",{key:b.id,value:b.id},b.name+" — "+b.full))
+              )
+            ),
+            // Save
+            h("div",{style:{display:"flex",gap:8}},
+              h("button",{
+                onClick:async()=>{
+                  if(!editingStaff.name.trim()){showT("Enter name","warn");return;}
+                  try{
+                    // Update Firestore
+                    await updateDoc(doc(db,"staff_accounts",editingStaff.id||editingStaff.uid),{
+                      name:editingStaff.name,
+                      role:editingStaff.role,
+                      branch:editingStaff.branch,
+                      updatedBy:user.name,
+                      updatedAt:serverTimestamp()
+                    });
+                    // Update local state
+                    setStaff(p=>p.map(s=>s.id===editingStaff.id?{...s,...editingStaff}:s));
+                    showT(editingStaff.name+" updated ✓");
+                    setModal(null);setEditingStaff(null);
+                  }catch(e){showT("Error: "+e.message,"err");}
+                },
+                style:{flex:1,padding:"11px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,
+                  border:"none",borderRadius:9,color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}
+              },"💾 Save Changes"),
+              h("button",{onClick:()=>{setModal(null);setEditingStaff(null);},
+                style:{padding:"11px 16px",background:"#fff",border:"1px solid "+C.border,
+                  borderRadius:9,fontWeight:600,fontSize:12,cursor:"pointer"}},"Cancel")
+            )
+          )
+        ),
+
         modal==="edit_pin"&&editingStaff&&h("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:900}},
           h("div",{style:{background:"#fff",width:300,borderRadius:16,padding:"22px",boxShadow:"0 20px 60px rgba(0,0,0,.3)",textAlign:"center"}},
             h("div",{style:{fontSize:34,marginBottom:8}},"🔑"),
