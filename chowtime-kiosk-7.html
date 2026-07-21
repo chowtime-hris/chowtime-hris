@@ -1,0 +1,1175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<title>Chowtime — Attendance Kiosk</title>
+<!-- face-api.js for face recognition -->
+<script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Syne:wght@700;800&display=swap');
+:root{--brand:#E8460A;--dark:#1A1208;--green:#2D7D3A;--red:#C0392B;--blue:#1A6FA8;--radius:14px;}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+body{font-family:'Inter',sans-serif;background:var(--dark);color:#fff;min-height:100vh;display:flex;flex-direction:column;align-items:center;}
+.kiosk-hdr{width:100%;background:rgba(255,255,255,.05);border-bottom:1px solid rgba(255,255,255,.08);display:flex;align-items:center;justify-content:space-between;padding:13px 20px;}
+.logo-wrap{display:flex;align-items:center;gap:10px;}
+.logo-icon{width:34px;height:34px;background:var(--brand);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:18px;}
+.logo-text{font-family:'Syne',sans-serif;font-size:17px;}
+.logo-sub{font-size:9px;color:rgba(255,255,255,.4);letter-spacing:2px;text-transform:uppercase;margin-top:1px;}
+.clock-wrap{text-align:right;}
+.clock-time{font-family:'Syne',sans-serif;font-size:26px;font-weight:700;line-height:1;}
+.clock-date{font-size:11px;color:rgba(255,255,255,.4);margin-top:2px;}
+.main{width:100%;max-width:500px;padding:18px 14px 50px;display:flex;flex-direction:column;gap:14px;}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;}
+.badges{display:flex;gap:7px;flex-wrap:wrap;}
+.bg-green{background:rgba(45,125,58,.25);border:1px solid rgba(45,125,58,.5);color:#6fcf7a;}
+.bg-red{background:rgba(192,57,43,.25);border:1px solid rgba(192,57,43,.5);color:#f08080;}
+.bg-orange{background:rgba(232,70,10,.25);border:1px solid rgba(232,70,10,.5);color:#ff9060;}
+.bg-blue{background:rgba(26,111,168,.25);border:1px solid rgba(26,111,168,.5);color:#74b9ff;}
+.bg-gray{background:rgba(140,112,96,.2);border:1px solid rgba(140,112,96,.3);color:rgba(255,255,255,.4);}
+.bg-yellow{background:rgba(240,165,0,.25);border:1px solid rgba(240,165,0,.5);color:#f0c040;}
+
+/* camera */
+.cam-wrap{position:relative;width:100%;border-radius:var(--radius);overflow:hidden;background:#0a0808;border:2px solid rgba(255,255,255,.08);aspect-ratio:4/3;}
+#video{width:100%;height:100%;object-fit:cover;display:block;transform:scaleX(-1);}
+.cam-overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:rgba(0,0,0,.75);transition:opacity .4s;}
+.cam-overlay.hidden{opacity:0;pointer-events:none;}
+.cam-icon{font-size:44px;opacity:.5;}
+.cam-msg{font-size:13px;color:rgba(255,255,255,.5);text-align:center;max-width:260px;line-height:1.5;}
+.cam-retry{margin-top:6px;padding:8px 16px;border-radius:8px;border:1px solid rgba(255,255,255,.2);background:none;color:rgba(255,255,255,.6);font-size:12px;cursor:pointer;font-family:inherit;}
+
+/* face guide - changes color based on state */
+.face-guide{position:absolute;top:50%;left:50%;transform:translate(-50%,-52%);width:160px;height:200px;
+  border:3px solid rgba(232,70,10,.85);border-radius:50% 50% 45% 45%;
+  box-shadow:0 0 0 9999px rgba(0,0,0,.32);pointer-events:none;transition:border-color .3s;}
+.face-guide.scanning{border-color:rgba(240,165,0,.9);animation:pulse-border 1s infinite;}
+.face-guide.match{border-color:#6fcf7a;box-shadow:0 0 0 9999px rgba(0,0,0,.32),0 0 20px rgba(45,125,58,.5);}
+.face-guide.nomatch{border-color:#f08080;box-shadow:0 0 0 9999px rgba(0,0,0,.32),0 0 20px rgba(192,57,43,.5);}
+.face-guide.registering{border-color:#74b9ff;animation:pulse-border 0.5s infinite;}
+@keyframes pulse-border{0%,100%{opacity:1;}50%{opacity:.4;}}
+
+.cam-hint{position:absolute;bottom:10px;left:0;right:0;text-align:center;font-size:12px;color:rgba(255,255,255,.7);background:rgba(0,0,0,.5);padding:5px 0;}
+#snap-canvas{display:none;}
+
+/* face status overlay */
+.face-status{position:absolute;top:10px;left:0;right:0;text-align:center;}
+.face-status-badge{display:inline-block;padding:5px 14px;border-radius:20px;font-size:12px;font-weight:700;background:rgba(0,0,0,.6);}
+
+/* employee select */
+.emp-box{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:var(--radius);padding:15px;}
+.emp-lbl{font-size:10px;font-weight:700;color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:1px;margin-bottom:7px;}
+#emp-select{width:100%;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);color:#fff;padding:12px 14px;border-radius:9px;font-size:16px;font-family:inherit;cursor:pointer;outline:none;-webkit-appearance:none;}
+#emp-select:focus{border-color:var(--brand);}
+#emp-select option{background:#1e0e06;color:#fff;}
+
+/* face registration box */
+.face-reg-box{background:rgba(26,111,168,.1);border:1px solid rgba(26,111,168,.3);border-radius:var(--radius);padding:16px;display:none;}
+.face-reg-title{font-size:13px;font-weight:700;color:#74b9ff;margin-bottom:8px;}
+.face-reg-desc{font-size:12px;color:rgba(255,255,255,.5);line-height:1.5;margin-bottom:12px;}
+.face-samples{display:flex;gap:8px;margin-bottom:12px;justify-content:center;}
+.face-sample{width:60px;height:60px;border-radius:50%;border:2px solid rgba(255,255,255,.2);background:rgba(255,255,255,.05);display:flex;align-items:center;justify-content:center;font-size:22px;overflow:hidden;}
+.face-sample img{width:100%;height:100%;object-fit:cover;}
+.face-sample.captured{border-color:#6fcf7a;}
+
+/* action buttons */
+.act-grid{display:grid;grid-template-columns:1fr 1fr;gap:11px;}
+.act-btn{padding:17px 10px;border-radius:var(--radius);border:none;font-size:15px;font-weight:700;cursor:pointer;font-family:'Syne',sans-serif;transition:.18s;display:flex;flex-direction:column;align-items:center;gap:5px;-webkit-tap-highlight-color:transparent;}
+.act-btn .ico{font-size:26px;line-height:1;}
+.act-btn:disabled{opacity:.4;cursor:not-allowed;}
+.btn-in{background:#2D7D3A;color:#fff;}
+.btn-out{background:#C0392B;color:#fff;}
+.btn-brk{background:#7a5500;color:#fff;}
+.btn-rsm{background:#1A6FA8;color:#fff;}
+.btn-reg{background:#1A6FA8;color:#fff;grid-column:1/-1;padding:14px;}
+.act-btn:active{transform:scale(.95);filter:brightness(.85);}
+
+/* confirm */
+.confirm{display:none;border-radius:var(--radius);padding:18px;text-align:center;animation:pop .25s ease;}
+.confirm.show{display:block;}
+.confirm.success{background:rgba(45,125,58,.15);border:1px solid rgba(45,125,58,.4);}
+.confirm.blocked{background:rgba(192,57,43,.15);border:1px solid rgba(192,57,43,.4);}
+@keyframes pop{from{transform:scale(.94);opacity:0;}to{transform:scale(1);opacity:1;}}
+.conf-photo{width:76px;height:76px;border-radius:50%;object-fit:cover;border:3px solid var(--brand);margin:0 auto 10px;display:none;}
+.conf-name{font-family:'Syne',sans-serif;font-size:19px;font-weight:800;}
+.conf-action{font-size:13px;color:rgba(255,255,255,.55);margin-top:3px;}
+.conf-time{font-size:26px;font-weight:700;color:var(--brand);margin:8px 0 3px;}
+.conf-branch{display:inline-block;margin-top:6px;padding:3px 10px;border-radius:20px;background:rgba(232,70,10,.2);color:#ff9060;font-size:11px;font-weight:600;}
+.conf-geo{font-size:11px;color:rgba(255,255,255,.35);margin-top:5px;}
+
+/* geo warn */
+.geo-warn{background:rgba(192,57,43,.15);border:1px solid rgba(192,57,43,.35);border-radius:10px;padding:10px 14px;font-size:12px;color:#f08080;display:none;}
+.geo-warn.show{display:block;}
+
+/* log */
+.log-box{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);border-radius:var(--radius);padding:13px;}
+.log-hdr{font-size:11px;font-weight:700;color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;}
+.sync-row{display:flex;align-items:center;gap:7px;font-size:11px;color:rgba(255,255,255,.3);margin-bottom:9px;}
+.sync-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;background:#6fcf7a;}
+.sync-dot.off{background:#f08080;}
+.sync-dot.spin{background:#f0a500;animation:spin-pulse .9s infinite;}
+@keyframes spin-pulse{0%,100%{opacity:1;}50%{opacity:.35;}}
+.log-empty{font-size:13px;color:rgba(255,255,255,.25);text-align:center;padding:10px 0;}
+.log-row{display:flex;align-items:center;gap:9px;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.05);}
+.log-row:last-child{border:none;}
+.log-ava{width:30px;height:30px;border-radius:50%;flex-shrink:0;overflow:hidden;background:rgba(255,255,255,.08);display:flex;align-items:center;justify-content:center;font-size:14px;}
+.log-ava img{width:100%;height:100%;object-fit:cover;}
+.log-info{flex:1;min-width:0;}
+.log-name{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.log-det{font-size:10px;color:rgba(255,255,255,.35);}
+.log-right{text-align:right;flex-shrink:0;}
+.log-badge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:9px;}
+.l-in{background:rgba(45,125,58,.3);color:#6fcf7a;}
+.l-out{background:rgba(192,57,43,.3);color:#f08080;}
+.l-brk{background:rgba(232,70,10,.3);color:#ffaa70;}
+.log-t{font-size:10px;color:rgba(255,255,255,.25);margin-top:2px;}
+
+/* toast */
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(70px);background:#1e0e06;border:1px solid rgba(255,255,255,.15);color:#fff;padding:11px 20px;border-radius:28px;font-size:13px;font-weight:600;transition:.28s cubic-bezier(.34,1.56,.64,1);z-index:999;white-space:nowrap;box-shadow:0 4px 18px rgba(0,0,0,.5);}
+.toast.show{transform:translateX(-50%) translateY(0);}
+
+.setup-banner{background:rgba(232,70,10,.13);border:1px solid rgba(232,70,10,.28);border-radius:var(--radius);padding:13px 15px;font-size:13px;display:none;line-height:1.5;}
+.setup-banner a{color:#ff9060;font-weight:600;}
+.connected-banner{background:rgba(45,125,58,.13);border:1px solid rgba(45,125,58,.3);border-radius:10px;padding:10px 14px;font-size:12px;color:#6fcf7a;display:none;}
+.admin-link{margin-top:auto;padding:14px;text-align:center;}
+.admin-link a{color:rgba(255,255,255,.2);font-size:11px;text-decoration:none;margin:0 8px;}
+.admin-link a:hover{color:rgba(255,255,255,.5);}
+
+/* face loading */
+.model-loading{background:rgba(26,111,168,.1);border:1px solid rgba(26,111,168,.25);border-radius:10px;padding:10px 14px;font-size:12px;color:#74b9ff;display:none;}
+</style>
+</head>
+<body>
+
+<div class="kiosk-hdr">
+  <div class="logo-wrap">
+    <div class="logo-icon">🍽️</div>
+    <div>
+      <div class="logo-text">Chowtime</div>
+      <div class="logo-sub" id="branch-label">Attendance Kiosk</div>
+    </div>
+  </div>
+  <div class="clock-wrap">
+    <div class="clock-time" id="live-time">--:--:--</div>
+    <div class="clock-date" id="live-date"></div>
+  </div>
+</div>
+
+<div class="main">
+
+  <div class="connected-banner" id="connected-banner">
+    ✅ Connected via QR — <strong id="connected-branch-name"></strong>
+  </div>
+  <div class="setup-banner" id="setup-banner">
+    ⚠️ <strong>Offline mode.</strong> <a href="https://chowtime-hris.github.io/chowtime-hris/chowtime-setup.html">Set up cloud sync →</a>
+  </div>
+  <div class="model-loading" id="model-loading">
+    🧠 Loading face recognition… <span id="model-pct">0%</span>
+  </div>
+
+  <!-- Status badges -->
+  <div class="badges">
+    <span class="badge bg-gray" id="badge-branch">📍 —</span>
+    <span class="badge bg-gray" id="badge-sync">📴 Offline</span>
+    <span class="badge bg-gray" id="badge-geo">📡 GPS…</span>
+    <span class="badge bg-gray" id="badge-cam">📷 Camera…</span>
+    <span class="badge bg-gray" id="badge-face">🧠 Face AI…</span>
+  </div>
+
+  <!-- Geofence warning -->
+  <div class="geo-warn" id="geo-warn">
+    ⚠️ Outside branch zone (<span id="geo-dist-txt"></span>m). Clock-in blocked.
+  </div>
+
+  <!-- Camera -->
+  <div class="cam-wrap">
+    <video id="video" autoplay playsinline muted></video>
+    <div class="cam-overlay" id="cam-overlay">
+      <div class="cam-icon">📷</div>
+      <div class="cam-msg" id="cam-msg">Starting camera…</div>
+      <button class="cam-retry" id="cam-retry" style="display:none;" onclick="startCamera()">↺ Try Again</button>
+    </div>
+    <div class="face-guide" id="face-guide" style="display:none;"></div>
+    <div class="face-status" id="face-status"></div>
+    <div class="cam-hint" id="cam-hint">Centre your face in the oval</div>
+    <canvas id="snap-canvas"></canvas>
+    <canvas id="face-canvas" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;transform:scaleX(-1);"></canvas>
+  </div>
+
+  <!-- Employee selector -->
+  <div class="emp-box">
+    <div class="emp-lbl">Select Your Name</div>
+    <select id="emp-select" onchange="onEmployeeSelect()">
+      <option value="">— Tap to choose —</option>
+    </select>
+  </div>
+
+  <!-- Face Registration box (shown for unregistered employees) -->
+  <div class="face-reg-box" id="face-reg-box">
+    <div class="face-reg-title">👤 First Time? Register Your Face</div>
+    <div class="face-reg-desc">
+      We need 3 photos of your face to set up recognition.<br>
+      Look straight at the camera and tap <strong>"Capture"</strong> 3 times.
+    </div>
+    <div class="face-samples" id="face-samples">
+      <div class="face-sample" id="sample-0">1</div>
+      <div class="face-sample" id="sample-1">2</div>
+      <div class="face-sample" id="sample-2">3</div>
+    </div>
+    <div class="act-grid">
+      <button class="act-btn btn-reg" id="capture-btn" onclick="captureRegistrationSample()" style="background:#1A6FA8;">
+        <span class="ico">📸</span>Capture Photo (<span id="capture-count">0</span>/3)
+      </button>
+    </div>
+    <button id="save-face-btn" onclick="saveFaceRegistration()" disabled
+      style="margin-top:10px;width:100%;padding:12px;border-radius:9px;border:none;
+      background:#2D7D3A;color:#fff;font-size:14px;font-weight:700;cursor:pointer;opacity:.4;">
+      ✅ Save & Register Face
+    </button>
+    <button onclick="cancelRegistration()"
+      style="margin-top:8px;width:100%;padding:10px;border-radius:9px;border:1px solid rgba(255,255,255,.15);
+      background:none;color:rgba(255,255,255,.5);font-size:13px;cursor:pointer;">
+      Cancel
+    </button>
+  </div>
+
+  <!-- Action buttons -->
+  <div id="action-buttons">
+    <div class="act-grid" style="margin-bottom:11px;">
+      <button class="act-btn btn-in"  id="btn-in"  onclick="doAction('in')"     disabled>
+        <span class="ico">✅</span>Clock In
+      </button>
+      <button class="act-btn btn-out" id="btn-out" onclick="doAction('out')"    disabled>
+        <span class="ico">🚪</span>Clock Out
+      </button>
+    </div>
+    <div class="act-grid">
+      <button class="act-btn btn-brk" id="btn-brk" onclick="doAction('bstart')" disabled>
+        <span class="ico">☕</span>Break Start
+      </button>
+      <button class="act-btn btn-rsm" id="btn-rsm" onclick="doAction('bend')"   disabled>
+        <span class="ico">▶️</span>Break End
+      </button>
+    </div>
+  </div>
+
+  <!-- Confirmation -->
+  <div class="confirm" id="confirm-box">
+    <img class="conf-photo" id="conf-photo" src="" alt="">
+    <div class="conf-name"   id="conf-name">—</div>
+    <div class="conf-action" id="conf-action">—</div>
+    <div class="conf-time"   id="conf-time">—</div>
+    <div class="conf-branch" id="conf-branch">—</div>
+    <div class="conf-geo"    id="conf-geo">—</div>
+    <div id="conf-late" style="display:none;margin-top:10px;background:rgba(255,60,60,.25);border:1px solid rgba(255,100,100,.4);border-radius:8px;padding:8px 14px;font-size:13px;font-weight:700;color:#ff8080;">⚠️ LATE — will be deducted from pay</div>
+  </div>
+
+  <!-- Today log -->
+  <div class="log-box">
+    <div class="log-hdr">
+      Today's Log
+      <span class="badge bg-orange" id="log-branch-badge" style="font-size:10px;"></span>
+    </div>
+    <div class="sync-row">
+      <div class="sync-dot off" id="sync-dot"></div>
+      <span id="sync-label">Offline</span>
+    </div>
+    <div id="today-log"><div class="log-empty">No entries yet today.</div></div>
+  </div>
+
+  <!-- Loading screen while Firebase connects -->
+  <div id="firebase-loading" style="position:fixed;inset:0;background:var(--dark);z-index:500;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;">
+    <div style="font-size:48px;">🍽️</div>
+    <div style="font-family:'Syne',sans-serif;font-size:22px;">Chowtime</div>
+    <div style="font-size:13px;color:rgba(255,255,255,.5);">Connecting to server…</div>
+    <div style="width:200px;height:4px;background:rgba(255,255,255,.1);border-radius:4px;overflow:hidden;">
+      <div id="loading-bar" style="height:100%;background:var(--brand);border-radius:4px;width:0%;transition:width .3s;"></div>
+    </div>
+    <div id="loading-status" style="font-size:11px;color:rgba(255,255,255,.3);">Please wait…</div>
+  </div>
+  <div id="manual-cfg-section" style="display:none;background:rgba(232,70,10,.1);border:1px solid rgba(232,70,10,.3);border-radius:var(--radius);padding:14px;">
+    <div style="font-size:12px;font-weight:700;color:#ff9060;margin-bottom:8px;">📋 Paste Config Code</div>
+    <textarea id="manual-cfg-input" rows="3" placeholder="Paste the config code here…"
+      style="width:100%;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);color:#fff;padding:9px;border-radius:7px;font-family:monospace;font-size:12px;resize:none;"></textarea>
+    <button onclick="applyManualConfig()" style="margin-top:8px;width:100%;padding:10px;border-radius:8px;border:none;background:var(--brand);color:#fff;font-size:14px;font-weight:700;cursor:pointer;">
+      ⚡ Apply Config
+    </button>
+  </div>
+
+</div>
+
+<div class="admin-link">
+  <a href="https://chowtime-hris.github.io/chowtime-hris/chowtime-payroll.html">⚙️ HR Admin</a>
+  <a href="https://chowtime-hris.github.io/chowtime-hris/chowtime-setup.html">🔧 Setup</a>
+  <a href="#" onclick="toggleManualConfig();return false;">📋 Paste Config</a>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ══════════════════════════════════════════════════════
+//  QR AUTO-CONFIG
+// ══════════════════════════════════════════════════════
+(function applyQRConfig() {
+  const hash = window.location.hash;
+  if (!hash.startsWith('#cfg=')) return;
+  try {
+    const payload = JSON.parse(decodeURIComponent(escape(atob(hash.slice(5)))));
+    if (payload.apiKey) {
+      localStorage.setItem('ct_firebase_cfg', JSON.stringify({
+        apiKey: payload.apiKey, projectId: payload.projectId,
+        databaseURL: payload.databaseURL, appId: payload.appId,
+        branch: payload.branch,
+      }));
+    }
+    localStorage.setItem('ct_branchCfg', JSON.stringify({
+      name: payload.branch||'Branch', lat: payload.lat||14.5995,
+      lng: payload.lng||120.9842, radius: payload.radius||200,
+      enforceGeo: payload.enforceGeo||false,
+    }));
+    // Mark as just configured so banner shows on next load
+    localStorage.setItem('ct_just_configured', payload.branch||'Branch');
+    // FORCE redirect to clean URL — removes hash permanently from browser
+    // This prevents the hash from re-applying on every refresh
+    window.location.replace(window.location.pathname);
+    // Stop execution — page will reload clean
+  } catch(e){ console.warn('QR config error:',e); }
+})();
+
+// Show "just configured" banner if coming from QR scan
+(function checkJustConfigured() {
+  const branch = localStorage.getItem('ct_just_configured');
+  if (branch) {
+    localStorage.removeItem('ct_just_configured');
+    // Will show banner after DOM loads
+    window._showConfiguredBanner = branch;
+  }
+})();
+
+// ══════════════════════════════════════════════════════
+//  STATE
+// ══════════════════════════════════════════════════════
+function lsGet(k){ try{return JSON.parse(localStorage.getItem('ct_'+k));}catch(e){return null;} }
+function lsSet(k,v){ localStorage.setItem('ct_'+k,JSON.stringify(v)); }
+
+let employees  = lsGet('employees')  || [];
+let dtrData    = lsGet('dtrData')    || {};
+let kioskLog   = lsGet('kioskLog')   || [];
+let shiftDefs  = lsGet('shiftDefs')  || [];
+let empShifts  = lsGet('empShifts')  || {};
+function timeToMins(t){ if(!t) return 0; const [h,m]=t.split(':').map(Number); return h*60+m; }
+let settings   = lsGet('settings')   || {start:'09:00',end:'18:00',bstart:'12:00',bend:'13:00',grace:5,hours:8};
+let branchCfg  = lsGet('branchCfg')  || {name:'Main Branch',lat:14.5995,lng:120.9842,radius:200,enforceGeo:false};
+let fbCfg      = lsGet('firebase_cfg') || null;
+let faceData   = lsGet('faceData')   || {}; // {empId: [descriptor arrays]}
+
+const BRANCH = fbCfg?.branch || branchCfg.name || 'Kiosk';
+const ACTION_LABELS = {in:'🟢 Clock In',out:'🔴 Clock Out',bstart:'☕ Break Start',bend:'▶️ Break End'};
+
+// ══════════════════════════════════════════════════════
+//  CLOCK
+// ══════════════════════════════════════════════════════
+setInterval(()=>{
+  const now=new Date();
+  document.getElementById('live-time').textContent=now.toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  document.getElementById('live-date').textContent=now.toLocaleDateString('en-PH',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
+},1000);
+
+// ══════════════════════════════════════════════════════
+//  FACE-API.JS — load models
+// ══════════════════════════════════════════════════════
+let faceModelsLoaded = false;
+let faceDetectionActive = false;
+let currentDescriptor = null; // live face descriptor from camera
+
+const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model';
+
+async function loadFaceModels() {
+  document.getElementById('model-loading').style.display='block';
+  document.getElementById('badge-face').textContent='🧠 Loading AI…';
+  document.getElementById('badge-face').className='badge bg-yellow';
+  try {
+    await Promise.all([
+      faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+      faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODEL_URL),
+      faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+    ]);
+    faceModelsLoaded = true;
+    document.getElementById('model-loading').style.display='none';
+    document.getElementById('badge-face').textContent='🧠 Face AI ✓';
+    document.getElementById('badge-face').className='badge bg-green';
+    startFaceDetectionLoop();
+  } catch(e) {
+    document.getElementById('model-loading').textContent='⚠️ Face AI unavailable — check internet connection.';
+    document.getElementById('badge-face').textContent='🧠 AI Error';
+    document.getElementById('badge-face').className='badge bg-red';
+  }
+}
+
+// ══════════════════════════════════════════════════════
+//  FACE DETECTION LOOP — runs continuously
+// ══════════════════════════════════════════════════════
+async function startFaceDetectionLoop() {
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('face-canvas');
+  faceDetectionActive = true;
+
+  async function detect() {
+    if (!faceDetectionActive || !cameraReady) { requestAnimationFrame(detect); return; }
+    try {
+      const detection = await faceapi
+        .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({scoreThreshold:0.5}))
+        .withFaceLandmarks(true)
+        .withFaceDescriptor();
+
+      canvas.width  = video.videoWidth  || 640;
+      canvas.height = video.videoHeight || 480;
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+
+      if (detection) {
+        currentDescriptor = detection.descriptor;
+        // Draw face box (mirrored)
+        const box = detection.detection.box;
+        const x = canvas.width - box.x - box.width;
+        ctx.strokeStyle = '#6fcf7a';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x, box.y, box.width, box.height);
+      } else {
+        currentDescriptor = null;
+      }
+    } catch(e){}
+    requestAnimationFrame(detect);
+  }
+  detect();
+}
+
+// ══════════════════════════════════════════════════════
+//  CAMERA
+// ══════════════════════════════════════════════════════
+let videoStream=null, cameraReady=false;
+
+async function startCamera() {
+  const overlay=document.getElementById('cam-overlay');
+  const msg=document.getElementById('cam-msg');
+  const retry=document.getElementById('cam-retry');
+  const guide=document.getElementById('face-guide');
+  const badge=document.getElementById('badge-cam');
+
+  if(window.location.protocol==='file:'){
+    msg.textContent='Camera needs HTTPS. Open via Netlify URL.';
+    retry.style.display='none';
+    badge.textContent='📷 No HTTPS'; badge.className='badge bg-red';
+    return;
+  }
+  msg.textContent='Requesting camera…'; retry.style.display='none';
+  if(videoStream){ videoStream.getTracks().forEach(t=>t.stop()); videoStream=null; }
+
+  const constraints=[
+    // Always use front/selfie camera for face recognition
+    {video:{facingMode:{exact:'user'},width:{ideal:640},height:{ideal:480}},audio:false},
+    {video:{facingMode:'user',width:{ideal:640},height:{ideal:480}},audio:false},
+    {video:{width:{ideal:640},height:{ideal:480}},audio:false}, // fallback any camera
+    {video:true,audio:false},
+  ];
+  let stream=null, lastErr='';
+  for(const c of constraints){ try{ stream=await navigator.mediaDevices.getUserMedia(c); break; }catch(e){ lastErr=e.message; } }
+
+  if(!stream){
+    overlay.classList.remove('hidden');
+    msg.textContent='Camera blocked: '+lastErr;
+    retry.style.display='block';
+    badge.textContent='📷 Blocked'; badge.className='badge bg-red';
+    return;
+  }
+  const video=document.getElementById('video');
+  video.srcObject=stream; videoStream=stream;
+  await new Promise(res=>{ if(video.readyState>=2){res();return;} video.addEventListener('loadedmetadata',res,{once:true}); setTimeout(res,3000); });
+  try{ await video.play(); }catch(e){}
+  overlay.classList.add('hidden');
+  guide.style.display='block';
+  cameraReady=true;
+  badge.textContent='📷 Live ✓'; badge.className='badge bg-green';
+}
+
+function snapPhoto() {
+  if(!cameraReady||!videoStream) return null;
+  const video=document.getElementById('video');
+  const canvas=document.getElementById('snap-canvas');
+  if(!video.videoWidth) return null;
+  const size=Math.min(video.videoWidth,video.videoHeight);
+  canvas.width=260; canvas.height=260;
+  const ctx=canvas.getContext('2d');
+  ctx.save(); ctx.translate(260,0); ctx.scale(-1,1);
+  ctx.drawImage(video,(video.videoWidth-size)/2,(video.videoHeight-size)/2,size,size,0,0,260,260);
+  ctx.restore();
+  return canvas.toDataURL('image/jpeg',0.6);
+}
+
+// ══════════════════════════════════════════════════════
+//  GEOLOCATION
+// ══════════════════════════════════════════════════════
+let currentPos=null, currentDist=null;
+function haversine(a,b,c,d){
+  const R=6371000,r=x=>x*Math.PI/180;
+  const x=Math.sin(r(c-a)/2)**2+Math.cos(r(a))*Math.cos(r(c))*Math.sin(r(d-b)/2)**2;
+  return R*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x));
+}
+if(navigator.geolocation){
+  navigator.geolocation.watchPosition(pos=>{
+    currentPos=pos.coords;
+    currentDist=Math.round(haversine(currentPos.latitude,currentPos.longitude,branchCfg.lat,branchCfg.lng));
+    const inside=currentDist<=branchCfg.radius;
+    document.getElementById('badge-geo').textContent=`📍 ${currentDist}m`;
+    document.getElementById('badge-geo').className='badge '+(inside?'bg-green':'bg-red');
+    document.getElementById('geo-dist-txt').textContent=currentDist;
+    document.getElementById('geo-warn').classList.toggle('show',!inside&&branchCfg.enforceGeo);
+  },()=>{ document.getElementById('badge-geo').textContent='📡 No GPS'; document.getElementById('badge-geo').className='badge bg-gray'; },{enableHighAccuracy:true,maximumAge:6000});
+}
+
+// ══════════════════════════════════════════════════════
+//  EMPLOYEES
+// ══════════════════════════════════════════════════════
+function populateEmployees(){
+  const sel=document.getElementById('emp-select');
+  const cur=sel.value;
+  sel.innerHTML='<option value="">— Tap to choose —</option>'+
+    employees.filter(e=>e.status!=='Resigned'&&e.type!=='Resigned')
+    .map(e=>`<option value="${e.id}">${e.name}${e.pos?' — '+e.pos:''}</option>`).join('');
+  if(cur) sel.value=cur;
+}
+populateEmployees();
+
+// ══════════════════════════════════════════════════════
+//  EMPLOYEE SELECT HANDLER
+// ══════════════════════════════════════════════════════
+function onEmployeeSelect(){
+  const empId=document.getElementById('emp-select').value;
+  const regBox=document.getElementById('face-reg-box');
+  const actionBtns=document.getElementById('action-buttons');
+
+  if(!empId){
+    regBox.style.display='none';
+    setActionButtons(false);
+    return;
+  }
+
+  // Check if face registered
+  const hasface = faceData[empId] && faceData[empId].length > 0;
+  if(hasface){
+    regBox.style.display='none';
+    // Verify face before enabling buttons
+    verifyFaceForEmployee(empId);
+  } else {
+    // Show registration UI
+    regBox.style.display='block';
+    setActionButtons(false);
+    resetRegistrationSamples();
+    showToast('👋 First time? Please register your face.');
+  }
+}
+
+function setActionButtons(enabled){
+  ['btn-in','btn-out','btn-brk','btn-rsm'].forEach(id=>{
+    document.getElementById(id).disabled=!enabled;
+  });
+}
+
+// ══════════════════════════════════════════════════════
+//  FACE VERIFICATION — match live face to registered
+// ══════════════════════════════════════════════════════
+let verifyInterval=null;
+
+function verifyFaceForEmployee(empId){
+  const guide=document.getElementById('face-guide');
+  const status=document.getElementById('face-status');
+  const hint=document.getElementById('cam-hint');
+
+  setActionButtons(false);
+  guide.className='face-guide scanning';
+  status.innerHTML='<span class="face-status-badge" style="background:rgba(240,165,0,.7);">🔍 Scanning face…</span>';
+  hint.textContent='Look straight at the camera';
+
+  let attempts=0;
+  clearInterval(verifyInterval);
+
+  verifyInterval=setInterval(async()=>{
+    attempts++;
+    if(!currentDescriptor){
+      if(attempts>30){ // 3 seconds with no face
+        clearInterval(verifyInterval);
+        guide.className='face-guide nomatch';
+        status.innerHTML='<span class="face-status-badge" style="background:rgba(192,57,43,.7);">❌ No face detected</span>';
+        hint.textContent='Make sure your face is visible';
+      }
+      return;
+    }
+
+    // Compare with stored descriptors
+    const stored=faceData[empId];
+    if(!stored||!stored.length){ clearInterval(verifyInterval); return; }
+
+    // Convert stored arrays back to Float32Array
+    const labeledDescriptors=[
+      new faceapi.LabeledFaceDescriptors(empId,
+        stored.map(d=>new Float32Array(d)))
+    ];
+    const matcher=new faceapi.FaceMatcher(labeledDescriptors, 0.5); // threshold 0.5 (strict)
+    const result=matcher.findBestMatch(currentDescriptor);
+
+    clearInterval(verifyInterval);
+
+    if(result.label===empId && result.distance<0.5){
+      // MATCH ✅
+      guide.className='face-guide match';
+      status.innerHTML=`<span class="face-status-badge" style="background:rgba(45,125,58,.8);">✅ Face Verified! (${Math.round((1-result.distance)*100)}% match)</span>`;
+      hint.textContent='Face recognized — you may clock in';
+      setActionButtons(true);
+      showToast('✅ Face recognized!');
+    } else {
+      // NO MATCH ❌
+      guide.className='face-guide nomatch';
+      status.innerHTML='<span class="face-status-badge" style="background:rgba(192,57,43,.8);">❌ Face Not Recognized</span>';
+      hint.textContent='Wrong face or face not clear';
+      setActionButtons(false);
+      showToast('❌ Face not recognized. Clock-in blocked.');
+      // Reset selector after 3s
+      setTimeout(()=>{
+        document.getElementById('emp-select').value='';
+        guide.className='face-guide';
+        status.innerHTML='';
+        hint.textContent='Centre your face in the oval';
+      },3000);
+    }
+  },100); // check every 100ms
+}
+
+// ══════════════════════════════════════════════════════
+//  FACE REGISTRATION
+// ══════════════════════════════════════════════════════
+let registrationSamples=[]; // array of Float32Array descriptors
+let regSampleCount=0;
+
+function resetRegistrationSamples(){
+  registrationSamples=[];
+  regSampleCount=0;
+  document.getElementById('capture-count').textContent='0';
+  document.getElementById('save-face-btn').disabled=true;
+  document.getElementById('save-face-btn').style.opacity='.4';
+  for(let i=0;i<3;i++){
+    const s=document.getElementById('sample-'+i);
+    s.innerHTML=i+1; s.className='face-sample';
+  }
+  document.getElementById('face-guide').className='face-guide';
+}
+
+async function captureRegistrationSample(){
+  if(regSampleCount>=3){ showToast('Already captured 3 photos.'); return; }
+  if(!currentDescriptor){ showToast('⚠️ No face detected. Look at the camera.'); return; }
+  if(!faceModelsLoaded){ showToast('⚠️ Face AI still loading, please wait.'); return; }
+
+  const guide=document.getElementById('face-guide');
+  guide.className='face-guide registering';
+
+  // Store descriptor
+  registrationSamples.push(Array.from(currentDescriptor));
+
+  // Capture photo for display
+  const photo=snapPhoto();
+  const sampleEl=document.getElementById('sample-'+regSampleCount);
+  if(photo){
+    sampleEl.innerHTML=`<img src="${photo}" alt="">`;
+    sampleEl.className='face-sample captured';
+  } else {
+    sampleEl.innerHTML='✓'; sampleEl.className='face-sample captured';
+  }
+
+  regSampleCount++;
+  document.getElementById('capture-count').textContent=regSampleCount;
+
+  if(regSampleCount>=3){
+    // All 3 captured
+    guide.className='face-guide match';
+    document.getElementById('save-face-btn').disabled=false;
+    document.getElementById('save-face-btn').style.opacity='1';
+    showToast('✅ 3 photos captured! Tap Save to register.');
+  } else {
+    setTimeout(()=>{ guide.className='face-guide'; },500);
+    showToast(`📸 Photo ${regSampleCount}/3 captured. ${3-regSampleCount} more needed.`);
+  }
+}
+
+async function saveFaceRegistration(){
+  const empId=document.getElementById('emp-select').value;
+  if(!empId||registrationSamples.length<3){ showToast('⚠️ Need 3 photos first.'); return; }
+
+  document.getElementById('save-face-btn').textContent='⏳ Saving…';
+  document.getElementById('save-face-btn').disabled=true;
+
+  // Save locally
+  faceData[empId]=registrationSamples;
+  lsSet('faceData',faceData);
+
+  // Save to Firebase (sync across branches)
+  if(window._fbDB){
+    try{
+      const{ref,set}=window._fbFns;
+      await set(ref(window._fbDB,`faceData/${empId}`),{
+        empId, descriptors: registrationSamples,
+        registeredAt: Date.now(), branch: BRANCH
+      });
+      showToast('✅ Face registered and synced to all branches!');
+    } catch(e){
+      showToast('✅ Face saved locally. Will sync when online.');
+    }
+  } else {
+    showToast('✅ Face registered on this device.');
+  }
+
+  // Hide registration, verify
+  document.getElementById('face-reg-box').style.display='none';
+  document.getElementById('save-face-btn').textContent='✅ Save & Register Face';
+  verifyFaceForEmployee(empId);
+}
+
+function cancelRegistration(){
+  document.getElementById('emp-select').value='';
+  document.getElementById('face-reg-box').style.display='none';
+  setActionButtons(false);
+  document.getElementById('face-guide').className='face-guide';
+  document.getElementById('face-status').innerHTML='';
+}
+
+// ══════════════════════════════════════════════════════
+//  PERIOD MAPPER
+// ══════════════════════════════════════════════════════
+function getPeriodKey(dateStr){
+  const[y,m,d]=dateStr.split('-').map(Number);
+  return d<=15?`${y}-${String(m).padStart(2,'0')}-01`:`${y}-${String(m).padStart(2,'0')}-16`;
+}
+
+// ══════════════════════════════════════════════════════
+//  SYNC STATUS
+// ══════════════════════════════════════════════════════
+function setSyncStatus(state,label){
+  const dot=document.getElementById('sync-dot');
+  const lbl=document.getElementById('sync-label');
+  const badge=document.getElementById('badge-sync');
+  dot.className='sync-dot'+(state==='online'?'':state==='syncing'?' spin':' off');
+  lbl.textContent=label;
+  badge.textContent=state==='online'?'☁️ Synced':state==='syncing'?'⟳ Syncing…':'📴 Offline';
+  badge.className='badge '+(state==='online'?'bg-green':state==='syncing'?'bg-orange':'bg-red');
+}
+
+// ══════════════════════════════════════════════════════
+//  CLOCK ACTION
+// ══════════════════════════════════════════════════════
+async function doAction(action){
+  const empId=document.getElementById('emp-select').value;
+  if(!empId){ showToast('⚠️ Select your name first.'); return; }
+
+  // Double-check face is verified (buttons should be disabled if not, but safety check)
+  if(!document.getElementById('btn-in') || document.getElementById('btn-in').disabled){
+    showToast('❌ Face verification required.'); return;
+  }
+
+  if(branchCfg.enforceGeo&&action==='in'){
+    if(!currentPos){ showToast('⚠️ Waiting for GPS…'); return; }
+    if(currentDist>branchCfg.radius){ showToast(`🚫 ${currentDist}m away — outside branch zone.`); return; }
+  }
+
+  const emp=employees.find(e=>e.id===empId);
+  if(!emp){ showToast('⚠️ Employee not found.'); return; }
+
+  const now=new Date();
+  const timeStr=now.toTimeString().slice(0,5);
+  const dateStr=now.toISOString().split('T')[0];
+  const today=dateStr.replace(/-/g,'');
+  const timeDisp=now.toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  const photo=snapPhoto();
+
+  // Write DTR
+  const pKey=getPeriodKey(dateStr);
+  if(pKey){
+    const dKey=pKey+'__'+empId;
+    if(!dtrData[dKey]) dtrData[dKey]={};
+    if(!dtrData[dKey][dateStr]) dtrData[dKey][dateStr]={};
+    const fmap={in:'in',out:'out',bstart:'bstart',bend:'bend'};
+    dtrData[dKey][dateStr][fmap[action]]=timeStr;
+    lsSet('dtrData',dtrData);
+  }
+
+  const entry={
+    empId,empName:emp.name,empPos:emp.pos||'',action,
+    timeStr,timeDisp,date:dateStr,branch:BRANCH,
+    lat:currentPos?currentPos.latitude:null,
+    lng:currentPos?currentPos.longitude:null,
+    dist:currentDist,
+    inside:currentDist!==null?currentDist<=branchCfg.radius:null,
+    photo:photo||'',ts:Date.now(),faceVerified:true,
+  };
+
+  kioskLog.unshift(entry);
+  if(kioskLog.length>400) kioskLog=kioskLog.slice(0,400);
+  lsSet('kioskLog',kioskLog);
+
+  if(window._fbDB){
+    setSyncStatus('syncing','Saving…');
+    try{
+      const{ref,push,set}=window._fbFns;
+      await push(ref(window._fbDB,`kioskLog/${today}`),{...entry,photo:''});
+      if(pKey){
+        const dKey=pKey+'__'+empId;
+        const fmap={in:'in',out:'out',bstart:'bstart',bend:'bend'};
+        await set(ref(window._fbDB,`dtrData/${dKey}/${dateStr}/${fmap[action]}`),timeStr);
+      }
+      await set(ref(window._fbDB,`devices/${BRANCH.replace(/[^a-zA-Z0-9]/g,'_')}`),
+        {name:BRANCH,lastSeen:Date.now(),type:'kiosk',online:true});
+      setSyncStatus('online','Synced');
+    }catch(e){ setSyncStatus('offline','Sync failed — saved locally'); }
+  }
+
+  // Show confirmation
+  const box=document.getElementById('confirm-box');
+  box.className='confirm show success';
+  document.getElementById('conf-name').textContent=emp.name;
+  document.getElementById('conf-action').textContent=ACTION_LABELS[action];
+  document.getElementById('conf-time').textContent=timeDisp;
+  document.getElementById('conf-branch').textContent='📍 '+BRANCH+' · ✅ Face Verified';
+  document.getElementById('conf-geo').textContent=entry.dist!==null?`${entry.dist}m from branch`:'No GPS';
+
+  // ── LATE NOTIFICATION ────────────────────────────────────────────
+  // Show late warning if clocking in past prep start + grace
+  const lateMsg = document.getElementById('conf-late');
+  if (action === 'in' && lateMsg) {
+    try {
+      const now = new Date();
+      const dow = now.getDay();
+      const empShift = empShifts ? empShifts[empId] : null;
+      const shiftId  = empShift ? (empShift.shiftId || empShift.id) : null;
+      const shift    = shiftId ? shiftDefs.find(s => s.id === shiftId) : null;
+      if (shift) {
+        const shiftStart = timeToMins(shift.start || '09:00');
+        const prepMins   = +(shift.prep || 30);
+        const grace      = +(shift.grace || 5);
+        const prepStart  = shiftStart - prepMins;
+        const nowMins    = now.getHours()*60 + now.getMinutes();
+        const lateMins   = Math.max(0, nowMins - prepStart - grace);
+        if (lateMins > 0) {
+          lateMsg.style.display = 'block';
+          lateMsg.textContent = `⚠️ LATE ${lateMins} min — will be deducted from pay`;
+        } else {
+          lateMsg.style.display = 'none';
+        }
+      } else {
+        lateMsg.style.display = 'none';
+      }
+    } catch(e) { lateMsg.style.display = 'none'; }
+  } else if (lateMsg) {
+    lateMsg.style.display = 'none';
+  }
+  const ph=document.getElementById('conf-photo');
+  if(photo){ph.src=photo;ph.style.display='block';}else{ph.style.display='none';}
+
+  renderTodayLog();
+  showToast(ACTION_LABELS[action]+' — '+emp.name.split(' ')[0]);
+
+  // Reset after 3.5s
+  setTimeout(()=>{
+    document.getElementById('emp-select').value='';
+    box.classList.remove('show');
+    setActionButtons(false);
+    document.getElementById('face-guide').className='face-guide';
+    document.getElementById('face-status').innerHTML='';
+    document.getElementById('cam-hint').textContent='Centre your face in the oval';
+    clearInterval(verifyInterval);
+  },3500);
+}
+window.doAction=doAction;
+
+// ══════════════════════════════════════════════════════
+//  TODAY LOG
+// ══════════════════════════════════════════════════════
+function renderTodayLog(){
+  const today=new Date().toISOString().split('T')[0];
+  const entries=kioskLog.filter(e=>e.date===today);
+  const el=document.getElementById('today-log');
+  if(!entries.length){el.innerHTML='<div class="log-empty">No entries yet today.</div>';return;}
+  el.innerHTML=entries.map(e=>`
+    <div class="log-row">
+      <div class="log-ava">${e.photo?`<img src="${e.photo}" alt="">`:'👤'}</div>
+      <div class="log-info">
+        <div class="log-name">${e.empName} ${e.faceVerified?'<span style="font-size:10px;color:#6fcf7a;">✅ verified</span>':''}</div>
+        <div class="log-det">${e.branch} · ${e.dist!==null?e.dist+'m':'no GPS'}</div>
+      </div>
+      <div class="log-right">
+        <div class="log-badge ${e.action==='in'?'l-in':e.action==='out'?'l-out':'l-brk'}">${ACTION_LABELS[e.action]||e.action}</div>
+        <div class="log-t">${e.timeDisp||e.timeStr||''}</div>
+      </div>
+    </div>`).join('');
+}
+renderTodayLog();
+
+// ══════════════════════════════════════════════════════
+//  TOAST
+// ══════════════════════════════════════════════════════
+let _tt;
+function showToast(msg){
+  const el=document.getElementById('toast');
+  el.textContent=msg; el.classList.add('show');
+  clearTimeout(_tt); _tt=setTimeout(()=>el.classList.remove('show'),2800);
+}
+
+// ══════════════════════════════════════════════════════
+//  MANUAL CONFIG
+// ══════════════════════════════════════════════════════
+window.applyManualConfig=function(){
+  const code=document.getElementById('manual-cfg-input').value.trim();
+  if(!code){showToast('⚠️ Paste the config code first.');return;}
+  try{
+    const payload=JSON.parse(decodeURIComponent(escape(atob(code))));
+    if(!payload.apiKey) throw new Error('Invalid config');
+    localStorage.setItem('ct_firebase_cfg',JSON.stringify({
+      apiKey:payload.apiKey,projectId:payload.projectId,
+      databaseURL:payload.databaseURL,appId:payload.appId,branch:payload.branch,
+    }));
+    localStorage.setItem('ct_branchCfg',JSON.stringify({
+      name:payload.branch||'Branch',lat:payload.lat||14.5995,lng:payload.lng||120.9842,
+      radius:payload.radius||200,enforceGeo:payload.enforceGeo||false,
+    }));
+    document.getElementById('connected-banner').style.display='block';
+    document.getElementById('connected-branch-name').textContent=payload.branch||'Branch';
+    document.getElementById('manual-cfg-section').style.display='none';
+    showToast('✅ Config applied! Reloading…');
+    setTimeout(()=>window.location.reload(),1500);
+  }catch(e){showToast('❌ Invalid code: '+e.message);}
+};
+window.toggleManualConfig=function(){
+  const s=document.getElementById('manual-cfg-section');
+  s.style.display=s.style.display==='none'?'block':'none';
+};
+
+
+// ══════════════════════════════════════════════════════
+//  LABELS & INIT
+// ══════════════════════════════════════════════════════
+document.getElementById('branch-label').textContent=BRANCH;
+document.getElementById('badge-branch').textContent='📍 '+BRANCH;
+document.getElementById('badge-branch').className='badge bg-orange';
+document.getElementById('log-branch-badge').textContent=BRANCH;
+
+// Show "connected via QR" banner if just configured
+if (window._showConfiguredBanner) {
+  document.getElementById('connected-banner').style.display='block';
+  document.getElementById('connected-branch-name').textContent=window._showConfiguredBanner;
+}
+
+// ── Loading screen helpers ──────────────────────────────────
+function setLoadingProgress(pct, msg) {
+  const bar = document.getElementById('loading-bar');
+  const status = document.getElementById('loading-status');
+  if(bar) bar.style.width = pct + '%';
+  if(status) status.textContent = msg;
+}
+function hideLoadingScreen() {
+  const screen = document.getElementById('firebase-loading');
+  if(screen){ screen.style.transition='opacity .4s'; screen.style.opacity='0'; setTimeout(()=>screen.remove(),400); }
+}
+window.setLoadingProgress = setLoadingProgress;
+window.hideLoadingScreen  = hideLoadingScreen;
+
+// Auto-hide after 6 seconds max (in case Firebase is slow)
+setTimeout(()=>hideLoadingScreen(), 6000);
+setLoadingProgress(15, 'Starting up…');
+
+window.startCamera=startCamera;
+window.captureRegistrationSample=captureRegistrationSample;
+window.saveFaceRegistration=saveFaceRegistration;
+window.cancelRegistration=cancelRegistration;
+window.onEmployeeSelect=onEmployeeSelect;
+</script>
+
+<!-- Firebase module -->
+<script type="module">
+import{initializeApp}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+import{getDatabase,ref,push,set,onValue}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js';
+
+// ── Firebase config — hardcoded so it always connects ──
+const HARDCODED_FB_CFG = {
+  apiKey:      'AIzaSyB8PlWl-qfmAn2GDdrJ1Y5pZQs4RAjhTo4',
+  projectId:   'chowtime-hris',
+  databaseURL: 'https://chowtime-hris-default-rtdb.asia-southeast1.firebasedatabase.app',
+  appId:       '1:443134962503:web:7959dc5a6c9cbc967d7a62',
+};
+const savedCfg = JSON.parse(localStorage.getItem('ct_firebase_cfg')||'null');
+const fbCfg = savedCfg?.apiKey ? savedCfg : HARDCODED_FB_CFG;
+// Save merged config back
+localStorage.setItem('ct_firebase_cfg', JSON.stringify({...HARDCODED_FB_CFG, branch: fbCfg.branch || 'Branch'}));
+
+if(!fbCfg?.apiKey||!fbCfg?.databaseURL){
+  document.getElementById('setup-banner').style.display='block';
+  window.hideLoadingScreen && window.hideLoadingScreen();
+}else{
+  try{
+    window.setLoadingProgress && window.setLoadingProgress(40,'Connecting to Firebase…');
+    const app=initializeApp({
+      apiKey:fbCfg.apiKey,authDomain:`${fbCfg.projectId}.firebaseapp.com`,
+      databaseURL:fbCfg.databaseURL,projectId:fbCfg.projectId,appId:fbCfg.appId,
+    });
+    const db=getDatabase(app);
+    window._fbDB=db; window._fbFns={ref,push,set};
+    window.setLoadingProgress && window.setLoadingProgress(65,'Loading employees…');
+
+    // Pull employees — hide loading screen once loaded
+    onValue(ref(db,'employees'),snap=>{
+      const data=snap.val();
+      if(data){
+        const emps=Object.values(data);
+        localStorage.setItem('ct_employees',JSON.stringify(emps));
+        window.employees=emps;
+        populateEmployees();
+      } else {
+        // Firebase has no employees — clear any cached local ones
+        localStorage.removeItem('ct_employees');
+        window.employees=[];
+        populateEmployees();
+      }
+      // Hide loading screen after employees load
+      window.setLoadingProgress && window.setLoadingProgress(100,'Ready!');
+      setTimeout(()=>window.hideLoadingScreen && window.hideLoadingScreen(), 400);
+    });
+
+    // Pull face data from cloud (sync across branches)
+    onValue(ref(db,'faceData'),snap=>{
+      const data=snap.val();
+      if(data){
+        // Merge cloud face data with local
+        const merged={...faceData};
+        Object.keys(data).forEach(empId=>{
+          if(data[empId].descriptors) merged[empId]=data[empId].descriptors;
+        });
+        faceData=merged;
+        localStorage.setItem('ct_faceData',JSON.stringify(faceData));
+      }
+    });
+
+    // Pull settings
+    onValue(ref(db,'settings'),snap=>{ if(snap.val()) localStorage.setItem('ct_settings',JSON.stringify(snap.val())); });
+
+    // Pull branch schedules — apply this branch's schedule
+    onValue(ref(db,'branchSchedules'),snap=>{
+      const data=snap.val();
+      if(!data) return;
+      const myKey=Object.keys(data).find(k=>data[k].name===BRANCH);
+      if(myKey){
+        const s=data[myKey];
+        Object.assign(settings,{start:s.start||'09:00',end:s.end||'18:00',bstart:s.bstart||'12:00',bend:s.bend||'13:00',grace:s.grace||5});
+        localStorage.setItem('ct_settings',JSON.stringify(settings));
+      }
+    });
+
+    // Pull auto clock-out — run for today if past closing time
+    onValue(ref(db,'autoClockOut'),snap=>{
+      const data=snap.val();
+      if(!data||data.enabled===false) return;
+      const now=new Date();
+      const [ah,am]=(data.time||'22:00').split(':').map(Number);
+      const autoTime=new Date(now.getFullYear(),now.getMonth(),now.getDate(),ah,am,0);
+      if(now<autoTime) return; // not yet time
+      const todayStr=now.toISOString().split('T')[0];
+      const pKey=getPeriodKey(todayStr);
+      if(!pKey) return;
+      const allEmps=JSON.parse(localStorage.getItem('ct_employees')||'[]');
+      const dtrD=JSON.parse(localStorage.getItem('ct_dtrData')||'{}');
+      allEmps.forEach(emp=>{
+        const dKey=pKey+'__'+emp.id;
+        if(!dtrD[dKey]||!dtrD[dKey][todayStr]) return;
+        const entry=dtrD[dKey][todayStr];
+        if(entry.in&&!entry.out){
+          set(ref(db,`dtrData/${dKey}/${todayStr}/out`),data.time||'22:00').catch(()=>{});
+          set(ref(db,`dtrData/${dKey}/${todayStr}/auto`),true).catch(()=>{});
+        }
+      });
+    });
+
+    // Pull branch config from Firebase — auto-updates geofence settings
+    // Admin can change coordinates/geofence and all kiosks update automatically
+    onValue(ref(db,'branches'),snap=>{
+      const data=snap.val();
+      if(!data) return;
+      // Find config matching this branch name
+      const branchKey = BRANCH.replace(/[^a-zA-Z0-9]/g,'_');
+      const myConfig = data[branchKey] || data[BRANCH] || null;
+      if(myConfig){
+        branchCfg = {
+          name:       myConfig.name       || branchCfg.name,
+          lat:        myConfig.lat        || branchCfg.lat,
+          lng:        myConfig.lng        || branchCfg.lng,
+          radius:     myConfig.radius     || branchCfg.radius,
+          enforceGeo: myConfig.enforceGeo !== undefined ? myConfig.enforceGeo : branchCfg.enforceGeo,
+        };
+        localStorage.setItem('ct_branchCfg', JSON.stringify(branchCfg));
+      }
+    });
+
+    // Pull shift definitions for late detection
+    onValue(ref(db,'shiftDefs'), snap => {
+      const data = snap.val();
+      if (data) { shiftDefs = Array.isArray(data) ? data : Object.values(data); lsSet('shiftDefs', shiftDefs); }
+    });
+    onValue(ref(db,'empShifts'), snap => {
+      const data = snap.val();
+      if (data) { empShifts = data; lsSet('empShifts', empShifts); }
+    });
+
+    // Pull today log
+    const today=new Date().toISOString().split('T')[0].replace(/-/g,'');
+    onValue(ref(db,`kioskLog/${today}`),snap=>{
+      const data=snap.val();
+      if(data){
+        const all=Object.values(data).sort((a,b)=>b.ts-a.ts);
+        const local=JSON.parse(localStorage.getItem('ct_kioskLog')||'[]');
+        const byTs={};local.forEach(e=>{if(e.ts)byTs[e.ts]=e;});
+        const merged=all.map(e=>byTs[e.ts]?{...e,photo:byTs[e.ts].photo||''}:e);
+        localStorage.setItem('ct_kioskLog',JSON.stringify(merged));
+        const dateStr=new Date().toISOString().split('T')[0];
+        const todayE=merged.filter(e=>e.date===dateStr);
+        const ACTION_LABELS={in:'🟢 Clock In',out:'🔴 Clock Out',bstart:'☕ Break Start',bend:'▶️ Break End'};
+        const el=document.getElementById('today-log');
+        if(!todayE.length){el.innerHTML='<div class="log-empty">No entries yet today.</div>';}
+        else el.innerHTML=todayE.map(e=>`
+          <div class="log-row">
+            <div class="log-ava">${e.photo?`<img src="${e.photo}" alt="">`:'👤'}</div>
+            <div class="log-info">
+              <div class="log-name">${e.empName} ${e.faceVerified?'<span style="font-size:10px;color:#6fcf7a;">✅</span>':''}</div>
+              <div class="log-det">${e.branch} · ${e.dist!==null?e.dist+'m':'no GPS'}</div>
+            </div>
+            <div class="log-right">
+              <div class="log-badge ${e.action==='in'?'l-in':e.action==='out'?'l-out':'l-brk'}">${ACTION_LABELS[e.action]||e.action}</div>
+              <div class="log-t">${e.timeDisp||''}</div>
+            </div>
+          </div>`).join('');
+      }
+      document.getElementById('sync-dot').className='sync-dot';
+      document.getElementById('sync-label').textContent='Synced · All branches';
+      document.getElementById('badge-sync').textContent='☁️ Synced';
+      document.getElementById('badge-sync').className='badge bg-green';
+    });
+
+    // Heartbeat
+    const BRANCH=fbCfg.branch||'Kiosk';
+    const hb=()=>set(ref(db,`devices/${BRANCH.replace(/[^a-zA-Z0-9]/g,'_')}`),{name:BRANCH,lastSeen:Date.now(),type:'kiosk',online:true});
+    hb(); setInterval(hb,60000);
+
+  }catch(e){
+    console.error('Firebase error',e);
+    document.getElementById('setup-banner').style.display='block';
+  }
+}
+
+// Start camera and face models after Firebase init
+startCamera();
+loadFaceModels();
+</script>
+</body>
+</html>

@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Chowtime HRIS — Setup</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Syne:wght@700;800&display=swap');
+:root{--brand:#E8460A;--dark:#1A1208;--surface:#FFF8F4;--border:#F0DDD4;--green:#2D7D3A;--muted:#8C7060;--radius:12px;}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'Inter',sans-serif;background:var(--dark);color:#fff;min-height:100vh;padding:24px;}
+.wrap{max-width:820px;margin:0 auto;}
+
+/* header */
+.hdr{display:flex;align-items:center;gap:12px;margin-bottom:32px;}
+.hdr-icon{width:46px;height:46px;background:var(--brand);border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;}
+.hdr-title{font-family:'Syne',sans-serif;font-size:22px;}
+.hdr-sub{font-size:12px;color:rgba(255,255,255,.4);letter-spacing:1.5px;text-transform:uppercase;}
+
+/* tabs */
+.tabs{display:flex;gap:4px;background:rgba(255,255,255,.05);border-radius:10px;padding:4px;margin-bottom:24px;}
+.tab-btn{flex:1;padding:9px;border:none;background:none;color:rgba(255,255,255,.45);font-size:13px;font-weight:600;border-radius:8px;cursor:pointer;font-family:inherit;transition:.15s;}
+.tab-btn.active{background:var(--brand);color:#fff;}
+
+/* panels */
+.tab-panel{display:none;}.tab-panel.active{display:block;}
+
+/* cards */
+.card{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.09);border-radius:var(--radius);padding:20px;margin-bottom:14px;}
+.card-title{font-weight:700;font-size:14px;margin-bottom:12px;display:flex;align-items:center;gap:8px;}
+.step-num{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;background:var(--brand);border-radius:50%;font-size:11px;font-weight:700;flex-shrink:0;}
+
+/* inputs */
+.inp{width:100%;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);color:#fff;
+  padding:10px 14px;border-radius:8px;font-size:14px;font-family:inherit;outline:none;margin-top:6px;}
+.inp:focus{border-color:var(--brand);}
+.inp::placeholder{color:rgba(255,255,255,.25);}
+.label{font-size:11px;font-weight:600;color:rgba(255,255,255,.45);text-transform:uppercase;letter-spacing:.8px;}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;}
+@media(max-width:500px){.form-row{grid-template-columns:1fr;}}
+
+/* buttons */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:11px 20px;border-radius:9px;
+  border:none;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;transition:.15s;}
+.btn-brand{background:var(--brand);color:#fff;width:100%;margin-top:16px;}
+.btn-brand:hover{background:#c73b08;}
+.btn-ghost{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);color:#fff;}
+.btn-ghost:hover{background:rgba(255,255,255,.12);}
+.btn-green{background:#2D7D3A;color:#fff;}
+
+/* alerts */
+.alert{padding:12px 16px;border-radius:8px;font-size:13px;margin-top:12px;line-height:1.5;}
+.alert-green{background:rgba(45,125,58,.18);border:1px solid rgba(45,125,58,.35);color:#7cda8a;}
+.alert-orange{background:rgba(232,70,10,.15);border:1px solid rgba(232,70,10,.3);color:#ffaa70;}
+.alert-blue{background:rgba(26,111,168,.18);border:1px solid rgba(26,111,168,.35);color:#74b9ff;}
+.alert-red{background:rgba(192,57,43,.18);border:1px solid rgba(192,57,43,.35);color:#f08080;}
+
+/* QR */
+.qr-wrap{display:flex;flex-direction:column;align-items:center;gap:14px;}
+.qr-box{background:#fff;border-radius:12px;padding:14px;display:inline-block;}
+#qr-canvas{display:block;}
+.qr-url{font-size:11px;color:rgba(255,255,255,.35);word-break:break-all;text-align:center;max-width:320px;}
+
+/* branch list */
+.branch-item{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.07);}
+.branch-item:last-child{border-bottom:none;}
+.branch-name{font-weight:600;font-size:13px;}
+.branch-detail{font-size:11px;color:rgba(255,255,255,.4);margin-top:2px;}
+.online-dot{width:8px;height:8px;border-radius:50%;background:#6fcf7a;display:inline-block;margin-right:5px;}
+.offline-dot{width:8px;height:8px;border-radius:50%;background:#f08080;display:inline-block;margin-right:5px;}
+
+code{background:rgba(255,255,255,.08);padding:2px 7px;border-radius:4px;font-family:monospace;font-size:12px;}
+a{color:var(--brand);}
+hr{border:none;border-top:1px solid rgba(255,255,255,.08);margin:16px 0;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="hdr">
+  <div class="hdr-icon">🍽️</div>
+  <div>
+    <div class="hdr-title">Chowtime HRIS — Setup</div>
+    <div class="hdr-sub">Multi-Branch Configuration</div>
+  </div>
+</div>
+
+<div class="tabs">
+  <button class="tab-btn active" onclick="showTab('first')">1️⃣ First-Time Setup</button>
+  <button class="tab-btn" onclick="showTab('branch')">📲 Add a Branch</button>
+  <button class="tab-btn" onclick="showTab('status')">📡 Branch Status</button>
+</div>
+
+<!-- ═══ TAB 1: FIRST-TIME SETUP ═══ -->
+<div id="tab-first" class="tab-panel active">
+
+  <div class="alert alert-blue">
+    ✅ <strong>You only do this once</strong> — on your HR laptop. After that, adding branches takes 30 seconds via QR code.
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span class="step-num">1</span> Create your free Firebase database</div>
+    <div style="font-size:13px;color:rgba(255,255,255,.5);line-height:1.7;">
+      1. Open <a href="https://console.firebase.google.com" target="_blank">console.firebase.google.com</a> (free Google account)<br>
+      2. Click <strong>Add project</strong> → name it <em>"Chowtime HRIS"</em> → Continue → Disable Analytics → Create project<br>
+      3. Left sidebar → <strong>Build → Realtime Database → Create Database</strong><br>
+      4. Choose nearest region (e.g. <em>asia-southeast1</em>) → <strong>Start in Test mode</strong> → Done<br>
+      5. Copy the URL shown: <code>https://chowtime-hris-xxxx-default-rtdb.firebaseio.com</code>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span class="step-num">2</span> Get your Web App config</div>
+    <div style="font-size:13px;color:rgba(255,255,255,.5);line-height:1.7;">
+      1. Click the ⚙️ gear → <strong>Project settings</strong><br>
+      2. Scroll to <strong>Your apps</strong> → click <strong>&lt;/&gt; Web</strong> → Register app (any nickname)<br>
+      3. Copy the values from the <code>firebaseConfig</code> block shown<br>
+      4. Paste them below:
+    </div>
+    <div class="form-row">
+      <div><div class="label">API Key</div><input class="inp" id="cfg-apikey" placeholder="AIzaSy…"></div>
+      <div><div class="label">Project ID</div><input class="inp" id="cfg-projectid" placeholder="chowtime-hris-xxxx"></div>
+    </div>
+    <div class="form-row">
+      <div><div class="label">Database URL</div><input class="inp" id="cfg-dburl" placeholder="https://…firebaseio.com"></div>
+      <div><div class="label">App ID</div><input class="inp" id="cfg-appid" placeholder="1:123456:web:abc…"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span class="step-num">3</span> Name this device</div>
+    <div class="label">This Device / Branch Name</div>
+    <input class="inp" id="cfg-branch" placeholder="e.g. HR Admin, Main Branch, SM North">
+  </div>
+
+  <button class="btn btn-brand" onclick="saveAndConnect()">⚡ Save & Connect</button>
+  <div id="connect-result"></div>
+
+  <hr>
+  <div style="font-size:11px;color:rgba(255,255,255,.25);line-height:1.6;">
+    Firebase free tier (Spark plan): 1 GB storage, 10 GB/month downloads — plenty for a food business with several branches.
+    Your data lives in your own Firebase account. Nobody else has access.
+  </div>
+</div>
+
+<!-- ═══ TAB 2: ADD A BRANCH ═══ -->
+<div id="tab-branch" class="tab-panel">
+
+  <div id="no-config-warn" class="alert alert-orange" style="display:none;">
+    ⚠️ Complete First-Time Setup first, then come back here to generate branch QR codes.
+  </div>
+
+  <div id="branch-setup-content">
+    <div class="alert alert-green">
+      📲 <strong>Adding a branch takes 30 seconds.</strong> Generate a QR code below → someone at the branch scans it on their tablet/phone → done. No typing, no config.
+    </div>
+    <div id="file-protocol-tip" class="alert alert-orange" style="display:none;">
+      ⚠️ <strong>You're on file://</strong> — GPS and QR links won't work correctly here.<br>
+      Run <code>npx http-server .</code> in this folder and open <code>http://localhost:8080/chowtime-setup.html</code> instead.
+      Then GPS and QR codes will work perfectly.
+    </div>
+
+    <div class="card">
+      <div class="card-title">🏪 New Branch Details</div>
+      <div class="label">Branch Name</div>
+      <input class="inp" id="new-branch-name" placeholder="e.g. SM North, Alabang, Branch 3">
+      <div class="form-row" style="margin-top:12px;">
+        <div>
+          <div class="label">Branch Latitude <span style="font-weight:400;opacity:.5;">(for geofencing)</span></div>
+          <input class="inp" id="new-branch-lat" placeholder="14.5995">
+          <button class="btn btn-ghost" style="margin-top:8px;width:100%;font-size:12px;" onclick="getMyLocation()">📍 Use My Location</button>
+          <div id="geo-status-msg"></div>
+        </div>
+        <div>
+          <div class="label">Branch Longitude</div>
+          <input class="inp" id="new-branch-lng" placeholder="120.9842">
+          <div style="margin-top:8px;font-size:11px;color:rgba(255,255,255,.3);padding:8px 0;">Or type coordinates from Google Maps.</div>
+        </div>
+      </div>
+      <div class="form-row">
+        <div>
+          <div class="label">Geofence Radius (meters)</div>
+          <input class="inp" id="new-branch-radius" value="200" type="number">
+        </div>
+        <div>
+          <div class="label">Enforce Geofence?</div>
+          <select class="inp" id="new-branch-enforce">
+            <option value="false">No — log location only</option>
+            <option value="true">Yes — block outside clock-in</option>
+          </select>
+        </div>
+      </div>
+      <button class="btn btn-brand" onclick="generateQR()">📲 Generate QR Code for this Branch</button>
+    </div>
+
+    <div class="card" id="qr-card" style="display:none;">
+      <div class="card-title">✅ QR Code Ready — <span id="qr-branch-label" style="color:var(--brand);"></span></div>
+
+      <!-- QR renders here (div, not canvas) -->
+      <div style="text-align:center;">
+        <div id="qr-canvas-wrap" style="display:inline-block;background:#fff;border-radius:12px;padding:14px;margin-bottom:14px;"></div>
+      </div>
+
+      <!-- Manual fallback for file:// -->
+      <div id="qr-manual-section" style="display:none;">
+        <div class="alert alert-orange" style="margin-bottom:14px;">
+          ⚠️ <strong>You're on file:// — QR codes can't link to local files on other devices.</strong><br><br>
+          <strong>Option A (Recommended):</strong> Run a local server so all devices on the same WiFi can connect:<br>
+          1. Install Node.js → open Terminal/Command Prompt in this folder<br>
+          2. Run: <code>npx http-server . -p 8080</code><br>
+          3. Your HR URL will be: <code>http://YOUR-IP:8080/chowtime-setup.html</code><br>
+          4. Reopen setup there → QR codes will work perfectly for all branches.<br><br>
+          <strong>Option B (Manual):</strong> Copy the config code below → paste it into the kiosk manually:
+        </div>
+        <div class="label" style="margin-bottom:6px;">Config Code (copy this → paste in kiosk)</div>
+        <textarea id="qr-config-code" rows="4"
+          style="width:100%;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);color:#fff;
+          padding:10px;border-radius:8px;font-family:monospace;font-size:11px;resize:none;"></textarea>
+        <button class="btn btn-ghost" style="margin-top:8px;width:100%;" onclick="
+          navigator.clipboard.writeText(document.getElementById('qr-config-code').value)
+            .then(()=>this.textContent='✅ Copied!')
+            .catch(()=>{ document.getElementById('qr-config-code').select(); document.execCommand('copy'); this.textContent='✅ Copied!'; });
+          setTimeout(()=>this.textContent='📋 Copy Config Code',2000);
+        ">📋 Copy Config Code</button>
+        <div style="margin-top:10px;font-size:12px;color:rgba(255,255,255,.4);">
+          On the kiosk device: open <strong>chowtime-kiosk.html</strong> → tap the menu icon → "Paste Config Code"
+        </div>
+      </div>
+
+      <div id="qr-url-display" class="qr-url" style="margin-top:8px;font-size:11px;color:rgba(255,255,255,.3);word-break:break-all;text-align:center;"></div>
+
+      <div style="font-size:13px;color:rgba(255,255,255,.5);text-align:center;line-height:1.6;margin-top:12px;">
+        Show or print this QR on the branch tablet/phone.<br>
+        Scan it → kiosk configures itself in one tap. No typing needed.
+      </div>
+      <div style="display:flex;gap:10px;margin-top:14px;">
+        <button class="btn btn-ghost" style="flex:1;" onclick="printQR()">🖨️ Print QR</button>
+        <button class="btn btn-ghost" style="flex:1;" onclick="document.getElementById('qr-card').style.display='none';">✕ Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ TAB 3: BRANCH STATUS ═══ -->
+<div id="tab-status" class="tab-panel">
+  <div class="card">
+    <div class="card-title">📡 Connected Branches</div>
+    <div id="branch-list"><div style="font-size:13px;color:rgba(255,255,255,.35);padding:10px 0;">Loading…</div></div>
+    <button class="btn btn-ghost" style="margin-top:12px;" onclick="loadBranchStatus()">🔄 Refresh</button>
+  </div>
+  <div class="card">
+    <div class="card-title">📊 Today's Clock Summary (All Branches)</div>
+    <div id="clock-summary"><div style="font-size:13px;color:rgba(255,255,255,.35);padding:10px 0;">Loading…</div></div>
+  </div>
+</div>
+
+</div><!-- /wrap -->
+
+<!-- QR lib -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+<script type="module">
+import { initializeApp }    from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+import { getDatabase, ref, set, get, onValue, push, serverTimestamp }
+                             from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js';
+
+// ── Helpers ─────────────────────────────────────────────────
+function lsGet(k){ try{return JSON.parse(localStorage.getItem('ct_'+k));}catch(e){return null;} }
+function lsSet(k,v){ localStorage.setItem('ct_'+k,JSON.stringify(v)); }
+
+// ── Hardcoded Firebase config ────────────────────────────────
+const HARDCODED_FB_CFG = {
+  apiKey:      'AIzaSyB8PlWl-qfmAn2GDdrJ1Y5pZQs4RAjhTo4',
+  projectId:   'chowtime-hris',
+  databaseURL: 'https://chowtime-hris-default-rtdb.asia-southeast1.firebasedatabase.app',
+  appId:       '1:443134962503:web:7959dc5a6c9cbc967d7a62',
+};
+let db=null, cfg=lsGet('firebase_cfg') || HARDCODED_FB_CFG;
+// Always save to localStorage
+lsSet('firebase_cfg', cfg);
+
+function tryInitFirebase(c){
+  try{
+    const app=initializeApp({
+      apiKey:c.apiKey, authDomain:`${c.projectId}.firebaseapp.com`,
+      databaseURL:c.databaseURL, projectId:c.projectId, appId:c.appId
+    },c.projectId); // unique name to avoid duplicate app error
+    db=getDatabase(app);
+    return true;
+  }catch(e){console.error(e);return false;}
+}
+if(cfg?.apiKey) tryInitFirebase(cfg);
+// auto-connect with hardcoded config if not already connected
+if(!db) tryInitFirebase(HARDCODED_FB_CFG);
+
+// ── Tab switching ────────────────────────────────────────────
+window.showTab=function(id){
+  document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('tab-'+id).classList.add('active');
+  [...document.querySelectorAll('.tab-btn')].find(b=>b.getAttribute('onclick')?.includes("'"+id+"'"))?.classList.add('active');
+  if(id==='branch') checkBranchTabReady();
+  if(id==='status') loadBranchStatus();
+};
+
+// ── Save & Connect ───────────────────────────────────────────
+window.saveAndConnect=async function(){
+  const c={
+    apiKey:   document.getElementById('cfg-apikey').value.trim(),
+    projectId:document.getElementById('cfg-projectid').value.trim(),
+    databaseURL:document.getElementById('cfg-dburl').value.trim(),
+    appId:    document.getElementById('cfg-appid').value.trim(),
+    branch:   document.getElementById('cfg-branch').value.trim()||'HR Admin',
+  };
+  if(!c.apiKey||!c.databaseURL){
+    document.getElementById('connect-result').innerHTML='<div class="alert alert-red">⚠️ API Key and Database URL are required.</div>';
+    return;
+  }
+  lsSet('firebase_cfg',c);
+  cfg=c;
+  const ok=tryInitFirebase(c);
+  if(!ok){
+    document.getElementById('connect-result').innerHTML='<div class="alert alert-red">❌ Could not connect. Check your config values.</div>';
+    return;
+  }
+  // Register this device in Firebase
+  try{
+    await set(ref(db,`devices/${c.branch.replace(/\s/g,'_')}`),{
+      name:c.branch, lastSeen:Date.now(), type:'admin', online:true
+    });
+    // Push existing local employees & settings to cloud
+    const emps=lsGet('employees');
+    if(emps&&emps.length){
+      const empObj={};emps.forEach(e=>{empObj[e.id]=e;});
+      await set(ref(db,'employees'),empObj);
+    }
+    const sett=lsGet('settings');
+    if(sett) await set(ref(db,'settings'),sett);
+
+    document.getElementById('connect-result').innerHTML=`
+      <div class="alert alert-green">
+        ✅ <strong>Connected!</strong> This device is "<strong>${c.branch}</strong>".<br><br>
+        Now go to the <strong>"Add a Branch"</strong> tab to set up your branch kiosks via QR code.
+      </div>`;
+  }catch(e){
+    document.getElementById('connect-result').innerHTML=`<div class="alert alert-red">❌ Firebase error: ${e.message}</div>`;
+  }
+};
+
+// Pre-fill if already configured
+if(cfg){
+  document.getElementById('cfg-apikey').value   =cfg.apiKey   ||'';
+  document.getElementById('cfg-projectid').value=cfg.projectId||'';
+  document.getElementById('cfg-dburl').value    =cfg.databaseURL||'';
+  document.getElementById('cfg-appid').value    =cfg.appId    ||'';
+  document.getElementById('cfg-branch').value   =cfg.branch   ||'';
+}
+
+// ── Branch tab ───────────────────────────────────────────────
+function checkBranchTabReady(){
+  const hasConfig=!!(cfg?.apiKey&&cfg?.databaseURL);
+  document.getElementById('no-config-warn').style.display=hasConfig?'none':'block';
+  document.getElementById('branch-setup-content').style.display=hasConfig?'block':'none';
+  // Show file:// warning if relevant
+  const tip = document.getElementById('file-protocol-tip');
+  if (tip) tip.style.display = (window.location.protocol === 'file:') ? 'block' : 'none';
+}
+
+window.getMyLocation = function() {
+  const btn     = event.target;
+  const latEl   = document.getElementById('new-branch-lat');
+  const lngEl   = document.getElementById('new-branch-lng');
+  const geoMsg  = document.getElementById('geo-status-msg');
+
+  // file:// blocks geolocation in most browsers
+  if (window.location.protocol === 'file:') {
+    geoMsg.innerHTML = `<div class="alert alert-orange" style="margin-top:10px;">
+      ⚠️ <strong>Location blocked on file://</strong><br>
+      Browsers only allow GPS on <code>https://</code> or <code>localhost</code>.<br><br>
+      <strong>Quick fix:</strong> Run <code>npx http-server .</code> in this folder, then open
+      <code>http://localhost:8080/chowtime-setup.html</code><br><br>
+      <strong>Or just paste the coordinates manually:</strong><br>
+      Open <a href="https://maps.google.com" target="_blank" style="color:#ffaa70;">Google Maps</a>,
+      right-click your branch location → the first line shows <em>lat, lng</em>. Copy and paste those above.
+    </div>`;
+    return;
+  }
+
+  if (!navigator.geolocation) {
+    geoMsg.innerHTML = `<div class="alert alert-red" style="margin-top:10px;">❌ This device doesn't support GPS.</div>`;
+    return;
+  }
+
+  btn.textContent = '⏳ Getting location…';
+  btn.disabled = true;
+  geoMsg.innerHTML = '';
+
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      latEl.value = pos.coords.latitude.toFixed(6);
+      lngEl.value = pos.coords.longitude.toFixed(6);
+      btn.textContent = '✅ Location set!';
+      btn.disabled = false;
+      geoMsg.innerHTML = `<div class="alert alert-green" style="margin-top:10px;">
+        📍 Got it: <strong>${pos.coords.latitude.toFixed(5)}, ${pos.coords.longitude.toFixed(5)}</strong>
+        · Accuracy: ±${Math.round(pos.coords.accuracy)}m
+      </div>`;
+      setTimeout(() => { btn.textContent = '📍 Use My Location'; }, 3000);
+    },
+    err => {
+      btn.textContent = '📍 Use My Location';
+      btn.disabled = false;
+      const msgs = {
+        1: 'Permission denied — allow location access in your browser settings, then try again.',
+        2: 'Location unavailable — make sure GPS is enabled on this device.',
+        3: 'Timed out — try again or move closer to a window.',
+      };
+      geoMsg.innerHTML = `<div class="alert alert-red" style="margin-top:10px;">
+        ❌ ${msgs[err.code] || err.message}<br><br>
+        <strong>Alternative:</strong> Open
+        <a href="https://maps.google.com" target="_blank" style="color:#f08080;">Google Maps</a>,
+        right-click your branch → copy the coordinates shown, paste them in the fields above.
+      </div>`;
+    },
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+  );
+};
+
+window.generateQR = async function() {
+  if (!cfg?.apiKey) { alert('Complete First-Time Setup first.'); return; }
+
+  const name    = document.getElementById('new-branch-name').value.trim() || 'Branch';
+  const lat     = +document.getElementById('new-branch-lat').value  || 14.5995;
+  const lng     = +document.getElementById('new-branch-lng').value  || 120.9842;
+  const radius  = +document.getElementById('new-branch-radius').value || 200;
+  const enforce = document.getElementById('new-branch-enforce').value === 'true';
+
+  // Save branch to Firebase
+  if (db) {
+    try {
+      const branchKey = name.replace(/[^a-zA-Z0-9]/g,'_');
+      await set(ref(db, `branches/${branchKey}`),
+        {name, lat, lng, radius, enforceGeo: enforce, createdAt: Date.now()});
+    } catch(e) { console.warn('Firebase branch save:', e); }
+  }
+
+  const payload = {
+    apiKey: cfg.apiKey, projectId: cfg.projectId,
+    databaseURL: cfg.databaseURL, appId: cfg.appId,
+    branch: name, lat, lng, radius, enforceGeo: enforce,
+  };
+
+  // Safe base64 encoding (handles Unicode branch names)
+  const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+
+  // ── Build kiosk URL ───────────────────────────────────────
+  // Always point to Netlify so QR works from any device/protocol
+  const NETLIFY_BASE = 'https://chowtime-hris.github.io/chowtime-hris';
+  const kioskUrl = NETLIFY_BASE + '/chowtime-kiosk.html#cfg=' + encoded;
+
+  // If on file://, also show manual config as backup
+  if (window.location.protocol === 'file:') {
+    document.getElementById('qr-config-code').value = encoded;
+    document.getElementById('qr-manual-section').style.display = 'block';
+  } else {
+    document.getElementById('qr-manual-section').style.display = 'none';
+  }
+
+  // ── Draw QR code ──────────────────────────────────────────
+  const qrWrap = document.getElementById('qr-canvas-wrap');
+  qrWrap.style.display = 'block';
+  qrWrap.innerHTML = ''; // clear previous
+
+  // Use QRCode lib to render directly into the wrap div (creates its own canvas/img)
+  new QRCode(qrWrap, {
+    text:         kioskUrl,
+    width:        240,
+    height:       240,
+    colorDark:    '#000000',
+    colorLight:   '#ffffff',
+    correctLevel: QRCode.CorrectLevel.M,
+  });
+
+  document.getElementById('qr-manual-section').style.display = 'none';
+  document.getElementById('qr-url-display').textContent =
+    kioskUrl.length > 100 ? kioskUrl.substring(0,100)+'…' : kioskUrl;
+  document.getElementById('qr-card').style.display = 'block';
+  document.getElementById('qr-card').scrollIntoView({behavior:'smooth'});
+};
+
+window.printQR = function() {
+  const wrap = document.getElementById('qr-canvas-wrap');
+  const img  = wrap.querySelector('img') || wrap.querySelector('canvas');
+  const branchName = document.getElementById('new-branch-name').value || 'Branch';
+  const src = img ? (img.tagName === 'CANVAS' ? img.toDataURL() : img.src) : '';
+  const w = window.open('');
+  w.document.write(`<!DOCTYPE html><html><body style="text-align:center;font-family:Arial;padding:40px;background:#fff;">
+    <div style="font-size:32px;">🍽️</div>
+    <h2 style="font-size:22px;margin:6px 0 2px;">Chowtime HRIS</h2>
+    <p style="color:#888;font-size:14px;margin-bottom:22px;">${branchName} — Kiosk Setup QR</p>
+    ${src ? `<img src="${src}" style="width:260px;height:260px;border-radius:8px;border:4px solid #E8460A;">` : '<p>QR not available</p>'}
+    <p style="margin-top:18px;font-size:13px;color:#444;max-width:300px;margin-left:auto;margin-right:auto;line-height:1.6;">
+      Scan this code on the branch tablet or phone.<br>
+      The kiosk will configure itself automatically — no typing needed.
+    </p>
+    <p style="font-size:11px;color:#aaa;margin-top:8px;">Chowtime HRIS · ${branchName}</p>
+  </body></html>`);
+  w.document.close();
+  setTimeout(() => w.print(), 500);
+};
+
+// ── Branch status ────────────────────────────────────────────
+window.loadBranchStatus=async function(){
+  if(!db){
+    document.getElementById('branch-list').innerHTML='<div style="font-size:13px;color:rgba(255,255,255,.35);">Not connected. Complete First-Time Setup first.</div>';
+    return;
+  }
+  try{
+    const snap=await get(ref(db,'devices'));
+    const data=snap.val();
+    if(!data){
+      document.getElementById('branch-list').innerHTML='<div style="font-size:13px;color:rgba(255,255,255,.35);">No devices registered yet.</div>';
+      return;
+    }
+    const now=Date.now();
+    const entries=Object.entries(data); // [key, value]
+    document.getElementById('branch-list').innerHTML=entries.map(([key,d])=>{
+      const ago=now-d.lastSeen;
+      const online=ago<120000;
+      const agoStr=ago<60000?'just now':ago<3600000?Math.round(ago/60000)+' min ago':Math.round(ago/3600000)+'h ago';
+      return `<div class="branch-item" id="branch-row-${key}">
+        <div style="flex:1;">
+          <div class="branch-name"><span class="${online?'online':'offline'}-dot"></span>${d.name}</div>
+          <div class="branch-detail">${d.type==='admin'?'HR Admin':'Branch Kiosk'} · Last seen: ${agoStr}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-size:11px;padding:3px 10px;border-radius:20px;font-weight:600;background:${online?'rgba(45,125,58,.25)':'rgba(140,112,96,.2)'};color:${online?'#6fcf7a':'rgba(255,255,255,.35)'};">${online?'Online':'Offline'}</span>
+          <button onclick="renameBranch('${key}','${d.name}')" style="padding:4px 10px;border-radius:7px;border:1px solid rgba(255,255,255,.2);background:none;color:rgba(255,255,255,.6);font-size:11px;cursor:pointer;">✏️ Rename</button>
+          <button onclick="deleteBranch('${key}','${d.name}')" style="padding:4px 10px;border-radius:7px;border:1px solid rgba(192,57,43,.4);background:rgba(192,57,43,.15);color:#f08080;font-size:11px;cursor:pointer;">🗑 Delete</button>
+        </div>
+      </div>`;
+    }).join('');
+
+    // Today's summary
+    const today=new Date().toISOString().split('T')[0].replace(/-/g,'');
+    const logSnap=await get(ref(db,`kioskLog/${today}`));
+    const logData=logSnap.val();
+    if(logData){
+      const entries2=Object.values(logData);
+      const byBranch={};
+      entries2.forEach(e=>{
+        if(!byBranch[e.branch]) byBranch[e.branch]={in:0,out:0,break:0};
+        if(e.action==='in') byBranch[e.branch].in++;
+        else if(e.action==='out') byBranch[e.branch].out++;
+        else byBranch[e.branch].break++;
+      });
+      document.getElementById('clock-summary').innerHTML=
+        `<div style="font-size:12px;color:rgba(255,255,255,.4);margin-bottom:10px;">Total entries today: ${entries2.length}</div>`+
+        Object.entries(byBranch).map(([branch,c])=>`
+          <div class="branch-item">
+            <div class="branch-name">📍 ${branch}</div>
+            <div style="display:flex;gap:12px;font-size:12px;">
+              <span style="color:#6fcf7a;">✅ ${c.in} in</span>
+              <span style="color:#f08080;">🚪 ${c.out} out</span>
+              <span style="color:#ffaa70;">☕ ${c.break} breaks</span>
+            </div>
+          </div>`).join('');
+    } else {
+      document.getElementById('clock-summary').innerHTML='<div style="font-size:13px;color:rgba(255,255,255,.35);padding:8px 0;">No clock entries today yet.</div>';
+    }
+  }catch(e){
+    document.getElementById('branch-list').innerHTML=`<div class="alert alert-red">Error loading: ${e.message}</div>`;
+  }
+};
+
+// ── Rename branch ────────────────────────────────────────────
+window.renameBranch = async function(key, currentName) {
+  const newName = prompt(`Rename "${currentName}" to:`, currentName);
+  if (!newName || newName === currentName) return;
+  try {
+    const snap = await get(ref(db, `devices/${key}`));
+    const data = snap.val();
+    await set(ref(db, `devices/${key}`), {...data, name: newName});
+    alert(`✅ "${currentName}" renamed to "${newName}"`);
+    loadBranchStatus();
+  } catch(e) {
+    alert('❌ Error: ' + e.message);
+  }
+};
+
+// ── Delete branch ────────────────────────────────────────────
+window.deleteBranch = async function(key, name) {
+  if (!confirm(`Delete branch "${name}"?\n\nThis removes it from the list but does NOT affect attendance records.`)) return;
+  try {
+    const { remove } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js');
+    await remove(ref(db, `devices/${key}`));
+    alert(`✅ "${name}" deleted from branch list.`);
+    loadBranchStatus();
+  } catch(e) {
+    alert('❌ Error: ' + e.message);
+  }
+};
+
+loadBranchStatus();
+</script>
+</body>
+</html>
