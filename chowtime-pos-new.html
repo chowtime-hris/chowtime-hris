@@ -3061,16 +3061,31 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
                   border:`2px solid ${selOrder?.id===o.id?C.danger:C.border}`,
                   background:selOrder?.id===o.id?"#FFEBEE":"#fff"}},
 
-                // Order header - click to select
-                h("div",{onClick:()=>setSelOrder(selOrder?.id===o.id?null:o),
+                // Order header - click to select/expand
+                h("div",{
+                  onClick:()=>{
+                    if(selOrder?.id===o.id){
+                      setSelOrder(null);
+                      setSelItems({});
+                    } else {
+                      setSelOrder(o);
+                      // Auto-check all items
+                      const all={};
+                      (o.items||[]).forEach((_,i)=>{ all[i]=true; });
+                      setSelItems(all);
+                    }
+                  },
                   style:{display:"flex",justifyContent:"space-between",
-                    marginBottom:4,cursor:"pointer"}},
+                    alignItems:"center",marginBottom:selOrder?.id===o.id?8:0,cursor:"pointer"}},
                   h("span",{style:{fontSize:11,fontWeight:800,color:C.danger}},"#"+o.id),
                   h("div",{style:{display:"flex",gap:8,alignItems:"center"}},
                     h("span",{style:{fontSize:12,fontWeight:900,color:C.primary}},
                       "₱"+o.total?.toFixed(2)),
-                    h("span",{style:{fontSize:9,color:selOrder?.id===o.id?C.danger:C.muted,fontWeight:700}},
-                      selOrder?.id===o.id?"▲ Hide":"▼ Select items")
+                    h("span",{style:{
+                      fontSize:9,fontWeight:700,padding:"2px 8px",borderRadius:10,
+                      background:selOrder?.id===o.id?"#FFCDD2":"#f5f5f5",
+                      color:selOrder?.id===o.id?C.danger:C.muted}},
+                      selOrder?.id===o.id?"▲ Close":"▼ Select items")
                   )
                 ),
 
@@ -3772,7 +3787,10 @@ function App(){
   // ── PLACE ORDER (Firebase) ───────────────────────────────
   const placeOrder=async()=>{
     const today=new Date().toISOString().slice(0,10).replace(/-/g,"");
-    const id=`CT-${today}-${String(ordCounter).padStart(3,"0")}`;
+    // Use timestamp + random for truly unique order ID
+    const ts = Date.now().toString().slice(-6);
+    const rand = Math.floor(Math.random()*100).toString().padStart(2,"0");
+    const id=`CT-${today}-${ts}${rand}`;
     const now=new Date().toLocaleTimeString("en-PH",{hour:"2-digit",minute:"2-digit"});
     const ord={
       id,branch:branchId,
