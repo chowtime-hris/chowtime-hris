@@ -2886,6 +2886,7 @@ function BranchSettingsPage({branchId,curBranch,user,db,showT}){
 function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=false}){
   const [voidRequests,setVoidReqs] = useState([]);
   const [selOrder,setSelOrder]     = useState(null);
+  const [selItems,setSelItems]     = useState({}); // {itemIdx: true/false}
   const [reason,setReason]         = useState("");
   const [submitting,setSubmitting] = useState(false);
   const [tab,setTab]               = useState(isManager?"pending":"new");
@@ -2906,6 +2907,10 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
   const submitVoid = async()=>{
     if(!selOrder){showT("Select an order to void","warn");return;}
     if(!reason.trim()){showT("Enter reason for void","warn");return;}
+    const voidedItems = (selOrder.items||[]).filter((_,i)=>selItems[i]!==false);
+    if(!voidedItems.length){showT("Select at least 1 item to void","warn");return;}
+    const isPartial = voidedItems.length < (selOrder.items||[]).length;
+    const voidAmt = voidedItems.reduce((s,i)=>(s+(i.price||0)*(i.qty||1)),0);
     setSubmitting(true);
     try{
       await addDoc(collection(db,"void_requests"),{
@@ -2913,36 +2918,87 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
         branchName:curBranch.full,
         orderId:selOrder.id,
         orderTotal:selOrder.total,
+        voidAmount:voidAmt,
         orderItems:selOrder.items,
+        voidedItems,
+        isPartial,
         requestedBy:user.name,
         reason,
         status:"pending",
         timestamp:serverTimestamp(),
         date:new Date().toISOString().slice(0,10)
       });
-      showT("Void request submitted — waiting for manager approval ✓");
-      setSelOrder(null);setReason("");setTab("history");
+      showT((isPartial?"Partial":"Full")+" void request submitted ✓");
+      setSelOrder(null);setSelItems({});setReason("");setTab("history");
     }catch(e){showT("Error submitting","err");}
     setSubmitting(false);
   };
 
+  // When order selected, default all items to voided
+  useEffect(()=>{
+    if(selOrder){
+      const all={};
+      (selOrder.items||[]).forEach((_,i)=>{ all[i]=true; });
+      setSelItems(all);
+    }
+  },[selOrder?.id]);
+
+  const voidedItems = selOrder?(selOrder.items||[]).filter((_,i)=>selItems[i]!==false):[];
+  const voidAmt = voidedItems.reduce((s,i)=>s+(i.price||0)*(i.qty||1),0);
+
   const approveVoid = async(req)=>{
     try{
-      // Mark void request approved
       await updateDoc(doc(db,"void_requests",req._docId),{
         status:"approved",
         approvedBy:user.name,
         approvedAt:serverTimestamp()
       });
-      // Cancel the actual order
-      await updateDoc(doc(db,"orders",req.orderId),{
-        status:"void",
-        voidedBy:user.name,
-        voidReason:req.reason,
-        voidedAt:serverTimestamp()
-      });
-      showT("Order #"+req.orderId+" voided ✓");
-    }catch(e){showT("Error approving void","err");}
+
+      if(req.isPartial){
+        // Partial void — deduct void amount from order total, mark partial
+        const order = orders.find(o=>o.id===req.orderId);
+        const newTotal = (order?.total||0) - (req.voidAmount||0);
+        await updateDoc(doc(db,"orders",req.orderId),{
+          status:"partial-void",
+          total:Math.max(0,newTotal),
+          voidedItems:req.voidedItems,
+          voidedBy:user.name,
+          voidReason:req.reason,
+          voidedAt:serverTimestamp()
+        });
+      } else {
+        // Full void
+        await updateDoc(doc(db,"orders",req.orderId),{
+          status:"void",
+          voidedBy:user.name,
+          voidReason:req.reason,
+          voidedAt:serverTimestamp()
+        });
+      }
+
+      // BOM Restock — return ingredients to branch inventory
+      const invCol = "inventory_"+req.branch;
+      for(const item of (req.voidedItems||req.orderItems||[])){
+        try{
+          const bomSnap = await getDocs(query(collection(db,"bom"),where("menuItemId","==",item.id)));
+          if(!bomSnap.empty){
+            const bomItems = bomSnap.docs[0].data().items||[];
+            for(const bRow of bomItems){
+              if(!bRow.ingId) continue;
+              const restoreQty = (bRow.qty||0)*(item.qty||1);
+              try{
+                await updateDoc(doc(db,invCol,bRow.ingId),{
+                  stock:increment(restoreQty),
+                  lastUpdated:serverTimestamp()
+                });
+              }catch(e){}
+            }
+          }
+        }catch(e){}
+      }
+
+      showT((req.isPartial?"Partial void":"Order #"+req.orderId+" voided")+" ✓ Inventory restocked");
+    }catch(e){showT("Error approving void","err");console.error(e);}
   };
 
   const rejectVoid = async(req)=>{
@@ -3039,12 +3095,12 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
                   height:80,boxSizing:"border-box",fontFamily:"inherit"}})
             ),
             h("button",{onClick:submitVoid,
-              disabled:!selOrder||!reason.trim()||submitting,
+              disabled:!selOrder||!reason.trim()||submitting||!voidedItems.length,
               style:{width:"100%",padding:"12px",
-                background:selOrder&&reason?C.danger:"#ddd",
+                background:selOrder&&reason&&voidedItems.length?C.danger:"#ddd",
                 border:"none",borderRadius:9,color:"#fff",
                 fontWeight:800,fontSize:13,cursor:selOrder&&reason?"pointer":"not-allowed"}},
-              submitting?"Submitting...":"📤 Submit Void Request")
+              submitting?"Submitting...":`📤 ${voidedItems.length<(selOrder?.items?.length||0)?"Partial ":""}Void Request (₱${voidAmt.toFixed(2)})`)
           )
         )
       )
@@ -3074,8 +3130,15 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
                 h("span",{style:{color:C.muted}},"Reason: "),
                 h("span",{style:{fontWeight:700,color:"#C62828"}},req.reason)
               ),
-              h("div",{style:{fontSize:10,color:C.muted,marginBottom:12}},
-                (req.orderItems||[]).map(i=>i.qty+"x "+i.name).join(", ")),
+              // Show partial vs full indicator
+              req.isPartial&&h("div",{style:{background:"#FFF8E1",border:"1px solid #FFE082",
+                borderRadius:6,padding:"5px 10px",marginBottom:6,fontSize:10,color:"#795548",fontWeight:700}},
+                "⚡ PARTIAL VOID — "+req.voidedItems?.length+"/"+req.orderItems?.length+" items · ₱"+req.voidAmount?.toFixed(2)
+              ),
+              h("div",{style:{fontSize:10,color:C.muted,marginBottom:6}},
+                "Void items: "+(req.voidedItems||req.orderItems||[]).map(i=>i.qty+"x "+i.name).join(", ")),
+              req.isPartial&&h("div",{style:{fontSize:9,color:C.muted,marginBottom:6}},
+                "Kept items: "+(req.orderItems||[]).filter(i=>!(req.voidedItems||[]).find(v=>v.name===i.name)).map(i=>i.qty+"x "+i.name).join(", ")||"none"),
               h("div",{style:{display:"flex",gap:8}},
                 h("button",{onClick:()=>approveVoid(req),
                   style:{flex:1,padding:"10px",background:C.success,border:"none",
