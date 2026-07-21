@@ -3512,22 +3512,7 @@ function App(){
         snap=>setAdvances(snap.docs.map(d=>({...d.data(),_docId:d.id}))),()=>{}));
     }catch(e){}
 
-    // Branch permissions loaded via separate useEffect below
-
-
-
-  // Menu overrides — per branch visibility
-    try{
-      unsubs.push(onSnapshot(
-        query(collection(db,"menu_overrides"),where("branch","==",bId)),
-        snap=>{
-          if(!snap.empty){
-            const overrides={};
-            snap.docs.forEach(d=>{const od=d.data();overrides[od.itemId]=od.avail;});
-            setMenuItems(p=>p.map(m=>overrides.hasOwnProperty(m.id)?{...m,avail:overrides[m.id]}:m));
-          }
-        },()=>{}));
-    }catch(e){}
+    // Branch permissions + menu overrides handled above
 
     // Inventory — per branch freezer stock
     // Owner/Commissary → sees master commissary inventory
@@ -3592,14 +3577,15 @@ function App(){
 
   // ── BRANCH PERMISSIONS ───────────────────────────────────
   useEffect(()=>{
-    if(!branchId||!db)return;
+    if(!user?.branch||!db)return;
+    const bPermsId=(user.branch==="all"||user.branch==="comm")?"ct-wsfp":user.branch;
     try{
-      const unsub=onSnapshot(doc(db,"branch_settings",branchId),snap=>{
+      const unsub=onSnapshot(doc(db,"branch_settings",bPermsId),snap=>{
         if(snap.exists())setBranchPerms(snap.data().permissions||{});
       },()=>{});
       return()=>unsub();
     }catch(e){}
-  },[branchId]);
+  },[user?.branch]);
 
   // ── BRANCH MENU OVERRIDES ────────────────────────────────
   useEffect(()=>{
