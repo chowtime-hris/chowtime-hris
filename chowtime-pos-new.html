@@ -4279,6 +4279,7 @@ function App(){
 
       // PAGE CONTENT
       h("div",{style:{flex:1,overflow:"auto",padding:page==="pos"||page==="kitchen"?0:"16px 18px"}},
+        h("div",{key:page,style:{minHeight:"100%"}},
 
         // ══ DASHBOARD (Owner) ══
         page==="dashboard"&&h("div",null,
@@ -5438,7 +5439,7 @@ function App(){
     modal==="checkout"&&h(CheckoutModal,null),
     modal==="receipt"&&curOrd&&h(ReceiptModal,{ord:curOrd}),
     toast&&h(Toast,{msg:toast.msg,type:toast.type,onDone:()=>setToast(null)})
-
+      ) // end key=page wrapper
   ); // end layout return
 } // end App
 
