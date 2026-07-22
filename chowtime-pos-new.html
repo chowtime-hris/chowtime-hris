@@ -530,7 +530,7 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
       deliveryRequested:deliveryReq,
       notes,
       discount:parseFloat(discount)||0,
-      status:"pending",
+      status:"received_by_main",
       paymentStatus:"Unpaid",
       deliveryStatus:"Pending",
       requestedBy:user.name,
@@ -582,12 +582,13 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
       h("div",{style:{flex:1,overflowY:"auto",padding:"0"}},
         // Table header
         h("div",{style:{display:"grid",gridTemplateColumns:"1fr 80px 80px 1fr",
-          padding:"8px 20px",background:"#fafafa",borderBottom:"1px solid #eee",position:"sticky",top:0}},
-          ["ITEM","CATEGORY","QTY","NOTE"].map(h2=>h("div",{key:h2,
+          padding:"8px 20px",background:"#fafafa",borderBottom:"1px solid #eee",position:"sticky",top:0,
+          display:"grid",gridTemplateColumns:"1fr 80px 80px 70px 1fr"}},
+          ["ITEM","CATEGORY","QTY","LAST PRICE","NOTE"].map(h2=>h("div",{key:h2,
             style:{fontSize:8,fontWeight:700,color:C.muted,letterSpacing:1}},h2))
         ),
         items.map((item,idx)=>h("div",{key:item.id,
-          style:{display:"grid",gridTemplateColumns:"1fr 80px 80px 1fr",
+          style:{display:"grid",gridTemplateColumns:"1fr 80px 80px 70px 1fr",
             padding:"8px 20px",borderBottom:"1px solid #f5f5f5",alignItems:"center",
             background:(item.orderQty||0)>0?"#FFF8F0":"#fff"}},
           // Item name
@@ -610,6 +611,9 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
               style:{width:22,height:22,borderRadius:5,border:`1px solid ${C.primary}`,
                 background:"#FFF0F0",cursor:"pointer",fontWeight:700,color:C.primary,fontSize:13,flexShrink:0}},"+")
           ),
+          // Last price (from item data)
+          h("div",{style:{fontSize:10,color:C.muted,textAlign:"center"}},
+            item.cost>0?"₱"+item.cost.toFixed(2):"—"),
           // Note
           h("input",{value:item.note||"",
             onChange:e=>setItems(p=>p.map((x,i)=>i===idx?{...x,note:e.target.value}:x)),
@@ -638,6 +642,11 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
             h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:4}},
               h("span",{style:{fontSize:11,color:C.muted}},"Line Items:"),
               h("span",{style:{fontSize:11,fontWeight:700}},ordered.length+" items")
+            ),
+            h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:4}},
+              h("span",{style:{fontSize:11,color:C.muted}},"Est. Total (based on last price):"),
+              h("span",{style:{fontSize:11,fontWeight:800,color:C.primary}},
+                "₱"+ordered.reduce((s,i)=>s+(i.cost||0)*(i.orderQty||0),0).toFixed(2))
             ),
             h("div",{style:{display:"flex",justifyContent:"space-between",padding:"6px 0",
               borderTop:"1px solid "+C.border}},
@@ -907,7 +916,7 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
 // ─── DR CHECK FORM (Branch confirms receipt, flags discrepancy) ──
 function DRCheckForm({po,db,branchId,user,showT,INIT_INVENTORY,setAdvances,advances,branches=BRANCHES}){
   const [receivedQtys,setReceivedQtys]=useState(
-    (po.deliveredItems||po.items||[]).reduce((acc,i)=>({...acc,[i.id]:i.actualQty??i.qty}),[])
+    (po.deliveredItems||po.items||[]).reduce((acc,i)=>({...acc,[i.id]:i.actualQty!=null?i.actualQty:i.qty}),[])
   );
   const [discNotes,setDiscNotes]=useState("");
   const [expanded,setExpanded]=useState(true);
@@ -915,8 +924,8 @@ function DRCheckForm({po,db,branchId,user,showT,INIT_INVENTORY,setAdvances,advan
   const confirmReceipt=async()=>{
     const received=(po.deliveredItems||po.items||[]).map(i=>({
       ...i,
-      receivedQty:receivedQtys[i.id]??i.actualQty??i.qty,
-      discrepancy:(receivedQtys[i.id]??i.actualQty??i.qty)-(i.actualQty??i.qty)
+      receivedQty:receivedQtys[i.id]??i.actualQty!=null?i.actualQty:i.qty,
+      discrepancy:(receivedQtys[i.id]??i.actualQty!=null?i.actualQty:i.qty)-(i.actualQty!=null?i.actualQty:i.qty)
     }));
     const hasDisc=received.some(i=>i.discrepancy!==0);
     try{
@@ -956,14 +965,14 @@ function DRCheckForm({po,db,branchId,user,showT,INIT_INVENTORY,setAdvances,advan
     <style>*{margin:0;padding:0;}body{font-family:'Courier New',monospace;font-size:11px;width:80mm;margin:0 auto;padding:8px;}
     .c{text-align:center;}.b{font-weight:bold;}.hr{border-top:1px dashed #000;margin:6px 0;}
     .row{display:flex;justify-content:space-between;}</style></head><body>
-    <div class="c"><b style="font-size:14px">DELIVERY RECEIPT</b><br>CHOWTIME COMMISSARY<br>${po.drNum||"DR-"+po.poNum}</div>
+    <div class="c"><b style="font-size:14px">DELIVERY RECEIPT</b><br>CHOWTIME COMMISSARY<br>${po.drNum||('DR-'+po.poNum)}</div>
     <div class="hr"></div>
     <div class="row"><span>PO#: ${po.poNum}</span><span>${po.deliveryDate||po.date}</span></div>
     <div class="row"><span>Branch: ${branches.find(b=>b.id===po.branch)?.full||po.branch}</span></div>
     <div class="row"><span>Issued by: ${po.issuedBy||"Commissary"}</span></div>
     <div class="hr"></div>
     <div class="b">ITEMS DELIVERED:</div>
-    ${items.map(i=>`<div class="row"><span>${i.name}</span><span>${i.actualQty??i.qty} ${i.unit}</span></div>
+    ${items.map(i=>`<div class="row"><span>${i.name}</span><span>${i.actualQty!=null?i.actualQty:i.qty} ${i.unit}</span></div>
     <div style="padding-left:10px;font-size:9px">PO Qty: ${i.qty} ${i.unit}</div>`).join("")}
     <div class="hr"></div>
     <div>Received by: ________________</div>
@@ -1007,7 +1016,7 @@ function DRCheckForm({po,db,branchId,user,showT,INIT_INVENTORY,setAdvances,advan
           );
         })
       ),
-      (po.deliveredItems||po.items||[]).some(i=>(receivedQtys[i.id]??i.actualQty??i.qty)!==(i.actualQty??i.qty))&&
+      (po.deliveredItems||po.items||[]).some(i=>(receivedQtys[i.id]??i.actualQty!=null?i.actualQty:i.qty)!==(i.actualQty!=null?i.actualQty:i.qty))&&
         h("div",{style:{marginTop:10}},
           h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"DISCREPANCY NOTES"),
           h("textarea",{value:discNotes,onChange:e=>setDiscNotes(e.target.value),
@@ -3524,6 +3533,7 @@ function App(){
   const [branchOverrides,setBranchOverrides]=useState({});
   const [branchPerms,setBranchPerms]=useState({});
   const [priceType,setPriceType]=useState("retail");
+  const [poFilter,setPoFilter]=useState("all");
   const [authLoading,setAuthLoading]=useState(true);
   const [loginEmail,setLoginEmail]=useState("");
   const [loginPw,setLoginPw]=useState("");
@@ -5306,39 +5316,214 @@ function App(){
 
         // ══ PO MONITOR (Owner sees all POs across branches) ══
         page==="po_monitor"&&h("div",null,
-          h(SectionHeader,{title:"Purchase Order Monitor — All Branches"}),
-          h("div",{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:13}},
-            h(Stat,{label:"Total POs",value:advances.filter(a=>a._type==="po").length,icon:"📋",color:C.primary}),
-            h(Stat,{label:"Pending",value:advances.filter(a=>a._type==="po"&&a.status==="pending").length,icon:"⏳",color:C.warning}),
-            h(Stat,{label:"For Delivery",value:advances.filter(a=>a._type==="po"&&a.status==="approved").length,icon:"🚚",color:C.info}),
-            h(Stat,{label:"Unpaid DRs",value:advances.filter(a=>a._type==="po"&&a.paymentStatus==="Unpaid"&&a.status==="delivered").length,icon:"💳",color:C.danger})
+          h(SectionHeader,{title:"📦 Purchase Order Monitor"}),
+
+          // Status filter tabs
+          h("div",{style:{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap"}},
+            ["all","pending","processing","paid","completed","discrepancy"].map(s=>
+              h("button",{key:s,
+                onClick:()=>setPoFilter(s),
+                style:{padding:"5px 14px",borderRadius:20,fontSize:11,cursor:"pointer",
+                  border:`1px solid ${(poFilter||"all")===s?C.primary:C.border}`,
+                  background:(poFilter||"all")===s?`${C.primary}15`:"#fff",
+                  color:(poFilter||"all")===s?C.primary:C.muted,
+                  fontWeight:(poFilter||"all")===s?700:400,
+                  textTransform:"capitalize"}},
+                s==="all"?"All POs":s.charAt(0).toUpperCase()+s.slice(1)))
           ),
-          h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
-            h("div",{style:{display:"grid",gridTemplateColumns:"90px 100px 1fr 110px 110px 100px 90px",padding:"8px 14px",background:"#f9f9f9",borderBottom:"1px solid #eee"}},
-              ["PO #","Branch","Items","Requested","Delivery","Status","Payment"].map(h2=>h("div",{key:h2,style:{fontSize:8,fontWeight:700,color:C.muted,textTransform:"uppercase"}},h2))
-            ),
-            advances.filter(a=>a._type==="po").length===0
-              ?h("div",{style:{textAlign:"center",padding:"30px",color:C.muted,fontSize:12}},"No POs yet")
-              :advances.filter(a=>a._type==="po").map(po=>h("div",{key:po._docId,style:{display:"grid",gridTemplateColumns:"90px 100px 1fr 110px 110px 100px 90px",padding:"10px 14px",borderBottom:"1px solid #f5f5f5",alignItems:"center"}},
-                h("div",{style:{fontSize:10,fontWeight:800,color:C.primary}},po.poNum||"—"),
-                h("div",null,
-                  h("div",{style:{fontSize:9,fontWeight:700}},branches.find(b=>b.id===po.branch)?.name||po.branch),
+
+          // PO List
+          h("div",{style:{display:"grid",gap:8}},
+            advances.filter(a=>a._type==="po"&&((poFilter||"all")==="all"||(a.status||"pending")===(poFilter||"all")))
+            .sort((a,b)=>(b.timestamp?.seconds||0)-(a.timestamp?.seconds||0))
+            .map(po=>{
+              const statusColors={
+                pending:"#FF9500",
+                received_by_main:"#1565C0",
+                processing:"#6A1B9A",
+                paid:"#2E7D32",
+                completed:"#2E7D32",
+                discrepancy:"#C62828"
+              };
+              const statusLabels={
+                pending:"⏳ PENDING",
+                received_by_main:"📥 RECEIVED",
+                processing:"⚙️ PROCESSING",
+                paid:"💰 PAID",
+                completed:"✅ COMPLETED",
+                discrepancy:"⚠️ DISCREPANCY"
+              };
+              const st = po.status||"pending";
+              const col = statusColors[st]||C.muted;
+              const total = (po.deliveredItems||po.items||[]).reduce((s,i)=>{
+                const p = i.price||0;
+                const q = (i.actualQty!=null?i.actualQty:i.qty)||0;
+                return s + p*q;
+              },0);
+
+              return h("div",{key:po._docId,
+                style:{background:"#fff",borderRadius:12,
+                  border:`2px solid ${col}22`,overflow:"hidden"}},
+
+                // Header bar
+                h("div",{style:{background:`${col}12`,padding:"10px 16px",
+                  display:"flex",justifyContent:"space-between",alignItems:"center",
+                  borderBottom:`1px solid ${col}22`}},
+                  h("div",null,
+                    h("div",{style:{display:"flex",gap:8,alignItems:"center"}},
+                      h("span",{style:{fontSize:13,fontWeight:900,color:col}},po.poNum),
+                      h("span",{style:{fontSize:9,padding:"2px 8px",background:col,
+                        color:"#fff",borderRadius:10,fontWeight:700}},
+                        statusLabels[st]||st.toUpperCase())
+                    ),
+                    h("div",{style:{fontSize:10,color:C.muted,marginTop:2}},
+                      (po.branchName||po.branch)+" · "+po.date+
+                      (po.deliveryRequested?" · Delivery: "+po.deliveryRequested:""))
+                  ),
+                  h("div",{style:{textAlign:"right"}},
+                    h("div",{style:{fontSize:16,fontWeight:900,color:col}},
+                      total>0?"₱"+total.toFixed(2):"No price yet"),
+                    h("div",{style:{fontSize:9,color:C.muted}},
+                      (po.items||[]).length+" items · "+(po.paymentStatus||"Unpaid"))
+                  )
                 ),
-                h("div",{style:{fontSize:9,color:C.muted}},(po.items||[]).map(i=>i.qty+"x "+i.name).join(", ").slice(0,45)),
-                h("div",{style:{fontSize:9}},po.date||"—"),
-                h("div",{style:{fontSize:9,fontWeight:po.deliveryDate?700:400,color:po.deliveryDate?C.info:C.muted}},po.deliveryDate||"TBD"),
-                h("div",null,h(Badge,{label:po.status||"pending",color:{pending:C.warning,approved:C.info,delivered:C.success,cancelled:C.danger}[po.status]||C.muted})),
-                h("div",{style:{display:"flex",flexDirection:"column",gap:3}},
-                  h(Badge,{label:po.paymentStatus||"Unpaid",color:{Unpaid:C.danger,Partial:C.warning,Paid:C.success}[po.paymentStatus]||C.muted}),
-                  po.status==="delivered"&&(po.paymentStatus==="Unpaid"||po.paymentStatus==="Partial")&&user.role==="owner"&&
-                    h("button",{onClick:async()=>{
-                      if(po._docId)await updateDoc(doc(db,"advances",po._docId),{paymentStatus:"Paid",paidBy:user.name,paidAt:serverTimestamp()});
+
+                // Items preview (collapsed)
+                h("div",{style:{padding:"8px 16px"}},
+                  h("div",{style:{display:"grid",
+                    gridTemplateColumns:"1fr 80px 80px 80px 80px",
+                    fontSize:9,color:C.muted,fontWeight:700,
+                    letterSpacing:1,marginBottom:5}},
+                    ["ITEM","PO QTY","ACTUAL","PRICE","TOTAL"].map(h2=>h("div",{key:h2},h2))
+                  ),
+                  (po.deliveredItems||po.items||[]).slice(0,5).map((i,idx)=>
+                    h("div",{key:idx,style:{display:"grid",
+                      gridTemplateColumns:"1fr 80px 80px 80px 80px",
+                      fontSize:11,padding:"4px 0",
+                      borderBottom:"1px solid #f5f5f5"}},
+                      h("div",{style:{fontWeight:600}},i.name),
+                      h("div",{style:{color:C.muted}},i.qty+" "+(i.unit||"")),
+                      h("div",{style:{color:i.discrepancy?C.danger:C.muted}},
+                        i.actualQty!=null?i.actualQty+" "+(i.unit||""):"—"),
+                      h("div",{style:{color:C.muted}},
+                        i.price>0?"₱"+i.price.toFixed(2):"—"),
+                      h("div",{style:{fontWeight:700,color:C.primary}},
+                        i.price>0?"₱"+((i.actualQty!=null?i.actualQty:i.qty)*i.price).toFixed(2):"—")
+                    )
+                  ),
+                  (po.items||[]).length>5&&h("div",{style:{fontSize:9,color:C.muted,marginTop:4}},
+                    "+"+(po.items.length-5)+" more items")
+                ),
+
+                // Action buttons based on status
+                h("div",{style:{padding:"10px 16px",borderTop:"1px solid #f5f5f5",
+                  display:"flex",gap:7,flexWrap:"wrap"}},
+
+                  // PENDING → Mark as Received by Main
+                  st==="pending"&&h("button",{
+                    onClick:async()=>{
+                      await updateDoc(doc(db,"advances",po._docId),{
+                        status:"received_by_main",
+                        receivedBy:user.name,
+                        receivedAt:serverTimestamp()
+                      });
+                      showT(po.poNum+" marked as Received ✓");
+                    },
+                    style:{padding:"7px 14px",background:"#1565C0",border:"none",
+                      borderRadius:8,color:"#fff",fontSize:11,fontWeight:700,cursor:"pointer"}},
+                    "📥 Mark Received"),
+
+                  // RECEIVED → Go to Issue DR
+                  (st==="received_by_main")&&h("button",{
+                    onClick:()=>setModal("issue_dr_"+po._docId),
+                    style:{padding:"7px 14px",background:"#6A1B9A",border:"none",
+                      borderRadius:8,color:"#fff",fontSize:11,fontWeight:700,cursor:"pointer"}},
+                    "⚙️ Process & Issue DR"),
+
+                  // PROCESSING → Mark as Paid
+                  (st==="processing")&&h("button",{
+                    onClick:async()=>{
+                      await updateDoc(doc(db,"advances",po._docId),{
+                        status:"paid",
+                        paymentStatus:"Paid",
+                        paidBy:user.name,
+                        paidAt:serverTimestamp()
+                      });
                       showT(po.poNum+" marked Paid ✓");
-                    },style:{fontSize:8,padding:"2px 7px",background:C.success,border:"none",borderRadius:5,color:"#fff",cursor:"pointer",fontWeight:700}},"Mark Paid")
+                    },
+                    style:{padding:"7px 14px",background:C.success,border:"none",
+                      borderRadius:8,color:"#fff",fontSize:11,fontWeight:700,cursor:"pointer"}},
+                    "💰 Mark Paid"),
+
+                  // Print DR (available once processing or beyond)
+                  (st==="processing"||st==="paid"||st==="completed")&&
+                    h("button",{
+                      onClick:()=>{
+                        const w=window.open("","_blank","width=500,height=700");
+                        const items=po.deliveredItems||po.items||[];
+                        const tot=items.reduce((s,i)=>s+(i.price||0)*((i.actualQty!=null?i.actualQty:i.qty)||0),0);
+                        w.document.write(`<!DOCTYPE html><html><head><title>DR - ${po.poNum}</title>
+                        <style>*{margin:0;padding:0;box-sizing:border-box;}
+                        body{font-family:Arial,sans-serif;font-size:12px;padding:20px;}
+                        .c{text-align:center;} .b{font-weight:bold;} .hr{border-top:1px dashed #000;margin:8px 0;}
+                        table{width:100%;border-collapse:collapse;font-size:11px;margin-top:8px;}
+                        th{background:#f5f5f5;padding:5px;text-align:left;border:1px solid #ddd;}
+                        td{padding:5px;border:1px solid #ddd;}
+                        .r{text-align:right;} .total-row{font-weight:bold;background:#f9f9f9;}
+                        </style></head><body>
+                        <div class="c"><h2>CHOWTIME COMMISSARY</h2>
+                        <h3>DELIVERY RECEIPT</h3>
+                        <p>${po.drNum||('DR-'+po.poNum)}</p></div>
+                        <div class="hr"></div>
+                        <table style="border:none;margin:0">
+                          <tr><td class="b">PO Reference:</td><td>${po.poNum}</td></tr>
+                          <tr><td class="b">Branch:</td><td>${po.branchName||po.branch}</td></tr>
+                          <tr><td class="b">Delivery Date:</td><td>${po.deliveryDate||"—"}</td></tr>
+                          <tr><td class="b">Status:</td><td>${po.paymentStatus||"Unpaid"}</td></tr>
+                        </table>
+                        <div class="hr"></div>
+                        <table>
+                          <tr><th>Item</th><th>PO Qty</th><th>Actual</th><th>Unit</th><th class="r">Price</th><th class="r">Total</th></tr>
+                          ${items.map(i=>`<tr>
+                            <td>${i.name}</td>
+                            <td>${i.qty||0}</td>
+                            <td>${i.actualQty!=null?i.actualQty:(i.qty||0)}</td>
+                            <td>${i.unit||""}</td>
+                            <td class="r">₱${(i.price||0).toFixed(2)}</td>
+                            <td class="r">₱${(((i.actualQty!=null?i.actualQty:i.qty)||0)*(i.price||0)).toFixed(2)}</td>
+                          </tr>`).join("")}
+                          <tr class="total-row"><td colspan="5" class="r">GROSS TOTAL:</td><td class="r">₱${tot.toFixed(2)}</td></tr>
+                        </table>
+                        <div class="hr"></div>
+                        <p>Payment Status: <b>${po.paymentStatus||"UNPAID"}</b></p>
+                        ${po.drNotes?`<p>Notes: ${po.drNotes}</p>`:""}
+                        <div class="hr"></div>
+                        <table style="border:none;margin-top:20px">
+                          <tr>
+                            <td style="width:50%;padding-top:40px;border-top:1px solid #000;text-align:center">Prepared by</td>
+                            <td style="width:50%;padding-top:40px;border-top:1px solid #000;text-align:center">Received by</td>
+                          </tr>
+                        </table>
+                        </body></html>`);
+                        w.document.close();
+                        setTimeout(()=>w.print(),500);
+                      },
+                      style:{padding:"7px 14px",background:"#fff",
+                        border:"1px solid "+C.border,borderRadius:8,
+                        fontSize:11,fontWeight:700,cursor:"pointer"}},
+                    "🖨️ Print DR"),
+
+                  // Notes if any
+                  po.notes&&h("div",{style:{fontSize:9,color:C.muted,
+                    padding:"5px 8px",background:"#f9f9f9",borderRadius:6,
+                    alignSelf:"center"}},
+                    "📝 "+po.notes)
                 )
-              ))
+              );
+            })
           )
         ),
+
 
         // ══ COMM DR (Commissary issues DR to branch) ══
         page==="comm_dr"&&h("div",null,
