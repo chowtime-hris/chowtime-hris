@@ -28,12 +28,13 @@ select,input,textarea,button{font-family:inherit;}
 </head>
 <body>
 <div id="root"></div>
+<div id="err-overlay" style="display:none;position:fixed;inset:0;background:#1a1a2e;color:#fff;font-family:monospace;z-index:99999;align-items:center;justify-content:center;"></div>
 <script>
 // Pre-load React to ensure single instance
 window.__REACT_DEVTOOLS_GLOBAL_HOOK__ = { isDisabled: true };
 // Catch any uncaught errors and show them visibly  
 window.onerror = function(msg, src, line, col, err) {
-  document.getElementById("root").innerHTML =
+  document.getElementById("err-overlay").style.display="flex"; document.getElementById("err-overlay").innerHTML =
     '<div style="padding:20px;font-family:monospace;background:#1a1a2e;min-height:100vh;color:#fff">' +
     '<div style="font-size:30px;margin-bottom:12px">⚠️ Error</div>' +
     '<div style="color:#ff6b6b;font-size:14px;margin-bottom:8px">' + msg + '</div>' +
@@ -43,7 +44,7 @@ window.onerror = function(msg, src, line, col, err) {
   return false;
 };
 window.addEventListener("unhandledrejection", function(e) {
-  document.getElementById("root").innerHTML =
+  document.getElementById("err-overlay").style.display="flex"; document.getElementById("err-overlay").innerHTML =
     '<div style="padding:20px;font-family:monospace;background:#1a1a2e;min-height:100vh;color:#fff">' +
     '<div style="font-size:30px;margin-bottom:12px">⚠️ Promise Error</div>' +
     '<div style="color:#ff6b6b;font-size:14px">' + (e.reason?.message||e.reason||"Unknown error") + '</div>' +
@@ -5474,7 +5475,7 @@ function App(){
 try{
   createRoot(document.getElementById("root")).render(h(App));
 }catch(err){
-  document.getElementById("root").innerHTML=
+  document.getElementById("err-overlay").style.display="flex"; document.getElementById("err-overlay").innerHTML=
     '<div style="font-family:monospace;padding:30px;background:#1a1a2e;min-height:100vh;color:#fff">'+
     '<div style="font-size:40px;margin-bottom:16px">⚠️</div>'+
     '<div style="font-size:20px;font-weight:900;color:#ff6b6b;margin-bottom:8px">ChowTime POS — Startup Error</div>'+
