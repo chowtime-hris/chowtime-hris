@@ -4102,7 +4102,11 @@ function App(){
             [50,100,200,500,1000,Math.ceil((chkTotal||0)/50)*50]
             .filter((v,i,a)=>v>0&&a.indexOf(v)===i).sort((a,b)=>a-b)
             .map(amt=>h("button",{key:amt,
-              onClick:()=>setChkCash(String(amt)),
+              onClick:()=>{
+                setChkCash(String(amt));
+                const inp=document.getElementById("cash-tendered-input");
+                if(inp){inp.value=String(amt);}
+              },
               style:{padding:"8px 4px",borderRadius:8,
                 border:`2px solid ${Number(chkCash)===amt?C.primary:C.border}`,
                 background:Number(chkCash)===amt?`${C.primary}15`:"#fff",
@@ -4112,10 +4116,17 @@ function App(){
             ))
           ),
           h("input",{type:"number",
-            defaultValue:chkCash,
-            onInput:e=>setChkCash(e.target.value),
+            id:"cash-tendered-input",
+            defaultValue:"",
+            onChange:e=>{
+              // Only update state on change, don't cause re-render during typing
+              e.stopPropagation();
+            },
+            onBlur:e=>setChkCash(e.target.value),
+            onKeyUp:e=>{
+              setChkCash(e.target.value);
+            },
             placeholder:"Type amount here...",
-            key:"cash-input",
             style:{width:"100%",padding:"10px 12px",border:"2px solid "+C.primary,
               borderRadius:9,fontSize:15,fontWeight:700,outline:"none",
               boxSizing:"border-box",color:C.primary}}),
