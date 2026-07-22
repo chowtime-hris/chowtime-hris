@@ -4001,7 +4001,8 @@ function App(){
               h("div",{style:{fontSize:11,fontWeight:800,
                 color:priceType==="franchisee"?"#E65100":priceType==="wholesale"?"#6A1B9A":C.text}},
                 "₱"+(getPriceByType(i)*(i.qty||1)).toFixed(2)),
-              priceType!=="retail"&&h("div",{style:{fontSize:8,color:C.muted,textDecoration:"line-through"}},
+              h("div",{style:{fontSize:8,color:C.muted,textDecoration:"line-through",
+                visibility:priceType!=="retail"?"visible":"hidden",height:priceType!=="retail"?"auto":"0px",overflow:"hidden"}},
                 "₱"+i.lineTotal.toFixed(2))
             )
           ))
@@ -4015,14 +4016,16 @@ function App(){
             )
           )
         ),
-        // Price Type (owner/main only)
-        (user?.role==="owner")&&h("div",{style:{marginBottom:10}},
+        // Price Type (owner/main only) - always rendered to avoid removeChild
+        h("div",{style:{marginBottom:user?.role==="owner"?10:0,
+          overflow:"hidden",maxHeight:user?.role==="owner"?"100px":"0px",
+          transition:"max-height .2s"}},
           h("div",{style:{fontSize:9,fontWeight:800,color:C.muted,letterSpacing:1,marginBottom:6}},"PRICE TYPE"),
           h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}},
             [
               {id:"retail",label:"Retail",sub:"Regular"},
-              {id:"franchisee",label:"Franchisee",sub:"-15%"},
-              {id:"wholesale",label:"Wholesale",sub:"-25%"},
+              {id:"franchisee",label:"Franchisee",sub:"Custom ₱"},
+              {id:"wholesale",label:"Wholesale",sub:"Custom ₱"},
             ].map(pt=>h("button",{key:pt.id,onClick:()=>setPriceType(pt.id),
               style:{padding:"7px 4px",borderRadius:8,textAlign:"center",cursor:"pointer",border:"none",
                 background:priceType===pt.id?C.primary:"#f5f5f5",
@@ -4091,13 +4094,40 @@ function App(){
           chkDiscAmt>0&&h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:2,color:C.danger}},h("span",null,"Discount"),h("span",null,"-₱"+chkDiscAmt.toFixed(2))),
           h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:14,fontWeight:900,color:C.primary,paddingTop:6,borderTop:"1px dashed "+C.border}},h("span",null,"TOTAL"),h("span",null,"₱"+chkTotal.toFixed(2)))
         ),
-        // Cash tendered — only show for cash payments
-        chkPay==="cash"&&h("div",null,
+        // Cash tendered — always rendered, hidden via display:none
+        h("div",{style:{display:chkPay==="cash"?"block":"none"}},
           h("div",{style:{fontSize:9,fontWeight:800,color:C.muted,letterSpacing:1,marginBottom:5}},"CASH TENDERED"),
-          h("input",{type:"number",value:chkCash,onChange:e=>setChkCash(e.target.value),placeholder:"₱0.00",
-            style:{width:"100%",padding:"10px 12px",border:"1px solid "+C.border,borderRadius:9,fontSize:15,fontWeight:700,outline:"none",boxSizing:"border-box"}}),
-          chkCash&&parseFloat(chkCash)>=chkTotal&&h("div",{style:{marginTop:5,padding:"8px 12px",background:"#E8F5E9",borderRadius:8,fontSize:13,fontWeight:800,color:C.success,display:"flex",justifyContent:"space-between"}},h("span",null,"Change:"),h("span",null,"₱"+(parseFloat(chkCash)-chkTotal).toFixed(2))),
-          chkCash&&parseFloat(chkCash)<chkTotal&&h("div",{style:{marginTop:5,padding:"8px 12px",background:"#FFEBEE",borderRadius:8,fontSize:12,color:C.danger,fontWeight:700}},"Short ₱"+(chkTotal-parseFloat(chkCash)).toFixed(2))
+          // Quick amount buttons
+          h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:5,marginBottom:7}},
+            [50,100,200,500,1000,Math.ceil((chkTotal||0)/50)*50]
+            .filter((v,i,a)=>v>0&&a.indexOf(v)===i).sort((a,b)=>a-b)
+            .map(amt=>h("button",{key:amt,
+              onClick:()=>setChkCash(String(amt)),
+              style:{padding:"8px 4px",borderRadius:8,
+                border:`2px solid ${Number(chkCash)===amt?C.primary:C.border}`,
+                background:Number(chkCash)===amt?`${C.primary}15`:"#fff",
+                cursor:"pointer",fontWeight:700,fontSize:13,
+                color:Number(chkCash)===amt?C.primary:C.text}},
+              "₱"+amt
+            ))
+          ),
+          h("input",{type:"number",value:chkCash,
+            onChange:e=>setChkCash(e.target.value),
+            placeholder:"Or type exact amount...",
+            style:{width:"100%",padding:"10px 12px",border:"1px solid "+C.border,
+              borderRadius:9,fontSize:15,fontWeight:700,outline:"none",boxSizing:"border-box"}}),
+          h("div",{style:{marginTop:5,padding:"8px 12px",background:"#E8F5E9",borderRadius:8,
+            fontSize:13,fontWeight:800,color:C.success,
+            display:chkCash&&parseFloat(chkCash)>=chkTotal?"flex":"none",
+            justifyContent:"space-between"}},
+            h("span",null,"Change:"),
+            h("span",null,"₱"+(parseFloat(chkCash||0)-chkTotal).toFixed(2))
+          ),
+          h("div",{style:{marginTop:5,padding:"8px 12px",background:"#FFEBEE",borderRadius:8,
+            fontSize:12,color:C.danger,fontWeight:700,
+            display:chkCash&&parseFloat(chkCash)<chkTotal?"block":"none"}},
+            "Short ₱"+(chkTotal-parseFloat(chkCash||0)).toFixed(2)
+          )
         )
       ),
       h("div",{style:{padding:"11px 18px 17px",borderTop:"1px solid "+C.border}},
@@ -4198,7 +4228,7 @@ function App(){
         (()=>{
           try{
             const rp=(branchPerms||{})[user?.role]||{};
-            return ((role&&role?.nav||[])||[]).filter(p=>{
+            return (role?.nav||[]).filter(p=>{
               if(!user?.role||user.role==="owner"||user.role==="manager")return true;
               if(["pos","orders","kitchen","inventory"].includes(p))return true;
               return rp[p]!==false;
@@ -4419,7 +4449,7 @@ function App(){
                 h("div",{style:{fontSize:10,fontWeight:700,display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}},
                   (o.id||"—"),
                   h(Badge,{label:(o.orderType||"dine-in").toUpperCase(),color:"#E65100",bg:"#FFF3E0"}),
-                  o.tableNo&&h(Badge,{label:"T"+o.tableNo,color:"#5E35B1",bg:"#EDE7F6"}),
+                  o.tableNo?h(Badge,{label:"T"+o.tableNo,color:"#5E35B1",bg:"#EDE7F6"}):null,
                   o.cashier&&h(Badge,{label:o.cashier,color:C.info,bg:"#E3F2FD"}),
                   (o.discAmt||0)>0&&h(Badge,{label:o.discType?.label||"Disc",color:C.danger,bg:"#FFEBEE"})
                 ),
