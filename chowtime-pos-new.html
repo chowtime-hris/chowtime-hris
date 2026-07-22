@@ -5433,13 +5433,13 @@ function App(){
           h("button",{onClick:()=>{setCartOpen(false);setModal("checkout");},style:{width:"100%",padding:"12px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:10,color:"#fff",fontSize:12,fontWeight:800,cursor:"pointer"}},"Proceed to Checkout →")
         )
       )
-    ),
+    ) // end key=page wrapper
+    ), // end right panel
 
-    // CHECKOUT + RECEIPT MODALS
+    // MODALS + TOAST (outside page wrapper to avoid removeChild)
     modal==="checkout"&&h(CheckoutModal,null),
     modal==="receipt"&&curOrd&&h(ReceiptModal,{ord:curOrd}),
     toast&&h(Toast,{msg:toast.msg,type:toast.type,onDone:()=>setToast(null)})
-      ) // end key=page wrapper
   ); // end layout return
 } // end App
 
