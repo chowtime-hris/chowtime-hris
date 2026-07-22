@@ -4117,15 +4117,8 @@ function App(){
           ),
           h("input",{type:"number",
             id:"cash-tendered-input",
-            defaultValue:"",
-            onChange:e=>{
-              // Only update state on change, don't cause re-render during typing
-              e.stopPropagation();
-            },
+            defaultValue:chkCash||"",
             onBlur:e=>setChkCash(e.target.value),
-            onKeyUp:e=>{
-              setChkCash(e.target.value);
-            },
             placeholder:"Type amount here...",
             style:{width:"100%",padding:"10px 12px",border:"2px solid "+C.primary,
               borderRadius:9,fontSize:15,fontWeight:700,outline:"none",
@@ -4141,11 +4134,24 @@ function App(){
             fontSize:12,color:C.danger,fontWeight:700,
             display:chkCash&&parseFloat(chkCash)<chkTotal?"block":"none"}},
             "Short ₱"+(chkTotal-parseFloat(chkCash||0)).toFixed(2)
-          )
+          ),
+          h("div",{style:{marginTop:5,padding:"8px 12px",background:"#f5f5f5",borderRadius:8,
+            fontSize:11,color:C.muted,textAlign:"center"}},
+            "Tap outside input to see change/short")
         )
       ),
       h("div",{style:{padding:"11px 18px 17px",borderTop:"1px solid "+C.border}},
-        h("button",{onClick:placeOrder,style:{width:"100%",padding:"13px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:10,color:"#fff",fontSize:14,fontWeight:800,cursor:"pointer"}},"✓ Confirm & Print Receipt")
+        h("button",{
+          onClick:()=>{
+            const inp=document.getElementById("cash-tendered-input");
+            if(inp&&inp.value) setChkCash(inp.value);
+            setTimeout(placeOrder,50);
+          },
+          style:{width:"100%",padding:"13px",
+            background:`linear-gradient(135deg,${C.primary},${C.dark})`,
+            border:"none",borderRadius:10,color:"#fff",
+            fontSize:14,fontWeight:800,cursor:"pointer"}},
+          "✓ Confirm & Print Receipt")
       )
     )
   );
