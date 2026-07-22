@@ -4244,7 +4244,7 @@ function App(){
           dbReady&&h("span",{style:{fontSize:7,color:"rgba(255,255,255,.2)"}},orders.length+" orders")
         )
       ),
-      h("nav",{style:{flex:1,padding:"3px 6px",overflowY:"auto",minHeight:0}},
+      h("nav",{style:{flex:1,padding:"3px 6px",overflowY:"auto",minHeight:0,maxHeight:"calc(100vh - 180px)"}},
         (()=>{
           try{
             const rp=(branchPerms||{})[user?.role]||{};
