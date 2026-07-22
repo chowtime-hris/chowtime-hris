@@ -126,9 +126,9 @@ const BRANCHES = [
 
 const ROLES = {
   owner:     {label:"Owner / Admin",    emoji:"\u{1F451}", color:"#C8151B",
-    nav:["dashboard","branches","pos","orders","all_orders","sales_report","analytics","z_reading","cash_count","expenses","cash_monitor","inventory","po_monitor","bom_mgmt","menu_mgmt","user_mgmt","hris_dash","payroll","kiosk","branch_settings","settings"]},
+    nav:["dashboard","branches","pos","orders","all_orders","sales_report","analytics","z_reading","cash_count","expenses","cash_monitor","inventory","po_monitor","bom_mgmt","menu_mgmt","user_mgmt","kiosk","branch_settings","settings"]},
   manager:   {label:"Branch Manager",   emoji:"\u{1F3EA}", color:"#007AFF",
-    nav:["branch_dash","pos","orders","analytics","z_reading","cash_count","expenses","cash_in_out","inventory","stock_order","branch_menu","bom_mgmt","crew_mgmt","void_requests","ca_request","loan_request","hris_branch","kiosk","branch_settings"]},
+    nav:["branch_dash","pos","orders","analytics","z_reading","cash_count","expenses","cash_in_out","inventory","stock_order","branch_menu","bom_mgmt","crew_mgmt","void_requests","ca_request","loan_request","kiosk","branch_settings"]},
   cashier:   {label:"Cashier",          emoji:"\u{1F4B3}", color:"#34C759",
     nav:["pos","orders","x_reading","z_reading","cash_count","ca_request","loan_request","kiosk","void_request"]},
   crew:      {label:"Crew / Kitchen",   emoji:"\u{1F9D1}\u{200D}\u{1F373}", color:"#FF9500",
@@ -510,7 +510,7 @@ function ItemCustomizer({item,onAdd,onClose}){
 
 
 // ─── PO FORM (Branch creates Purchase Order) ─────────────
-function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvances}){
+function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvances,branches=BRANCHES}){
   const [items,setItems]     = useState(INIT_INVENTORY.map(i=>({...i,orderQty:0,note:""})));
   const [deliveryReq,setDeliveryReq] = useState("");
   const [notes,setNotes]     = useState("");
@@ -905,7 +905,7 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
 }
 
 // ─── DR CHECK FORM (Branch confirms receipt, flags discrepancy) ──
-function DRCheckForm({po,db,branchId,user,showT,INIT_INVENTORY,setAdvances,advances}){
+function DRCheckForm({po,db,branchId,user,showT,INIT_INVENTORY,setAdvances,advances,branches=BRANCHES}){
   const [receivedQtys,setReceivedQtys]=useState(
     (po.deliveredItems||po.items||[]).reduce((acc,i)=>({...acc,[i.id]:i.actualQty??i.qty}),[])
   );
@@ -2210,7 +2210,7 @@ function MenuEditor({menuItems,setMenuItems,db,user,showT}){
 }
 
 // ─── BRANCH MENU PAGE (toggle + price override) ──────────
-function BranchMenuPage({menuItems,setMenuItems,branchId,curBranch,user,db,showT}){
+function BranchMenuPage({menuItems,setMenuItems,branchId,curBranch,user,db,showT,branches=BRANCHES}){
   const [overrides,setOverrides] = useState({}); // {itemId: {avail,price}}
   const [editPrice,setEditPrice] = useState(null); // itemId being edited
   const [tempPrice,setTempPrice] = useState("");
@@ -5039,7 +5039,7 @@ function App(){
 
         // ══ BRANCH MENU SETTINGS ══
         page==="branch_menu"&&h(BranchMenuPage,{
-          menuItems,setMenuItems,branchId,curBranch,user,db,showT,key:"bm_"+branchId
+          menuItems,setMenuItems,branchId,curBranch,user,db,showT,branches,key:"bm_"+branchId
         }),
 
         // ══ HRIS HUB ══
@@ -5288,7 +5288,7 @@ function App(){
               ))
           ),
           modal==="new_po"&&h("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:900}},
-            h(POForm,{branchId,user,db,INIT_INVENTORY,onClose:()=>setModal(null),showT,advances,setAdvances})
+            h(POForm,{branchId,user,db,INIT_INVENTORY,onClose:()=>setModal(null),showT,advances,setAdvances,branches})
           )
         ),
 
