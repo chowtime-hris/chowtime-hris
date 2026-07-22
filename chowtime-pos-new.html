@@ -4273,10 +4273,14 @@ function App(){
     h("div",{style:{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}},
 
       // TOP HEADER
-      h("div",{style:{background:"#fff",borderBottom:"1px solid "+C.border,padding:"10px 18px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}},
-        h("div",null,
-          h("div",{style:{fontSize:14,fontWeight:800,color:C.text}},NAV_META[page]?.label||"Chowtime POS"),
-          h("div",{style:{fontSize:9,color:C.muted,marginTop:1}},new Date().toLocaleDateString("en-PH",{weekday:"short",year:"numeric",month:"short",day:"numeric"})+" · "+curBranch.full)
+      h("div",{style:{background:"#fff",borderBottom:"1px solid "+C.border,padding:"8px 18px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,gap:10}},
+        h("div",{style:{flex:1,minWidth:0}},
+          h("div",{style:{fontSize:13,fontWeight:800,color:C.text,display:"flex",alignItems:"center",gap:6}},
+            h("span",{style:{fontSize:16}},NAV_META[page]?.icon||""),
+            NAV_META[page]?.label||"Chowtime POS"
+          ),
+          h("div",{style:{fontSize:9,color:C.muted,marginTop:1}},
+            new Date().toLocaleDateString("en-PH",{weekday:"short",year:"numeric",month:"short",day:"numeric"})+" · "+curBranch.full)
         ),
         h("div",{style:{display:"flex",gap:7,alignItems:"center"}},
           h("button",{onClick:()=>setCartOpen(true),
