@@ -1903,11 +1903,8 @@ function MenuEditor({menuItems,setMenuItems,db,user,showT}){
           h("div",{style:{padding:"9px 11px"}},
             h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:4}},
               h("div",{style:{fontWeight:800,fontSize:12,color:item.avail?C.text:"#999",flex:1,marginRight:4}},item.name),
-              h("div",{style:{fontSize:13,fontWeight:900,flexShrink:0,
-                color:color:item.avail?(true==="franchisee"?"#E65100":priceType==="wholesale"?"#6A1B9A":C.primary):"#bbb"}},
-                "₱"+(priceType==="franchisee"&&item.franchiseePrice?item.franchiseePrice:
-                     priceType==="wholesale"&&item.wholesalePrice?item.wholesalePrice:
-                     item.basePrice))
+              h("div",{style:{fontSize:13,fontWeight:900,flexShrink:0,color:item.avail?C.primary:"#bbb"}},
+                "₱"+item.basePrice)
             ),
             h("div",{style:{fontSize:8,color:C.muted,marginBottom:3}},item.cat),
             item.desc&&h("div",{style:{fontSize:9,color:C.muted,lineHeight:1.4,marginBottom:6,
@@ -4227,7 +4224,7 @@ function App(){
           dbReady&&h("span",{style:{fontSize:7,color:"rgba(255,255,255,.2)"}},orders.length+" orders")
         )
       ),
-      h("nav",{style:{flex:1,padding:"3px 6px",overflowY:"auto"}},
+      h("nav",{style:{flex:1,padding:"3px 6px",overflowY:"auto",minHeight:0}},
         (()=>{
           try{
             const rp=(branchPerms||{})[user?.role]||{};
@@ -4245,9 +4242,14 @@ function App(){
           h("span",{style:{fontSize:12}},m.icon),m.label
         );})
       ),
-      h("div",{style:{padding:"7px 6px 14px"}},
+      h("div",{style:{padding:"7px 6px 14px",flexShrink:0,borderTop:"1px solid rgba(255,255,255,.1)"}},
+        h("div",{style:{fontSize:9,color:"rgba(255,255,255,.3)",marginBottom:5,paddingLeft:4}},
+          user.name+" · "+((ROLES[user.role]||{}).label||user.role)),
         h("button",{onClick:handleSignOut,
-          style:{width:"100%",display:"flex",alignItems:"center",gap:6,padding:"9px 10px",borderRadius:7,border:"1px solid rgba(255,255,255,.2)",background:"rgba(200,21,27,.25)",color:"#fff",cursor:"pointer",fontSize:11,fontWeight:600}},
+          style:{width:"100%",display:"flex",alignItems:"center",gap:6,padding:"9px 10px",
+            borderRadius:7,border:"1px solid rgba(255,255,255,.2)",
+            background:"rgba(200,21,27,.25)",color:"#fff",cursor:"pointer",
+            fontSize:11,fontWeight:600}},
           "🚪 Sign Out")
       )
     ),
