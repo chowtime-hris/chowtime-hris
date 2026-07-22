@@ -298,8 +298,8 @@ function Badge({label,color,bg}){
 }
 
 function SectionHeader({title,action,actionLabel}){
-  return h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}},
-    h("h2",{style:{margin:0,fontSize:17,fontWeight:800,color:C.text}},title),
+  return h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}},
+    h("div",{style:{fontSize:13,fontWeight:800,color:C.text}},title),
     action&&h("button",{onClick:action,style:{padding:"7px 14px",background:C.primary,border:"none",borderRadius:8,color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}},"+ "+actionLabel)
   );
 }
@@ -4272,52 +4272,28 @@ function App(){
     // MAIN CONTENT
     h("div",{style:{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}},
 
-      // TOP HEADER
-      h("div",{style:{background:"#fff",borderBottom:"1px solid "+C.border,padding:"6px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,gap:8}},
-        h("div",{style:{flex:1,minWidth:0}},
-          h("div",{style:{fontSize:12,fontWeight:800,color:C.text,display:"flex",alignItems:"center",gap:5}},
-            h("span",{style:{fontSize:14}},NAV_META[page]?.icon||""),
-            NAV_META[page]?.label||"Chowtime POS"
-          ),
-          h("div",{style:{fontSize:8,color:C.muted}},
-            new Date().toLocaleDateString("en-PH",{weekday:"short",month:"short",day:"numeric"})+" · "+curBranch.name)
-        ),
-        h("div",{style:{display:"flex",gap:7,alignItems:"center"}},
-          h("button",{onClick:()=>setCartOpen(true),
-            style:{display:page==="pos"&&cart.length>0?"flex":"none",
-              gap:7,padding:"7px 13px",
-              background:`linear-gradient(135deg,${C.primary},${C.dark})`,
-              border:"none",borderRadius:9,color:"#fff",fontWeight:700,
-              fontSize:11,cursor:"pointer",alignItems:"center"}},
-            "🛒 "+cartCount+" items · ₱"+cartTotal.toFixed(0)),
-          h("button",{onClick:()=>setPage("orders"),
-            style:{display:myOrders.filter(o=>o.status==="pending").length>0?"flex":"none",
-              padding:"4px 10px",background:"#FFF8E1",
-              border:"1px solid "+C.warning,borderRadius:20,
-              fontSize:9,color:C.warning,fontWeight:700,cursor:"pointer"}},
-            "⚠️ "+myOrders.filter(o=>o.status==="pending").length+" pending"),
-          h(VoidBadge,{branchId,db,setPage,
-            visible:user.role==="manager"||user.role==="owner"}),
-          h("button",{onClick:()=>setPage("hris_dash"),
-            style:{display:user.role==="owner"&&advances.filter(a=>!a._type&&a.status==="pending").length>0?"flex":"none",
-              padding:"4px 10px",background:"#F3E5F5",
-              border:"1px solid #CE93D8",borderRadius:20,
-              fontSize:9,color:"#6A1B9A",fontWeight:700,cursor:"pointer"}},
-            "💵 "+advances.filter(a=>!a._type&&a.status==="pending").length+" CA pending"),
-          h("div",{style:{display:!isOnline?"flex":"none",
-            padding:"4px 10px",background:"#FFEBEE",
-            border:"1px solid "+C.danger,borderRadius:20,
-            fontSize:9,color:C.danger,fontWeight:700}},"● Offline"),
-          h("button",{onClick:handleSignOut,
-            style:{padding:"5px 10px",background:C.primary,border:"none",
-              borderRadius:7,color:"#fff",fontWeight:700,fontSize:10,
-              cursor:"pointer",flexShrink:0}},
-            "🚪 Out")
-        ),
-
       // PAGE CONTENT
       h("div",{style:{flex:1,overflow:"auto",padding:page==="pos"||page==="kitchen"?0:"16px 18px",
           display:"flex",flexDirection:"column"}},
+
+        // STICKY MINI HEADER - always at top
+        page!=="pos"&&page!=="kitchen"&&h("div",{style:{
+          display:"flex",justifyContent:"space-between",alignItems:"center",
+          marginBottom:12,paddingBottom:10,borderBottom:"1px solid "+C.border}},
+          h("div",{style:{display:"flex",alignItems:"center",gap:6}},
+            h("span",{style:{fontSize:16}},NAV_META[page]?.icon||""),
+            h("div",null,
+              h("div",{style:{fontSize:13,fontWeight:800,color:C.text}},NAV_META[page]?.label||""),
+              h("div",{style:{fontSize:8,color:C.muted}},
+                new Date().toLocaleDateString("en-PH",{weekday:"short",month:"short",day:"numeric"})+" · "+curBranch.name)
+            )
+          ),
+          h("button",{onClick:handleSignOut,
+            style:{padding:"5px 12px",background:C.primary,border:"none",
+              borderRadius:7,color:"#fff",fontWeight:700,fontSize:10,cursor:"pointer"}},
+            "🚪 Sign Out")
+        ),
+
         h("div",{key:page,style:{flex:1,display:"flex",flexDirection:"column"}},
 
         // ══ DASHBOARD (Owner) ══
@@ -5497,7 +5473,7 @@ function App(){
     h("div",{style:{display:toast?"block":"none"}},
       toast&&h(Toast,{msg:toast.msg,type:toast.type,onDone:()=>setToast(null)})
     )
-  )); // end layout return
+  ); // end layout return
 } // end App
 
 try{
