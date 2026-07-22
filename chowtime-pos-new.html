@@ -125,7 +125,7 @@ const BRANCHES = [
 
 const ROLES = {
   owner:     {label:"Owner / Admin",    emoji:"\u{1F451}", color:"#C8151B",
-    nav:["dashboard","branches","all_orders","sales_report","analytics","z_reading","cash_count","expenses","cash_monitor","inventory","po_monitor","bom_mgmt","menu_mgmt","user_mgmt","hris_dash","payroll","kiosk","branch_settings","settings"]},
+    nav:["dashboard","branches","pos","orders","all_orders","sales_report","analytics","z_reading","cash_count","expenses","cash_monitor","inventory","po_monitor","bom_mgmt","menu_mgmt","user_mgmt","hris_dash","payroll","kiosk","branch_settings","settings"]},
   manager:   {label:"Branch Manager",   emoji:"\u{1F3EA}", color:"#007AFF",
     nav:["branch_dash","pos","orders","analytics","z_reading","cash_count","expenses","cash_in_out","inventory","stock_order","branch_menu","bom_mgmt","crew_mgmt","void_requests","ca_request","loan_request","hris_branch","kiosk","branch_settings"]},
   cashier:   {label:"Cashier",          emoji:"\u{1F4B3}", color:"#34C759",
@@ -1902,7 +1902,11 @@ function MenuEditor({menuItems,setMenuItems,db,user,showT}){
           h("div",{style:{padding:"9px 11px"}},
             h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:4}},
               h("div",{style:{fontWeight:800,fontSize:12,color:item.avail?C.text:"#999",flex:1,marginRight:4}},item.name),
-              h("div",{style:{fontSize:13,fontWeight:900,color:item.avail?C.primary:"#bbb",flexShrink:0}},"₱"+item.basePrice)
+              h("div",{style:{fontSize:13,fontWeight:900,flexShrink:0,
+                color:item.avail?(priceType==="franchisee"?"#E65100":priceType==="wholesale"?"#6A1B9A":C.primary):"#bbb"}},
+                "₱"+(priceType==="franchisee"&&item.franchiseePrice?item.franchiseePrice:
+                     priceType==="wholesale"&&item.wholesalePrice?item.wholesalePrice:
+                     item.basePrice))
             ),
             h("div",{style:{fontSize:8,color:C.muted,marginBottom:3}},item.cat),
             item.desc&&h("div",{style:{fontSize:9,color:C.muted,lineHeight:1.4,marginBottom:6,
@@ -2000,10 +2004,29 @@ function MenuEditor({menuItems,setMenuItems,db,user,showT}){
 
             // Base price
             h("div",{style:{marginBottom:10}},
-              h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"BASE PRICE (₱) *"),
+              h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"RETAIL PRICE (₱) *"),
               h("input",{type:"number",value:item.basePrice||"",onChange:e=>setField("basePrice",parseFloat(e.target.value)||0),
                 placeholder:"0",
                 style:{width:"100%",padding:"9px",border:`1px solid ${item.basePrice>0?C.border:C.danger}`,borderRadius:7,fontSize:16,fontWeight:700,outline:"none",boxSizing:"border-box",color:C.primary}})
+            ),
+            // Franchisee + Wholesale prices
+            h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}},
+              h("div",null,
+                h("div",{style:{fontSize:9,fontWeight:700,color:"#E65100",marginBottom:4,letterSpacing:1}},"FRANCHISEE PRICE (₱)"),
+                h("input",{type:"number",value:item.franchiseePrice||"",
+                  onChange:e=>setField("franchiseePrice",parseFloat(e.target.value)||0),
+                  placeholder:"Optional",
+                  style:{width:"100%",padding:"9px",border:"1px solid #FFE0B2",borderRadius:7,
+                    fontSize:14,fontWeight:700,outline:"none",boxSizing:"border-box",color:"#E65100"}})
+              ),
+              h("div",null,
+                h("div",{style:{fontSize:9,fontWeight:700,color:"#6A1B9A",marginBottom:4,letterSpacing:1}},"WHOLESALE PRICE (₱)"),
+                h("input",{type:"number",value:item.wholesalePrice||"",
+                  onChange:e=>setField("wholesalePrice",parseFloat(e.target.value)||0),
+                  placeholder:"Optional",
+                  style:{width:"100%",padding:"9px",border:"1px solid #E1BEE7",borderRadius:7,
+                    fontSize:14,fontWeight:700,outline:"none",boxSizing:"border-box",color:"#6A1B9A"}})
+              )
             ),
 
             // Category
@@ -3764,7 +3787,14 @@ function App(){
   const role=user?ROLES[user.role]:null;
   const branchId=(user?.branch==="all"||user?.branch==="comm")?"ct-wsfp":(user?.branch||"ct-wsfp");
   const curBranch=branches.find(b=>b.id===branchId)||BRANCHES[0];
-  const cartTotal=cart.reduce((s,i)=>s+i.lineTotal,0);
+  // Get price based on type
+  const getPriceByType=(item)=>{
+    if(priceType==="franchisee"&&item.franchiseePrice) return item.franchiseePrice;
+    if(priceType==="wholesale"&&item.wholesalePrice) return item.wholesalePrice;
+    return item.unitPrice||item.basePrice||0;
+  };
+  const priceMultiplier=1; // kept for compatibility
+  const cartTotal=cart.reduce((s,i)=>s+(getPriceByType(i)*(i.qty||1)),0);
   const cartCount=cart.reduce((s,i)=>s+i.qty,0);
   const chkSub=cartTotal;
   const chkDiscAmt=chkSub*chkDisc.rate;
@@ -3801,7 +3831,7 @@ function App(){
       discType:{id:chkDisc.id,label:chkDisc.label,rate:chkDisc.rate},
       discId:chkDiscId,custName:chkCust,tableNo:chkTable,
       cash:chkCash,total:chkTotal,time:now,
-      status:"pending",orderType:chkType,payMethod:chkPay,cashier:user.name,
+      status:"pending",orderType:chkType,payMethod:chkPay,priceType,cashier:user.name,
       bomDeducted:false,
       timestamp:serverTimestamp()
     };
@@ -3967,7 +3997,13 @@ function App(){
               i.options?.length>0&&h("div",{style:{fontSize:9,color:C.muted}},"✓ "+i.options.join(" · ")),
               i.note&&h("div",{style:{fontSize:9,color:C.muted,fontStyle:"italic"}},'"'+i.note+'"')
             ),
-            h("div",{style:{fontSize:11,fontWeight:800,flexShrink:0}},"₱"+i.lineTotal.toFixed(2))
+            h("div",{style:{textAlign:"right",flexShrink:0}},
+              h("div",{style:{fontSize:11,fontWeight:800,
+                color:priceType==="franchisee"?"#E65100":priceType==="wholesale"?"#6A1B9A":C.text}},
+                "₱"+(getPriceByType(i)*(i.qty||1)).toFixed(2)),
+              priceType!=="retail"&&h("div",{style:{fontSize:8,color:C.muted,textDecoration:"line-through"}},
+                "₱"+i.lineTotal.toFixed(2))
+            )
           ))
         ),
         // Order type
@@ -3977,6 +4013,23 @@ function App(){
             [["dine-in","🪑 Dine-in"],["takeout","📦 Takeout"],["delivery","🛵 Delivery"]].map(([t,l])=>
               h("button",{key:t,onClick:()=>setChkType(t),style:{flex:1,padding:"8px 0",borderRadius:9,border:`2px solid ${chkType===t?C.primary:C.border}`,background:chkType===t?"#FFF0F0":"#fff",color:chkType===t?C.primary:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}},l)
             )
+          )
+        ),
+        // Price Type (owner/main only)
+        (user?.role==="owner")&&h("div",{style:{marginBottom:10}},
+          h("div",{style:{fontSize:9,fontWeight:800,color:C.muted,letterSpacing:1,marginBottom:6}},"PRICE TYPE"),
+          h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}},
+            [
+              {id:"retail",label:"Retail",sub:"Regular"},
+              {id:"franchisee",label:"Franchisee",sub:"-15%"},
+              {id:"wholesale",label:"Wholesale",sub:"-25%"},
+            ].map(pt=>h("button",{key:pt.id,onClick:()=>setPriceType(pt.id),
+              style:{padding:"7px 4px",borderRadius:8,textAlign:"center",cursor:"pointer",border:"none",
+                background:priceType===pt.id?C.primary:"#f5f5f5",
+                color:priceType===pt.id?"#fff":C.text}},
+              h("div",{style:{fontSize:10,fontWeight:800}},pt.label),
+              h("div",{style:{fontSize:8,opacity:.7}},pt.sub)
+            ))
           )
         ),
         // Payment method
