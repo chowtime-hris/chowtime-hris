@@ -3525,6 +3525,235 @@ function VoidBadge({branchId,db,setPage,visible=true}){
     "🚫 "+count+" void pending");
 }
 
+
+// ─── DR PROCESS MODAL ────────────────────────────────────
+function DRProcessModal({po,db,user,showT,onClose}){
+  if(!po) return null;
+  const [prices,setPrices]   = useState({});
+  const [actualQtys,setActual] = useState({});
+  const [deliveryDate,setDD]  = useState(new Date().toISOString().slice(0,10));
+  const [notes,setNotes]      = useState("");
+  const [saving,setSaving]    = useState(false);
+
+  // Init from existing DR data if any
+  useEffect(()=>{
+    const p={}, q={};
+    (po.items||[]).forEach(i=>{
+      p[i.id]=i.price||0;
+      q[i.id]=i.actualQty!=null?i.actualQty:i.qty;
+    });
+    setPrices(p); setActual(q);
+  },[po._docId]);
+
+  const items = po.items||[];
+  const total = items.reduce((s,i)=>
+    s+((prices[i.id]||0)*((actualQtys[i.id]!=null?actualQtys[i.id]:i.qty)||0)),0);
+
+  const printDR = ()=>{
+    const w=window.open("","_blank","width=500,height=700");
+    w.document.write(`<!DOCTYPE html><html><head><title>DR-${po.poNum}</title>
+    <style>
+      *{margin:0;padding:0;box-sizing:border-box;}
+      body{font-family:Arial,sans-serif;font-size:12px;padding:20px;max-width:400px;margin:0 auto;}
+      .c{text-align:center;} .b{font-weight:bold;} 
+      .hr{border-top:1px dashed #000;margin:8px 0;}
+      table{width:100%;border-collapse:collapse;font-size:11px;}
+      th{background:#f5f5f5;padding:4px 6px;border:1px solid #ddd;font-size:10px;text-align:left;}
+      td{padding:4px 6px;border:1px solid #ddd;}
+      .r{text-align:right;} .tot{font-weight:bold;background:#f9f9f9;}
+    </style></head><body>
+    <div class="c">
+      <div class="b" style="font-size:16px">CHOWTIME COMMISSARY</div>
+      <div class="b" style="font-size:13px;margin:4px 0">DELIVERY RECEIPT</div>
+      <div>DR-${po.poNum}</div>
+    </div>
+    <div class="hr"></div>
+    <table style="border:none;margin-bottom:8px">
+      <tr><td class="b" style="border:none;width:40%">Branch:</td><td style="border:none">${po.branchName||po.branch}</td></tr>
+      <tr><td class="b" style="border:none">SO Reference:</td><td style="border:none">${po.poNum}</td></tr>
+      <tr><td class="b" style="border:none">Delivery Date:</td><td style="border:none">${deliveryDate}</td></tr>
+      <tr><td class="b" style="border:none">Prepared by:</td><td style="border:none">${user.name}</td></tr>
+    </table>
+    <div class="hr"></div>
+    <table>
+      <tr><th>Item</th><th>PO Qty</th><th>Actual</th><th class="r">Price</th><th class="r">Total</th></tr>
+      ${items.map(i=>{
+        const aq=actualQtys[i.id]!=null?actualQtys[i.id]:i.qty;
+        const p=prices[i.id]||0;
+        return `<tr>
+          <td>${i.name}</td>
+          <td>${i.qty} ${i.unit||""}</td>
+          <td>${aq} ${i.unit||""}</td>
+          <td class="r">₱${p.toFixed(2)}</td>
+          <td class="r">₱${(aq*p).toFixed(2)}</td>
+        </tr>`;
+      }).join("")}
+      <tr class="tot">
+        <td colspan="4" class="r">GROSS TOTAL</td>
+        <td class="r">₱${total.toFixed(2)}</td>
+      </tr>
+    </table>
+    <div class="hr"></div>
+    <div>Payment Status: <b>UNPAID</b></div>
+    ${notes?`<div>Notes: ${notes}</div>`:""}
+    <div class="hr"></div>
+    <table style="border:none;margin-top:30px">
+      <tr>
+        <td style="border:none;width:50%;text-align:center;border-top:1px solid #000;padding-top:4px">Prepared by<br><b>${user.name}</b></td>
+        <td style="border:none;width:50%;text-align:center;border-top:1px solid #000;padding-top:4px">Received by<br>&nbsp;</td>
+      </tr>
+    </table>
+    </body></html>`);
+    w.document.close();
+    setTimeout(()=>w.print(),400);
+  };
+
+  const issueDR = async()=>{
+    setSaving(true);
+    try{
+      const delivered = items.map(i=>({
+        ...i,
+        actualQty: actualQtys[i.id]!=null?actualQtys[i.id]:i.qty,
+        price: prices[i.id]||0,
+        total: ((actualQtys[i.id]!=null?actualQtys[i.id]:i.qty)||0)*(prices[i.id]||0),
+        discrepancy: ((actualQtys[i.id]!=null?actualQtys[i.id]:i.qty)||0)-(i.qty||0)
+      }));
+      const hasDisc = delivered.some(i=>i.discrepancy!==0);
+      await updateDoc(doc(db,"advances",po._docId),{
+        status:"processing",
+        drNum:"DR-"+po.poNum,
+        deliveredItems:delivered,
+        totalAmount:total,
+        deliveryDate,
+        drNotes:notes,
+        hasDiscrepancy:hasDisc,
+        issuedBy:user.name,
+        issuedAt:serverTimestamp()
+      });
+      showT("DR issued ✓ — "+po.poNum+" now PROCESSING");
+      printDR();
+      onClose();
+    }catch(e){showT("Error issuing DR","err");console.error(e);}
+    setSaving(false);
+  };
+
+  return h("div",{style:{background:"#fff",width:620,maxHeight:"90vh",borderRadius:16,
+    display:"flex",flexDirection:"column",overflow:"hidden",
+    boxShadow:"0 20px 60px rgba(0,0,0,.4)"}},
+
+    // Header
+    h("div",{style:{background:`linear-gradient(135deg,#6A1B9A,#4A148C)`,
+      padding:"14px 20px",display:"flex",justifyContent:"space-between",alignItems:"center"}},
+      h("div",null,
+        h("div",{style:{color:"rgba(255,255,255,.6)",fontSize:9,fontWeight:700,letterSpacing:2}},
+          "PROCESS & ISSUE DELIVERY RECEIPT"),
+        h("div",{style:{color:"#fff",fontSize:15,fontWeight:900,marginTop:2}},po.poNum),
+        h("div",{style:{color:"rgba(255,255,255,.5)",fontSize:9,marginTop:1}},
+          po.branchName||po.branch)
+      ),
+      h("button",{onClick:onClose,style:{background:"rgba(255,255,255,.15)",border:"none",
+        color:"#fff",width:28,height:28,borderRadius:8,fontSize:16,cursor:"pointer"}},
+        "×")
+    ),
+
+    // Delivery date + notes
+    h("div",{style:{padding:"12px 20px",background:"#f9f9f9",borderBottom:"1px solid #eee",
+      display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
+      h("div",null,
+        h("div",{style:{fontSize:9,fontWeight:700,color:"#6A1B9A",marginBottom:4,letterSpacing:1}},
+          "DELIVERY DATE *"),
+        h("input",{type:"date",value:deliveryDate,onChange:e=>setDD(e.target.value),
+          style:{width:"100%",padding:"7px",border:"2px solid #6A1B9A",borderRadius:7,
+            fontSize:12,fontWeight:700,color:"#6A1B9A",outline:"none",boxSizing:"border-box"}})
+      ),
+      h("div",null,
+        h("div",{style:{fontSize:9,fontWeight:700,color:"#6A1B9A",marginBottom:4,letterSpacing:1}},
+          "DR NOTES"),
+        h("input",{value:notes,onChange:e=>setNotes(e.target.value),
+          placeholder:"Remarks, substitutions...",
+          style:{width:"100%",padding:"7px",border:"1px solid #ddd",borderRadius:7,
+            fontSize:11,outline:"none",boxSizing:"border-box"}})
+      )
+    ),
+
+    // Items table
+    h("div",{style:{flex:1,overflowY:"auto"}},
+      h("div",{style:{display:"grid",gridTemplateColumns:"1fr 70px 90px 100px 90px",
+        padding:"7px 20px",background:"#fafafa",borderBottom:"1px solid #eee",
+        position:"sticky",top:0}},
+        ["ITEM","PO QTY","ACTUAL QTY","PRICE/UNIT","TOTAL"].map(h2=>
+          h("div",{key:h2,style:{fontSize:8,fontWeight:700,color:"#6A1B9A",letterSpacing:1}},h2))
+      ),
+      items.map(i=>{
+        const aq = actualQtys[i.id]!=null?actualQtys[i.id]:i.qty;
+        const p  = prices[i.id]||0;
+        const diff = aq-(i.qty||0);
+        return h("div",{key:i.id,
+          style:{display:"grid",gridTemplateColumns:"1fr 70px 90px 100px 90px",
+            padding:"8px 20px",borderBottom:"1px solid #f5f5f5",alignItems:"center",
+            background:diff!==0?"#FFF8E1":"#fff"}},
+          h("div",null,
+            h("div",{style:{fontSize:11,fontWeight:700}},i.name),
+            h("div",{style:{fontSize:9,color:"#888"}},i.unit||"")
+          ),
+          h("div",{style:{fontSize:11,color:"#888"}},i.qty+" "+(i.unit||"")),
+          // Actual qty
+          h("div",{style:{display:"flex",alignItems:"center",gap:4}},
+            h("button",{onClick:()=>setActual(p=>({...p,[i.id]:Math.max(0,(p[i.id]!=null?p[i.id]:i.qty)-1)})),
+              style:{width:20,height:20,borderRadius:4,border:"1px solid #ddd",
+                background:"#fff",cursor:"pointer",fontSize:12}},"-"),
+            h("input",{type:"number",min:0,
+              value:actualQtys[i.id]!=null?actualQtys[i.id]:i.qty,
+              onChange:e=>setActual(p=>({...p,[i.id]:parseFloat(e.target.value)||0})),
+              style:{width:38,textAlign:"center",padding:"3px",border:"1px solid #ddd",
+                borderRadius:4,fontSize:11,fontWeight:700,outline:"none",
+                color:diff<0?"#C62828":diff>0?"#1565C0":"#333"}}),
+            h("button",{onClick:()=>setActual(p=>({...p,[i.id]:(p[i.id]!=null?p[i.id]:i.qty)+1})),
+              style:{width:20,height:20,borderRadius:4,border:"1px solid #6A1B9A",
+                background:"#F3E5F5",cursor:"pointer",fontSize:12,color:"#6A1B9A"}},"+"),
+            diff!==0&&h("span",{style:{fontSize:8,color:diff<0?"#C62828":"#1565C0",fontWeight:700}},
+              (diff>0?"+":"")+diff)
+          ),
+          // Price
+          h("div",{style:{display:"flex",alignItems:"center",gap:3}},
+            h("span",{style:{fontSize:10,color:"#888"}},"₱"),
+            h("input",{type:"number",min:0,step:"0.01",
+              value:prices[i.id]||"",
+              onChange:e=>setPrices(p=>({...p,[i.id]:parseFloat(e.target.value)||0})),
+              placeholder:"0.00",
+              style:{width:60,padding:"5px",border:"1px solid #ddd",borderRadius:6,
+                fontSize:11,fontWeight:700,outline:"none",textAlign:"right"}})
+          ),
+          h("div",{style:{fontSize:11,fontWeight:800,color:"#6A1B9A",textAlign:"right"}},
+            "₱"+(aq*(prices[i.id]||0)).toFixed(2))
+        );
+      }),
+      // Total row
+      h("div",{style:{display:"grid",gridTemplateColumns:"1fr 70px 90px 100px 90px",
+        padding:"10px 20px",background:"#f9f9f9",borderTop:"2px solid #6A1B9A"}},
+        h("div",{style:{fontSize:11,fontWeight:800,gridColumn:"1/5"}},"GROSS TOTAL"),
+        h("div",{style:{fontSize:14,fontWeight:900,color:"#6A1B9A",textAlign:"right"}},
+          "₱"+total.toFixed(2))
+      )
+    ),
+
+    // Footer actions
+    h("div",{style:{padding:"12px 20px",borderTop:"2px solid #6A1B9A",
+      display:"flex",gap:8,background:"#fafafa"}},
+      h("button",{onClick:printDR,
+        style:{padding:"10px 16px",background:"#fff",border:"1px solid #ddd",
+          borderRadius:9,fontWeight:700,fontSize:12,cursor:"pointer"}},
+        "🖨️ Preview DR"),
+      h("button",{onClick:issueDR,disabled:saving||!deliveryDate,
+        style:{flex:1,padding:"11px",
+          background:saving?"#ddd":"linear-gradient(135deg,#6A1B9A,#4A148C)",
+          border:"none",borderRadius:9,color:"#fff",fontWeight:800,fontSize:13,
+          cursor:saving?"not-allowed":"pointer"}},
+        saving?"Issuing DR...":"✅ Issue DR → Mark as Processing")
+    )
+  );
+}
+
 // ─── MAIN APP ─────────────────────────────────────────────
 function App(){
   // Auth
@@ -5646,6 +5875,17 @@ function App(){
           h("button",{onClick:()=>{setCartOpen(false);setModal("checkout");},style:{width:"100%",padding:"12px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:10,color:"#fff",fontSize:12,fontWeight:800,cursor:"pointer"}},"Proceed to Checkout →")
         )
       )
+    ),
+
+    // DR PROCESS MODAL
+    modal&&modal.startsWith("issue_dr_")&&h("div",{
+      style:{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",
+        display:"flex",alignItems:"center",justifyContent:"center",zIndex:900}},
+      h(DRProcessModal,{
+        po:advances.find(a=>a._docId===modal.replace("issue_dr_","")),
+        db,user,showT,
+        onClose:()=>setModal(null)
+      })
     ),
 
     // MODALS + TOAST - always rendered, display:none when inactive
