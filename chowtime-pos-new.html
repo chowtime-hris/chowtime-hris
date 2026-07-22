@@ -4308,8 +4308,8 @@ function App(){
               border:"1px solid rgba(200,21,27,.25)",borderRadius:8,
               color:C.danger,fontWeight:700,fontSize:11,cursor:"pointer",
               display:"flex",alignItems:"center",gap:5,flexShrink:0}},
-            "🚪")
-        ),      ),
+            "🚪 Sign Out")
+        ),
 
       // PAGE CONTENT
       h("div",{style:{flex:1,overflow:"auto",padding:page==="pos"||page==="kitchen"?0:"16px 18px",
@@ -5493,7 +5493,7 @@ function App(){
     h("div",{style:{display:toast?"block":"none"}},
       toast&&h(Toast,{msg:toast.msg,type:toast.type,onDone:()=>setToast(null)})
     )
-  ); // end layout return
+  )); // end layout return
 } // end App
 
 try{
