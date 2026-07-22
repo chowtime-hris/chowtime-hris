@@ -4273,14 +4273,14 @@ function App(){
     h("div",{style:{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}},
 
       // TOP HEADER
-      h("div",{style:{background:"#fff",borderBottom:"1px solid "+C.border,padding:"8px 18px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,gap:10}},
+      h("div",{style:{background:"#fff",borderBottom:"1px solid "+C.border,padding:"6px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,gap:8}},
         h("div",{style:{flex:1,minWidth:0}},
-          h("div",{style:{fontSize:13,fontWeight:800,color:C.text,display:"flex",alignItems:"center",gap:6}},
-            h("span",{style:{fontSize:16}},NAV_META[page]?.icon||""),
+          h("div",{style:{fontSize:12,fontWeight:800,color:C.text,display:"flex",alignItems:"center",gap:5}},
+            h("span",{style:{fontSize:14}},NAV_META[page]?.icon||""),
             NAV_META[page]?.label||"Chowtime POS"
           ),
-          h("div",{style:{fontSize:9,color:C.muted,marginTop:1}},
-            new Date().toLocaleDateString("en-PH",{weekday:"short",year:"numeric",month:"short",day:"numeric"})+" · "+curBranch.full)
+          h("div",{style:{fontSize:8,color:C.muted}},
+            new Date().toLocaleDateString("en-PH",{weekday:"short",month:"short",day:"numeric"})+" · "+curBranch.name)
         ),
         h("div",{style:{display:"flex",gap:7,alignItems:"center"}},
           h("button",{onClick:()=>setCartOpen(true),
@@ -4309,10 +4309,10 @@ function App(){
             border:"1px solid "+C.danger,borderRadius:20,
             fontSize:9,color:C.danger,fontWeight:700}},"● Offline"),
           h("button",{onClick:handleSignOut,
-            style:{padding:"6px 14px",background:C.primary,border:"none",
-              borderRadius:8,color:"#fff",fontWeight:800,fontSize:11,
-              cursor:"pointer",flexShrink:0,whiteSpace:"nowrap"}},
-            "🚪 Sign Out")
+            style:{padding:"5px 10px",background:C.primary,border:"none",
+              borderRadius:7,color:"#fff",fontWeight:700,fontSize:10,
+              cursor:"pointer",flexShrink:0}},
+            "🚪 Out")
         ),
 
       // PAGE CONTENT
