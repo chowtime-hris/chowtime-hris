@@ -4304,12 +4304,12 @@ function App(){
             border:"1px solid "+C.danger,borderRadius:20,
             fontSize:9,color:C.danger,fontWeight:700}},"● Offline"),
           h("button",{onClick:handleSignOut,
-            title:"Sign Out",
-            style:{padding:"6px 10px",background:"rgba(200,21,27,.08)",
-              border:"1px solid rgba(200,21,27,.25)",borderRadius:8,
+            style:{padding:"6px 12px",background:"rgba(200,21,27,.1)",
+              border:"1px solid rgba(200,21,27,.3)",borderRadius:8,
               color:C.danger,fontWeight:700,fontSize:11,cursor:"pointer",
-              display:"flex",alignItems:"center",gap:4,flexShrink:0}},
-            "🚪")
+              display:"flex",alignItems:"center",gap:5,flexShrink:0,
+              whiteSpace:"nowrap"}},
+            "🚪 Sign Out")
         ),
 
       // PAGE CONTENT
