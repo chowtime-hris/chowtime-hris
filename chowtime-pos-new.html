@@ -1904,7 +1904,7 @@ function MenuEditor({menuItems,setMenuItems,db,user,showT}){
             h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:4}},
               h("div",{style:{fontWeight:800,fontSize:12,color:item.avail?C.text:"#999",flex:1,marginRight:4}},item.name),
               h("div",{style:{fontSize:13,fontWeight:900,flexShrink:0,
-                color:item.avail?(priceType==="franchisee"?"#E65100":priceType==="wholesale"?"#6A1B9A":C.primary):"#bbb"}},
+                color:color:item.avail?(true==="franchisee"?"#E65100":priceType==="wholesale"?"#6A1B9A":C.primary):"#bbb"}},
                 "₱"+(priceType==="franchisee"&&item.franchiseePrice?item.franchiseePrice:
                      priceType==="wholesale"&&item.wholesalePrice?item.wholesalePrice:
                      item.basePrice))
