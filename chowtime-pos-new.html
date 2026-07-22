@@ -4298,9 +4298,9 @@ function App(){
         // ══ DASHBOARD (Owner) ══
         page==="dashboard"&&h("div",null,
           h("div",{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}},
-            h(Stat,{label:"Total Sales Today",value:"₱"+BRANCHES.reduce((s,b)=>s+(b.sales||0),0).toLocaleString(),sub:"All branches",icon:"📈",color:C.primary}),
+            h(Stat,{label:"Total Sales Today",value:"₱"+branches.reduce((s,b)=>s+(b.sales||0),0).toLocaleString(),sub:"All branches",icon:"📈",color:C.primary}),
             h(Stat,{label:"Live Orders",value:orders.length,sub:"From Firebase",icon:"📋",color:C.info}),
-            h(Stat,{label:"Active Branches",value:branches.filter(b=>b.status!=="closed").length+"/"+BRANCHES.length,icon:"🏪",color:C.success}),
+            h(Stat,{label:"Active Branches",value:branches.filter(b=>b.status!=="closed").length+"/"+branches.length,icon:"🏪",color:C.success}),
             h(Stat,{label:"Pending Orders",value:orders.filter(o=>o.status==="pending").length,icon:"⚠️",color:C.warning})
           ),
           h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}},
@@ -5248,7 +5248,7 @@ function App(){
 
         // ══ HRIS DASHBOARD (Owner) ══
         page==="hris_dash"&&h(HRISDashPage,{
-          user,db,hrisDB,showT,branches:BRANCHES,hrisEmps
+          user,db,hrisDB,showT,branches,hrisEmps
         }),
 
         // ══ HRIS BRANCH VIEW (Manager) ══
@@ -5392,7 +5392,7 @@ function App(){
             h(SectionHeader,{title:"Commissary Dashboard"}),
             h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}},
               h(Stat,{label:"Items in Stock",value:inventory.length,icon:"❄️",color:C.info}),
-              h(Stat,{label:"Active Branches",value:BRANCHES.length,icon:"🏪",color:C.success}),
+              h(Stat,{label:"Active Branches",value:branches.length,icon:"🏪",color:C.success}),
               h(Stat,{label:"Inventory Value",value:"₱"+inventory.reduce((s,i)=>s+(i.stock||0)*(i.cost||0),0).toLocaleString(),icon:"💰",color:C.primary})
             ),
             h("div",{style:{background:"#FFF8E1",border:"1px solid #FFE082",borderRadius:10,padding:"10px 14px",fontSize:11,color:"#795548"}},
