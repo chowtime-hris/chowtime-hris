@@ -4262,21 +4262,10 @@ function App(){
           h("span",{style:{fontSize:11}},m.icon),m.label
         );})
       ),
-      h("div",{style:{
-          padding:"8px 8px 12px",flexShrink:0,
-          borderTop:"1px solid rgba(255,255,255,.1)"}},
-        h("div",{style:{fontSize:8,color:"rgba(255,255,255,.25)",
-          paddingLeft:4,marginBottom:6}},
-          user.name+" · "+(role?.label||user.role)),
-        h("button",{onClick:handleSignOut,
-          style:{width:"100%",padding:"9px 10px",
-            background:C.primary,
-            border:"none",
-            borderRadius:8,color:"#fff",
-            fontWeight:800,fontSize:12,cursor:"pointer",
-            display:"flex",alignItems:"center",
-            justifyContent:"center",gap:6}},
-          "🚪 Sign Out")
+      h("div",{style:{padding:"6px 8px",flexShrink:0,
+          borderTop:"1px solid rgba(255,255,255,.08)"}},
+        h("div",{style:{fontSize:8,color:"rgba(255,255,255,.2)",paddingLeft:4}},
+          user.name+" · "+(role?.label||user.role))
       )
     ),
 
@@ -4315,6 +4304,11 @@ function App(){
             padding:"4px 10px",background:"#FFEBEE",
             border:"1px solid "+C.danger,borderRadius:20,
             fontSize:9,color:C.danger,fontWeight:700}},"● Offline"),
+          h("button",{onClick:handleSignOut,
+            style:{padding:"6px 14px",background:C.primary,border:"none",
+              borderRadius:8,color:"#fff",fontWeight:800,fontSize:11,
+              cursor:"pointer",flexShrink:0,whiteSpace:"nowrap"}},
+            "🚪 Sign Out")
         ),
 
       // PAGE CONTENT
