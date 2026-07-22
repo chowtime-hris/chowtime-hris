@@ -4220,8 +4220,8 @@ function App(){
   return h("div",{style:{display:"flex",height:"100vh",background:C.bg,fontFamily:"'Segoe UI',system-ui,sans-serif",overflow:"hidden"}},
 
     // SIDEBAR
-    h("div",{style:{width:192,background:C.sidebar,display:"flex",flexDirection:"column",flexShrink:0,height:"100vh",position:"sticky",top:0}},
-      h("div",{style:{padding:"13px 11px 7px"}},
+    h("div",{style:{width:192,background:C.sidebar,display:"flex",flexDirection:"column",flexShrink:0,height:"100vh",overflow:"hidden"}},
+      h("div",{style:{padding:"10px 11px 6px",flexShrink:0}},
         h("div",{style:{display:"flex",alignItems:"center",gap:7,marginBottom:9}},
           h("div",{style:{width:28,height:28,background:`linear-gradient(135deg,${C.primary},${C.dark})`,borderRadius:7,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13}},"🍽️"),
           h("div",null,
@@ -4262,15 +4262,9 @@ function App(){
           h("span",{style:{fontSize:12}},m.icon),m.label
         );})
       ),
-      h("div",{style:{padding:"7px 6px 14px",flexShrink:0,borderTop:"1px solid rgba(255,255,255,.1)"}},
-        h("div",{style:{fontSize:9,color:"rgba(255,255,255,.3)",marginBottom:5,paddingLeft:4}},
-          user.name+" · "+((ROLES[user.role]||{}).label||user.role)),
-        h("button",{onClick:handleSignOut,
-          style:{width:"100%",display:"flex",alignItems:"center",gap:6,padding:"9px 10px",
-            borderRadius:7,border:"1px solid rgba(255,255,255,.2)",
-            background:"rgba(200,21,27,.25)",color:"#fff",cursor:"pointer",
-            fontSize:11,fontWeight:600}},
-          "🚪 Sign Out")
+      h("div",{style:{padding:"6px 8px 10px",flexShrink:0,borderTop:"1px solid rgba(255,255,255,.08)"}},
+        h("div",{style:{fontSize:8,color:"rgba(255,255,255,.25)",paddingLeft:4}},
+          user.name+" · "+(role?.label||user.role))
       )
     ),
 
@@ -4308,7 +4302,13 @@ function App(){
           h("div",{style:{display:!isOnline?"flex":"none",
             padding:"4px 10px",background:"#FFEBEE",
             border:"1px solid "+C.danger,borderRadius:20,
-            fontSize:9,color:C.danger,fontWeight:700}},"● Offline")
+            fontSize:9,color:C.danger,fontWeight:700}},"● Offline"),
+          h("button",{onClick:handleSignOut,
+            style:{padding:"6px 12px",background:"rgba(200,21,27,.08)",
+              border:"1px solid rgba(200,21,27,.25)",borderRadius:8,
+              color:C.danger,fontWeight:700,fontSize:11,cursor:"pointer",
+              display:"flex",alignItems:"center",gap:5,flexShrink:0}},
+            "🚪")
         ),      ),
 
       // PAGE CONTENT
