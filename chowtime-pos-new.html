@@ -3501,7 +3501,7 @@ function AnalyticsPage({orders,branchId,curBranch,user,db,showT}){
 }
 
 // ─── VOID BADGE (header alert) ───────────────────────────
-function VoidBadge({branchId,db,setPage}){
+function VoidBadge({branchId,db,setPage,visible=true}){
   const [count,setCount] = useState(0);
   useEffect(()=>{
     if(!branchId)return;
@@ -3510,9 +3510,10 @@ function VoidBadge({branchId,db,setPage}){
     const unsub = onSnapshot(q,snap=>setCount(snap.size),()=>{});
     return()=>unsub();
   },[branchId]);
-  if(!count)return null;
+  // Always render - use display:none to avoid removeChild
   return h("button",{onClick:()=>setPage("void_requests"),
-    style:{padding:"4px 10px",background:"#FFEBEE",border:"1px solid #FFCDD2",
+    style:{display:visible&&count>0?"flex":"none",
+      padding:"4px 10px",background:"#FFEBEE",border:"1px solid #FFCDD2",
       borderRadius:20,fontSize:9,color:"#C62828",fontWeight:700,cursor:"pointer"}},
     "🚫 "+count+" void pending");
 }
@@ -4259,23 +4260,32 @@ function App(){
           h("div",{style:{fontSize:9,color:C.muted,marginTop:1}},new Date().toLocaleDateString("en-PH",{weekday:"short",year:"numeric",month:"short",day:"numeric"})+" · "+curBranch.full)
         ),
         h("div",{style:{display:"flex",gap:7,alignItems:"center"}},
-          page==="pos"&&cart.length>0&&h("button",{onClick:()=>setCartOpen(true),
-            style:{display:"flex",gap:7,padding:"7px 13px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:9,color:"#fff",fontWeight:700,fontSize:11,cursor:"pointer",boxShadow:`0 3px 10px ${C.primary}44`,alignItems:"center"}},
+          h("button",{onClick:()=>setCartOpen(true),
+            style:{display:page==="pos"&&cart.length>0?"flex":"none",
+              gap:7,padding:"7px 13px",
+              background:`linear-gradient(135deg,${C.primary},${C.dark})`,
+              border:"none",borderRadius:9,color:"#fff",fontWeight:700,
+              fontSize:11,cursor:"pointer",alignItems:"center"}},
             "🛒 "+cartCount+" items · ₱"+cartTotal.toFixed(0)),
-          myOrders.filter(o=>o.status==="pending").length>0&&h("button",{onClick:()=>setPage("orders"),
-            style:{padding:"4px 10px",background:"#FFF8E1",border:"1px solid "+C.warning,borderRadius:20,fontSize:9,color:C.warning,fontWeight:700,cursor:"pointer"}},
+          h("button",{onClick:()=>setPage("orders"),
+            style:{display:myOrders.filter(o=>o.status==="pending").length>0?"flex":"none",
+              padding:"4px 10px",background:"#FFF8E1",
+              border:"1px solid "+C.warning,borderRadius:20,
+              fontSize:9,color:C.warning,fontWeight:700,cursor:"pointer"}},
             "⚠️ "+myOrders.filter(o=>o.status==="pending").length+" pending"),
-          (user.role==="manager"||user.role==="owner")&&h(VoidBadge,{branchId,db,setPage}),
-          (user.role==="owner")&&advances.filter(a=>!a._type&&a.status==="pending").length>0&&
-            h("button",{onClick:()=>setPage("hris_dash"),
-              style:{padding:"4px 10px",background:"#F3E5F5",border:"1px solid #CE93D8",borderRadius:20,fontSize:9,color:"#6A1B9A",fontWeight:700,cursor:"pointer"}},
-              "💵 "+advances.filter(a=>!a._type&&a.status==="pending").length+" CA pending"),
-          !isOnline&&h("div",{style:{padding:"4px 10px",background:"#FFEBEE",border:"1px solid "+C.danger,borderRadius:20,fontSize:9,color:C.danger,fontWeight:700}},"● OFFLINE"),
-          h("button",{onClick:handleSignOut,
-            style:{padding:"6px 14px",background:"#FFF0F0",border:"1px solid #FFD0D0",borderRadius:8,color:C.primary,fontWeight:700,fontSize:11,cursor:"pointer",display:"flex",alignItems:"center",gap:5}},
-            "🚪 Sign Out")
-        )
-      ),
+          h(VoidBadge,{branchId,db,setPage,
+            visible:user.role==="manager"||user.role==="owner"}),
+          h("button",{onClick:()=>setPage("hris_dash"),
+            style:{display:user.role==="owner"&&advances.filter(a=>!a._type&&a.status==="pending").length>0?"flex":"none",
+              padding:"4px 10px",background:"#F3E5F5",
+              border:"1px solid #CE93D8",borderRadius:20,
+              fontSize:9,color:"#6A1B9A",fontWeight:700,cursor:"pointer"}},
+            "💵 "+advances.filter(a=>!a._type&&a.status==="pending").length+" CA pending"),
+          h("div",{style:{display:!isOnline?"flex":"none",
+            padding:"4px 10px",background:"#FFEBEE",
+            border:"1px solid "+C.danger,borderRadius:20,
+            fontSize:9,color:C.danger,fontWeight:700}},"● Offline")
+        ),      ),
 
       // PAGE CONTENT
       h("div",{style:{flex:1,overflow:"auto",padding:page==="pos"||page==="kitchen"?0:"16px 18px"}},
@@ -5389,13 +5399,18 @@ function App(){
 
       ) // end page content
     ) // end main
-  ,
+  ), // end right side panel
 
-    // ITEM CUSTOMIZER MODAL
-    customizing&&h(ItemCustomizer,{item:customizing,onAdd:addToCart,onClose:()=>setCustomizing(null)}),
+    // ITEM CUSTOMIZER MODAL - always rendered
+    h("div",{style:{display:customizing?"block":"none"}},
+      customizing&&h(ItemCustomizer,{item:customizing,onAdd:addToCart,onClose:()=>setCustomizing(null)})
+    ),
 
-    // CART SIDEBAR
-    cartOpen&&h("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:880,display:"flex",alignItems:"stretch",justifyContent:"flex-end"},onClick:e=>e.target===e.currentTarget&&setCartOpen(false)},
+    // CART SIDEBAR - always rendered
+    h("div",{style:{position:"fixed",inset:0,zIndex:880,
+      display:cartOpen?"flex":"none",
+      background:"rgba(0,0,0,.5)",alignItems:"stretch",justifyContent:"flex-end"},
+      onClick:e=>e.target===e.currentTarget&&setCartOpen(false)},
       h("div",{style:{background:"#fff",width:320,display:"flex",flexDirection:"column",boxShadow:"-8px 0 40px rgba(0,0,0,.15)"}},
         h("div",{style:{padding:"13px 15px 10px",borderBottom:"1px solid "+C.border,display:"flex",justifyContent:"space-between"}},
           h("b",{style:{fontSize:13}},"🛒 Order ("+cartCount+")"),
@@ -5424,22 +5439,35 @@ function App(){
                   h("span",{style:{minWidth:18,textAlign:"center",fontWeight:800,fontSize:12}},item.qty),
                   h("button",{onClick:()=>chgQty(item.cartId,1),style:{width:22,height:22,borderRadius:5,border:"none",background:C.primary,cursor:"pointer",color:"#fff",fontSize:14,fontWeight:900,display:"flex",alignItems:"center",justifyContent:"center"}},"+")
                 ),
-                h("div",{style:{fontWeight:900,fontSize:13,color:C.primary}},"₱"+item.lineTotal.toFixed(2))
+                h("div",{style:{textAlign:"right",flexShrink:0}},
+                  h("div",{style:{fontSize:11,fontWeight:800,
+                    color:priceType==="franchisee"?"#E65100":priceType==="wholesale"?"#6A1B9A":C.text}},
+                    "₱"+(getPriceByType(item)*(item.qty||1)).toFixed(2)),
+                  h("div",{style:{fontSize:8,color:C.muted,textDecoration:"line-through",
+                    visibility:priceType!=="retail"?"visible":"hidden"}},
+                    "₱"+item.lineTotal.toFixed(2))
+                )
               )
             ))
         ),
-        cart.length>0&&h("div",{style:{padding:"10px 14px 16px",borderTop:"1px solid "+C.border}},
+        h("div",{style:{padding:"10px 14px 16px",borderTop:"1px solid "+C.border,
+          display:cart.length>0?"block":"none"}},
           h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:12,fontWeight:800,marginBottom:9}},h("span",null,"Subtotal"),h("span",null,"₱"+cartTotal.toFixed(2))),
           h("button",{onClick:()=>{setCartOpen(false);setModal("checkout");},style:{width:"100%",padding:"12px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:10,color:"#fff",fontSize:12,fontWeight:800,cursor:"pointer"}},"Proceed to Checkout →")
         )
       )
-    ) // end key=page wrapper
-    ), // end right panel
+    ),
 
-    // MODALS + TOAST (outside page wrapper to avoid removeChild)
-    modal==="checkout"&&h(CheckoutModal,null),
-    modal==="receipt"&&curOrd&&h(ReceiptModal,{ord:curOrd}),
-    toast&&h(Toast,{msg:toast.msg,type:toast.type,onDone:()=>setToast(null)})
+    // MODALS + TOAST - always rendered, display:none when inactive
+    h("div",{style:{display:modal==="checkout"?"block":"none"}},
+      h(CheckoutModal,null)
+    ),
+    h("div",{style:{display:modal==="receipt"&&curOrd?"block":"none"}},
+      curOrd&&h(ReceiptModal,{ord:curOrd})
+    ),
+    h("div",{style:{display:toast?"block":"none"}},
+      toast&&h(Toast,{msg:toast.msg,type:toast.type,onDone:()=>setToast(null)})
+    )
   ); // end layout return
 } // end App
 
