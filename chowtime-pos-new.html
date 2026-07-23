@@ -4404,6 +4404,7 @@ function App(){
   const [expenses,setExpenses]=useState([]);
   const [cashLog,setCashLog]=useState([]);
   const [advances,setAdvances]=useState([]);
+  const prevPOStatuses=useRef({});
   const [inventory,setInventory]=useState(INIT_INVENTORY);
   const [staff,setStaff]=useState([]);
   const [hrisEmps,setHrisEmps]=useState([]); // employees from HRIS RTDB
@@ -4637,6 +4638,45 @@ function App(){
       return()=>unsub();
     }catch(e){}
   },[]);
+
+  // ── PO STATUS CHANGE NOTIFICATIONS ──────────────────────
+  useEffect(()=>{
+    if(!advances.length||!user)return;
+    const isOwner=user.role==="owner"||user.role==="commissary";
+
+    if(isOwner){
+      // MAIN: notify when branch submits new PO or reports discrepancy
+      advances.filter(a=>a._type==="po").forEach(po=>{
+        const prev=prevPOStatuses.current[po._docId];
+        const curr=po.status;
+        if(prev&&prev!==curr){
+          const msgs={
+            received_by_main:"📦 New PO from "+(po.branchName||po.branch)+" — "+po.poNum,
+            discrepancy:"⚠️ Discrepancy reported by "+(po.branchName||po.branch)+" — "+po.poNum,
+            completed:"✅ "+po.poNum+" received by "+(po.branchName||po.branch)
+          };
+          if(msgs[curr])showT(msgs[curr],curr==="discrepancy"?"warn":"ok");
+        }
+        prevPOStatuses.current[po._docId]=curr;
+      });
+    } else {
+      // BRANCH: notify when Main updates their PO
+      advances.filter(a=>a._type==="po"&&a.branch===branchId).forEach(po=>{
+        const prev=prevPOStatuses.current[po._docId];
+        const curr=po.status;
+        if(prev&&prev!==curr){
+          const msgs={
+            processing:"⚙️ "+po.poNum+" is now being processed by Main",
+            paid:"💰 "+po.poNum+" is marked PAID — ready to receive items",
+            completed:"✅ "+po.poNum+" completed!",
+            discrepancy:"⚠️ "+po.poNum+" — discrepancy needs approval"
+          };
+          if(msgs[curr])showT(msgs[curr],curr==="discrepancy"?"warn":"ok");
+        }
+        prevPOStatuses.current[po._docId]=curr;
+      });
+    }
+  },[advances]);
 
   // ── LOAD INVENTORY LOG ───────────────────────────────────
   useEffect(()=>{
@@ -5146,7 +5186,33 @@ function App(){
             background:page===p?"rgba(200,21,27,.22)":"transparent",
             color:page===p?C.primary:"rgba(255,255,255,.38)",
             cursor:"pointer",fontSize:10,fontWeight:page===p?700:500,marginBottom:0,textAlign:"left"}},
-          h("span",{style:{fontSize:11}},m.icon),m.label
+          h("span",{style:{fontSize:11}},m.icon),
+          h("span",{style:{flex:1}},m.label),
+          (function(){
+            var cnt=0;
+            if(p==="stock_order"){
+              cnt=advances.filter(function(a){
+                return a._type==="po"&&a.branch===branchId&&
+                  (a.status==="paid"||a.status==="discrepancy");
+              }).length;
+            }
+            if(p==="po_monitor"){
+              cnt=advances.filter(function(a){
+                return a._type==="po"&&
+                  (a.status==="received_by_main"||a.status==="discrepancy");
+              }).length;
+            }
+            if(p==="void_requests"){
+              cnt=advances.filter(function(a){
+                return a._type==="void"&&a.status==="pending";
+              }).length;
+            }
+            return cnt>0?h("span",{style:{
+              background:C.primary,color:"#fff",borderRadius:10,
+              fontSize:8,fontWeight:900,padding:"1px 5px",
+              minWidth:16,textAlign:"center",flexShrink:0}},
+              cnt>9?"9+":String(cnt)):null;
+          })()
         );})
       ),
       h("div",{style:{padding:"6px 8px",flexShrink:0,
@@ -5185,49 +5251,160 @@ function App(){
 
         // ══ DASHBOARD (Owner) ══
         page==="dashboard"&&h("div",null,
+
+          // ── TOP KPI ROW ──
           h("div",{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}},
-            h(Stat,{label:"Total Sales Today",value:"₱"+branches.reduce((s,b)=>s+(b.sales||0),0).toLocaleString(),sub:"All branches",icon:"📈",color:C.primary}),
-            h(Stat,{label:"Live Orders",value:orders.length,sub:"From Firebase",icon:"📋",color:C.info}),
-            h(Stat,{label:"Active Branches",value:branches.filter(b=>b.status!=="closed").length+"/"+branches.length,icon:"🏪",color:C.success}),
-            h(Stat,{label:"Pending Orders",value:orders.filter(o=>o.status==="pending").length,icon:"⚠️",color:C.warning})
+            h(Stat,{label:"All Branch Sales Today",
+              value:"₱"+orders.filter(o=>o.date===new Date().toISOString().slice(0,10))
+                .reduce((s,o)=>s+(o.subtotal||0),0).toLocaleString(),
+              sub:"From Firebase orders",icon:"📈",color:C.primary}),
+            h(Stat,{label:"Live Orders",
+              value:orders.filter(o=>o.status==="pending"||o.status==="cooking").length,
+              sub:"Pending + Cooking",icon:"🔥",color:C.warning}),
+            h(Stat,{label:"Active Branches",
+              value:branches.filter(b=>b.active!==false).length+"/"+branches.length,
+              sub:"Online now",icon:"🏪",color:C.info}),
+            h(Stat,{label:"PO Collections",
+              value:"₱"+advances.filter(a=>a._type==="po"&&a.paymentStatus==="Paid")
+                .reduce((s,a)=>s+(a.totalAmount||0),0).toLocaleString(),
+              sub:"Commissary payments received",icon:"💰",color:C.success})
           ),
-          h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}},
-            h(Stat,{label:"Total Expenses",value:"₱"+expenses.reduce((s,e)=>s+(e.amount||0),0).toLocaleString(),icon:"💸",color:C.danger}),
-            h(Stat,{label:"Cash Advances Pending",value:advances.filter(a=>a.status==="pending").length,icon:"💵",color:C.warning}),
-            h(Stat,{label:"Low Stock Items",value:inventory.filter(i=>(i.stock||0)<(i.minStock||0)).length,icon:"📦",color:C.purple})
+
+          // ── MAIN BRANCH REVENUE STREAMS ──
+          h("div",{style:{background:"linear-gradient(135deg,#C8151B,#8B0000)",
+            borderRadius:14,padding:"16px 20px",marginBottom:14,color:"#fff"}},
+            h("div",{style:{fontSize:11,fontWeight:700,opacity:.7,letterSpacing:2,marginBottom:10}},
+              "MAIN BRANCH — REVENUE STREAMS"),
+            h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12}},
+              // Walk-in POS
+              h("div",{style:{background:"rgba(255,255,255,.1)",borderRadius:10,padding:"12px"}},
+                h("div",{style:{fontSize:9,opacity:.7,marginBottom:4}},"🛒 WALK-IN POS SALES"),
+                h("div",{style:{fontSize:22,fontWeight:900}},
+                  "₱"+orders.filter(o=>o.branch==="ct-main"&&
+                    o.date===new Date().toISOString().slice(0,10))
+                    .reduce((s,o)=>s+(o.subtotal||0),0).toLocaleString()),
+                h("div",{style:{fontSize:9,opacity:.6}},
+                  orders.filter(o=>o.branch==="ct-main"&&
+                    o.date===new Date().toISOString().slice(0,10)).length+" transactions today")
+              ),
+              // Commissary PO collections
+              h("div",{style:{background:"rgba(255,255,255,.1)",borderRadius:10,padding:"12px"}},
+                h("div",{style:{fontSize:9,opacity:.7,marginBottom:4}},"📦 COMMISSARY COLLECTIONS"),
+                h("div",{style:{fontSize:22,fontWeight:900}},
+                  "₱"+advances.filter(a=>a._type==="po"&&
+                    (a.paidAt?.seconds||0)*1000>Date.now()-86400000)
+                    .reduce((s,a)=>s+(a.totalAmount||0),0).toLocaleString()),
+                h("div",{style:{fontSize:9,opacity:.6}},
+                  advances.filter(a=>a._type==="po"&&a.paymentStatus==="Paid").length+" POs paid")
+              ),
+              // Wholesale/Franchisee
+              h("div",{style:{background:"rgba(255,255,255,.1)",borderRadius:10,padding:"12px"}},
+                h("div",{style:{fontSize:9,opacity:.7,marginBottom:4}},"🏭 WHOLESALE/FRANCHISEE"),
+                h("div",{style:{fontSize:22,fontWeight:900}},
+                  "₱"+orders.filter(o=>o.branch==="ct-main"&&
+                    (o.priceType==="wholesale"||o.priceType==="franchisee")&&
+                    o.date===new Date().toISOString().slice(0,10))
+                    .reduce((s,o)=>s+(o.subtotal||0),0).toLocaleString()),
+                h("div",{style:{fontSize:9,opacity:.6}},"Special price type orders")
+              )
+            )
           ),
-          h("div",{style:{display:"grid",gridTemplateColumns:"1.3fr 1fr",gap:10}},
-            h("div",{style:{background:"#fff",borderRadius:13,padding:"13px 15px",border:"1px solid "+C.border}},
-              h("div",{style:{fontWeight:800,fontSize:12,marginBottom:10}},"Branch Performance"),
-              branches.map(b=>h("div",{key:b.id,style:{display:"flex",alignItems:"center",gap:8,padding:"7px 0",borderBottom:"1px solid #f5f5f5"}},
-                h("div",{style:{width:26,height:26,background:"#FFF0F0",borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",fontSize:8,fontWeight:900,color:C.primary,flexShrink:0}},b.name.replace("CT-","")),
-                h("div",{style:{flex:1}},
-                  h("div",{style:{fontSize:10,fontWeight:700}},b.full),
-                  h("div",{style:{fontSize:8,color:C.muted}},b.loc)
-                ),
-                h("div",{style:{textAlign:"right"}},
-                  h("div",{style:{fontSize:11,fontWeight:800,color:C.primary}},"₱"+orders.filter(o=>o.branch===b.id).reduce((s,o)=>s+(o.total||0),0).toFixed(0)),
-                  h("div",{style:{fontSize:8,color:C.muted}},orders.filter(o=>o.branch===b.id).length+" orders")
-                )
-              ))
+
+          // ── BRANCH PERFORMANCE TABLE ──
+          h("div",{style:{display:"grid",gridTemplateColumns:"1fr 320px",gap:12}},
+
+            // Branch list
+            h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
+              h("div",{style:{padding:"12px 16px",borderBottom:"1px solid "+C.border,
+                display:"flex",justifyContent:"space-between",alignItems:"center"}},
+                h("div",{style:{fontSize:13,fontWeight:800}},"🏪 Branch Performance"),
+                h("div",{style:{fontSize:9,color:C.muted}},
+                  new Date().toLocaleDateString("en-PH",{month:"short",day:"numeric",year:"numeric"}))
+              ),
+              branches.map(function(b){
+                const bOrders=orders.filter(function(o){
+                  return o.branch===b.id&&o.date===new Date().toISOString().slice(0,10);
+                });
+                const bSales=bOrders.reduce(function(s,o){return s+(o.subtotal||0);},0);
+                const bPending=bOrders.filter(function(o){return o.status==="pending";}).length;
+                const allBranchSales=orders.filter(function(o){
+                  return o.date===new Date().toISOString().slice(0,10);
+                }).reduce(function(s,o){return s+(o.subtotal||0);},0);
+                const pct=allBranchSales>0?Math.round(bSales/allBranchSales*100):0;
+                return h("div",{key:b.id,
+                  style:{display:"flex",alignItems:"center",padding:"10px 16px",
+                    borderBottom:"1px solid #f5f5f5",gap:10}},
+                  h("div",{style:{background:C.primary,color:"#fff",borderRadius:6,
+                    padding:"2px 6px",fontSize:9,fontWeight:900,flexShrink:0}},
+                    b.id.replace("ct-","").toUpperCase()),
+                  h("div",{style:{flex:1}},
+                    h("div",{style:{fontSize:11,fontWeight:700}},b.name||b.full),
+                    h("div",{style:{fontSize:9,color:C.muted}},b.address||"")
+                  ),
+                  h("div",{style:{textAlign:"right"}},
+                    h("div",{style:{fontSize:13,fontWeight:900,
+                      color:bSales>0?C.primary:C.muted}},
+                      "₱"+bSales.toLocaleString()),
+                    h("div",{style:{fontSize:9,color:C.muted}},
+                      bOrders.length+" orders"+(bPending>0?" · ⚠️"+bPending+" pending":""))
+                  ),
+                  // Progress bar
+                  h("div",{style:{width:60}},
+                    h("div",{style:{height:4,background:"#f0f0f0",borderRadius:2}},
+                      h("div",{style:{height:"100%",width:pct+"%",
+                        background:C.primary,borderRadius:2,
+                        transition:"width .3s"}}))
+                  )
+                );
+              })
             ),
-            h("div",{style:{background:"#fff",borderRadius:13,padding:"13px 15px",border:"1px solid "+C.border}},
-              h("div",{style:{fontWeight:800,fontSize:12,marginBottom:10}},"Live Orders (Firebase)"),
-              orders.slice(0,6).map(o=>h("div",{key:o._docId||o.id,style:{display:"flex",gap:8,padding:"6px 0",borderBottom:"1px solid #f5f5f5",alignItems:"center"}},
-                h("div",{style:{width:30,height:30,background:"#FFF0F0",borderRadius:7,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,color:C.primary,fontSize:8,flexShrink:0}},(o.id||"—").slice(-3)),
-                h("div",{style:{flex:1}},
-                  h("div",{style:{fontSize:10,fontWeight:700}},(o.id||"—")+" · "+(o.cashier||"—")),
-                  h("div",{style:{fontSize:8,color:C.muted}},(o.items||[]).map(i=>i.name).join(", ").slice(0,30))
-                ),
-                h("div",{style:{textAlign:"right"}},
-                  h("div",{style:{fontSize:10,fontWeight:800}},"₱"+(o.total||0).toFixed(0)),
-                  h(Badge,{label:o.status||"—",color:({"pending":C.warning,"preparing":C.info,"served":C.success})[o.status]||C.muted})
-                )
-              )),
-              orders.length===0&&h("div",{style:{textAlign:"center",padding:"20px 0",color:C.muted,fontSize:11}},"No orders yet — waiting for Firebase...")
+
+            // Live Orders feed
+            h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,
+              overflow:"hidden"}},
+              h("div",{style:{padding:"12px 16px",borderBottom:"1px solid "+C.border,
+                display:"flex",justifyContent:"space-between",alignItems:"center"}},
+                h("div",{style:{fontSize:13,fontWeight:800}},"🔴 Live Orders"),
+                h("div",{style:{background:C.danger,color:"#fff",borderRadius:20,
+                  padding:"2px 8px",fontSize:9,fontWeight:700}},
+                  orders.filter(function(o){
+                    return o.status==="pending"||o.status==="cooking";
+                  }).length+" active")
+              ),
+              h("div",{style:{maxHeight:350,overflowY:"auto"}},
+                orders.filter(function(o){
+                  return o.status==="pending"||o.status==="cooking"||o.status==="served";
+                })
+                .sort(function(a,b){return (b.timestamp?.seconds||0)-(a.timestamp?.seconds||0);})
+                .slice(0,15)
+                .map(function(o){
+                  const stCol={pending:C.warning,cooking:C.info,served:C.success}[o.status]||C.muted;
+                  return h("div",{key:o._docId||o.id,
+                    style:{padding:"8px 16px",borderBottom:"1px solid #f5f5f5"}},
+                    h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:2}},
+                      h("div",{style:{fontSize:10,fontWeight:700}},o.id||"—"),
+                      h("div",{style:{fontSize:12,fontWeight:900,color:C.primary}},
+                        "₱"+(o.subtotal||0).toFixed(2))
+                    ),
+                    h("div",{style:{display:"flex",justifyContent:"space-between"}},
+                      h("div",{style:{fontSize:9,color:C.muted}},
+                        (o.branch||"").replace("ct-","").toUpperCase()+" · "+
+                        (o.items||[]).slice(0,2).map(function(i){return i.name;}).join(", ")),
+                      h("span",{style:{fontSize:8,padding:"1px 6px",borderRadius:8,
+                        background:stCol,color:"#fff",fontWeight:700}},
+                        (o.status||"").toUpperCase())
+                    )
+                  );
+                }),
+                orders.filter(function(o){
+                  return o.status==="pending"||o.status==="cooking"||o.status==="served";
+                }).length===0&&h("div",{style:{padding:"20px",textAlign:"center",
+                  color:C.muted,fontSize:11}},"No live orders")
+              )
             )
           )
         ),
+
 
         // ══ BRANCHES ══
         page==="branches"&&h("div",null,
@@ -5744,25 +5921,132 @@ function App(){
 
         // ══ BRANCH DASH ══
         page==="branch_dash"&&h("div",null,
-          h("div",{style:{background:`linear-gradient(135deg,${C.primary},${C.dark})`,borderRadius:13,padding:"15px 17px",marginBottom:12,display:"flex",justifyContent:"space-between"}},
+
+          // Branch hero card
+          h("div",{style:{background:"linear-gradient(135deg,"+C.primary+","+C.dark+")",
+            borderRadius:13,padding:"15px 17px",marginBottom:12,
+            display:"flex",justifyContent:"space-between",alignItems:"flex-start"}},
             h("div",null,
-              h("div",{style:{color:C.accent,fontSize:8,fontWeight:700,letterSpacing:2}},"YOUR BRANCH"),
-              h("div",{style:{color:"#fff",fontSize:15,fontWeight:900,marginTop:2}},curBranch.full),
-              h("div",{style:{color:"rgba(255,255,255,.6)",fontSize:9,marginTop:1}},curBranch.loc)
+              h("div",{style:{color:"rgba(255,255,255,.6)",fontSize:8,fontWeight:700,letterSpacing:2}},
+                "YOUR BRANCH"),
+              h("div",{style:{color:"#fff",fontSize:20,fontWeight:900,marginTop:2}},
+                curBranch.name||curBranch.full),
+              h("div",{style:{color:"rgba(255,255,255,.5)",fontSize:9,marginTop:2}},
+                curBranch.address||"")
             ),
             h("div",{style:{textAlign:"right"}},
-              h("div",{style:{color:C.accent,fontSize:8}},"LIVE SALES"),
-              h("div",{style:{color:"#fff",fontSize:22,fontWeight:900}},"₱"+myOrders.reduce((s,o)=>s+(o.total||0),0).toFixed(0)),
-              h("div",{style:{color:"rgba(255,255,255,.5)",fontSize:9}},myOrders.length+" orders")
+              h("div",{style:{color:"rgba(255,255,255,.5)",fontSize:9}},"LIVE SALES"),
+              h("div",{style:{color:"#fff",fontSize:22,fontWeight:900}},
+                "₱"+myOrders.filter(function(o){
+                  return o.date===new Date().toISOString().slice(0,10);
+                }).reduce(function(s,o){return s+(o.subtotal||0);},0).toLocaleString()),
+              h("div",{style:{color:"rgba(255,255,255,.5)",fontSize:9}},
+                myOrders.filter(function(o){
+                  return o.date===new Date().toISOString().slice(0,10);
+                }).length+" orders today")
             )
           ),
-          h("div",{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:9}},
-            h(Stat,{label:"Pending",value:myOrders.filter(o=>o.status==="pending").length,icon:"⏳",color:C.warning}),
-            h(Stat,{label:"Cooking",value:myOrders.filter(o=>o.status==="preparing").length,icon:"🔥",color:C.info}),
-            h(Stat,{label:"Served",value:myOrders.filter(o=>o.status==="served").length,icon:"✅",color:C.success}),
-            h(Stat,{label:"Expenses",value:"₱"+expenses.filter(e=>e.branch===branchId).reduce((s,e)=>s+(e.amount||0),0).toFixed(0),icon:"💸",color:C.danger})
+
+          // KPI row
+          h("div",{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:12}},
+            h(Stat,{label:"Pending",
+              value:myOrders.filter(function(o){return o.status==="pending";}).length,
+              icon:"⏳",color:C.warning}),
+            h(Stat,{label:"Cooking",
+              value:myOrders.filter(function(o){return o.status==="cooking";}).length,
+              icon:"🔥",color:C.info}),
+            h(Stat,{label:"Served Today",
+              value:myOrders.filter(function(o){
+                return o.status==="served"&&o.date===new Date().toISOString().slice(0,10);
+              }).length,
+              icon:"✅",color:C.success}),
+            h(Stat,{label:"Expenses",
+              value:"₱"+orders.filter(function(o){return o._type==="expense"&&o.branch===branchId;})
+                .reduce(function(s,o){return s+(o.amount||0);},0).toLocaleString(),
+              icon:"💸",color:C.danger})
+          ),
+
+          // MAIN BRANCH EXTRA: Commissary section
+          branchId==="ct-main"&&h("div",{style:{marginBottom:12}},
+            h("div",{style:{fontSize:11,fontWeight:800,marginBottom:8,color:C.text}},
+              "📦 Commissary — PO Queue"),
+            h("div",{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:10}},
+              h(Stat,{label:"Pending POs",
+                value:advances.filter(function(a){return a._type==="po"&&a.status==="received_by_main";}).length,
+                icon:"⏳",color:C.warning}),
+              h(Stat,{label:"Processing",
+                value:advances.filter(function(a){return a._type==="po"&&a.status==="processing";}).length,
+                icon:"⚙️",color:"#6A1B9A"}),
+              h(Stat,{label:"For Collection",
+                value:advances.filter(function(a){return a._type==="po"&&a.status==="paid";}).length,
+                icon:"💰",color:C.success}),
+              h(Stat,{label:"This Month",
+                value:"₱"+advances.filter(function(a){
+                  return a._type==="po"&&a.paymentStatus==="Paid"&&
+                    (a.date||"").slice(0,7)===new Date().toISOString().slice(0,7);
+                }).reduce(function(s,a){return s+(a.totalAmount||0);},0).toLocaleString(),
+                icon:"📊",color:C.primary})
+            ),
+            // Urgent POs needing action
+            advances.filter(function(a){
+              return a._type==="po"&&
+                (a.status==="received_by_main"||a.status==="discrepancy");
+            }).length>0&&h("div",{style:{background:"#FFF3E0",border:"1px solid #FFE0B2",
+              borderRadius:10,padding:"10px 14px"}},
+              h("div",{style:{fontSize:10,fontWeight:700,color:"#E65100",marginBottom:6}},
+                "⚠️ Needs Action"),
+              advances.filter(function(a){
+                return a._type==="po"&&
+                  (a.status==="received_by_main"||a.status==="discrepancy");
+              }).slice(0,3).map(function(po){
+                return h("div",{key:po._docId,
+                  style:{display:"flex",justifyContent:"space-between",
+                    padding:"5px 0",borderBottom:"1px solid #FFE0B2",fontSize:11}},
+                  h("span",{style:{fontWeight:700}},po.poNum),
+                  h("span",{style:{color:C.muted}},po.branchName||po.branch),
+                  h("button",{onClick:function(){setPage("po_monitor");},
+                    style:{padding:"2px 8px",background:"#E65100",border:"none",
+                      borderRadius:5,color:"#fff",fontSize:9,fontWeight:700,cursor:"pointer"}},
+                    po.status==="discrepancy"?"Resolve":"Process")
+                );
+              })
+            )
+          ),
+
+          // Recent orders
+          h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border}},
+            h("div",{style:{padding:"10px 14px",borderBottom:"1px solid "+C.border,
+              fontSize:12,fontWeight:800}},"📋 Recent Orders"),
+            h("div",{style:{maxHeight:280,overflowY:"auto"}},
+              myOrders.filter(function(o){
+                return o.date===new Date().toISOString().slice(0,10);
+              }).slice(0,10).map(function(o){
+                const stCol={pending:C.warning,cooking:C.info,served:C.success,voided:C.danger}[o.status]||C.muted;
+                return h("div",{key:o._docId||o.id,
+                  style:{display:"flex",justifyContent:"space-between",alignItems:"center",
+                    padding:"8px 14px",borderBottom:"1px solid #f5f5f5"}},
+                  h("div",null,
+                    h("div",{style:{fontSize:10,fontWeight:700}},o.id||"—"),
+                    h("div",{style:{fontSize:9,color:C.muted}},
+                      (o.items||[]).slice(0,2).map(function(i){return i.name;}).join(", "))
+                  ),
+                  h("div",{style:{display:"flex",gap:8,alignItems:"center"}},
+                    h("span",{style:{fontSize:9,padding:"2px 7px",borderRadius:8,
+                      background:stCol,color:"#fff",fontWeight:700}},
+                      (o.status||"").toUpperCase()),
+                    h("span",{style:{fontWeight:800,fontSize:12}},
+                      "₱"+(o.subtotal||0).toFixed(2))
+                  )
+                );
+              }),
+              myOrders.filter(function(o){
+                return o.date===new Date().toISOString().slice(0,10);
+              }).length===0&&h("div",{style:{padding:"20px",textAlign:"center",
+                color:C.muted,fontSize:11}},"No orders today yet")
+            )
           )
         ),
+
 
         // ══ BRANCH ACCESS CONTROL ══
         page==="branch_settings"&&h(BranchSettingsPage,{
