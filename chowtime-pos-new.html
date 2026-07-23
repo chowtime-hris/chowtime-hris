@@ -4640,17 +4640,18 @@ function App(){
 
   // ── LOAD INVENTORY LOG ───────────────────────────────────
   useEffect(()=>{
-    if(!branchId||!user)return;
+    if(!user?.branch||!user)return;
     try{
       const isOwner=user.role==="owner"||user.role==="commissary";
-      const logCol=isOwner?"inventory_log":"inventory_log_"+branchId;
+      const bid=isOwner?"ct-main":(user.branch==="all"?"ct-wsfp":user.branch);
+      const logCol=isOwner?"inventory_log":"inventory_log_"+bid;
       const q=query(collection(db,logCol),orderBy("at","desc"),limit(50));
       const unsub=onSnapshot(q,snap=>{
         setInvLog(snap.docs.map(d=>({...d.data(),_docId:d.id})));
       },()=>{});
       return()=>unsub();
     }catch(e){}
-  },[branchId,user?.role]);
+  },[user?.branch,user?.role]);
 
   // ── LOAD STAFF FROM FIRESTORE ────────────────────────────
   useEffect(()=>{
