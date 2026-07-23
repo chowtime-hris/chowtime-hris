@@ -59,7 +59,7 @@ import { initializeApp } from "firebase/app";
 import {
   getFirestore, collection, doc,
   onSnapshot, addDoc, updateDoc, setDoc, deleteDoc,
-  getDocs, query, orderBy, where, serverTimestamp,
+  getDocs, getDoc, query, orderBy, where, serverTimestamp,
   writeBatch, limit, increment
 } from "firebase/firestore";
 import {
@@ -3574,6 +3574,381 @@ function VoidBadge({branchId,db,setPage,visible=true}){
 
 
 
+
+// ─── RECEIVE ITEMS MODAL (Branch) ────────────────────────
+function ReceiveItemsModal({po,db,user,branchId,showT,onClose}){
+  if(!po)return null;
+  const items=po.deliveredItems||po.items||[];
+  const [received,setReceived]=useState(()=>{
+    const r={};
+    items.forEach(i=>{r[i.id]=i.actualQty!=null?i.actualQty:i.qty;});
+    return r;
+  });
+  const [remarks,setRemarks]=useState({});
+  const [saving,setSaving]=useState(false);
+
+  const hasDisc=items.some(i=>{
+    const exp=i.actualQty!=null?i.actualQty:i.qty;
+    return (received[i.id]||0)!==exp;
+  });
+
+  const confirmReceipt=async()=>{
+    setSaving(true);
+    try{
+      const recItems=items.map(i=>({
+        ...i,
+        receivedQty:received[i.id]||0,
+        discrepancy:(received[i.id]||0)-(i.actualQty!=null?i.actualQty:i.qty),
+        remark:remarks[i.id]||""
+      }));
+      const discItems=recItems.filter(i=>i.discrepancy!==0);
+
+      if(hasDisc){
+        // Submit discrepancy report for approval
+        await updateDoc(doc(db,"advances",po._docId),{
+          status:"discrepancy",
+          receivedItems:recItems,
+          discrepancyItems:discItems,
+          receivedBy:user.name,
+          receivedAt:serverTimestamp(),
+          discRepStatus:"pending_approval"
+        });
+        showT("Discrepancy report submitted — awaiting approval ⚠️","warn");
+      } else {
+        // No discrepancy — complete and update inventory
+        await updateDoc(doc(db,"advances",po._docId),{
+          status:"completed",
+          receivedItems:recItems,
+          receivedBy:user.name,
+          receivedAt:serverTimestamp()
+        });
+        // Update branch inventory
+        for(const item of recItems){
+          try{
+            const invRef=doc(db,"inventory_"+branchId,item.id);
+            const invSnap=await getDoc(invRef);
+            if(invSnap.exists()){
+              await updateDoc(invRef,{
+                stock:increment(item.receivedQty),
+                lastReceived:serverTimestamp()
+              });
+            } else {
+              await setDoc(invRef,{
+                id:item.id,name:item.name,
+                stock:item.receivedQty,
+                unit:item.unit||"pc",
+                lastReceived:serverTimestamp()
+              });
+            }
+          }catch(e){console.warn("Inv update failed for",item.id);}
+        }
+        showT("Items received! Inventory updated ✅");
+      }
+      onClose();
+    }catch(e){showT("Error saving receipt","err");console.error(e);}
+    setSaving(false);
+  };
+
+  return h("div",{style:{background:"#fff",width:640,maxHeight:"90vh",borderRadius:16,
+    display:"flex",flexDirection:"column",overflow:"hidden",
+    boxShadow:"0 20px 60px rgba(0,0,0,.4)"}},
+
+    // Header
+    h("div",{style:{background:hasDisc?
+      "linear-gradient(135deg,#C62828,#B71C1C)":
+      "linear-gradient(135deg,#2E7D32,#1B5E20)",
+      padding:"14px 20px",display:"flex",justifyContent:"space-between",alignItems:"center"}},
+      h("div",null,
+        h("div",{style:{color:"rgba(255,255,255,.6)",fontSize:9,fontWeight:700,letterSpacing:2}},
+          "RECEIVE & CHECK ITEMS"),
+        h("div",{style:{color:"#fff",fontSize:15,fontWeight:900,marginTop:2}},po.poNum),
+        h("div",{style:{color:"rgba(255,255,255,.5)",fontSize:9}},
+          (po.branchName||po.branch)+" · DR: "+(po.drNum||"—"))
+      ),
+      h("button",{onClick:onClose,style:{background:"rgba(255,255,255,.15)",border:"none",
+        color:"#fff",width:28,height:28,borderRadius:8,fontSize:16,cursor:"pointer"}},"×")
+    ),
+
+    // Discrepancy warning
+    hasDisc&&h("div",{style:{background:"#FFF8E1",padding:"8px 16px",
+      borderBottom:"1px solid #FFE082",
+      display:"flex",gap:8,alignItems:"center"}},
+      h("span",{style:{fontSize:16}},"⚠️"),
+      h("div",null,
+        h("div",{style:{fontSize:11,fontWeight:800,color:"#E65100"}},
+          "Discrepancy detected!"),
+        h("div",{style:{fontSize:9,color:"#795548"}},
+          "Items with discrepancy will be submitted for commissary approval before going to inventory.")
+      )
+    ),
+
+    // Items table
+    h("div",{style:{flex:1,overflowY:"auto"}},
+      h("div",{style:{display:"grid",
+        gridTemplateColumns:"1fr 80px 90px 90px 80px",
+        padding:"7px 16px",background:"#fafafa",
+        borderBottom:"1px solid #eee",position:"sticky",top:0}},
+        ["ITEM","DR QTY","RECEIVED","DIFF","REMARK"].map(h2=>
+          h("div",{key:h2,style:{fontSize:8,fontWeight:700,color:C.muted,letterSpacing:1}},h2))
+      ),
+      items.map(i=>{
+        const drQty=i.actualQty!=null?i.actualQty:i.qty;
+        const recQty=received[i.id]!=null?received[i.id]:drQty;
+        const diff=recQty-drQty;
+        return h("div",{key:i.id,
+          style:{display:"grid",gridTemplateColumns:"1fr 80px 90px 90px 80px",
+            padding:"8px 16px",borderBottom:"1px solid #f5f5f5",alignItems:"center",
+            background:diff<0?"#FFEBEE":diff>0?"#E3F2FD":"#fff"}},
+          h("div",null,
+            h("div",{style:{fontSize:11,fontWeight:700}},i.name),
+            h("div",{style:{fontSize:9,color:C.muted}},i.unit||"")
+          ),
+          h("div",{style:{fontSize:11,textAlign:"center",color:C.muted}},drQty),
+          h("div",{style:{display:"flex",alignItems:"center",gap:3}},
+            h("button",{onClick:()=>setReceived(p=>({...p,[i.id]:Math.max(0,(p[i.id]!=null?p[i.id]:drQty)-1)})),
+              style:{width:22,height:22,borderRadius:5,border:"1px solid #ddd",
+                background:"#fff",cursor:"pointer",fontSize:14}},"-"),
+            h("input",{type:"number",min:0,
+              value:received[i.id]!=null?received[i.id]:drQty,
+              onChange:e=>setReceived(p=>({...p,[i.id]:parseFloat(e.target.value)||0})),
+              style:{width:40,textAlign:"center",padding:"3px",border:"1px solid #ddd",
+                borderRadius:5,fontSize:11,fontWeight:700,outline:"none",
+                color:diff!==0?(diff<0?"#C62828":"#1565C0"):"#333"}}),
+            h("button",{onClick:()=>setReceived(p=>({...p,[i.id]:(p[i.id]!=null?p[i.id]:drQty)+1})),
+              style:{width:22,height:22,borderRadius:5,border:"1px solid #4CAF50",
+                background:"#E8F5E9",cursor:"pointer",fontSize:14,color:"#2E7D32"}},"+")
+          ),
+          h("div",{style:{fontSize:12,fontWeight:800,textAlign:"center",
+            color:diff<0?"#C62828":diff>0?"#1565C0":"#9E9E9E"}},
+            diff===0?"✓":(diff>0?"+":"")+diff),
+          h("input",{value:remarks[i.id]||"",
+            onChange:e=>setRemarks(p=>({...p,[i.id]:e.target.value})),
+            placeholder:diff!==0?"Required...":"",
+            style:{padding:"4px 6px",border:`1px solid ${diff!==0?C.danger:C.border}`,
+              borderRadius:6,fontSize:9,outline:"none",width:"100%",boxSizing:"border-box"}})
+        );
+      })
+    ),
+
+    // Summary + Confirm
+    h("div",{style:{padding:"12px 16px",borderTop:"2px solid #eee",background:"#fafafa"}},
+      h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:10}},
+        h("div",{style:{textAlign:"center",padding:"8px",background:"#fff",borderRadius:8,border:"1px solid #eee"}},
+          h("div",{style:{fontSize:9,color:C.muted}},"EXPECTED"),
+          h("div",{style:{fontSize:13,fontWeight:800}},
+            items.reduce((s,i)=>s+(i.actualQty!=null?i.actualQty:i.qty),0))
+        ),
+        h("div",{style:{textAlign:"center",padding:"8px",background:"#fff",borderRadius:8,border:"1px solid #eee"}},
+          h("div",{style:{fontSize:9,color:C.muted}},"RECEIVED"),
+          h("div",{style:{fontSize:13,fontWeight:800,color:C.success}},
+            items.reduce((s,i)=>s+(received[i.id]!=null?received[i.id]:(i.actualQty!=null?i.actualQty:i.qty)),0))
+        ),
+        h("div",{style:{textAlign:"center",padding:"8px",
+          background:hasDisc?"#FFEBEE":"#E8F5E9",borderRadius:8}},
+          h("div",{style:{fontSize:9,color:C.muted}},"DISCREPANCIES"),
+          h("div",{style:{fontSize:13,fontWeight:800,color:hasDisc?C.danger:C.success}},
+            hasDisc?items.filter(i=>(received[i.id]!=null?received[i.id]:(i.actualQty!=null?i.actualQty:i.qty))!==(i.actualQty!=null?i.actualQty:i.qty)).length+" items":"None ✓")
+        )
+      ),
+      h("button",{onClick:confirmReceipt,disabled:saving,
+        style:{width:"100%",padding:"11px",border:"none",borderRadius:9,
+          color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer",
+          background:hasDisc?"linear-gradient(135deg,#C62828,#B71C1C)":
+            "linear-gradient(135deg,#2E7D32,#1B5E20)"}},
+        saving?"Saving...":(hasDisc?"⚠️ Submit Discrepancy Report":"✅ Confirm Receipt & Update Inventory"))
+    )
+  );
+}
+
+
+// ─── RECEIVE ITEMS MODAL ─────────────────────────────────
+function ReceiveItemsModal({po,db,user,showT,branchId,onClose}){
+  if(!po)return null;
+  const drItems = po.deliveredItems||po.items||[];
+  const [received,setReceived] = useState(()=>{
+    const init={};
+    drItems.forEach(i=>{init[i.id]=i.actualQty!=null?i.actualQty:(i.qty||0);});
+    return init;
+  });
+  const [remarks,setRemarks] = useState({});
+  const [saving,setSaving] = useState(false);
+
+  // Check for discrepancies
+  const discItems = drItems.filter(i=>{
+    const dr=i.actualQty!=null?i.actualQty:(i.qty||0);
+    const rc=received[i.id]!=null?received[i.id]:dr;
+    return rc!==dr;
+  });
+  const hasDisc = discItems.length>0;
+
+  const confirmReceipt = async()=>{
+    setSaving(true);
+    try{
+      const finalItems = drItems.map(i=>({
+        ...i,
+        receivedQty: received[i.id]!=null?received[i.id]:(i.actualQty!=null?i.actualQty:(i.qty||0)),
+        remark: remarks[i.id]||""
+      }));
+
+      if(hasDisc){
+        // Save as discrepancy - needs approval
+        await updateDoc(doc(db,"advances",po._docId),{
+          status:"discrepancy",
+          receivedItems:finalItems,
+          receivedBy:user.name,
+          receivedAt:serverTimestamp(),
+          discrepancyItems:discItems.map(i=>({
+            ...i,
+            drQty:i.actualQty!=null?i.actualQty:(i.qty||0),
+            receivedQty:received[i.id]||0,
+            diff:(received[i.id]||0)-(i.actualQty!=null?i.actualQty:(i.qty||0)),
+            remark:remarks[i.id]||""
+          })),
+          discrepancyStatus:"pending_approval"
+        });
+        showT("Discrepancy reported — awaiting Main approval","warn");
+      } else {
+        // No discrepancy - complete and add to inventory
+        await updateDoc(doc(db,"advances",po._docId),{
+          status:"completed",
+          receivedItems:finalItems,
+          receivedBy:user.name,
+          receivedAt:serverTimestamp()
+        });
+        // Add to branch inventory
+        const invRef = doc(db,"inventory_"+branchId,"main");
+        finalItems.forEach(async(i)=>{
+          try{
+            await updateDoc(doc(db,"inventory_"+branchId,i.id),{
+              qty: increment(i.receivedQty),
+              lastReceived: serverTimestamp(),
+              lastDR: po.drNum||po.poNum
+            });
+          }catch(e){
+            // Item might not exist yet
+            try{
+              const {setDoc} = await import("https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js");
+            }catch(e2){}
+          }
+        });
+        showT("Items received ✅ Inventory updated");
+      }
+      onClose();
+    }catch(e){showT("Error saving receipt","err");console.error(e);}
+    setSaving(false);
+  };
+
+  return h("div",{style:{background:"#fff",width:640,maxHeight:"90vh",
+    borderRadius:16,display:"flex",flexDirection:"column",overflow:"hidden",
+    boxShadow:"0 20px 60px rgba(0,0,0,.4)"}},
+
+    // Header
+    h("div",{style:{background:`linear-gradient(135deg,${C.primary},${C.dark})`,
+      padding:"14px 20px",display:"flex",justifyContent:"space-between",alignItems:"center"}},
+      h("div",null,
+        h("div",{style:{color:"rgba(255,255,255,.6)",fontSize:9,fontWeight:700,letterSpacing:2}},
+          "RECEIVE ITEMS — CHECK FOR DISCREPANCY"),
+        h("div",{style:{color:"#fff",fontSize:15,fontWeight:900,marginTop:2}},
+          po.drNum||po.poNum),
+        h("div",{style:{color:"rgba(255,255,255,.5)",fontSize:9}},
+          "From: Commissary · "+po.date)
+      ),
+      h("button",{onClick:onClose,style:{background:"rgba(255,255,255,.15)",border:"none",
+        color:"#fff",width:28,height:28,borderRadius:8,fontSize:16,cursor:"pointer"}},"×")
+    ),
+
+    // Discrepancy alert
+    hasDisc&&h("div",{style:{padding:"8px 20px",background:"#FFF3E0",
+      borderBottom:"1px solid #FFE0B2",fontSize:11,color:"#E65100",fontWeight:700}},
+      "⚠️ "+discItems.length+" item(s) with discrepancy detected — will be sent for approval before inventory update"
+    ),
+
+    // Items table
+    h("div",{style:{flex:1,overflowY:"auto"}},
+      h("div",{style:{display:"grid",
+        gridTemplateColumns:"1fr 80px 80px 80px 1fr",
+        padding:"7px 20px",background:"#fafafa",
+        borderBottom:"1px solid #eee",position:"sticky",top:0}},
+        ["ITEM","DR QTY","RECEIVED","DIFF","REMARKS"].map(h2=>
+          h("div",{key:h2,style:{fontSize:8,fontWeight:700,color:C.muted,letterSpacing:1}},h2))
+      ),
+
+      drItems.map(i=>{
+        const drQty = i.actualQty!=null?i.actualQty:(i.qty||0);
+        const rcvQty = received[i.id]!=null?received[i.id]:drQty;
+        const diff = rcvQty-drQty;
+
+        return h("div",{key:i.id,
+          style:{display:"grid",gridTemplateColumns:"1fr 80px 80px 80px 1fr",
+            padding:"8px 20px",borderBottom:"1px solid #f5f5f5",alignItems:"center",
+            background:diff!==0?"#FFF8E1":"#fff"}},
+
+          h("div",null,
+            h("div",{style:{fontSize:11,fontWeight:700}},i.name),
+            h("div",{style:{fontSize:9,color:"#888"}},i.unit||"")
+          ),
+
+          h("div",{style:{fontSize:11,color:C.muted,fontWeight:600}},
+            drQty+" "+(i.unit||"")),
+
+          // Received qty input
+          h("div",{style:{display:"flex",alignItems:"center",gap:3}},
+            h("button",{
+              onClick:()=>setReceived(p=>({...p,[i.id]:Math.max(0,(p[i.id]!=null?p[i.id]:drQty)-1)})),
+              style:{width:20,height:20,borderRadius:4,border:"1px solid #ddd",
+                background:"#fff",cursor:"pointer",fontSize:12}},"-"),
+            h("input",{type:"number",min:0,
+              value:received[i.id]!=null?received[i.id]:drQty,
+              onChange:e=>setReceived(p=>({...p,[i.id]:parseFloat(e.target.value)||0})),
+              style:{width:38,textAlign:"center",padding:"2px",
+                border:"1px solid "+(diff!==0?C.warning:"#ddd"),
+                borderRadius:4,fontSize:11,fontWeight:700,outline:"none",
+                color:diff<0?C.danger:diff>0?"#1565C0":"#333"}}),
+            h("button",{
+              onClick:()=>setReceived(p=>({...p,[i.id]:(p[i.id]!=null?p[i.id]:drQty)+1})),
+              style:{width:20,height:20,borderRadius:4,border:"1px solid "+C.primary,
+                background:"#f5f5f5",cursor:"pointer",fontSize:12}},"+")
+          ),
+
+          h("div",{style:{fontSize:11,fontWeight:700,
+            color:diff<0?C.danger:diff>0?"#1565C0":"#888"}},
+            diff===0?"✓":(diff>0?"+":"")+diff),
+
+          // Remarks for discrepancy
+          diff!==0
+            ? h("input",{value:remarks[i.id]||"",
+                onChange:e=>setRemarks(p=>({...p,[i.id]:e.target.value})),
+                placeholder:"Reason for discrepancy...",
+                style:{width:"100%",padding:"4px 7px",border:"1px solid "+C.warning,
+                  borderRadius:6,fontSize:10,outline:"none",boxSizing:"border-box"}})
+            : h("span",{style:{fontSize:9,color:C.success}},"OK")
+        );
+      })
+    ),
+
+    // Footer
+    h("div",{style:{padding:"12px 20px",borderTop:"2px solid "+(hasDisc?C.warning:C.primary),
+      background:"#fafafa",display:"flex",gap:8,alignItems:"center"}},
+      hasDisc
+        ? h("div",{style:{fontSize:10,color:"#E65100",flex:1}},
+            "⚠️ Discrepancy will be reported to Main for approval")
+        : h("div",{style:{fontSize:10,color:C.success,flex:1}},
+            "✅ No discrepancy — items will be added to inventory"),
+      h("button",{onClick:onClose,
+        style:{padding:"9px 16px",background:"#fff",border:"1px solid "+C.border,
+          borderRadius:9,fontSize:11,fontWeight:700,cursor:"pointer"}},
+        "Cancel"),
+      h("button",{onClick:confirmReceipt,disabled:saving,
+        style:{padding:"10px 20px",
+          background:hasDisc?"linear-gradient(135deg,#E65100,#BF360C)":
+            "linear-gradient(135deg,"+C.primary+","+C.dark+")",
+          border:"none",borderRadius:9,color:"#fff",
+          fontWeight:800,fontSize:12,cursor:"pointer"}},
+        saving?"Saving...":(hasDisc?"⚠️ Report Discrepancy":"✅ Confirm Receipt & Update Inventory"))
+    )
+  );
+}
+
 // ─── PAYMENT MODAL ───────────────────────────────────────
 function PaymentModal({po,db,user,showT,onClose}){
   if(!po)return null;
@@ -4051,6 +4426,56 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
         saving?"Issuing DR...":"✅ Issue DR → Mark as Processing")
     )
   );
+}
+
+// ─── PRINT DR HELPER ────────────────────────────────────
+function printPODR(po){
+  const w=window.open("","_blank","width=800,height=900");
+  const items=po.deliveredItems||po.items||[];
+  const grouped={};
+  items.forEach(function(i){
+    const cat=i.category||i.cat||"Other";
+    if(!grouped[cat])grouped[cat]=[];
+    grouped[cat].push(i);
+  });
+  let rows="",grand=0,itemNo=1;
+  Object.keys(grouped).sort().forEach(function(cat){
+    const cItems=grouped[cat];
+    const cTotal=cItems.reduce(function(s,i){
+      return s+(i.price||0)*(i.actualQty!=null?i.actualQty:(i.qty||0));
+    },0);
+    grand+=cTotal;
+    cItems.forEach(function(i){
+      const q=i.actualQty!=null?i.actualQty:(i.qty||0);
+      rows+="<tr><td>"+itemNo+++"</td><td>"+cat+"</td><td>"+i.name+"</td>"+
+        "<td>"+q+" "+(i.unit||"")+"</td>"+
+        "<td style='text-align:right'>"+"₱"+(i.price||0).toFixed(2)+"</td>"+
+        "<td style='text-align:right'>"+"₱"+((i.price||0)*q).toFixed(2)+"</td></tr>";
+    });
+    rows+="<tr style='background:#f5f5f5;font-weight:bold'>"+
+      "<td colspan='2'></td><td>Total "+cat+"</td>"+
+      "<td></td><td></td><td style='text-align:right'>"+"₱"+cTotal.toFixed(2)+"</td></tr>";
+  });
+  const html="<!DOCTYPE html><html><head><title>"+(po.drNum||po.poNum)+"</title>"+
+    "<style>body{font-family:Arial;font-size:11px;padding:20px;}"+
+    "table{width:100%;border-collapse:collapse;}"+
+    "th{background:#C8151B;color:#fff;padding:5px;}"+
+    "td{padding:4px 6px;border-bottom:1px solid #eee;}</style></head><body>"+
+    "<h2 style='color:#C8151B'>"+(po.drNum||"DR-"+po.poNum)+"</h2>"+
+    "<p>Branch: "+(po.branchName||po.branch)+" &middot; Date: "+(po.deliveryDate||po.date)+"</p>"+
+    "<table><tr><th>#</th><th>Category</th><th>Item</th>"+
+    "<th>Qty</th><th>Price</th><th>Total</th></tr>"+
+    rows+
+    "<tr style='background:#C8151B;color:#fff;font-weight:bold'>"+
+    "<td colspan='5' style='text-align:right'>GRAND TOTAL</td>"+
+    "<td>"+"₱"+grand.toFixed(2)+"</td></tr></table>"+
+    "<div style='margin-top:30px;display:grid;grid-template-columns:repeat(4,1fr);gap:20px'>"+
+    ["Prepared by","Approved by","Delivered by","Received by"].map(function(s){
+      return "<div style='text-align:center;border-top:1px solid #000;padding-top:4px'>"+s+"</div>";
+    }).join("")+"</div></body></html>";
+  w.document.write(html);
+  w.document.close();
+  setTimeout(function(){w.print();},400);
 }
 
 // ─── MAIN APP ─────────────────────────────────────────────
@@ -5912,35 +6337,127 @@ function App(){
 
         // ══ STOCK ORDER (Branch → Commissary PO) ══
         page==="stock_order"&&h("div",null,
-          h(SectionHeader,{title:"Order Stocks from Commissary",action:()=>setModal("new_po"),actionLabel:"New Order"}),
-          h("div",{style:{background:"#E3F2FD",border:"1px solid #90CAF9",borderRadius:10,padding:"10px 14px",marginBottom:13,fontSize:11,color:"#1565C0"}},"📋 Submit a Purchase Order to Commissary. They will set the delivery date and issue a DR upon delivery."),
-          h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:13}},
-            h(Stat,{label:"Pending Orders",value:advances.filter(a=>a._type==="po"&&a.branch===branchId&&a.status==="pending").length,icon:"⏳",color:C.warning}),
-            h(Stat,{label:"For Delivery",value:advances.filter(a=>a._type==="po"&&a.branch===branchId&&a.status==="approved").length,icon:"🚚",color:C.info}),
-            h(Stat,{label:"Completed",value:advances.filter(a=>a._type==="po"&&a.branch===branchId&&a.status==="delivered").length,icon:"✅",color:C.success})
+          h(SectionHeader,{title:"📦 Order Stocks from Commissary",
+            action:()=>setModal("new_po"),actionLabel:"+ New Order"}),
+
+          // Stats
+          h("div",{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}},
+            h(Stat,{label:"Pending",value:advances.filter(a=>a._type==="po"&&a.branch===branchId&&a.status==="received_by_main").length,icon:"⏳",color:C.warning}),
+            h(Stat,{label:"Processing",value:advances.filter(a=>a._type==="po"&&a.branch===branchId&&a.status==="processing").length,icon:"⚙️",color:"#6A1B9A"}),
+            h(Stat,{label:"For Receiving",value:advances.filter(a=>a._type==="po"&&a.branch===branchId&&a.status==="paid").length,icon:"📥",color:C.primary}),
+            h(Stat,{label:"Completed",value:advances.filter(a=>a._type==="po"&&a.branch===branchId&&a.status==="completed").length,icon:"✅",color:C.success})
           ),
-          h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
-            h("div",{style:{display:"grid",gridTemplateColumns:"80px 1fr 120px 110px 100px 90px",padding:"8px 14px",background:"#f9f9f9",borderBottom:"1px solid #eee"}},
-              ["PO #","Items Ordered","Requested","Delivery Date","Status","Payment"].map(h2=>h("div",{key:h2,style:{fontSize:8,fontWeight:700,color:C.muted,textTransform:"uppercase"}},""+h2))
-            ),
-            advances.filter(a=>a._type==="po"&&(user.role==="owner"||a.branch===branchId)).length===0
-              ?h("div",{style:{textAlign:"center",padding:"30px",color:C.muted,fontSize:12}},"No purchase orders yet. Click '+ New Order' to request stocks.")
-              :advances.filter(a=>a._type==="po"&&(user.role==="owner"||a.branch===branchId)).map(po=>h("div",{key:po._docId,style:{display:"grid",gridTemplateColumns:"80px 1fr 120px 110px 100px 90px",padding:"10px 14px",borderBottom:"1px solid #f5f5f5",alignItems:"center"}},
-                h("div",{style:{fontSize:10,fontWeight:800,color:C.primary}},po.poNum||"—"),
-                h("div",null,
-                  h("div",{style:{fontSize:10,fontWeight:700}},(po.items||[]).map(i=>i.qty+"x "+i.name).join(", ").slice(0,50)+(((po.items||[]).join("").length>50)?"...":"")),
-                  h("div",{style:{fontSize:9,color:C.muted}},po.requestedBy+" · "+branches.find(b=>b.id===po.branch)?.name)
+
+          // Filter tabs
+          h("div",{style:{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}},
+            ["all","received_by_main","processing","paid","discrepancy","completed"].map(s=>
+              h("button",{key:s,
+                onClick:()=>setPoFilter(s),
+                style:{padding:"5px 14px",borderRadius:20,fontSize:11,cursor:"pointer",
+                  border:"1px solid "+(poFilter===s?C.primary:C.border),
+                  background:poFilter===s?C.primary+"15":"#fff",
+                  color:poFilter===s?C.primary:C.muted,
+                  fontWeight:poFilter===s?700:400}},
+                {all:"All",received_by_main:"Pending",processing:"Processing",
+                 paid:"For Receiving",discrepancy:"Discrepancy",completed:"Completed"}[s]||s)
+            )
+          ),
+
+          // PO List
+          h("div",{style:{display:"grid",gap:10}},
+            advances
+            .filter(a=>a._type==="po"&&a.branch===branchId&&
+              (poFilter==="all"||(a.status||"pending")===poFilter))
+            .sort((a,b)=>(b.timestamp?.seconds||0)-(a.timestamp?.seconds||0))
+            .map(po=>{
+              const st=po.status||"pending";
+              const stColor={
+                received_by_main:"#FF9500",processing:"#6A1B9A",
+                paid:C.primary,discrepancy:"#C62828",completed:C.success
+              }[st]||C.muted;
+              const stLabel={
+                received_by_main:"⏳ Pending at Main",processing:"⚙️ Processing",
+                paid:"📥 Ready to Receive",discrepancy:"⚠️ Discrepancy",completed:"✅ Completed"
+              }[st]||st;
+              const total=po.totalAmount||0;
+              const paid=(po.payments||[]).reduce((s,p)=>s+(p.amount||0),0);
+
+              return h("div",{key:po._docId,
+                style:{background:"#fff",borderRadius:12,
+                  border:"2px solid "+stColor+"33",overflow:"hidden"}},
+
+                // Header
+                h("div",{style:{padding:"10px 16px",background:stColor+"12",
+                  display:"flex",justifyContent:"space-between",alignItems:"center",
+                  borderBottom:"1px solid "+stColor+"22"}},
+                  h("div",null,
+                    h("div",{style:{display:"flex",gap:8,alignItems:"center"}},
+                      h("span",{style:{fontWeight:900,color:stColor,fontSize:13}},po.poNum),
+                      h("span",{style:{fontSize:9,padding:"2px 8px",background:stColor,
+                        color:"#fff",borderRadius:10,fontWeight:700}},stLabel)
+                    ),
+                    h("div",{style:{fontSize:9,color:C.muted,marginTop:2}},
+                      po.date+(po.deliveryDate?" · DR Date: "+po.deliveryDate:"")+
+                      (po.vatType?" · "+po.vatType.toUpperCase():""))
+                  ),
+                  h("div",{style:{textAlign:"right"}},
+                    h("div",{style:{fontSize:14,fontWeight:900,color:stColor}},
+                      "₱"+total.toFixed(2)),
+                    h("div",{style:{fontSize:9,color:paid>=total&&total>0?C.success:C.warning}},
+                      paid>0?"Paid: ₱"+paid.toFixed(2)+" / ₱"+total.toFixed(2):
+                      po.paymentStatus||"Unpaid")
+                  )
                 ),
-                h("div",{style:{fontSize:10,color:C.muted}},po.date||"—"),
-                h("div",{style:{fontSize:10,fontWeight:po.deliveryDate?700:400,color:po.deliveryDate?C.info:C.muted}},po.deliveryDate||"Pending"),
-                h("div",null,h(Badge,{label:po.status||"pending",color:{pending:C.warning,approved:C.info,delivered:C.success,cancelled:C.danger}[po.status]||C.muted})),
-                h("div",null,h(Badge,{label:po.paymentStatus||"Unpaid",color:{Unpaid:C.danger,Partial:C.warning,Paid:C.success}[po.paymentStatus]||C.muted}))
-              ))
-          ),
-          modal==="new_po"&&h("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:900}},
-            h(POForm,{branchId,user,db,INIT_INVENTORY,onClose:()=>setModal(null),showT,advances,setAdvances,branches})
+
+                // Items preview
+                h("div",{style:{padding:"8px 16px"}},
+                  (po.deliveredItems||po.items||[]).slice(0,3).map((i,ix)=>
+                    h("div",{key:ix,style:{fontSize:11,display:"flex",
+                      justifyContent:"space-between",padding:"3px 0",
+                      borderBottom:"1px solid #f5f5f5"}},
+                      h("span",{style:{fontWeight:600}},i.name),
+                      h("span",{style:{color:C.muted}},
+                        (i.actualQty!=null?i.actualQty:i.qty)+" "+(i.unit||""))
+                    )
+                  ),
+                  (po.items||[]).length>3&&h("div",{style:{fontSize:9,color:C.muted}},
+                    "+"+(po.items.length-3)+" more items")
+                ),
+
+                // Actions for branch
+                h("div",{style:{padding:"8px 16px",borderTop:"1px solid #f5f5f5",
+                  display:"flex",gap:7,flexWrap:"wrap"}},
+
+                  // PAID → Receive items / Check discrepancy
+                  st==="paid"&&h("button",{
+                    onClick:()=>setModal("receive_"+po._docId),
+                    style:{padding:"8px 16px",
+                      background:"linear-gradient(135deg,"+C.primary+","+C.dark+")",
+                      border:"none",borderRadius:8,color:"#fff",
+                      fontSize:11,fontWeight:800,cursor:"pointer"}},
+                    "📥 Receive Items"),
+
+                  // DISCREPANCY → View/edit report
+                  st==="discrepancy"&&h("button",{
+                    onClick:()=>setModal("receive_"+po._docId),
+                    style:{padding:"8px 16px",background:"#C62828",
+                      border:"none",borderRadius:8,color:"#fff",
+                      fontSize:11,fontWeight:800,cursor:"pointer"}},
+                    "⚠️ View Discrepancy Report"),
+
+                  // Print DR if available
+                  (po.drNum||po.deliveredItems)&&h("button",{
+                    onClick:()=>printPODR(po),
+                    style:{padding:"8px 14px",background:"#fff",
+                      border:"1px solid "+C.border,borderRadius:8,
+                      fontSize:11,fontWeight:700,cursor:"pointer"}},
+                    "🖨️ DR")
+                )
+              );
+            })
           )
         ),
+
 
         // ══ STOCK RECEIVE (Branch receives DR, checks discrepancy) ══
         page==="stock_receive"&&h("div",null,
@@ -6086,63 +6603,76 @@ function App(){
                       borderRadius:8,color:"#fff",fontSize:11,fontWeight:700,cursor:"pointer"}},
                     st==="paid"?"💰 Add Payment":"💰 Record Payment"),
 
+                  // PAID → Branch confirms receipt
+                  st==="paid"&&user.role!=="owner"&&h("button",{
+                    onClick:()=>setModal("receive_"+po._docId),
+                    style:{padding:"7px 14px",background:"#1565C0",border:"none",
+                      borderRadius:8,color:"#fff",fontSize:11,fontWeight:700,cursor:"pointer"}},
+                    "📦 Receive Items"),
+
+                  // DISCREPANCY → Approve actual received qty
+                  st==="discrepancy"&&user.role==="owner"&&h("button",{
+                    onClick:async()=>{
+                      const po2=advances.find(a=>a._docId===po._docId);
+                      if(!po2)return;
+                      // Approve received items as final
+                      await updateDoc(doc(db,"advances",po._docId),{
+                        status:"completed",
+                        discrepancyStatus:"approved",
+                        discrepancyApprovedBy:user.name,
+                        discrepancyApprovedAt:serverTimestamp(),
+                        deliveredItems:(po2.receivedItems||po2.deliveredItems||[])
+                      });
+                      showT("Discrepancy approved — "+po.poNum+" COMPLETED ✅");
+                    },
+                    style:{padding:"7px 14px",background:"#C62828",border:"none",
+                      borderRadius:8,color:"#fff",fontSize:11,fontWeight:700,cursor:"pointer"}},
+                    "✅ Approve Discrepancy"),
+
                   // Print DR (available once processing or beyond)
-                  (st==="processing"||st==="paid"||st==="completed")&&
-                    h("button",{
-                      onClick:()=>{
-                        const w=window.open("","_blank","width=500,height=700");
-                        const items=po.deliveredItems||po.items||[];
-                        const tot=items.reduce((s,i)=>s+(i.price||0)*((i.actualQty!=null?i.actualQty:i.qty)||0),0);
-                        w.document.write(`<!DOCTYPE html><html><head><title>DR - ${po.poNum}</title>
-                        <style>*{margin:0;padding:0;box-sizing:border-box;}
-                        body{font-family:Arial,sans-serif;font-size:12px;padding:20px;}
-                        .c{text-align:center;} .b{font-weight:bold;} .hr{border-top:1px dashed #000;margin:8px 0;}
-                        table{width:100%;border-collapse:collapse;font-size:11px;margin-top:8px;}
-                        th{background:#f5f5f5;padding:5px;text-align:left;border:1px solid #ddd;}
-                        td{padding:5px;border:1px solid #ddd;}
-                        .r{text-align:right;} .total-row{font-weight:bold;background:#f9f9f9;}
-                        </style></head><body>
-                        <div class="c"><h2>CHOWTIME COMMISSARY</h2>
-                        <h3>DELIVERY RECEIPT</h3>
-                        <p>${po.drNum||('DR-'+po.poNum)}</p></div>
-                        <div class="hr"></div>
-                        <table style="border:none;margin:0">
-                          <tr><td class="b">PO Reference:</td><td>${po.poNum}</td></tr>
-                          <tr><td class="b">Branch:</td><td>${po.branchName||po.branch}</td></tr>
-                          <tr><td class="b">Delivery Date:</td><td>${po.deliveryDate||"—"}</td></tr>
-                          <tr><td class="b">Status:</td><td>${po.paymentStatus||"Unpaid"}</td></tr>
-                        </table>
-                        <div class="hr"></div>
-                        <table>
-                          <tr><th>Item</th><th>PO Qty</th><th>Actual</th><th>Unit</th><th class="r">Price</th><th class="r">Total</th></tr>
-                          ${items.map(i=>`<tr>
-                            <td>${i.name}</td>
-                            <td>${i.qty||0}</td>
-                            <td>${i.actualQty!=null?i.actualQty:(i.qty||0)}</td>
-                            <td>${i.unit||""}</td>
-                            <td class="r">₱${(i.price||0).toFixed(2)}</td>
-                            <td class="r">₱${(((i.actualQty!=null?i.actualQty:i.qty)||0)*(i.price||0)).toFixed(2)}</td>
-                          </tr>`).join("")}
-                          <tr class="total-row"><td colspan="5" class="r">GROSS TOTAL:</td><td class="r">₱${tot.toFixed(2)}</td></tr>
-                        </table>
-                        <div class="hr"></div>
-                        <p>Payment Status: <b>${po.paymentStatus||"UNPAID"}</b></p>
-                        ${po.drNotes?`<p>Notes: ${po.drNotes}</p>`:""}
-                        <div class="hr"></div>
-                        <table style="border:none;margin-top:20px">
-                          <tr>
-                            <td style="width:50%;padding-top:40px;border-top:1px solid #000;text-align:center">Prepared by</td>
-                            <td style="width:50%;padding-top:40px;border-top:1px solid #000;text-align:center">Received by</td>
-                          </tr>
-                        </table>
-                        </body></html>`);
-                        w.document.close();
-                        setTimeout(()=>w.print(),500);
-                      },
+                  (st==="processing"||st==="paid"||st==="completed"||st==="discrepancy")&&
+                    h("button",{onClick:()=>printPODR(po),
                       style:{padding:"7px 14px",background:"#fff",
                         border:"1px solid "+C.border,borderRadius:8,
                         fontSize:11,fontWeight:700,cursor:"pointer"}},
                     "🖨️ Print DR"),
+
+                  // DISCREPANCY → Owner approves
+                  st==="discrepancy"&&user.role==="owner"&&h("button",{
+                    onClick:async()=>{
+                      if(!confirm("Approve discrepancy report? Inventory will be updated with ACTUAL received qty."))return;
+                      const recItems=po.receivedItems||[];
+                      await updateDoc(doc(db,"advances",po._docId),{
+                        status:"completed",
+                        discRepStatus:"approved",
+                        discRepApprovedBy:user.name,
+                        discRepApprovedAt:serverTimestamp()
+                      });
+                      // Update inventory with actual received qty
+                      for(const item of recItems){
+                        try{
+                          const invRef=doc(db,"inventory_"+po.branch,item.id);
+                          const invSnap=await getDoc(invRef);
+                          if(invSnap.exists()){
+                            await updateDoc(invRef,{stock:increment(item.receivedQty||0),lastReceived:serverTimestamp()});
+                          } else {
+                            await setDoc(invRef,{id:item.id,name:item.name,
+                              stock:item.receivedQty||0,unit:item.unit||"pc",
+                              lastReceived:serverTimestamp()});
+                          }
+                        }catch(e){console.warn("Inv fail",item.id);}
+                      }
+                      showT("Discrepancy approved — inventory updated ✅");
+                    },
+                    style:{padding:"7px 14px",background:C.warning,border:"none",
+                      borderRadius:8,color:"#fff",fontSize:11,fontWeight:700,cursor:"pointer"}},
+                    "✅ Approve Discrepancy"),
+
+                  // DISCREPANCY → Show details
+                  st==="discrepancy"&&(po.discrepancyItems||[]).length>0&&
+                    h("div",{style:{padding:"6px 10px",background:"#FFF8E1",
+                      borderRadius:7,fontSize:9,color:"#E65100",fontWeight:600}},
+                      "⚠️ "+po.discrepancyItems.length+" item(s) with discrepancy — pending approval"),
 
                   // Notes if any
                   po.notes&&h("div",{style:{fontSize:9,color:C.muted,
@@ -6290,6 +6820,17 @@ function App(){
       })
     ),
 
+    // RECEIVE ITEMS MODAL
+    modal&&modal.startsWith("receive_")&&h("div",{
+      style:{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",
+        display:"flex",alignItems:"center",justifyContent:"center",zIndex:900}},
+      h(ReceiveItemsModal,{
+        po:advances.find(a=>a._docId===modal.replace("receive_","")),
+        db,user,showT,branchId,
+        onClose:()=>setModal(null)
+      })
+    ),
+
     // PAYMENT MODAL
     modal&&modal.startsWith("payment_")&&h("div",{
       style:{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",
@@ -6297,6 +6838,17 @@ function App(){
       h(PaymentModal,{
         po:advances.find(a=>a._docId===modal.replace("payment_","")),
         db,user,showT,
+        onClose:()=>setModal(null)
+      })
+    ),
+
+    // RECEIVE ITEMS MODAL (Branch side)
+    modal&&modal.startsWith("receive_")&&h("div",{
+      style:{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",
+        display:"flex",alignItems:"center",justifyContent:"center",zIndex:900}},
+      h(ReceiveItemsModal,{
+        po:advances.find(a=>a._docId===modal.replace("receive_","")),
+        db,user,branchId,showT,
         onClose:()=>setModal(null)
       })
     ),
