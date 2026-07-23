@@ -3577,6 +3577,135 @@ function VoidBadge({branchId,db,setPage,visible=true}){
 
 // ─── RECEIVE ITEMS MODAL (Branch) ────────────────────────
 
+
+// ─── STOCK EDIT MODAL ────────────────────────────────────
+function StockEditModal({item,db,user,branchId,showT,onClose}){
+  if(!item)return null;
+  var isOwner=user.role==="owner"||user.role==="commissary";
+  var invCol=isOwner?"inventory":"inventory_"+branchId;
+  var logCol=isOwner?"inventory_log":"inventory_log_"+branchId;
+
+  var [mode,setMode]=useState("adjust");
+  var [amount,setAmount]=useState("");
+  var [reason,setReason]=useState("");
+  var [saving,setSaving]=useState(false);
+
+  var current=item.stock||0;
+  var adj=parseFloat(amount)||0;
+  var preview=mode==="adjust"?Math.max(0,current+adj):Math.max(0,parseFloat(amount)||0);
+
+  var save=async function(){
+    if(!amount){showT("Enter amount","warn");return;}
+    if(!reason){showT("Enter reason","warn");return;}
+    setSaving(true);
+    try{
+      await updateDoc(doc(db,invCol,item.id),{
+        stock:preview,lastAdjusted:serverTimestamp(),
+        adjustedBy:user.name,adjustReason:reason,
+        adjustType:mode,prevStock:current
+      });
+      await addDoc(collection(db,logCol),{
+        itemId:item.id,itemName:item.name,unit:item.unit||"",
+        type:mode==="set"?"set":adj>0?"add":"deduct",
+        amount:mode==="adjust"?adj:preview,
+        prevStock:current,newStock:preview,
+        reason:reason,by:user.name,at:serverTimestamp()
+      });
+      showT("Stock updated: "+item.name+" → "+String(preview)+" "+(item.unit||"")+" ✓");
+      onClose();
+    }catch(e){showT("Error","err");console.error(e);}
+    setSaving(false);
+  };
+
+  return h("div",{style:{background:"#fff",width:400,borderRadius:14,
+    overflow:"hidden",boxShadow:"0 20px 50px rgba(0,0,0,.35)"}},
+    h("div",{style:{background:"linear-gradient(135deg,#1565C0,#0D47A1)",
+      padding:"14px 18px",display:"flex",justifyContent:"space-between",alignItems:"center"}},
+      h("div",null,
+        h("div",{style:{color:"rgba(255,255,255,.6)",fontSize:9,letterSpacing:2,fontWeight:700}},
+          "MANUAL STOCK ADJUSTMENT"),
+        h("div",{style:{color:"#fff",fontWeight:900,fontSize:14}},item.name),
+        h("div",{style:{color:"rgba(255,255,255,.5)",fontSize:9}},
+          "Current: "+String(current)+" "+(item.unit||""))
+      ),
+      h("button",{onClick:onClose,
+        style:{background:"rgba(255,255,255,.15)",border:"none",color:"#fff",
+          width:26,height:26,borderRadius:7,fontSize:15,cursor:"pointer"}},"x")
+    ),
+    h("div",{style:{padding:"16px 18px"}},
+      // Current stock
+      h("div",{style:{display:"flex",justifyContent:"center",marginBottom:14}},
+        h("div",{style:{background:"#E3F2FD",borderRadius:10,padding:"10px 24px",textAlign:"center"}},
+          h("div",{style:{fontSize:9,color:"#1565C0",fontWeight:700,marginBottom:2}},"CURRENT STOCK"),
+          h("div",{style:{fontSize:26,fontWeight:900,color:"#1565C0"}},
+            String(current)+" "+(item.unit||""))
+        )
+      ),
+      // Mode toggle
+      h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:12}},
+        h("button",{onClick:function(){setMode("adjust");setAmount("");},
+          style:{padding:"8px",borderRadius:8,border:"none",cursor:"pointer",
+            fontWeight:700,fontSize:11,
+            background:mode==="adjust"?"#1565C0":"#f0f0f0",
+            color:mode==="adjust"?"#fff":"#333"}},
+          "+ / - Adjust"),
+        h("button",{onClick:function(){setMode("set");setAmount(String(current));},
+          style:{padding:"8px",borderRadius:8,border:"none",cursor:"pointer",
+            fontWeight:700,fontSize:11,
+            background:mode==="set"?"#1565C0":"#f0f0f0",
+            color:mode==="set"?"#fff":"#333"}},
+          "= Set Exact")
+      ),
+      // Amount
+      h("div",{style:{marginBottom:10}},
+        h("div",{style:{fontSize:9,color:"#888",fontWeight:700,marginBottom:4,letterSpacing:1}},
+          mode==="adjust"?"ADJUSTMENT (+/-)":"SET STOCK TO"),
+        h("input",{type:"number",value:amount,
+          onChange:function(e){setAmount(e.target.value);},
+          placeholder:mode==="adjust"?"e.g. 10 or -5":"e.g. 50",
+          style:{width:"100%",padding:"10px",border:"2px solid #1565C0",
+            borderRadius:8,fontSize:16,fontWeight:700,outline:"none",
+            boxSizing:"border-box",textAlign:"center",color:"#1565C0"}})
+      ),
+      // Preview
+      amount&&h("div",{style:{marginBottom:10,padding:"8px 14px",
+        background:preview<(item.minStock||0)?"#FFEBEE":"#E8F5E9",
+        borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center"}},
+        h("span",{style:{fontSize:11,color:"#555"}},"New stock:"),
+        h("span",{style:{fontSize:18,fontWeight:900,
+          color:preview<(item.minStock||0)?"#C62828":"#2E7D32"}},
+          String(preview)+" "+(item.unit||""))
+      ),
+      // Reason
+      h("div",{style:{marginBottom:14}},
+        h("div",{style:{fontSize:9,color:"#888",fontWeight:700,marginBottom:6,letterSpacing:1}},
+          "REASON *"),
+        h("div",{style:{display:"flex",gap:5,flexWrap:"wrap",marginBottom:6}},
+          ["Physical Count","Spoilage","Wastage","Transfer","Correction","Other"].map(function(r){
+            return h("button",{key:r,onClick:function(){setReason(r);},
+              style:{padding:"4px 10px",borderRadius:20,fontSize:10,cursor:"pointer",
+                border:"none",
+                background:reason===r?"#1565C0":"#eee",
+                color:reason===r?"#fff":"#333",
+                fontWeight:reason===r?700:400}},r);
+          })
+        ),
+        h("input",{value:reason,
+          onChange:function(e){setReason(e.target.value);},
+          placeholder:"Or type custom reason...",
+          style:{width:"100%",padding:"7px",border:"1px solid #ddd",borderRadius:7,
+            fontSize:11,outline:"none",boxSizing:"border-box"}})
+      ),
+      h("button",{onClick:save,disabled:saving||!amount||!reason,
+        style:{width:"100%",padding:"11px",
+          background:saving||!amount||!reason?"#ccc":"linear-gradient(135deg,#1565C0,#0D47A1)",
+          border:"none",borderRadius:9,color:"#fff",fontWeight:800,fontSize:13,
+          cursor:saving||!amount||!reason?"not-allowed":"pointer"}},
+        saving?"Saving...":"Save Stock Adjustment")
+    )
+  );
+}
+
 // ─── RECEIVE ITEMS MODAL ─────────────────────────────────
 function ReceiveItemsModal({po,db,user,showT,branchId,onClose}){
   if(!po)return null;
@@ -4246,6 +4375,7 @@ function App(){
   const [branchPerms,setBranchPerms]=useState({});
   const [priceType,setPriceType]=useState("retail");
   const [poFilter,setPoFilter]=useState("all");
+  const [invLog,setInvLog]=useState([]);
   const [companySettings,setCompanySettings]=useState({
     name:"CHOWTIME FAST-FOOD CHAIN",
     email:"tycheventurescorp@gmail.com",
@@ -4507,6 +4637,20 @@ function App(){
       return()=>unsub();
     }catch(e){}
   },[]);
+
+  // ── LOAD INVENTORY LOG ───────────────────────────────────
+  useEffect(()=>{
+    if(!branchId||!user)return;
+    try{
+      const isOwner=user.role==="owner"||user.role==="commissary";
+      const logCol=isOwner?"inventory_log":"inventory_log_"+branchId;
+      const q=query(collection(db,logCol),orderBy("at","desc"),limit(50));
+      const unsub=onSnapshot(q,snap=>{
+        setInvLog(snap.docs.map(d=>({...d.data(),_docId:d.id})));
+      },()=>{});
+      return()=>unsub();
+    }catch(e){}
+  },[branchId,user?.role]);
 
   // ── LOAD STAFF FROM FIRESTORE ────────────────────────────
   useEffect(()=>{
@@ -5423,7 +5567,8 @@ function App(){
         ),
 
         // ══ INVENTORY ══
-        page==="inventory"&&h("div",null,
+        page==="inventory"&&h("div",{style:{display:"grid",gridTemplateColumns:"1fr 270px",gap:12,alignItems:"start"}},
+          h("div",null,
           h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:13}},
             h("div",null,
               h("h2",{style:{margin:0,fontSize:17,fontWeight:800}},(user.role==="owner"||user.role==="commissary")?"Commissary Inventory":"Branch Inventory — "+curBranch.name),
@@ -5453,24 +5598,91 @@ function App(){
                 h("div",{style:{fontSize:10}},"₱"+(item.cost||0).toFixed(2)),
                 h("div",{style:{fontSize:10,color:C.success,fontWeight:700}},(item.margin||0)+"%"),
                 h("div",{style:{fontSize:10,color:C.muted}},item.cat||""),
-                h("button",{onClick:async()=>{
-                  const isCommOrOwner=user.role==="owner"||user.role==="commissary";
-                  const invCol=isCommOrOwner?"inventory":"inventory_"+branchId;
-                  const newStock=(item.stock||0)+100;
-                  try{
-                    if(item.id&&item.id.length>4){
-                      await updateDoc(doc(db,invCol,item.id),{stock:newStock,lastRestocked:serverTimestamp(),restockedBy:user.name});
-                    }else{
-                      await setDoc(doc(db,invCol,item.id||("i"+Date.now())),{...item,stock:newStock,branch:branchId,lastRestocked:serverTimestamp()});
-                    }
-                    showT(item.name+" +100 restocked ✓");
-                  }catch(e){
-                    setInventory(p=>p.map(x=>x.id===item.id?{...x,stock:newStock}:x));
-                    showT(item.name+" restocked (offline)","warn");
+                h("div",{style:{display:"flex",gap:5,alignItems:"center"}},
+                h("button",{onClick:()=>setModal("stock_edit_"+(item.id||item.name)),
+                  style:{padding:"4px 10px",background:"#1565C0",border:"none",
+                    borderRadius:6,color:"#fff",fontSize:10,fontWeight:700,cursor:"pointer"}},
+                  "✏️ Edit"),
+                h("input",{type:"number",placeholder:"+/-",
+                  style:{width:44,padding:"4px",border:"1px solid "+C.border,
+                    borderRadius:6,fontSize:10,textAlign:"center",outline:"none"},
+                  onKeyDown:async function(e){
+                    if(e.key!=="Enter")return;
+                    const adj=parseFloat(e.target.value);
+                    if(!adj)return;
+                    const isOwner=user.role==="owner"||user.role==="commissary";
+                    const invCol=isOwner?"inventory":"inventory_"+branchId;
+                    const logCol=isOwner?"inventory_log":"inventory_log_"+branchId;
+                    const newQ=Math.max(0,(item.stock||0)+adj);
+                    try{
+                      await updateDoc(doc(db,invCol,item.id),{
+                        stock:newQ,lastAdjusted:serverTimestamp(),
+                        adjustedBy:user.name,lastAdjAmt:adj
+                      });
+                      await addDoc(collection(db,logCol),{
+                        itemId:item.id,itemName:item.name,unit:item.unit||"",
+                        type:adj>0?"add":"deduct",amount:adj,
+                        prevStock:item.stock||0,newStock:newQ,
+                        reason:"Quick adjust",by:user.name,at:serverTimestamp()
+                      });
+                      showT((adj>0?"+":"")+String(adj)+" "+item.name+" ✓");
+                      e.target.value="";
+                    }catch(err){showT("Error","err");}
                   }
-                },style:{padding:"4px 10px",background:C.primary,border:"none",borderRadius:6,color:"#fff",fontSize:9,fontWeight:700,cursor:"pointer"}},"Restock")
+                })
+              )
               );
             })
+          )
+        ),  // end left col
+
+          // RIGHT: Stock Activity Log
+          h("div",{style:{background:"#fff",borderRadius:12,
+            border:"1px solid "+C.border,overflow:"hidden",
+            position:"sticky",top:0}},
+            h("div",{style:{padding:"10px 14px",borderBottom:"1px solid "+C.border,
+              display:"flex",justifyContent:"space-between",alignItems:"center"}},
+              h("div",{style:{fontSize:12,fontWeight:800,color:C.text}},"📋 Stock Log"),
+              h("div",{style:{fontSize:9,color:C.muted}},
+                String(invLog.length)+" entries")
+            ),
+            h("div",{style:{maxHeight:"70vh",overflowY:"auto"}},
+              invLog.length===0
+                ? h("div",{style:{padding:"20px",textAlign:"center",
+                    color:C.muted,fontSize:11}},"No adjustments yet")
+                : invLog.map(function(log,ix){
+                    const isSet=log.type==="set";
+                    const isAdd=!isSet&&(log.amount||0)>0;
+                    const col=isSet?"#1565C0":isAdd?C.success:C.danger;
+                    const sign=isSet?"→":isAdd?"+":"-";
+                    const val=isSet?String(log.newStock||0):
+                      String(Math.abs(log.amount||0));
+                    return h("div",{key:log._docId||String(ix),
+                      style:{padding:"8px 14px",borderBottom:"1px solid #f5f5f5",
+                        borderLeft:"3px solid "+col}},
+                      h("div",{style:{display:"flex",justifyContent:"space-between",
+                        alignItems:"center",marginBottom:2}},
+                        h("div",{style:{fontSize:11,fontWeight:700,color:C.text,
+                          flex:1,marginRight:6,overflow:"hidden",
+                          textOverflow:"ellipsis",whiteSpace:"nowrap"}},
+                          log.itemName||""),
+                        h("div",{style:{fontSize:13,fontWeight:900,color:col,
+                          flexShrink:0}},
+                          sign+" "+val+" "+(log.unit||""))
+                      ),
+                      h("div",{style:{display:"flex",justifyContent:"space-between"}},
+                        h("span",{style:{fontSize:9,color:C.muted}},
+                          log.reason||"Adjustment"),
+                        h("span",{style:{fontSize:9,color:C.muted}},
+                          log.by||"")
+                      ),
+                      h("div",{style:{fontSize:8,color:"#ccc",marginTop:1}},
+                        log.prevStock!=null&&log.newStock!=null
+                          ? String(log.prevStock)+" → "+String(log.newStock)+" "+(log.unit||"")
+                          : "")
+                    );
+                  })
+            )
           )
         ),
 
@@ -6576,6 +6788,17 @@ function App(){
         po:advances.find(a=>a._docId===modal.replace("issue_dr_","")),
         db,user,showT,companySettings,branches,
         onClose:()=>setModal(null)
+      })
+    ),
+
+    // STOCK EDIT MODAL
+    modal&&modal.startsWith("stock_edit_")&&h("div",{
+      style:{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",
+        display:"flex",alignItems:"center",justifyContent:"center",zIndex:900}},
+      h(StockEditModal,{
+        item:inventory.find(function(i){return (i.id||i.name)===modal.replace("stock_edit_","");}),
+        db,user,branchId,showT,
+        onClose:function(){setModal(null);}
       })
     ),
 
