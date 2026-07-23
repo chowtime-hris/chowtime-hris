@@ -777,7 +777,7 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
         po.notes&&h("div",{style:{fontSize:10,color:C.info,marginTop:2}},"📝 "+po.notes)
       ),
       h("div",{style:{display:"flex",gap:6}},
-        h("button",{onClick:printDR,
+        h("button",{onClick:()=>printDR(companySettings),
           style:{padding:"6px 11px",background:C.info,border:"none",borderRadius:7,
             color:"#fff",fontSize:10,fontWeight:700,cursor:"pointer"}},"🖨️ Print DR"),
         h("button",{onClick:()=>setExpanded(!expanded),
@@ -900,7 +900,7 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
 
       // Actions
       h("div",{style:{display:"flex",gap:7}},
-        h("button",{onClick:printDR,
+        h("button",{onClick:()=>printDR(companySettings),
           style:{padding:"10px 16px",background:"#fff",border:"1px solid "+C.border,
             borderRadius:8,fontWeight:700,fontSize:11,cursor:"pointer"}},"🖨️ Print DR"),
         h("button",{onClick:issueDR,
@@ -990,7 +990,7 @@ function DRCheckForm({po,db,branchId,user,showT,INIT_INVENTORY,setAdvances,advan
         h("div",{style:{fontSize:12,fontWeight:800}},po.drNum||po.poNum+" — For Receipt"),
         h("div",{style:{fontSize:10,color:C.info,marginTop:1}},"Delivery Date: "+(po.deliveryDate||"—")+" · Issued by: "+(po.issuedBy||"Commissary"))
       ),
-      h("button",{onClick:printDR,style:{padding:"5px 11px",background:C.info,border:"none",borderRadius:7,color:"#fff",fontSize:10,fontWeight:700,cursor:"pointer"}},"🖨️ Print DR")
+      h("button",{onClick:()=>printDR(companySettings),style:{padding:"5px 11px",background:C.info,border:"none",borderRadius:7,color:"#fff",fontSize:10,fontWeight:700,cursor:"pointer"}},"🖨️ Print DR")
     ),
     h("div",{style:{padding:"12px 16px"}},
       h("div",{style:{fontSize:9,fontWeight:800,color:C.muted,marginBottom:8,letterSpacing:1}},"VERIFY ACTUAL RECEIVED QTY (edit if different from DR)"),
@@ -3527,7 +3527,7 @@ function VoidBadge({branchId,db,setPage,visible=true}){
 
 
 // ─── DR PROCESS MODAL ────────────────────────────────────
-function DRProcessModal({po,db,user,showT,onClose}){
+function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]}){
   if(!po) return null;
   const [prices,setPrices]   = useState({});
   const [actualQtys,setActual] = useState({});
@@ -3549,63 +3549,163 @@ function DRProcessModal({po,db,user,showT,onClose}){
   const total = items.reduce((s,i)=>
     s+((prices[i.id]||0)*((actualQtys[i.id]!=null?actualQtys[i.id]:i.qty)||0)),0);
 
-  const printDR = ()=>{
-    const w=window.open("","_blank","width=500,height=700");
-    w.document.write(`<!DOCTYPE html><html><head><title>DR-${po.poNum}</title>
+  const printDR = (cs)=>{
+    const w=window.open("","_blank","width=800,height=900");
+    // Group items by category
+    const cats={};
+    items.forEach(i=>{
+      const cat=i.cat||i.category||"Others";
+      if(!cats[cat])cats[cat]=[];
+      const aq=actualQtys[i.id]!=null?actualQtys[i.id]:i.qty;
+      const p=prices[i.id]||0;
+      cats[cat].push({...i,aq,p,lineTotal:aq*p});
+    });
+    let itemNo=1;
+    let tableRows="";
+    Object.keys(cats).forEach(cat=>{
+      const catItems=cats[cat];
+      const catTotal=catItems.reduce((s,i)=>s+i.lineTotal,0);
+      const catQty=catItems.reduce((s,i)=>s+i.aq,0);
+      catItems.forEach(i=>{
+        tableRows+=`<tr>
+          <td>${itemNo++}</td>
+          <td style="color:#888;font-size:10px">${i.id||""}</td>
+          <td>${cat}</td>
+          <td>${i.name}</td>
+          <td>${i.aq} ${i.unit||""}</td>
+          <td class="r">₱${i.p.toFixed(2)}</td>
+          <td class="r">₱${i.lineTotal.toFixed(2)}</td>
+          <td>—</td>
+        </tr>`;
+      });
+      tableRows+=`<tr class="cat-total">
+        <td colspan="3"></td>
+        <td class="b">Total ${cat}</td>
+        <td class="b">${catQty}</td>
+        <td></td>
+        <td class="r b">₱${catTotal.toFixed(2)}</td>
+        <td></td>
+      </tr>`;
+    });
+    tableRows+=`<tr class="grand-total">
+      <td colspan="3"></td>
+      <td class="b">Total Quantity</td>
+      <td class="b">${items.reduce((s,i)=>s+(actualQtys[i.id]!=null?actualQtys[i.id]:i.qty),0)}</td>
+      <td></td>
+      <td class="r b">₱${total.toFixed(2)}</td>
+      <td></td>
+    </tr>`;
+
+    const drNum="DR-"+po.poNum;
+    const branchInfo=po.branchName||po.branch;
+    const cs2=cs||{name:"CHOWTIME FAST-FOOD CHAIN",email:"",address:"",
+      bankName:"BPI",bankAccount:"Chowtime Fast Food Chain",bankNumber:"",bankQR:""};
+
+    w.document.write(`<!DOCTYPE html><html><head><title>${drNum}</title>
     <style>
       *{margin:0;padding:0;box-sizing:border-box;}
-      body{font-family:Arial,sans-serif;font-size:12px;padding:20px;max-width:400px;margin:0 auto;}
-      .c{text-align:center;} .b{font-weight:bold;} 
-      .hr{border-top:1px dashed #000;margin:8px 0;}
-      table{width:100%;border-collapse:collapse;font-size:11px;}
-      th{background:#f5f5f5;padding:4px 6px;border:1px solid #ddd;font-size:10px;text-align:left;}
-      td{padding:4px 6px;border:1px solid #ddd;}
-      .r{text-align:right;} .tot{font-weight:bold;background:#f9f9f9;}
+      body{font-family:Arial,sans-serif;font-size:11px;padding:24px;color:#222;}
+      .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;}
+      .logo-area{display:flex;align-items:center;gap:12px;}
+      .logo{width:52px;height:52px;background:#C8151B;border-radius:10px;
+        display:flex;align-items:center;justify-content:center;
+        color:#fff;font-weight:900;font-size:20px;flex-shrink:0;}
+      .dr-title{font-size:20px;font-weight:900;color:#C8151B;}
+      .dr-sub{font-size:11px;color:#888;margin-top:2px;}
+      .qr-box{text-align:center;}
+      .qr-box img{width:80px;height:80px;object-fit:contain;}
+      .to-from{display:grid;grid-template-columns:1fr 1fr;gap:0;
+        border:1px solid #ddd;border-radius:8px;overflow:hidden;margin-bottom:14px;}
+      .to-box{padding:10px 14px;border-right:1px solid #ddd;}
+      .from-box{padding:10px 14px;background:#f9f9f9;}
+      .box-label{font-size:9px;font-weight:700;color:#888;letter-spacing:1px;margin-bottom:4px;}
+      .box-name{font-size:13px;font-weight:800;margin-bottom:4px;}
+      .box-detail{font-size:10px;color:#555;line-height:1.6;}
+      table{width:100%;border-collapse:collapse;margin-bottom:14px;}
+      th{background:#f5f5f5;padding:6px 8px;text-align:left;
+        border:1px solid #ddd;font-size:10px;font-weight:700;}
+      td{padding:5px 8px;border:1px solid #eee;font-size:11px;}
+      .r{text-align:right;} .b{font-weight:700;}
+      .cat-total{background:#f0f0f0;}
+      .grand-total{background:#e8e8e8;font-weight:900;}
+      .sigs{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin:20px 0;}
+      .sig-box{text-align:center;padding-top:36px;border-top:1px solid #333;font-size:10px;}
+      .payment-section{border:1px solid #ddd;border-radius:8px;padding:12px 16px;
+        display:flex;justify-content:space-between;align-items:center;}
+      .pay-label{font-size:9px;font-weight:700;color:#888;letter-spacing:1px;margin-bottom:6px;}
+      .pay-detail{font-size:11px;line-height:1.8;}
+      .footer{margin-top:12px;font-size:9px;color:#aaa;text-align:center;}
+      @media print{body{padding:12px;}}
     </style></head><body>
-    <div class="c">
-      <div class="b" style="font-size:16px">CHOWTIME COMMISSARY</div>
-      <div class="b" style="font-size:13px;margin:4px 0">DELIVERY RECEIPT</div>
-      <div>DR-${po.poNum}</div>
+
+    <!-- HEADER -->
+    <div class="header">
+      <div class="logo-area">
+        <div class="logo">CT</div>
+        <div>
+          <div class="dr-title">Delivery Receipt – ${po.poNum}</div>
+          <div class="dr-sub">Delivery date: ${deliveryDate}</div>
+        </div>
+      </div>
+      ${cs2.bankQR?`<div class="qr-box"><img src="${cs2.bankQR}" alt="QR"/><div style="font-size:9px;color:#888;margin-top:2px">Scan to Pay</div></div>`:""}
     </div>
-    <div class="hr"></div>
-    <table style="border:none;margin-bottom:8px">
-      <tr><td class="b" style="border:none;width:40%">Branch:</td><td style="border:none">${po.branchName||po.branch}</td></tr>
-      <tr><td class="b" style="border:none">SO Reference:</td><td style="border:none">${po.poNum}</td></tr>
-      <tr><td class="b" style="border:none">Delivery Date:</td><td style="border:none">${deliveryDate}</td></tr>
-      <tr><td class="b" style="border:none">Prepared by:</td><td style="border:none">${user.name}</td></tr>
-    </table>
-    <div class="hr"></div>
+
+    <!-- TO / FROM -->
+    <div class="to-from">
+      <div class="to-box">
+        <div class="box-label">To</div>
+        <div class="box-name">${branchInfo}</div>
+        <div class="box-detail">
+          Client PO Number: ${po.poNum}<br>
+          Sales Invoice Number: ${drNum}
+        </div>
+      </div>
+      <div class="from-box">
+        <div class="box-label">From</div>
+        <div class="box-name">${cs2.name}</div>
+        <div class="box-detail">
+          ${cs2.phone?"Phone: "+cs2.phone+"<br>":""}
+          ${cs2.email?"Email: "+cs2.email+"<br>":""}
+          ${cs2.address?"Address: "+cs2.address:""}
+        </div>
+      </div>
+    </div>
+
+    <!-- LINE ITEMS -->
+    <div style="font-size:10px;font-weight:700;color:#C8151B;margin-bottom:6px;">Line items</div>
     <table>
-      <tr><th>Item</th><th>PO Qty</th><th>Actual</th><th class="r">Price</th><th class="r">Total</th></tr>
-      ${items.map(i=>{
-        const aq=actualQtys[i.id]!=null?actualQtys[i.id]:i.qty;
-        const p=prices[i.id]||0;
-        return `<tr>
-          <td>${i.name}</td>
-          <td>${i.qty} ${i.unit||""}</td>
-          <td>${aq} ${i.unit||""}</td>
-          <td class="r">₱${p.toFixed(2)}</td>
-          <td class="r">₱${(aq*p).toFixed(2)}</td>
-        </tr>`;
-      }).join("")}
-      <tr class="tot">
-        <td colspan="4" class="r">GROSS TOTAL</td>
-        <td class="r">₱${total.toFixed(2)}</td>
-      </tr>
-    </table>
-    <div class="hr"></div>
-    <div>Payment Status: <b>UNPAID</b></div>
-    ${notes?`<div>Notes: ${notes}</div>`:""}
-    <div class="hr"></div>
-    <table style="border:none;margin-top:30px">
       <tr>
-        <td style="border:none;width:50%;text-align:center;border-top:1px solid #000;padding-top:4px">Prepared by<br><b>${user.name}</b></td>
-        <td style="border:none;width:50%;text-align:center;border-top:1px solid #000;padding-top:4px">Received by<br>&nbsp;</td>
+        <th>Item No.</th><th>SKU</th><th>Category</th><th>Description</th>
+        <th>Quantity</th><th class="r">Unit Price</th><th class="r">Total Price</th><th>Remarks</th>
       </tr>
+      ${tableRows}
     </table>
+
+    <!-- SIGNATURES -->
+    <div class="sigs">
+      <div class="sig-box">Prepared by</div>
+      <div class="sig-box">Approved by</div>
+      <div class="sig-box">Delivered by</div>
+      <div class="sig-box">Received by</div>
+    </div>
+
+    <!-- PAYMENT METHOD -->
+    <div class="payment-section">
+      <div>
+        <div class="pay-label">PAYMENT METHOD</div>
+        <div class="pay-detail">
+          Bank Name: <b>${cs2.bankName}</b><br>
+          Bank Account Name: <b>${cs2.bankAccount}</b><br>
+          Bank Account Number: <b>${cs2.bankNumber}</b>
+        </div>
+      </div>
+      ${cs2.bankQR?`<img src="${cs2.bankQR}" style="width:80px;height:80px;object-fit:contain;">`:""}
+    </div>
+
+    <div class="footer">Powered by Chowtime POS v5.0</div>
     </body></html>`);
     w.document.close();
-    setTimeout(()=>w.print(),400);
+    setTimeout(()=>w.print(),500);
   };
 
   const issueDR = async()=>{
@@ -3631,7 +3731,7 @@ function DRProcessModal({po,db,user,showT,onClose}){
         issuedAt:serverTimestamp()
       });
       showT("DR issued ✓ — "+po.poNum+" now PROCESSING");
-      printDR();
+      printDR(companySettings);
       onClose();
     }catch(e){showT("Error issuing DR","err");console.error(e);}
     setSaving(false);
@@ -3740,7 +3840,7 @@ function DRProcessModal({po,db,user,showT,onClose}){
     // Footer actions
     h("div",{style:{padding:"12px 20px",borderTop:"2px solid #6A1B9A",
       display:"flex",gap:8,background:"#fafafa"}},
-      h("button",{onClick:printDR,
+      h("button",{onClick:()=>printDR(companySettings),
         style:{padding:"10px 16px",background:"#fff",border:"1px solid #ddd",
           borderRadius:9,fontWeight:700,fontSize:12,cursor:"pointer"}},
         "🖨️ Preview DR"),
@@ -3763,6 +3863,16 @@ function App(){
   const [branchPerms,setBranchPerms]=useState({});
   const [priceType,setPriceType]=useState("retail");
   const [poFilter,setPoFilter]=useState("all");
+  const [companySettings,setCompanySettings]=useState({
+    name:"CHOWTIME FAST-FOOD CHAIN",
+    email:"tycheventurescorp@gmail.com",
+    address:"Purok 2 Sto. Rosario Young, Zaragosa",
+    phone:"",
+    bankName:"BPI",
+    bankAccount:"Chowtime Fast Food Chain",
+    bankNumber:"0619385195",
+    bankQR:"" // base64 image
+  });
   const [authLoading,setAuthLoading]=useState(true);
   const [loginEmail,setLoginEmail]=useState("");
   const [loginPw,setLoginPw]=useState("");
@@ -4000,6 +4110,16 @@ function App(){
     try{
       const unsub=onSnapshot(doc(db,"settings","branches"),snap=>{
         if(snap.exists()&&snap.data().branches)setBranches(snap.data().branches);
+      },()=>{});
+      return()=>unsub();
+    }catch(e){}
+  },[]);
+
+  // ── LOAD COMPANY SETTINGS ────────────────────────────────
+  useEffect(()=>{
+    try{
+      const unsub=onSnapshot(doc(db,"settings","company"),snap=>{
+        if(snap.exists())setCompanySettings(p=>({...p,...snap.data()}));
       },()=>{});
       return()=>unsub();
     }catch(e){}
@@ -5455,6 +5575,97 @@ function App(){
           h("button",{onClick:()=>showT("Settings saved!"),style:{padding:"10px 24px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:8,color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}},"Save Settings"),
           h("div",{style:{marginTop:16,background:"#E3F2FD",borderRadius:10,padding:"12px 15px",fontSize:11,color:C.info}},
             h("b",null,"🔥 Firebase Status: "),isOnline?"Connected — real-time sync active":"Offline — orders queued locally"
+          ),
+
+          // ── Company & Bank Settings ──────────────────────
+          h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,
+            padding:"16px",marginTop:14}},
+            h("div",{style:{fontSize:12,fontWeight:800,marginBottom:12,
+              display:"flex",alignItems:"center",gap:6}},
+              "🏦 Company & Bank Settings"),
+
+            // Company info
+            h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}},
+              [
+                {key:"name",label:"Company Name"},
+                {key:"email",label:"Email"},
+                {key:"address",label:"Address"},
+                {key:"phone",label:"Phone"},
+              ].map(f=>h("div",{key:f.key},
+                h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,
+                  letterSpacing:1,marginBottom:4}},f.label.toUpperCase()),
+                h("input",{value:companySettings[f.key]||"",
+                  onChange:e=>setCompanySettings(p=>({...p,[f.key]:e.target.value})),
+                  style:{width:"100%",padding:"8px",border:"1px solid "+C.border,
+                    borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box"}})
+              ))
+            ),
+
+            // Bank info
+            h("div",{style:{fontSize:10,fontWeight:800,color:"#1565C0",
+              marginBottom:8,marginTop:4}},"💳 Bank Payment Details"),
+            h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:12}},
+              [
+                {key:"bankName",label:"Bank Name"},
+                {key:"bankAccount",label:"Account Name"},
+                {key:"bankNumber",label:"Account Number"},
+              ].map(f=>h("div",{key:f.key},
+                h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,
+                  letterSpacing:1,marginBottom:4}},f.label.toUpperCase()),
+                h("input",{value:companySettings[f.key]||"",
+                  onChange:e=>setCompanySettings(p=>({...p,[f.key]:e.target.value})),
+                  style:{width:"100%",padding:"8px",border:"1px solid #BBDEFB",
+                    borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box",
+                    color:"#1565C0"}})
+              ))
+            ),
+
+            // QR Code upload
+            h("div",{style:{marginBottom:12}},
+              h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,
+                letterSpacing:1,marginBottom:6}},"BANK QR CODE (for DR payment)"),
+              h("div",{style:{display:"flex",gap:12,alignItems:"flex-start"}},
+                companySettings.bankQR&&h("div",{style:{flexShrink:0}},
+                  h("img",{src:companySettings.bankQR,
+                    style:{width:100,height:100,objectFit:"contain",
+                      border:"1px solid "+C.border,borderRadius:8,padding:4}})
+                ),
+                h("div",null,
+                  h("label",{style:{display:"inline-block",padding:"8px 14px",
+                    background:"#E3F2FD",border:"1px solid #90CAF9",borderRadius:8,
+                    cursor:"pointer",fontSize:11,fontWeight:700,color:"#1565C0"}},
+                    companySettings.bankQR?"🔄 Change QR Code":"📷 Upload QR Code",
+                    h("input",{type:"file",accept:"image/*",style:{display:"none"},
+                      onChange:e=>{
+                        const file=e.target.files[0];
+                        if(!file)return;
+                        const reader=new FileReader();
+                        reader.onload=ev=>setCompanySettings(p=>({...p,bankQR:ev.target.result}));
+                        reader.readAsDataURL(file);
+                      }})
+                  ),
+                  h("div",{style:{fontSize:9,color:C.muted,marginTop:4}},
+                    "Upload QR image — will appear on printed DR"),
+                  companySettings.bankQR&&h("button",{
+                    onClick:()=>setCompanySettings(p=>({...p,bankQR:""})),
+                    style:{marginTop:4,padding:"4px 8px",background:"#FFEBEE",
+                      border:"1px solid #FFCDD2",borderRadius:6,color:C.danger,
+                      fontSize:10,cursor:"pointer",fontWeight:700}},
+                    "✕ Remove QR")
+                )
+              )
+            ),
+
+            // Save button
+            h("button",{onClick:async()=>{
+                try{
+                  await setDoc(doc(db,"settings","company"),companySettings,{merge:true});
+                  showT("Company settings saved ✓");
+                }catch(e){showT("Error saving settings","err");}
+              },
+              style:{padding:"9px 20px",background:C.primary,border:"none",
+                borderRadius:8,color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}},
+              "💾 Save Company Settings")
           )
         ),
 
@@ -5883,7 +6094,7 @@ function App(){
         display:"flex",alignItems:"center",justifyContent:"center",zIndex:900}},
       h(DRProcessModal,{
         po:advances.find(a=>a._docId===modal.replace("issue_dr_","")),
-        db,user,showT,
+        db,user,showT,companySettings,branches,
         onClose:()=>setModal(null)
       })
     ),
