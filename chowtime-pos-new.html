@@ -3576,190 +3576,6 @@ function VoidBadge({branchId,db,setPage,visible=true}){
 
 
 // ─── RECEIVE ITEMS MODAL (Branch) ────────────────────────
-function ReceiveItemsModal({po,db,user,branchId,showT,onClose}){
-  if(!po)return null;
-  const items=po.deliveredItems||po.items||[];
-  const [received,setReceived]=useState(()=>{
-    const r={};
-    items.forEach(i=>{r[i.id]=i.actualQty!=null?i.actualQty:i.qty;});
-    return r;
-  });
-  const [remarks,setRemarks]=useState({});
-  const [saving,setSaving]=useState(false);
-
-  const hasDisc=items.some(i=>{
-    const exp=i.actualQty!=null?i.actualQty:i.qty;
-    return (received[i.id]||0)!==exp;
-  });
-
-  const confirmReceipt=async()=>{
-    setSaving(true);
-    try{
-      const recItems=items.map(i=>({
-        ...i,
-        receivedQty:received[i.id]||0,
-        discrepancy:(received[i.id]||0)-(i.actualQty!=null?i.actualQty:i.qty),
-        remark:remarks[i.id]||""
-      }));
-      const discItems=recItems.filter(i=>i.discrepancy!==0);
-
-      if(hasDisc){
-        // Submit discrepancy report for approval
-        await updateDoc(doc(db,"advances",po._docId),{
-          status:"discrepancy",
-          receivedItems:recItems,
-          discrepancyItems:discItems,
-          receivedBy:user.name,
-          receivedAt:serverTimestamp(),
-          discRepStatus:"pending_approval"
-        });
-        showT("Discrepancy report submitted — awaiting approval ⚠️","warn");
-      } else {
-        // No discrepancy — complete and update inventory
-        await updateDoc(doc(db,"advances",po._docId),{
-          status:"completed",
-          receivedItems:recItems,
-          receivedBy:user.name,
-          receivedAt:serverTimestamp()
-        });
-        // Update branch inventory
-        for(const item of recItems){
-          try{
-            const invRef=doc(db,"inventory_"+branchId,item.id);
-            const invSnap=await getDoc(invRef);
-            if(invSnap.exists()){
-              await updateDoc(invRef,{
-                stock:increment(item.receivedQty),
-                lastReceived:serverTimestamp()
-              });
-            } else {
-              await setDoc(invRef,{
-                id:item.id,name:item.name,
-                stock:item.receivedQty,
-                unit:item.unit||"pc",
-                lastReceived:serverTimestamp()
-              });
-            }
-          }catch(e){console.warn("Inv update failed for",item.id);}
-        }
-        showT("Items received! Inventory updated ✅");
-      }
-      onClose();
-    }catch(e){showT("Error saving receipt","err");console.error(e);}
-    setSaving(false);
-  };
-
-  return h("div",{style:{background:"#fff",width:640,maxHeight:"90vh",borderRadius:16,
-    display:"flex",flexDirection:"column",overflow:"hidden",
-    boxShadow:"0 20px 60px rgba(0,0,0,.4)"}},
-
-    // Header
-    h("div",{style:{background:hasDisc?
-      "linear-gradient(135deg,#C62828,#B71C1C)":
-      "linear-gradient(135deg,#2E7D32,#1B5E20)",
-      padding:"14px 20px",display:"flex",justifyContent:"space-between",alignItems:"center"}},
-      h("div",null,
-        h("div",{style:{color:"rgba(255,255,255,.6)",fontSize:9,fontWeight:700,letterSpacing:2}},
-          "RECEIVE & CHECK ITEMS"),
-        h("div",{style:{color:"#fff",fontSize:15,fontWeight:900,marginTop:2}},po.poNum),
-        h("div",{style:{color:"rgba(255,255,255,.5)",fontSize:9}},
-          (po.branchName||po.branch)+" · DR: "+(po.drNum||"—"))
-      ),
-      h("button",{onClick:onClose,style:{background:"rgba(255,255,255,.15)",border:"none",
-        color:"#fff",width:28,height:28,borderRadius:8,fontSize:16,cursor:"pointer"}},"×")
-    ),
-
-    // Discrepancy warning
-    hasDisc&&h("div",{style:{background:"#FFF8E1",padding:"8px 16px",
-      borderBottom:"1px solid #FFE082",
-      display:"flex",gap:8,alignItems:"center"}},
-      h("span",{style:{fontSize:16}},"⚠️"),
-      h("div",null,
-        h("div",{style:{fontSize:11,fontWeight:800,color:"#E65100"}},
-          "Discrepancy detected!"),
-        h("div",{style:{fontSize:9,color:"#795548"}},
-          "Items with discrepancy will be submitted for commissary approval before going to inventory.")
-      )
-    ),
-
-    // Items table
-    h("div",{style:{flex:1,overflowY:"auto"}},
-      h("div",{style:{display:"grid",
-        gridTemplateColumns:"1fr 80px 90px 90px 80px",
-        padding:"7px 16px",background:"#fafafa",
-        borderBottom:"1px solid #eee",position:"sticky",top:0}},
-        ["ITEM","DR QTY","RECEIVED","DIFF","REMARK"].map(h2=>
-          h("div",{key:h2,style:{fontSize:8,fontWeight:700,color:C.muted,letterSpacing:1}},h2))
-      ),
-      items.map(i=>{
-        const drQty=i.actualQty!=null?i.actualQty:i.qty;
-        const recQty=received[i.id]!=null?received[i.id]:drQty;
-        const diff=recQty-drQty;
-        return h("div",{key:i.id,
-          style:{display:"grid",gridTemplateColumns:"1fr 80px 90px 90px 80px",
-            padding:"8px 16px",borderBottom:"1px solid #f5f5f5",alignItems:"center",
-            background:diff<0?"#FFEBEE":diff>0?"#E3F2FD":"#fff"}},
-          h("div",null,
-            h("div",{style:{fontSize:11,fontWeight:700}},i.name),
-            h("div",{style:{fontSize:9,color:C.muted}},i.unit||"")
-          ),
-          h("div",{style:{fontSize:11,textAlign:"center",color:C.muted}},drQty),
-          h("div",{style:{display:"flex",alignItems:"center",gap:3}},
-            h("button",{onClick:()=>setReceived(p=>({...p,[i.id]:Math.max(0,(p[i.id]!=null?p[i.id]:drQty)-1)})),
-              style:{width:22,height:22,borderRadius:5,border:"1px solid #ddd",
-                background:"#fff",cursor:"pointer",fontSize:14}},"-"),
-            h("input",{type:"number",min:0,
-              value:received[i.id]!=null?received[i.id]:drQty,
-              onChange:e=>setReceived(p=>({...p,[i.id]:parseFloat(e.target.value)||0})),
-              style:{width:40,textAlign:"center",padding:"3px",border:"1px solid #ddd",
-                borderRadius:5,fontSize:11,fontWeight:700,outline:"none",
-                color:diff!==0?(diff<0?"#C62828":"#1565C0"):"#333"}}),
-            h("button",{onClick:()=>setReceived(p=>({...p,[i.id]:(p[i.id]!=null?p[i.id]:drQty)+1})),
-              style:{width:22,height:22,borderRadius:5,border:"1px solid #4CAF50",
-                background:"#E8F5E9",cursor:"pointer",fontSize:14,color:"#2E7D32"}},"+")
-          ),
-          h("div",{style:{fontSize:12,fontWeight:800,textAlign:"center",
-            color:diff<0?"#C62828":diff>0?"#1565C0":"#9E9E9E"}},
-            diff===0?"✓":(diff>0?"+":"")+diff),
-          h("input",{value:remarks[i.id]||"",
-            onChange:e=>setRemarks(p=>({...p,[i.id]:e.target.value})),
-            placeholder:diff!==0?"Required...":"",
-            style:{padding:"4px 6px",border:`1px solid ${diff!==0?C.danger:C.border}`,
-              borderRadius:6,fontSize:9,outline:"none",width:"100%",boxSizing:"border-box"}})
-        );
-      })
-    ),
-
-    // Summary + Confirm
-    h("div",{style:{padding:"12px 16px",borderTop:"2px solid #eee",background:"#fafafa"}},
-      h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:10}},
-        h("div",{style:{textAlign:"center",padding:"8px",background:"#fff",borderRadius:8,border:"1px solid #eee"}},
-          h("div",{style:{fontSize:9,color:C.muted}},"EXPECTED"),
-          h("div",{style:{fontSize:13,fontWeight:800}},
-            items.reduce((s,i)=>s+(i.actualQty!=null?i.actualQty:i.qty),0))
-        ),
-        h("div",{style:{textAlign:"center",padding:"8px",background:"#fff",borderRadius:8,border:"1px solid #eee"}},
-          h("div",{style:{fontSize:9,color:C.muted}},"RECEIVED"),
-          h("div",{style:{fontSize:13,fontWeight:800,color:C.success}},
-            items.reduce((s,i)=>s+(received[i.id]!=null?received[i.id]:(i.actualQty!=null?i.actualQty:i.qty)),0))
-        ),
-        h("div",{style:{textAlign:"center",padding:"8px",
-          background:hasDisc?"#FFEBEE":"#E8F5E9",borderRadius:8}},
-          h("div",{style:{fontSize:9,color:C.muted}},"DISCREPANCIES"),
-          h("div",{style:{fontSize:13,fontWeight:800,color:hasDisc?C.danger:C.success}},
-            hasDisc?items.filter(i=>(received[i.id]!=null?received[i.id]:(i.actualQty!=null?i.actualQty:i.qty))!==(i.actualQty!=null?i.actualQty:i.qty)).length+" items":"None ✓")
-        )
-      ),
-      h("button",{onClick:confirmReceipt,disabled:saving,
-        style:{width:"100%",padding:"11px",border:"none",borderRadius:9,
-          color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer",
-          background:hasDisc?"linear-gradient(135deg,#C62828,#B71C1C)":
-            "linear-gradient(135deg,#2E7D32,#1B5E20)"}},
-        saving?"Saving...":(hasDisc?"⚠️ Submit Discrepancy Report":"✅ Confirm Receipt & Update Inventory"))
-    )
-  );
-}
-
 
 // ─── RECEIVE ITEMS MODAL ─────────────────────────────────
 function ReceiveItemsModal({po,db,user,showT,branchId,onClose}){
@@ -3767,16 +3583,15 @@ function ReceiveItemsModal({po,db,user,showT,branchId,onClose}){
   const drItems = po.deliveredItems||po.items||[];
   const [received,setReceived] = useState(()=>{
     const init={};
-    drItems.forEach(i=>{init[i.id]=i.actualQty!=null?i.actualQty:(i.qty||0);});
+    drItems.forEach(i=>{init[i.id]=(i.actualQty!=null?i.actualQty:(i.qty||0));});
     return init;
   });
   const [remarks,setRemarks] = useState({});
   const [saving,setSaving] = useState(false);
 
-  // Check for discrepancies
   const discItems = drItems.filter(i=>{
-    const dr=i.actualQty!=null?i.actualQty:(i.qty||0);
-    const rc=received[i.id]!=null?received[i.id]:dr;
+    const dr=(i.actualQty!=null?i.actualQty:(i.qty||0));
+    const rc=(received[i.id]!=null?received[i.id]:dr);
     return rc!==dr;
   });
   const hasDisc = discItems.length>0;
@@ -3786,170 +3601,114 @@ function ReceiveItemsModal({po,db,user,showT,branchId,onClose}){
     try{
       const finalItems = drItems.map(i=>({
         ...i,
-        receivedQty: received[i.id]!=null?received[i.id]:(i.actualQty!=null?i.actualQty:(i.qty||0)),
-        remark: remarks[i.id]||""
+        receivedQty:(received[i.id]!=null?received[i.id]:(i.actualQty!=null?i.actualQty:(i.qty||0))),
+        remark:remarks[i.id]||""
       }));
-
       if(hasDisc){
-        // Save as discrepancy - needs approval
         await updateDoc(doc(db,"advances",po._docId),{
-          status:"discrepancy",
-          receivedItems:finalItems,
-          receivedBy:user.name,
-          receivedAt:serverTimestamp(),
+          status:"discrepancy",receivedItems:finalItems,
+          receivedBy:user.name,receivedAt:serverTimestamp(),
           discrepancyItems:discItems.map(i=>({
-            ...i,
-            drQty:i.actualQty!=null?i.actualQty:(i.qty||0),
-            receivedQty:received[i.id]||0,
+            ...i,drQty:(i.actualQty!=null?i.actualQty:(i.qty||0)),
+            receivedQty:(received[i.id]||0),
             diff:(received[i.id]||0)-(i.actualQty!=null?i.actualQty:(i.qty||0)),
             remark:remarks[i.id]||""
-          })),
-          discrepancyStatus:"pending_approval"
+          })),discrepancyStatus:"pending_approval"
         });
         showT("Discrepancy reported — awaiting Main approval","warn");
       } else {
-        // No discrepancy - complete and add to inventory
         await updateDoc(doc(db,"advances",po._docId),{
-          status:"completed",
-          receivedItems:finalItems,
-          receivedBy:user.name,
-          receivedAt:serverTimestamp()
+          status:"completed",receivedItems:finalItems,
+          receivedBy:user.name,receivedAt:serverTimestamp()
         });
-        // Add to branch inventory
-        const invRef = doc(db,"inventory_"+branchId,"main");
-        finalItems.forEach(async(i)=>{
-          try{
-            await updateDoc(doc(db,"inventory_"+branchId,i.id),{
-              qty: increment(i.receivedQty),
-              lastReceived: serverTimestamp(),
-              lastDR: po.drNum||po.poNum
-            });
-          }catch(e){
-            // Item might not exist yet
-            try{
-              const {setDoc} = await import("https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js");
-            }catch(e2){}
-          }
-        });
-        showT("Items received ✅ Inventory updated");
+        showT("Items received — PO Completed");
       }
       onClose();
-    }catch(e){showT("Error saving receipt","err");console.error(e);}
+    }catch(e){showT("Error","err");}
     setSaving(false);
   };
 
   return h("div",{style:{background:"#fff",width:640,maxHeight:"90vh",
     borderRadius:16,display:"flex",flexDirection:"column",overflow:"hidden",
     boxShadow:"0 20px 60px rgba(0,0,0,.4)"}},
-
-    // Header
-    h("div",{style:{background:`linear-gradient(135deg,${C.primary},${C.dark})`,
+    h("div",{style:{background:"linear-gradient(135deg,"+C.primary+","+C.dark+")",
       padding:"14px 20px",display:"flex",justifyContent:"space-between",alignItems:"center"}},
       h("div",null,
-        h("div",{style:{color:"rgba(255,255,255,.6)",fontSize:9,fontWeight:700,letterSpacing:2}},
-          "RECEIVE ITEMS — CHECK FOR DISCREPANCY"),
-        h("div",{style:{color:"#fff",fontSize:15,fontWeight:900,marginTop:2}},
-          po.drNum||po.poNum),
-        h("div",{style:{color:"rgba(255,255,255,.5)",fontSize:9}},
-          "From: Commissary · "+po.date)
+        h("div",{style:{color:"rgba(255,255,255,.6)",fontSize:9,fontWeight:700,letterSpacing:2}},"RECEIVE ITEMS"),
+        h("div",{style:{color:"#fff",fontSize:15,fontWeight:900}},po.drNum||po.poNum),
+        h("div",{style:{color:"rgba(255,255,255,.5)",fontSize:9}},"DR Date: "+(po.deliveryDate||po.date))
       ),
       h("button",{onClick:onClose,style:{background:"rgba(255,255,255,.15)",border:"none",
-        color:"#fff",width:28,height:28,borderRadius:8,fontSize:16,cursor:"pointer"}},"×")
+        color:"#fff",width:28,height:28,borderRadius:8,fontSize:16,cursor:"pointer"}},"x")
     ),
-
-    // Discrepancy alert
     hasDisc&&h("div",{style:{padding:"8px 20px",background:"#FFF3E0",
       borderBottom:"1px solid #FFE0B2",fontSize:11,color:"#E65100",fontWeight:700}},
-      "⚠️ "+discItems.length+" item(s) with discrepancy detected — will be sent for approval before inventory update"
-    ),
-
-    // Items table
+      String(discItems.length)+" item(s) with discrepancy — needs Main approval"),
     h("div",{style:{flex:1,overflowY:"auto"}},
-      h("div",{style:{display:"grid",
-        gridTemplateColumns:"1fr 80px 80px 80px 1fr",
-        padding:"7px 20px",background:"#fafafa",
-        borderBottom:"1px solid #eee",position:"sticky",top:0}},
-        ["ITEM","DR QTY","RECEIVED","DIFF","REMARKS"].map(h2=>
-          h("div",{key:h2,style:{fontSize:8,fontWeight:700,color:C.muted,letterSpacing:1}},h2))
+      h("div",{style:{display:"grid",gridTemplateColumns:"1fr 80px 90px 60px 1fr",
+        padding:"7px 20px",background:"#fafafa",borderBottom:"1px solid #eee",position:"sticky",top:0}},
+        ["ITEM","DR QTY","RECEIVED","DIFF","REMARKS"].map(function(lbl){
+          return h("div",{key:lbl,style:{fontSize:8,fontWeight:700,color:C.muted,letterSpacing:1}},lbl);
+        })
       ),
-
-      drItems.map(i=>{
-        const drQty = i.actualQty!=null?i.actualQty:(i.qty||0);
-        const rcvQty = received[i.id]!=null?received[i.id]:drQty;
-        const diff = rcvQty-drQty;
-
+      drItems.map(function(i){
+        const drQty=(i.actualQty!=null?i.actualQty:(i.qty||0));
+        const rcvQty=(received[i.id]!=null?received[i.id]:drQty);
+        const diff=rcvQty-drQty;
         return h("div",{key:i.id,
-          style:{display:"grid",gridTemplateColumns:"1fr 80px 80px 80px 1fr",
+          style:{display:"grid",gridTemplateColumns:"1fr 80px 90px 60px 1fr",
             padding:"8px 20px",borderBottom:"1px solid #f5f5f5",alignItems:"center",
             background:diff!==0?"#FFF8E1":"#fff"}},
-
           h("div",null,
             h("div",{style:{fontSize:11,fontWeight:700}},i.name),
             h("div",{style:{fontSize:9,color:"#888"}},i.unit||"")
           ),
-
-          h("div",{style:{fontSize:11,color:C.muted,fontWeight:600}},
-            drQty+" "+(i.unit||"")),
-
-          // Received qty input
+          h("div",{style:{fontSize:11,color:C.muted}},String(drQty)+" "+(i.unit||"")),
           h("div",{style:{display:"flex",alignItems:"center",gap:3}},
-            h("button",{
-              onClick:()=>setReceived(p=>({...p,[i.id]:Math.max(0,(p[i.id]!=null?p[i.id]:drQty)-1)})),
-              style:{width:20,height:20,borderRadius:4,border:"1px solid #ddd",
-                background:"#fff",cursor:"pointer",fontSize:12}},"-"),
+            h("button",{onClick:function(){setReceived(function(p){var r={};Object.assign(r,p);r[i.id]=Math.max(0,(p[i.id]!=null?p[i.id]:drQty)-1);return r;});},
+              style:{width:20,height:20,borderRadius:4,border:"1px solid #ddd",background:"#fff",cursor:"pointer",fontSize:12}},"-"),
             h("input",{type:"number",min:0,
-              value:received[i.id]!=null?received[i.id]:drQty,
-              onChange:e=>setReceived(p=>({...p,[i.id]:parseFloat(e.target.value)||0})),
-              style:{width:38,textAlign:"center",padding:"2px",
+              value:(received[i.id]!=null?received[i.id]:drQty),
+              onChange:function(e){var v=parseFloat(e.target.value)||0;setReceived(function(p){var r={};Object.assign(r,p);r[i.id]=v;return r;});},
+              style:{width:36,textAlign:"center",padding:"2px",
                 border:"1px solid "+(diff!==0?C.warning:"#ddd"),
                 borderRadius:4,fontSize:11,fontWeight:700,outline:"none",
                 color:diff<0?C.danger:diff>0?"#1565C0":"#333"}}),
-            h("button",{
-              onClick:()=>setReceived(p=>({...p,[i.id]:(p[i.id]!=null?p[i.id]:drQty)+1})),
-              style:{width:20,height:20,borderRadius:4,border:"1px solid "+C.primary,
-                background:"#f5f5f5",cursor:"pointer",fontSize:12}},"+")
+            h("button",{onClick:function(){setReceived(function(p){var r={};Object.assign(r,p);r[i.id]=(p[i.id]!=null?p[i.id]:drQty)+1;return r;});},
+              style:{width:20,height:20,borderRadius:4,border:"1px solid "+C.primary,background:"#f5f5f5",cursor:"pointer",fontSize:12}},"+")
           ),
-
           h("div",{style:{fontSize:11,fontWeight:700,
             color:diff<0?C.danger:diff>0?"#1565C0":"#888"}},
-            diff===0?"✓":(diff>0?"+":"")+diff),
-
-          // Remarks for discrepancy
+            diff===0?"OK":(diff>0?"+":"")+String(diff)),
           diff!==0
             ? h("input",{value:remarks[i.id]||"",
-                onChange:e=>setRemarks(p=>({...p,[i.id]:e.target.value})),
-                placeholder:"Reason for discrepancy...",
+                onChange:function(e){var v=e.target.value;setRemarks(function(p){var r={};Object.assign(r,p);r[i.id]=v;return r;});},
+                placeholder:"Reason...",
                 style:{width:"100%",padding:"4px 7px",border:"1px solid "+C.warning,
                   borderRadius:6,fontSize:10,outline:"none",boxSizing:"border-box"}})
             : h("span",{style:{fontSize:9,color:C.success}},"OK")
         );
       })
     ),
-
-    // Footer
-    h("div",{style:{padding:"12px 20px",borderTop:"2px solid "+(hasDisc?C.warning:C.primary),
+    h("div",{style:{padding:"12px 20px",
+      borderTop:"2px solid "+(hasDisc?C.warning:C.primary),
       background:"#fafafa",display:"flex",gap:8,alignItems:"center"}},
       hasDisc
-        ? h("div",{style:{fontSize:10,color:"#E65100",flex:1}},
-            "⚠️ Discrepancy will be reported to Main for approval")
-        : h("div",{style:{fontSize:10,color:C.success,flex:1}},
-            "✅ No discrepancy — items will be added to inventory"),
+        ? h("div",{style:{fontSize:10,color:"#E65100",flex:1}},"Will be reported to Main for approval")
+        : h("div",{style:{fontSize:10,color:C.success,flex:1}},"No discrepancy — PO will be completed"),
       h("button",{onClick:onClose,
         style:{padding:"9px 16px",background:"#fff",border:"1px solid "+C.border,
-          borderRadius:9,fontSize:11,fontWeight:700,cursor:"pointer"}},
-        "Cancel"),
+          borderRadius:9,fontSize:11,fontWeight:700,cursor:"pointer"}},"Cancel"),
       h("button",{onClick:confirmReceipt,disabled:saving,
         style:{padding:"10px 20px",
           background:hasDisc?"linear-gradient(135deg,#E65100,#BF360C)":
             "linear-gradient(135deg,"+C.primary+","+C.dark+")",
-          border:"none",borderRadius:9,color:"#fff",
-          fontWeight:800,fontSize:12,cursor:"pointer"}},
-        saving?"Saving...":(hasDisc?"⚠️ Report Discrepancy":"✅ Confirm Receipt & Update Inventory"))
+          border:"none",borderRadius:9,color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}},
+        saving?"Saving...":(hasDisc?"Report Discrepancy":"Confirm Receipt"))
     )
   );
 }
 
-// ─── PAYMENT MODAL ───────────────────────────────────────
 function PaymentModal({po,db,user,showT,onClose}){
   if(!po)return null;
   const [amount,setAmount]=useState("");
