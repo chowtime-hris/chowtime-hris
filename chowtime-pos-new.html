@@ -516,8 +516,17 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
   const [notes,setNotes]     = useState("");
   const [discount,setDiscount] = useState(0);
   const today = new Date().toISOString().slice(0,10);
-  const soNum = "SO-"+Date.now().toString().slice(-6);
+  const [soNum,setSoNum] = useState("");
+  // Generate branch-sequential PO number on mount
+  useEffect(()=>{
+    if(!branchId||!advances)return;
+    const branchPOs = advances.filter(a=>a._type==="po"&&a.branch===branchId);
+    const nextNum = branchPOs.length+1;
+    const branchCode = branchId.toUpperCase().replace("CT-","");
+    setSoNum(branchCode+"-PO-"+String(nextNum).padStart(4,"0"));
+  },[branchId,advances.length]);
   const ordered = items.filter(i=>i.orderQty>0);
+  const [vatType,setVatType] = useState("vat"); // vat | nonvat | zerovat
 
   const submit = async()=>{
     if(!ordered.length){showT("Add at least 1 item","warn");return;}
@@ -533,6 +542,7 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
       status:"received_by_main",
       paymentStatus:"Unpaid",
       deliveryStatus:"Pending",
+      vatType,
       requestedBy:user.name,
       timestamp:serverTimestamp()
     };
@@ -643,11 +653,48 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
               h("span",{style:{fontSize:11,color:C.muted}},"Line Items:"),
               h("span",{style:{fontSize:11,fontWeight:700}},ordered.length+" items")
             ),
-            h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:4}},
-              h("span",{style:{fontSize:11,color:C.muted}},"Est. Total (based on last price):"),
-              h("span",{style:{fontSize:11,fontWeight:800,color:C.primary}},
-                "₱"+ordered.reduce((s,i)=>s+(i.cost||0)*(i.orderQty||0),0).toFixed(2))
+            // VAT Toggle
+            h("div",{style:{marginBottom:10,padding:"8px 12px",background:"#f9f9f9",borderRadius:8}},
+              h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,marginBottom:6,letterSpacing:1}},"TAX TYPE"),
+              h("div",{style:{display:"flex",gap:6}},
+                [
+                  {id:"vat",label:"VAT (12%)"},
+                  {id:"nonvat",label:"Non-VAT"},
+                  {id:"zerovat",label:"Zero-Rated"},
+                ].map(v=>h("button",{key:v.id,
+                  onClick:()=>setVatType(v.id),
+                  style:{padding:"5px 12px",borderRadius:7,fontSize:10,fontWeight:700,
+                    cursor:"pointer",border:"none",
+                    background:vatType===v.id?C.primary:"#eee",
+                    color:vatType===v.id?"#fff":C.text}},
+                  v.label))
+              )
             ),
+            // Computed totals
+            (()=>{
+              const estSubtotal=ordered.reduce((s,i)=>s+(i.cost||0)*(i.orderQty||0),0);
+              const vatAmt=vatType==="vat"?estSubtotal*0.12:0;
+              const grandTotal=estSubtotal+vatAmt;
+              return h("div",{style:{background:"#fff",borderRadius:8,padding:"10px",
+                border:"1px solid "+C.border}},
+                h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:4}},
+                  h("span",{style:{fontSize:11,color:C.muted}},"Est. Subtotal:"),
+                  h("span",{style:{fontSize:11,fontWeight:700}},"₱"+estSubtotal.toFixed(2))
+                ),
+                vatType==="vat"&&h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:4}},
+                  h("span",{style:{fontSize:11,color:C.muted}},"VAT (12%):"),
+                  h("span",{style:{fontSize:11,fontWeight:700,color:"#E65100"}},"₱"+vatAmt.toFixed(2))
+                ),
+                h("div",{style:{display:"flex",justifyContent:"space-between",
+                  padding:"6px 0",borderTop:"2px solid "+C.primary,marginTop:4}},
+                  h("span",{style:{fontSize:12,fontWeight:800}},"EST. GRAND TOTAL:"),
+                  h("span",{style:{fontSize:14,fontWeight:900,color:C.primary}},"₱"+grandTotal.toFixed(2))
+                ),
+                h("div",{style:{fontSize:9,color:C.muted,marginTop:4}},
+                  vatType==="vat"?"✓ VAT Inclusive":
+                  vatType==="zerovat"?"✓ Zero-Rated VAT":"✓ Non-VAT Transaction")
+              );
+            })(),
             h("div",{style:{display:"flex",justifyContent:"space-between",padding:"6px 0",
               borderTop:"1px solid "+C.border}},
               h("span",{style:{fontSize:11,fontWeight:800}},"Status:"),
@@ -3526,6 +3573,158 @@ function VoidBadge({branchId,db,setPage,visible=true}){
 }
 
 
+
+// ─── PAYMENT MODAL ───────────────────────────────────────
+function PaymentModal({po,db,user,showT,onClose}){
+  if(!po)return null;
+  const [amount,setAmount]=useState("");
+  const [method,setMethod]=useState("cash");
+  const [ref,setRef]=useState("");
+  const [saving,setSaving]=useState(false);
+
+  const payments=po.payments||[];
+  const totalPaid=payments.reduce((s,p)=>s+(p.amount||0),0);
+  const grandTotal=po.totalAmount||0;
+  const balance=grandTotal-totalPaid;
+  const newPaid=totalPaid+(parseFloat(amount)||0);
+  const newBalance=grandTotal-newPaid;
+  const payStatus=newPaid>=grandTotal?"Paid":newPaid>0?"Partial":"Unpaid";
+
+  const savePayment=async()=>{
+    if(!amount||parseFloat(amount)<=0){showT("Enter payment amount","warn");return;}
+    setSaving(true);
+    try{
+      const newPayment={
+        amount:parseFloat(amount),
+        method,ref,
+        by:user.name,
+        at:new Date().toISOString()
+      };
+      const newPayments=[...payments,newPayment];
+      const newTotalPaid=newPayments.reduce((s,p)=>s+(p.amount||0),0);
+      const newStatus=newTotalPaid>=grandTotal?"paid":"processing";
+      const newPayStatus=newTotalPaid>=grandTotal?"Paid":newTotalPaid>0?"Partial":"Unpaid";
+      await updateDoc(doc(db,"advances",po._docId),{
+        payments:newPayments,
+        totalPaid:newTotalPaid,
+        paymentStatus:newPayStatus,
+        status:newStatus,
+        ...(newStatus==="paid"?{paidAt:serverTimestamp(),paidBy:user.name}:{})
+      });
+      showT("Payment recorded ✓ — "+newPayStatus);
+      onClose();
+    }catch(e){showT("Error saving payment","err");}
+    setSaving(false);
+  };
+
+  return h("div",{style:{background:"#fff",width:460,borderRadius:16,
+    overflow:"hidden",boxShadow:"0 20px 60px rgba(0,0,0,.4)"}},
+
+    // Header
+    h("div",{style:{background:`linear-gradient(135deg,${C.success},#1B5E20)`,
+      padding:"14px 20px",display:"flex",justifyContent:"space-between"}},
+      h("div",null,
+        h("div",{style:{color:"rgba(255,255,255,.6)",fontSize:9,fontWeight:700,letterSpacing:2}},
+          "RECORD PAYMENT"),
+        h("div",{style:{color:"#fff",fontSize:15,fontWeight:900,marginTop:2}},po.poNum),
+        h("div",{style:{color:"rgba(255,255,255,.5)",fontSize:9}},po.branchName||po.branch)
+      ),
+      h("button",{onClick:onClose,style:{background:"rgba(255,255,255,.15)",border:"none",
+        color:"#fff",width:28,height:28,borderRadius:8,fontSize:16,cursor:"pointer"}},"×")
+    ),
+
+    h("div",{style:{padding:"16px 20px"}},
+
+      // Summary
+      h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:16}},
+        h("div",{style:{background:"#f9f9f9",borderRadius:8,padding:"10px",textAlign:"center"}},
+          h("div",{style:{fontSize:9,color:C.muted,marginBottom:3}},"GRAND TOTAL"),
+          h("div",{style:{fontSize:14,fontWeight:900,color:C.text}},"₱"+grandTotal.toFixed(2))
+        ),
+        h("div",{style:{background:"#E8F5E9",borderRadius:8,padding:"10px",textAlign:"center"}},
+          h("div",{style:{fontSize:9,color:C.muted,marginBottom:3}},"TOTAL PAID"),
+          h("div",{style:{fontSize:14,fontWeight:900,color:C.success}},"₱"+totalPaid.toFixed(2))
+        ),
+        h("div",{style:{background:balance>0?"#FFEBEE":"#E8F5E9",borderRadius:8,
+          padding:"10px",textAlign:"center"}},
+          h("div",{style:{fontSize:9,color:C.muted,marginBottom:3}},"BALANCE"),
+          h("div",{style:{fontSize:14,fontWeight:900,color:balance>0?C.danger:C.success}},
+            "₱"+balance.toFixed(2))
+        )
+      ),
+
+      // Payment history
+      payments.length>0&&h("div",{style:{marginBottom:14}},
+        h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:6}},
+          "PAYMENT HISTORY"),
+        payments.map((p,i)=>
+          h("div",{key:i,style:{display:"flex",justifyContent:"space-between",
+            padding:"6px 10px",background:"#f9f9f9",borderRadius:7,marginBottom:4,
+            fontSize:11}},
+            h("div",null,
+              h("span",{style:{fontWeight:700}},"₱"+p.amount.toFixed(2)),
+              h("span",{style:{color:C.muted,marginLeft:8}},
+                p.method.toUpperCase()+(p.ref?" · Ref: "+p.ref:""))
+            ),
+            h("div",{style:{fontSize:9,color:C.muted}},p.by+" · "+p.at.slice(0,10))
+          )
+        )
+      ),
+
+      // New payment input
+      h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:6}},
+        "ADD PAYMENT"),
+      h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}},
+        h("div",null,
+          h("div",{style:{fontSize:9,color:C.muted,marginBottom:3}},"AMOUNT (₱)"),
+          h("input",{type:"number",value:amount,onChange:e=>setAmount(e.target.value),
+            placeholder:"0.00",
+            style:{width:"100%",padding:"9px",border:"2px solid "+C.success,
+              borderRadius:8,fontSize:15,fontWeight:700,outline:"none",
+              boxSizing:"border-box",color:C.success}})
+        ),
+        h("div",null,
+          h("div",{style:{fontSize:9,color:C.muted,marginBottom:3}},"METHOD"),
+          h("div",{style:{display:"flex",gap:4}},
+            ["cash","bank","gcash","maya"].map(m=>
+              h("button",{key:m,onClick:()=>setMethod(m),
+                style:{flex:1,padding:"5px 2px",borderRadius:6,fontSize:9,
+                  fontWeight:700,cursor:"pointer",border:"none",
+                  background:method===m?C.primary:"#eee",
+                  color:method===m?"#fff":C.text}},
+                m.toUpperCase()))
+          )
+        )
+      ),
+      (method==="bank"||method==="gcash"||method==="maya")&&
+        h("div",{style:{marginBottom:8}},
+          h("div",{style:{fontSize:9,color:C.muted,marginBottom:3}},"REFERENCE NUMBER"),
+          h("input",{value:ref,onChange:e=>setRef(e.target.value),
+            placeholder:"Transaction ref...",
+            style:{width:"100%",padding:"8px",border:"1px solid "+C.border,
+              borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box"}})
+        ),
+
+      // Preview new status
+      amount&&parseFloat(amount)>0&&h("div",{style:{padding:"8px 12px",marginBottom:10,
+        background:payStatus==="Paid"?"#E8F5E9":payStatus==="Partial"?"#FFF8E1":"#FFEBEE",
+        borderRadius:8,display:"flex",justifyContent:"space-between",fontSize:11}},
+        h("span",null,"After payment:"),
+        h("div",{style:{textAlign:"right"}},
+          h("div",{style:{fontWeight:800,color:payStatus==="Paid"?C.success:payStatus==="Partial"?C.warning:C.danger}},
+            payStatus==="Paid"?"✅ FULLY PAID":payStatus==="Partial"?"⚡ PARTIAL — Balance: ₱"+newBalance.toFixed(2):"Unpaid"),
+          h("div",{style:{fontSize:9,color:C.muted}},"New total paid: ₱"+newPaid.toFixed(2))
+        )
+      ),
+
+      h("button",{onClick:savePayment,disabled:saving,
+        style:{width:"100%",padding:"11px",background:C.success,border:"none",
+          borderRadius:9,color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer"}},
+        saving?"Saving...":"💰 Save Payment")
+    )
+  );
+}
+
 // ─── DR PROCESS MODAL ────────────────────────────────────
 function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]}){
   if(!po) return null;
@@ -5880,20 +6079,12 @@ function App(){
                       borderRadius:8,color:"#fff",fontSize:11,fontWeight:700,cursor:"pointer"}},
                     "⚙️ Process & Issue DR"),
 
-                  // PROCESSING → Mark as Paid
-                  (st==="processing")&&h("button",{
-                    onClick:async()=>{
-                      await updateDoc(doc(db,"advances",po._docId),{
-                        status:"paid",
-                        paymentStatus:"Paid",
-                        paidBy:user.name,
-                        paidAt:serverTimestamp()
-                      });
-                      showT(po.poNum+" marked Paid ✓");
-                    },
+                  // PROCESSING → Payment options
+                  (st==="processing"||st==="paid")&&h("button",{
+                    onClick:()=>setModal("payment_"+po._docId),
                     style:{padding:"7px 14px",background:C.success,border:"none",
                       borderRadius:8,color:"#fff",fontSize:11,fontWeight:700,cursor:"pointer"}},
-                    "💰 Mark Paid"),
+                    st==="paid"?"💰 Add Payment":"💰 Record Payment"),
 
                   // Print DR (available once processing or beyond)
                   (st==="processing"||st==="paid"||st==="completed")&&
@@ -6095,6 +6286,17 @@ function App(){
       h(DRProcessModal,{
         po:advances.find(a=>a._docId===modal.replace("issue_dr_","")),
         db,user,showT,companySettings,branches,
+        onClose:()=>setModal(null)
+      })
+    ),
+
+    // PAYMENT MODAL
+    modal&&modal.startsWith("payment_")&&h("div",{
+      style:{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",
+        display:"flex",alignItems:"center",justifyContent:"center",zIndex:900}},
+      h(PaymentModal,{
+        po:advances.find(a=>a._docId===modal.replace("payment_","")),
+        db,user,showT,
         onClose:()=>setModal(null)
       })
     ),
