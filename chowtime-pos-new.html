@@ -126,9 +126,9 @@ const BRANCHES = [
 
 const ROLES = {
   owner:     {label:"Owner / Admin",    emoji:"\u{1F451}", color:"#C8151B",
-    nav:["dashboard","branches","pos","orders","all_orders","analytics","z_reading","cash_count","expenses","cash_monitor","inventory","po_monitor","menu_mgmt","user_mgmt","kiosk","settings"]},
+    nav:["dashboard","branches","pos","orders","all_orders","analytics","z_reading","cash_count","expenses","cash_monitor","inventory","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","kiosk","settings"]},
   manager:   {label:"Branch Manager",   emoji:"\u{1F3EA}", color:"#007AFF",
-    nav:["branch_dash","pos","orders","analytics","z_reading","cash_count","expenses","inventory","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","kiosk","branch_settings"]},
+    nav:["branch_dash","pos","orders","analytics","z_reading","cash_count","expenses","inventory","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","bom_mgmt","kiosk","branch_settings"]},
   cashier:   {label:"Cashier",          emoji:"\u{1F4B3}", color:"#34C759",
     nav:["pos","orders","x_reading","z_reading","cash_count","ca_request","loan_request","kiosk","void_request"]},
   crew:      {label:"Crew / Kitchen",   emoji:"\u{1F9D1}\u{200D}\u{1F373}", color:"#FF9500",
@@ -3325,236 +3325,318 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
 }
 
 // ─── SALES ANALYTICS + EXPORT ────────────────────────────
-function AnalyticsPage({orders,branchId,curBranch,user,db,showT}){
-  const [period,setPeriod]   = useState("today");
-  const [dateFrom,setFrom]   = useState(new Date().toISOString().slice(0,10));
-  const [dateTo,setTo]       = useState(new Date().toISOString().slice(0,10));
+function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inventory=[]}){
+  const [tab,setTab]       = useState("general");
+  const [period,setPeriod] = useState("today");
+  const [dateFrom,setFrom] = useState(new Date().toISOString().slice(0,10));
+  const [dateTo,setTo]     = useState(new Date().toISOString().slice(0,10));
 
   const today = new Date().toISOString().slice(0,10);
-  const getWeekStart = ()=>{
-    const d=new Date(); d.setDate(d.getDate()-d.getDay()); return d.toISOString().slice(0,10);
+  const getWeekStart=()=>{const d=new Date();d.setDate(d.getDate()-d.getDay());return d.toISOString().slice(0,10);};
+  const getMonthStart=()=>new Date().toISOString().slice(0,8)+"01";
+
+  const filtOrders = orders.filter(o=>{
+    if(o.status==="voided")return false;
+    const d=o.date||"";
+    if(period==="today")return d===today;
+    if(period==="week")return d>=getWeekStart();
+    if(period==="month")return d>=getMonthStart();
+    if(period==="custom")return d>=dateFrom&&d<=dateTo;
+    return true;
+  });
+
+  const gross   = filtOrders.reduce((s,o)=>s+(o.subtotal||0),0);
+  const discAmt = filtOrders.reduce((s,o)=>s+(o.discAmt||0),0);
+  const netSales= gross-discAmt;
+  const vatable = netSales/1.12;
+  const vat     = netSales-vatable;
+  const txnCount= filtOrders.length;
+  const avgTxn  = txnCount>0?gross/txnCount:0;
+
+  // Item breakdown
+  const itemMap={};
+  filtOrders.forEach(o=>(o.items||[]).forEach(i=>{
+    if(!itemMap[i.name])itemMap[i.name]={name:i.name,cat:i.cat||i.category||"",qty:0,rev:0};
+    itemMap[i.name].qty+=(i.qty||1);
+    itemMap[i.name].rev+=(i.lineTotal||0);
+  }));
+  const itemList=Object.values(itemMap).sort((a,b)=>b.rev-a.rev);
+
+  // Category breakdown
+  const catMap={};
+  itemList.forEach(i=>{
+    const c=i.cat||"Other";
+    if(!catMap[c])catMap[c]={cat:c,qty:0,rev:0};
+    catMap[c].qty+=i.qty; catMap[c].rev+=i.rev;
+  });
+  const catList=Object.values(catMap).sort((a,b)=>b.rev-a.rev);
+
+  // Payment breakdown
+  const payMap={};
+  filtOrders.forEach(o=>{
+    const p=o.payMethod||"cash";
+    if(!payMap[p])payMap[p]={method:p,count:0,total:0};
+    payMap[p].count++; payMap[p].total+=(o.subtotal||0);
+  });
+  const payList=Object.values(payMap).sort((a,b)=>b.total-a.total);
+
+  // Branch breakdown (owner)
+  const branchMap={};
+  orders.filter(o=>o.status!=="voided").forEach(o=>{
+    const b=o.branch||"unknown";
+    if(!branchMap[b])branchMap[b]={branch:b,count:0,total:0};
+    branchMap[b].count++; branchMap[b].total+=(o.subtotal||0);
+  });
+  const branchList=Object.values(branchMap).sort((a,b)=>b.total-a.total);
+
+  // PO/Purchasing breakdown
+  const poPaid=advances.filter(a=>a._type==="po"&&a.paymentStatus==="Paid");
+  const poTotal=poPaid.reduce((s,a)=>s+(a.totalAmount||0),0);
+
+  // Inventory value
+  const invValue=inventory.reduce((s,i)=>s+(i.cost||0)*(i.stock||0),0);
+  const invValueSell=inventory.reduce((s,i)=>s+(i.price||0)*(i.stock||0),0);
+
+  const tabs=["general","item","category","payment","branch","purchasing"];
+  if(user.role!=="owner")tabs.splice(tabs.indexOf("branch"),1);
+
+  const pctBar=(pct,col)=>h("div",{style:{height:4,background:"#f0f0f0",borderRadius:2,marginTop:3}},
+    h("div",{style:{height:"100%",width:Math.min(100,pct)+"%",background:col||C.primary,borderRadius:2}}));
+
+  const exportCSV=()=>{
+    const rows=[["Date","Order ID","Branch","Items","Subtotal","Discount","Payment","Cashier"]];
+    filtOrders.forEach(o=>rows.push([
+      o.date,o.id,o.branch,
+      (o.items||[]).map(i=>i.qty+"x "+i.name).join("; "),
+      (o.subtotal||0).toFixed(2),(o.discAmt||0).toFixed(2),
+      o.payMethod,o.cashier||""
+    ]));
+        const csv=rows.map(function(r){return r.map(function(v){var s=String(v||'');return '"'+s.split('"').join('""')+'"';}).join(',');}).join('\n');
+    const a=document.createElement("a");
+    a.href="data:text/csv;charset=utf-8,"+encodeURIComponent(csv);
+    a.download="analytics-"+today+".csv";a.click();
   };
-  const getMonthStart = ()=>new Date().toISOString().slice(0,8)+"01";
-
-  const periodFrom = period==="today"?today:period==="week"?getWeekStart():period==="month"?getMonthStart():dateFrom;
-  const periodTo   = period==="custom"?dateTo:today;
-
-  // Filter orders for this branch+period
-  const branchOrders = orders.filter(o=>{
-    if(branchId!=="all"&&o.branch!==branchId)return false;
-    if(o.status==="void"||o.status==="cancelled")return false;
-    const d=(o.timestamp?.toDate?.()?.toISOString()||o.date||"").slice(0,10);
-    return d>=periodFrom&&d<=periodTo;
-  });
-
-  // Sales by item
-  const itemSales = {};
-  branchOrders.forEach(o=>{
-    (o.items||[]).forEach(item=>{
-      if(!itemSales[item.name]) itemSales[item.name]={name:item.name,qty:0,revenue:0,orders:0};
-      itemSales[item.name].qty += item.qty||1;
-      itemSales[item.name].revenue += (item.price||0)*(item.qty||1);
-      itemSales[item.name].orders += 1;
-    });
-  });
-  const itemRanked = Object.values(itemSales).sort((a,b)=>b.qty-a.qty);
-
-  // Sales by payment method
-  const payBreakdown = {};
-  branchOrders.forEach(o=>{
-    const pm = o.payMethod||"cash";
-    if(!payBreakdown[pm]) payBreakdown[pm]={method:pm,count:0,total:0};
-    payBreakdown[pm].count++;
-    payBreakdown[pm].total += o.total||0;
-  });
-
-  // Sales by day (for chart data)
-  const byDay = {};
-  branchOrders.forEach(o=>{
-    const d=(o.timestamp?.toDate?.()?.toISOString()||o.date||"").slice(0,10);
-    if(!byDay[d]) byDay[d]={date:d,total:0,orders:0};
-    byDay[d].total += o.total||0;
-    byDay[d].orders++;
-  });
-  const dayData = Object.values(byDay).sort((a,b)=>a.date.localeCompare(b.date));
-  const maxDay = Math.max(...dayData.map(d=>d.total),1);
-
-  const totalRev = branchOrders.reduce((s,o)=>s+(o.total||0),0);
-  const totalTxns = branchOrders.length;
-  const avgTxn = totalTxns>0?totalRev/totalTxns:0;
-  const topItem = itemRanked[0];
-  const voidCount = orders.filter(o=>o.branch===branchId&&o.status==="void").length;
-
-  // Export to CSV
-  const exportCSV = ()=>{
-    const rows=[["Date","Order ID","Items","Qty","Payment","Total","Cashier","Branch"]];
-    branchOrders.forEach(o=>{
-      rows.push([
-        (o.timestamp?.toDate?.()?.toISOString()||"").slice(0,10),
-        o.id||"",
-        (o.items||[]).map(i=>i.qty+"x "+i.name).join("; "),
-        (o.items||[]).reduce((s,i)=>s+(i.qty||1),0),
-        o.payMethod||"cash",
-        (o.total||0).toFixed(2),
-        o.cashier||"",
-        o.branch||""
-      ]);
-    });
-    const csv = rows.map(r=>r.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(",")).join("\n");
-    const blob = new Blob([csv],{type:"text/csv"});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href=url;
-    a.download="chowtime-sales-"+periodFrom+"-to-"+periodTo+".csv";
-    a.click();
-    URL.revokeObjectURL(url);
-    showT("Exported "+branchOrders.length+" orders as CSV ✓");
-  };
-
-  // Export item summary
-  const exportItemSummary = ()=>{
-    const rows=[["Item","Qty Sold","Revenue","# Orders"]];
-    itemRanked.forEach(i=>rows.push([i.name,i.qty,"₱"+i.revenue.toFixed(2),i.orders]));
-    const csv = rows.map(r=>r.join(",")).join("\n");
-    const blob = new Blob([csv],{type:"text/csv"});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href=url;
-    a.download="chowtime-items-"+periodFrom+"-to-"+periodTo+".csv";
-    a.click();
-    URL.revokeObjectURL(url);
-    showT("Item summary exported ✓");
-  };
-
-  const pmColors={cash:"#2E7D32",gcash:"#0070FF",maya:"#00C853",bank:"#1565C0",foodpanda:"#D70F64",grabfood:"#00B14F"};
-  const pmLabels={cash:"💵 Cash",gcash:"💙 GCash",maya:"🟢 Maya",bank:"🏦 Bank Transfer",foodpanda:"🐼 FoodPanda",grabfood:"🟢 GrabFood"};
 
   return h("div",null,
     // Header
-    h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}},
+    h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}},
       h("div",null,
-        h("h2",{style:{margin:0,fontSize:17,fontWeight:800}},"📈 Sales Analytics"),
-        h("div",{style:{fontSize:10,color:C.muted,marginTop:2}},curBranch.name+" · "+periodFrom+(periodFrom!==periodTo?" to "+periodTo:""))
+        h("div",{style:{fontSize:17,fontWeight:900}},"📊 Sales Analytics"),
+        h("div",{style:{fontSize:10,color:C.muted}},(branchId||"").toUpperCase()+" · "+today)
       ),
-      h("div",{style:{display:"flex",gap:7}},
-        h("button",{onClick:exportCSV,
-          style:{padding:"7px 13px",background:"#E8F5E9",border:"1px solid #A5D6A7",
-            borderRadius:8,fontSize:11,fontWeight:700,cursor:"pointer",color:"#1B5E20"}},
-          "📥 Export Orders CSV"),
-        h("button",{onClick:exportItemSummary,
-          style:{padding:"7px 13px",background:"#E3F2FD",border:"1px solid #90CAF9",
-            borderRadius:8,fontSize:11,fontWeight:700,cursor:"pointer",color:"#1565C0"}},
-          "📥 Export Items CSV")
-      )
+      h("button",{onClick:exportCSV,
+        style:{padding:"7px 14px",background:C.success,border:"none",borderRadius:8,
+          color:"#fff",fontWeight:700,fontSize:11,cursor:"pointer"}},
+        "📥 Export CSV")
     ),
 
     // Period selector
-    h("div",{style:{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap",alignItems:"center"}},
-      ["today","week","month","custom"].map(p=>h("button",{key:p,onClick:()=>setPeriod(p),
-        style:{padding:"6px 14px",borderRadius:20,
-          border:`1px solid ${period===p?C.primary:C.border}`,
-          background:period===p?"#FFF0F0":"#fff",
-          color:period===p?C.primary:C.muted,
-          fontWeight:period===p?700:400,fontSize:11,cursor:"pointer"}},
-        {today:"Today",week:"This Week",month:"This Month",custom:"Custom"}[p])),
+    h("div",{style:{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}},
+      [["today","Today"],["week","This Week"],["month","This Month"],["custom","Custom"]].map(([id,lbl])=>
+        h("button",{key:id,onClick:()=>setPeriod(id),
+          style:{padding:"6px 14px",borderRadius:20,fontSize:11,cursor:"pointer",
+            border:"1px solid "+(period===id?C.primary:C.border),
+            background:period===id?C.primary:"#fff",
+            color:period===id?"#fff":C.muted,
+            fontWeight:period===id?700:400}},lbl)
+      ),
       period==="custom"&&h("div",{style:{display:"flex",gap:6,alignItems:"center"}},
         h("input",{type:"date",value:dateFrom,onChange:e=>setFrom(e.target.value),
           style:{padding:"5px 8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none"}}),
-        h("span",{style:{fontSize:11,color:C.muted}},"to"),
+        h("span",{style:{color:C.muted}},"→"),
         h("input",{type:"date",value:dateTo,onChange:e=>setTo(e.target.value),
           style:{padding:"5px 8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none"}})
       )
     ),
 
-    // KPI Cards
-    h("div",{style:{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10,marginBottom:14}},
-      h(Stat,{label:"Total Revenue",value:"₱"+totalRev.toFixed(2),icon:"💰",color:C.primary}),
-      h(Stat,{label:"Transactions",value:totalTxns,icon:"🧾",color:C.info}),
-      h(Stat,{label:"Avg per Txn",value:"₱"+avgTxn.toFixed(2),icon:"📊",color:C.success}),
-      h(Stat,{label:"Top Item",value:topItem?.name||"—",sub:topItem?topItem.qty+"x sold":"",icon:"🏆",color:C.warning}),
-      h(Stat,{label:"Void Orders",value:voidCount,icon:"🚫",color:C.danger})
+    // Tabs
+    h("div",{style:{display:"flex",gap:0,marginBottom:14,borderBottom:"2px solid "+C.border}},
+      tabs.map(t=>h("button",{key:t,onClick:()=>setTab(t),
+        style:{padding:"8px 14px",border:"none",background:"none",cursor:"pointer",
+          fontSize:11,fontWeight:tab===t?800:400,
+          color:tab===t?C.primary:C.muted,
+          borderBottom:tab===t?"2px solid "+C.primary:"2px solid transparent",
+          marginBottom:-2,textTransform:"capitalize"}},
+        {general:"General",item:"Item",category:"Category",
+         payment:"Payment",branch:"Branch",purchasing:"Purchasing"}[t]||t))
     ),
 
-    h("div",{style:{display:"grid",gridTemplateColumns:"2fr 1fr",gap:12,marginBottom:12}},
-
-      // Sales trend chart (bar)
-      h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,padding:"16px"}},
-        h("div",{style:{fontWeight:800,fontSize:12,marginBottom:12}},"📊 Sales Trend"),
-        dayData.length===0
-          ?h("div",{style:{textAlign:"center",padding:"20px",color:C.muted,fontSize:11}},"No data for this period")
-          :h("div",{style:{display:"flex",alignItems:"flex-end",gap:4,height:120,overflowX:"auto"}},
-            dayData.map(d=>h("div",{key:d.date,style:{display:"flex",flexDirection:"column",alignItems:"center",gap:3,flex:1,minWidth:32}},
-              h("div",{style:{fontSize:8,color:C.muted,fontWeight:600}},"₱"+Math.round(d.total/1000)+"k"),
-              h("div",{style:{width:"100%",background:`linear-gradient(180deg,${C.primary},${C.dark})`,
-                borderRadius:"4px 4px 0 0",
-                height:Math.max(4,(d.total/maxDay)*100)+"px",transition:"all .3s"}}),
-              h("div",{style:{fontSize:7,color:C.muted,textAlign:"center"}},d.date.slice(5))
-            ))
-          )
-      ),
-
-      // Payment breakdown
-      h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,padding:"16px"}},
-        h("div",{style:{fontWeight:800,fontSize:12,marginBottom:10}},"💳 By Payment"),
-        Object.values(payBreakdown).length===0
-          ?h("div",{style:{textAlign:"center",padding:"20px",color:C.muted,fontSize:11}},"No data")
-          :Object.values(payBreakdown).sort((a,b)=>b.total-a.total).map(pm=>
-            h("div",{key:pm.method,style:{marginBottom:8}},
-              h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:3}},
-                h("span",{style:{fontSize:10,fontWeight:700}},pmLabels[pm.method]||pm.method),
-                h("span",{style:{fontSize:10,fontWeight:800,color:pmColors[pm.method]||C.text}},
-                  "₱"+pm.total.toFixed(2))
-              ),
-              h("div",{style:{height:6,borderRadius:3,background:"#f5f5f5"}},
-                h("div",{style:{height:"100%",borderRadius:3,transition:"all .3s",
-                  background:pmColors[pm.method]||C.primary,
-                  width:(pm.total/totalRev*100||0)+"%"}}))
-            )
-          )
+    // ── GENERAL TAB ──
+    tab==="general"&&h("div",null,
+      h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}},
+        h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,padding:"16px"}},
+          h("div",{style:{fontSize:10,color:C.muted,marginBottom:4}},"PRODUCT INVENTORY VALUE"),
+          h("div",{style:{fontSize:22,fontWeight:900,color:C.text}},
+            "₱"+invValue.toLocaleString("en-PH",{minimumFractionDigits:2})),
+          h("div",{style:{fontSize:10,color:C.muted,marginTop:4}},"Selling value: ₱"+invValueSell.toLocaleString())
+        ),
+        h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,padding:"16px"}},
+          h("div",{style:{fontSize:10,color:C.muted,marginBottom:4}},"GROSS SALES"),
+          h("div",{style:{fontSize:22,fontWeight:900,color:C.primary}},"₱"+gross.toLocaleString()),
+          h("div",{style:{fontSize:10,color:C.muted,marginTop:4}},"*as of "+period)
+        ),
+        h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,padding:"16px"}},
+          h("div",{style:{fontSize:10,color:C.muted,marginBottom:4}},"NET SALES"),
+          h("div",{style:{fontSize:22,fontWeight:900,color:C.success}},"₱"+netSales.toLocaleString()),
+          h("div",{style:{fontSize:10,color:C.muted,marginTop:4}},"Discount: ₱"+discAmt.toLocaleString())
+        ),
+        h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,padding:"16px"}},
+          h("div",{style:{fontSize:10,color:C.muted,marginBottom:4}},"TRANSACTIONS"),
+          h("div",{style:{fontSize:22,fontWeight:900}},""+txnCount),
+          h("div",{style:{fontSize:10,color:C.muted,marginTop:4}},"Avg: ₱"+avgTxn.toFixed(2))
+        ),
+        h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,padding:"16px"}},
+          h("div",{style:{fontSize:10,color:C.muted,marginBottom:4}},"VAT (12%)"),
+          h("div",{style:{fontSize:22,fontWeight:900,color:"#6A1B9A"}},"₱"+vat.toFixed(2)),
+          h("div",{style:{fontSize:10,color:C.muted,marginTop:4}},"Vatable: ₱"+vatable.toFixed(2))
+        ),
+        h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,padding:"16px"}},
+          h("div",{style:{fontSize:10,color:C.muted,marginBottom:4}},"VOID ORDERS"),
+          h("div",{style:{fontSize:22,fontWeight:900,color:C.danger}},
+            ""+orders.filter(o=>o.status==="voided"&&(o.date||"")===today).length),
+          h("div",{style:{fontSize:10,color:C.muted,marginTop:4}},"Today's voids")
+        )
       )
     ),
 
-    // Best sellers table
-    h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
-      h("div",{style:{padding:"12px 16px",display:"flex",justifyContent:"space-between",
-        alignItems:"center",borderBottom:"1px solid #eee"}},
-        h("div",{style:{fontWeight:800,fontSize:12}},"🏆 Best Sellers — "+periodFrom+(periodFrom!==periodTo?" to "+periodTo:"")),
-        h("div",{style:{fontSize:10,color:C.muted}},itemRanked.length+" unique items sold")
-      ),
-      h("div",{style:{display:"grid",gridTemplateColumns:"30px 1fr 80px 100px 90px",
-        padding:"7px 14px",background:"#f9f9f9",borderBottom:"1px solid #eee"}},
-        ["#","Item","Qty Sold","Revenue","% of Sales"].map(h2=>
-          h("div",{key:h2,style:{fontSize:8,fontWeight:700,color:C.muted,letterSpacing:1}},h2))
-      ),
-      itemRanked.length===0
-        ?h("div",{style:{textAlign:"center",padding:"30px",color:C.muted,fontSize:11}},"No sales data for this period")
-        :itemRanked.map((item,i)=>h("div",{key:item.name,
-          style:{display:"grid",gridTemplateColumns:"30px 1fr 80px 100px 90px",
-            padding:"10px 14px",borderBottom:"1px solid #f5f5f5",alignItems:"center",
-            background:i===0?"#FFFDE7":i===1?"#F9FBE7":i===2?"#F1F8E9":"#fff"}},
-          h("div",{style:{fontSize:12,fontWeight:900,
-            color:i===0?"#F57F17":i===1?"#9E9E9E":i===2?"#6D4C41":C.muted}},
-            i===0?"🥇":i===1?"🥈":i===2?"🥉":i+1),
+    // ── ITEM TAB ──
+    tab==="item"&&h("div",null,
+      h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
+        h("div",{style:{display:"grid",gridTemplateColumns:"2fr 80px 80px 100px 80px",
+          padding:"8px 16px",background:"#fafafa",borderBottom:"1px solid "+C.border}},
+          ["ITEM","QTY SOLD","REVENUE","% OF SALES","RANK"].map(h2=>
+            h("div",{key:h2,style:{fontSize:8,fontWeight:700,color:C.muted,letterSpacing:1}},h2))
+        ),
+        itemList.length===0&&h("div",{style:{padding:"30px",textAlign:"center",color:C.muted}},
+          "No sales data for this period"),
+        itemList.map((it,i)=>h("div",{key:it.name,
+          style:{display:"grid",gridTemplateColumns:"2fr 80px 80px 100px 80px",
+            padding:"10px 16px",borderBottom:"1px solid #f5f5f5",alignItems:"center"}},
           h("div",null,
-            h("div",{style:{fontSize:11,fontWeight:700}},item.name),
-            h("div",{style:{fontSize:9,color:C.muted}},item.orders+" orders")
+            h("div",{style:{fontWeight:700,fontSize:12}},it.name),
+            h("div",{style:{fontSize:9,color:C.muted}},it.cat),
+            pctBar(gross>0?it.rev/gross*100:0)
           ),
-          h("div",{style:{fontSize:12,fontWeight:800,color:C.info}},item.qty+" pcs"),
-          h("div",{style:{fontSize:11,fontWeight:700,color:C.primary}},"₱"+item.revenue.toFixed(2)),
-          h("div",null,
-            h("div",{style:{fontSize:10,fontWeight:700,color:C.text,marginBottom:3}},
-              totalRev>0?(item.revenue/totalRev*100).toFixed(1)+"%":"0%"),
-            h("div",{style:{height:5,borderRadius:3,background:"#f5f5f5"}},
-              h("div",{style:{height:"100%",borderRadius:3,
-                background:`linear-gradient(90deg,${C.primary},${C.dark})`,
-                width:totalRev>0?(item.revenue/totalRev*100)+"%":"0%"}}))
-          )
+          h("div",{style:{fontSize:12,fontWeight:700}},it.qty),
+          h("div",{style:{fontSize:12,fontWeight:700,color:C.primary}},"₱"+it.rev.toFixed(2)),
+          h("div",{style:{fontSize:11,color:C.muted}},(gross>0?(it.rev/gross*100).toFixed(1):0)+"%"),
+          h("div",{style:{fontSize:12,fontWeight:900,color:i<3?C.warning:C.muted}},"#"+(i+1))
         ))
+      )
+    ),
+
+    // ── CATEGORY TAB ──
+    tab==="category"&&h("div",null,
+      h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
+        h("div",{style:{display:"grid",gridTemplateColumns:"1fr 80px 100px 80px",
+          padding:"8px 16px",background:"#fafafa",borderBottom:"1px solid "+C.border}},
+          ["CATEGORY","QTY","REVENUE","% SHARE"].map(h2=>
+            h("div",{key:h2,style:{fontSize:8,fontWeight:700,color:C.muted,letterSpacing:1}},h2))
+        ),
+        catList.map((c,i)=>{
+          const colors=["#C8151B","#FF6B6B","#FF9500","#FFD700","#4CAF50","#2196F3","#9C27B0"];
+          const col=colors[i%colors.length];
+          return h("div",{key:c.cat,
+            style:{display:"grid",gridTemplateColumns:"1fr 80px 100px 80px",
+              padding:"12px 16px",borderBottom:"1px solid #f5f5f5",alignItems:"center"}},
+            h("div",null,
+              h("div",{style:{fontWeight:700,fontSize:12}},c.cat||"Other"),
+              pctBar(gross>0?c.rev/gross*100:0,col)
+            ),
+            h("div",{style:{fontSize:12}},""+c.qty),
+            h("div",{style:{fontSize:12,fontWeight:700,color:col}},"₱"+c.rev.toFixed(2)),
+            h("div",{style:{fontSize:11,color:C.muted}},(gross>0?(c.rev/gross*100).toFixed(1):0)+"%")
+          );
+        })
+      )
+    ),
+
+    // ── PAYMENT TAB ──
+    tab==="payment"&&h("div",null,
+      h("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:10,marginBottom:12}},
+        payList.map(p=>h("div",{key:p.method,
+          style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,padding:"16px"}},
+          h("div",{style:{fontSize:10,color:C.muted,marginBottom:4,textTransform:"uppercase"}},p.method),
+          h("div",{style:{fontSize:20,fontWeight:900,color:C.primary}},"₱"+p.total.toFixed(2)),
+          h("div",{style:{fontSize:10,color:C.muted}},p.count+" transactions"),
+          pctBar(gross>0?p.total/gross*100:0)
+        ))
+      )
+    ),
+
+    // ── BRANCH TAB (owner only) ──
+    tab==="branch"&&user.role==="owner"&&h("div",null,
+      h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
+        h("div",{style:{display:"grid",gridTemplateColumns:"1fr 80px 100px 80px",
+          padding:"8px 16px",background:"#fafafa",borderBottom:"1px solid "+C.border}},
+          ["BRANCH","ORDERS","REVENUE","SHARE"].map(h2=>
+            h("div",{key:h2,style:{fontSize:8,fontWeight:700,color:C.muted,letterSpacing:1}},h2))
+        ),
+        branchList.map((b,i)=>{
+          const totalAll=branchList.reduce((s,x)=>s+x.total,0);
+          return h("div",{key:b.branch,
+            style:{display:"grid",gridTemplateColumns:"1fr 80px 100px 80px",
+              padding:"12px 16px",borderBottom:"1px solid #f5f5f5",alignItems:"center"}},
+            h("div",null,
+              h("div",{style:{fontWeight:700,fontSize:12}},
+                b.branch.replace("ct-","").toUpperCase()),
+              pctBar(totalAll>0?b.total/totalAll*100:0,C.primary)
+            ),
+            h("div",{style:{fontSize:12}},b.count),
+            h("div",{style:{fontSize:12,fontWeight:700,color:C.primary}},"₱"+b.total.toFixed(2)),
+            h("div",{style:{fontSize:11,color:C.muted}},(totalAll>0?(b.total/totalAll*100).toFixed(1):0)+"%")
+          );
+        })
+      )
+    ),
+
+    // ── PURCHASING TAB ──
+    tab==="purchasing"&&h("div",null,
+      h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}},
+        h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,padding:"16px"}},
+          h("div",{style:{fontSize:10,color:C.muted,marginBottom:4}},"TOTAL PO COLLECTIONS"),
+          h("div",{style:{fontSize:22,fontWeight:900,color:C.primary}},"₱"+poTotal.toLocaleString()),
+          h("div",{style:{fontSize:10,color:C.muted}},poPaid.length+" paid POs")
+        ),
+        h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,padding:"16px"}},
+          h("div",{style:{fontSize:10,color:C.muted,marginBottom:4}},"PENDING COLLECTIONS"),
+          h("div",{style:{fontSize:22,fontWeight:900,color:C.warning}},
+            "₱"+advances.filter(a=>a._type==="po"&&a.status==="processing")
+              .reduce((s,a)=>s+(a.totalAmount||0),0).toLocaleString()),
+          h("div",{style:{fontSize:10,color:C.muted}},"Awaiting payment")
+        ),
+        h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,padding:"16px"}},
+          h("div",{style:{fontSize:10,color:C.muted,marginBottom:4}},"DISCREPANCY POs"),
+          h("div",{style:{fontSize:22,fontWeight:900,color:C.danger}},
+            ""+advances.filter(a=>a._type==="po"&&a.status==="discrepancy").length),
+          h("div",{style:{fontSize:10,color:C.muted}},"Needs resolution")
+        )
+      ),
+      // PO list
+      h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
+        h("div",{style:{padding:"10px 16px",borderBottom:"1px solid "+C.border,
+          fontSize:12,fontWeight:800}},"Recent PO Transactions"),
+        advances.filter(a=>a._type==="po"&&a.paymentStatus==="Paid")
+          .slice(0,10)
+          .map(po=>h("div",{key:po._docId,
+            style:{display:"grid",gridTemplateColumns:"1fr 120px 100px 80px",
+              padding:"9px 16px",borderBottom:"1px solid #f5f5f5",
+              fontSize:11,alignItems:"center"}},
+            h("div",null,
+              h("div",{style:{fontWeight:700}},po.poNum),
+              h("div",{style:{fontSize:9,color:C.muted}},po.branchName||po.branch)
+            ),
+            h("div",{style:{color:C.muted}},po.deliveryDate||po.date),
+            h("div",{style:{fontWeight:700,color:C.primary}},"₱"+(po.totalAmount||0).toFixed(2)),
+            h("div",null,h("span",{style:{fontSize:9,padding:"2px 7px",
+              background:"#E8F5E9",color:C.success,borderRadius:8,fontWeight:700}},"PAID"))
+          ))
+      )
     )
   );
 }
 
-// ─── VOID BADGE (header alert) ───────────────────────────
+
 function VoidBadge({branchId,db,setPage,visible=true}){
   const [count,setCount] = useState(0);
   useEffect(()=>{
@@ -5864,6 +5946,63 @@ function App(){
           )
         ),
 
+          // ── TOP CONSUMED ──
+          h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,
+            marginTop:12,overflow:"hidden"}},
+            h("div",{style:{padding:"12px 16px",borderBottom:"1px solid "+C.border,
+              fontSize:13,fontWeight:800}},"📦 Top Consumed Products & Supplies"),
+            h("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:0}},
+              (function(){
+                // Calculate consumption per day from orders (BOM deduction)
+                const consMap={};
+                const sevenDaysAgo=new Date(Date.now()-7*86400000).toISOString().slice(0,10);
+                // Use inventory items sorted by consumption rate
+                return inventory
+                  .filter(function(i){return (i.stock||0)>=0;})
+                  .map(function(i){
+                    // Estimate daily consumption from avgDeduction or manual rate
+                    const dailyRate=i.dailyRate||i.avgDeduction||0;
+                    const stock=i.stock||0;
+                    const daysLeft=dailyRate>0?stock/dailyRate:null;
+                    return {name:i.name,unit:i.unit||"",stock,dailyRate,daysLeft,cat:i.cat||""};
+                  })
+                  .filter(function(i){return i.dailyRate>0;})
+                  .sort(function(a,b){return b.dailyRate-a.dailyRate;})
+                  .slice(0,12)
+                  .map(function(i,ix){
+                    const urgent=i.daysLeft!=null&&i.daysLeft<5;
+                    const warn=i.daysLeft!=null&&i.daysLeft<15;
+                    const col=urgent?C.danger:warn?C.warning:C.info;
+                    return h("div",{key:i.name,
+                      style:{display:"flex",alignItems:"center",gap:12,
+                        padding:"12px 16px",borderBottom:"1px solid #f5f5f5",
+                        background:urgent?"#FFF8F8":warn?"#FFFBF0":"#fff"}},
+                      h("div",{style:{width:40,height:40,background:"#f5f5f5",
+                        borderRadius:8,flexShrink:0,display:"flex",
+                        alignItems:"center",justifyContent:"center",
+                        fontSize:18}},
+                        urgent?"⚠️":warn?"🟡":"📦"),
+                      h("div",{style:{flex:1}},
+                        h("div",{style:{fontWeight:700,fontSize:12}},i.name),
+                        h("div",{style:{fontSize:10,color:C.muted}},
+                          i.daysLeft!=null
+                            ? (urgent?"⚠️ ":"")+(i.daysLeft).toFixed(2)+" days remaining"
+                            : "Stock: "+i.stock+" "+i.unit)
+                      ),
+                      h("div",{style:{background:col+"15",color:col,
+                        borderRadius:8,padding:"4px 8px",fontSize:10,
+                        fontWeight:700,flexShrink:0,textAlign:"center"}},
+                        i.dailyRate.toFixed(0)+" "+i.unit+"/DAY")
+                    );
+                  });
+              })()
+            ),
+            inventory.filter(function(i){return (i.dailyRate||0)>0;}).length===0
+              ? h("div",{style:{padding:"20px",textAlign:"center",color:C.muted,fontSize:11}},
+                  "Set 'Daily Rate' on inventory items to see consumption tracking")
+              : null
+          ),
+
         // ══ SALES REPORT ══
         page==="sales_report"&&h("div",null,
           h(SectionHeader,{title:"Sales Report (Firebase)"}),
@@ -6055,7 +6194,7 @@ function App(){
 
         // ══ ANALYTICS ══
         page==="analytics"&&h(AnalyticsPage,{
-          orders,branchId,curBranch,user,db,showT,
+          orders,branchId,curBranch,user,db,showT,advances,inventory,
           key:"analytics_"+branchId
         }),
 
