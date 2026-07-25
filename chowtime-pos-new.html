@@ -2551,7 +2551,11 @@ function BOMPage({menuItems,db,user,showT}){
     if(!item)return ["default"];
     const vArr=["default"];
     if(item.variants&&item.variants.length){
-      item.variants.forEach(v=>{if(v&&v.name)vArr.push(v.name);});
+      // variants use {id, label, priceAdd} structure
+      item.variants.forEach(v=>{
+        const lbl=v.label||v.name||"";
+        if(lbl)vArr.push(lbl);
+      });
     }
     return vArr;
   };
@@ -2733,7 +2737,10 @@ function BOMPage({menuItems,db,user,showT}){
         return varList.map((v,vi)=>{
           const sellPrice=v==="default"
             ?(item.basePrice||0)
-            :(item.variants&&item.variants.find(vv=>vv.name===v)?.price||item.basePrice||0);
+            :(()=>{
+              const vObj=item.variants&&item.variants.find(vv=>(vv.label||vv.name)===v);
+              return vObj?(item.basePrice||0)+(vObj.priceAdd||0):(item.basePrice||0);
+            })();
           const cost=getCost(item,v);
           const margin=sellPrice-cost;
           const marginPct=sellPrice>0?margin/sellPrice*100:0;
@@ -5967,7 +5974,7 @@ function App(){
         ),
 
           // ── TOP CONSUMED ──
-          h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,
+          page==="inventory"&&h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,
             marginTop:12,overflow:"hidden"}},
             h("div",{style:{padding:"12px 16px",borderBottom:"1px solid "+C.border,
               fontSize:13,fontWeight:800}},"📦 Top Consumed Products & Supplies"),
