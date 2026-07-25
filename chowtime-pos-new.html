@@ -2469,15 +2469,25 @@ function BranchMenuPage({menuItems,setMenuItems,branchId,curBranch,user,db,showT
 const UNITS = ["pc","pack","box","sack","kg","g","L","mL","cup","gal","tray","dozen","set","sheet","bottle","can","bag"];
 
 function BOMPage({menuItems,db,user,showT}){
-  const [selItem,setSelItem]   = useState(null);
-  const [selVariant,setSelVar] = useState("default"); // "default" or variant name
-  const [boms,setBoms]         = useState({}); // {itemId: {variantKey: [{ingId,ingName,unit,qty}]}}
-  const [editBom,setEditBom]   = useState([]);
-  const [ingredients,setIngs]  = useState([]);
-  const [saving,setSaving]     = useState(false);
-  const [tab,setTab]           = useState("bom"); // bom | costing
+  const [mainTab,setMainTab] = useState("products"); // products | options
+  const [selItem,setSelItem] = useState(null);
+  const [selVariant,setSelVar] = useState("default");
+  const [boms,setBoms]       = useState({});
+  const [editBom,setEditBom] = useState([]);
+  const [ingredients,setIngs]= useState([]);
+  const [saving,setSaving]   = useState(false);
+  const [costTab,setCostTab] = useState("bom"); // bom | costing
 
-  // Load BOM from Firestore
+  // Option Groups state
+  const [optGroups,setOptGroups]   = useState([]); // [{id,name,options:[{id,name,bom:[]}]}]
+  const [selGroup,setSelGroup]     = useState(null);
+  const [selOpt,setSelOpt]         = useState(null);
+  const [editOptBom,setEditOptBom] = useState([]);
+  const [savingOpt,setSavingOpt]   = useState(false);
+  const [newGroupName,setNewGN]    = useState("");
+  const [newOptName,setNewON]      = useState("");
+
+  // Load BOM
   useEffect(()=>{
     const unsub=onSnapshot(collection(db,"bom"),snap=>{
       const data={};
@@ -2495,151 +2505,245 @@ function BOMPage({menuItems,db,user,showT}){
     return()=>unsub();
   },[]);
 
-  const getVariantKey=(item,variant)=>{
-    if(!variant||variant==="default")return item.id;
-    return item.id+"__"+variant.replace(/\s+/g,"_");
-  };
+  // Load Option Groups
+  useEffect(()=>{
+    const unsub=onSnapshot(collection(db,"option_groups"),snap=>{
+      setOptGroups(snap.docs.map(d=>({...d.data(),id:d.id})));
+    },()=>{});
+    return()=>unsub();
+  },[]);
 
-  const openBOM=(item,variant="default")=>{
-    setSelItem(item);
-    setSelVar(variant);
-    const key=getVariantKey(item,variant);
-    const existing=(boms[item.id]&&boms[item.id][key])||boms[key]||[];
-    setEditBom(existing.length?[...existing]:[{ingId:"",ingName:"",unit:"",qty:1}]);
+  const getVKey=(item,v)=>(!v||v==="default")?item.id:item.id+"__"+v.replace(/\s+/g,"_");
+
+  const openBOM=(item,v="default")=>{
+    setSelItem(item); setSelVar(v);
+    const key=getVKey(item,v);
+    const rows=(boms[item.id]&&boms[item.id][key])||boms[key]||[];
+    setEditBom(rows.length?[...rows]:[{ingId:"",ingName:"",unit:"",qty:1}]);
   };
 
   const saveBOM=async()=>{
     if(!selItem)return;
     setSaving(true);
     try{
-      const key=getVariantKey(selItem,selVariant);
+      const key=getVKey(selItem,selVariant);
       const rows=editBom.filter(r=>r.ingId||r.ingName);
-      // Save under item.id doc, with variant keys inside
-      const existingDoc=boms[selItem.id]||{};
-      const newDoc={...existingDoc,[key]:rows};
-      await setDoc(doc(db,"bom",selItem.id),newDoc,{merge:true});
-      showT((selVariant==="default"?selItem.name:selItem.name+" ("+selVariant+")")+" BOM saved ✓");
-    }catch(e){showT("Error saving BOM","err");}
+      await setDoc(doc(db,"bom",selItem.id),{...(boms[selItem.id]||{}),[key]:rows},{merge:true});
+      showT(selItem.name+(selVariant!=="default"?" ("+selVariant+")":"")+" BOM saved ✓");
+    }catch(e){showT("Error","err");}
     setSaving(false);
   };
 
-  const addRow=()=>setEditBom(p=>[...p,{ingId:"",ingName:"",unit:"",qty:1}]);
-  const updRow=(i,k,v)=>setEditBom(p=>p.map((r,j)=>j===i?{...r,[k]:v}:r));
-  const delRow=(i)=>setEditBom(p=>p.filter((_,j)=>j!==i));
-
-  const hasBOM=(item,variant="default")=>{
-    const key=getVariantKey(item,variant);
-    const rows=(boms[item.id]&&boms[item.id][key])||boms[key]||[];
-    return rows.length>0;
+  const openOptBOM=(group,opt)=>{
+    setSelGroup(group); setSelOpt(opt);
+    setEditOptBom(opt.bom&&opt.bom.length?[...opt.bom]:[{ingId:"",ingName:"",unit:"",qty:1}]);
   };
 
-  const getBOMRows=(item,variant="default")=>{
-    const key=getVariantKey(item,variant);
-    return (boms[item.id]&&boms[item.id][key])||boms[key]||[];
+  const saveOptBOM=async()=>{
+    if(!selGroup||!selOpt)return;
+    setSavingOpt(true);
+    try{
+      const rows=editOptBom.filter(r=>r.ingId||r.ingName);
+      const updOpts=selGroup.options.map(o=>o.id===selOpt.id?{...o,bom:rows}:o);
+      await updateDoc(doc(db,"option_groups",selGroup.id),{options:updOpts});
+      showT(selGroup.name+" → "+selOpt.name+" BOM saved ✓");
+    }catch(e){showT("Error","err");}
+    setSavingOpt(false);
   };
 
-  // Costing: compute cost per item per variant
-  const getCost=(item,variant="default")=>{
-    const rows=getBOMRows(item,variant);
-    return rows.reduce((s,r)=>{
-      const ing=ingredients.find(i=>i.id===r.ingId)||{};
-      return s+(ing.cost||0)*(r.qty||0);
-    },0);
+  const addGroup=async()=>{
+    if(!newGroupName.trim())return;
+    await addDoc(collection(db,"option_groups"),{
+      name:newGroupName.trim(),options:[],createdAt:serverTimestamp()
+    });
+    setNewGN("");
   };
 
-  const variants=(item)=>{
-    if(!item)return ["default"];
+  const addOption=async()=>{
+    if(!selGroup||!newOptName.trim())return;
+    const newOpt={id:"opt_"+Date.now(),name:newOptName.trim(),bom:[]};
+    await updateDoc(doc(db,"option_groups",selGroup.id),{
+      options:[...(selGroup.options||[]),newOpt]
+    });
+    setNewON("");
+  };
+
+  const delGroup=async(g)=>{
+    if(!confirm("Delete group '"+g.name+"'?"))return;
+    await deleteDoc(doc(db,"option_groups",g.id));
+    if(selGroup?.id===g.id){setSelGroup(null);setSelOpt(null);}
+  };
+
+  const delOption=async(g,opt)=>{
+    const updOpts=(g.options||[]).filter(o=>o.id!==opt.id);
+    await updateDoc(doc(db,"option_groups",g.id),{options:updOpts});
+    if(selOpt?.id===opt.id)setSelOpt(null);
+  };
+
+  const addRow=(setter)=>setter(p=>[...p,{ingId:"",ingName:"",unit:"",qty:1}]);
+  const updRow=(setter,i,k,v)=>setter(p=>p.map((r,j)=>j===i?{...r,[k]:v}:r));
+  const delRow=(setter,i)=>setter(p=>p.filter((_,j)=>j!==i));
+
+  const hasBOM=(item,v="default")=>{
+    const key=getVKey(item,v);
+    return ((boms[item.id]&&boms[item.id][key])||boms[key]||[]).length>0;
+  };
+
+  const getCost=(rows)=>rows.reduce((s,r)=>{
+    const ing=ingredients.find(x=>x.id===r.ingId)||{};
+    return s+(ing.cost||0)*(r.qty||0);
+  },0);
+
+  const variantList=(item)=>{
     const vArr=["default"];
-    if(item.variants&&item.variants.length){
-      // variants use {id, label, priceAdd} structure
-      item.variants.forEach(v=>{
-        const lbl=v.label||v.name||"";
-        if(lbl)vArr.push(lbl);
-      });
-    }
+    (item.variants||[]).forEach(v=>{const l=v.label||v.name||"";if(l)vArr.push(l);});
     return vArr;
   };
 
+  // Shared BOM row editor component
+  const BOMEditor=({rows,setRows,onSave,saving:sv})=>h("div",null,
+    h("div",{style:{display:"grid",
+      gridTemplateColumns:"1fr 100px 70px 80px 36px",
+      gap:6,marginBottom:6}},
+      ["INGREDIENT","UNIT","QTY","COST",""].map(h2=>
+        h("div",{key:h2,style:{fontSize:8,fontWeight:700,color:C.muted,letterSpacing:1}},h2))
+    ),
+    rows.map((row,i)=>{
+      const ing=ingredients.find(x=>x.id===row.ingId)||{};
+      return h("div",{key:i,style:{display:"grid",
+        gridTemplateColumns:"1fr 100px 70px 80px 36px",
+        gap:6,marginBottom:5,alignItems:"center"}},
+        h("select",{value:row.ingId||"",
+          onChange:e=>{
+            const g=ingredients.find(x=>x.id===e.target.value)||{};
+            updRow(setRows,i,"ingId",e.target.value);
+            updRow(setRows,i,"ingName",g.name||"");
+            updRow(setRows,i,"unit",g.unit||"");
+          },
+          style:{padding:"5px",border:"1px solid "+C.border,borderRadius:6,
+            fontSize:10,outline:"none",width:"100%"}},
+          h("option",{value:""},"— Select —"),
+          ingredients.map(g=>h("option",{key:g.id,value:g.id},
+            g.name+(g.unit?" ("+g.unit+")":"")))
+        ),
+        h("div",{style:{fontSize:10,color:C.muted}},row.unit||ing.unit||"—"),
+        h("input",{type:"number",min:0,step:"0.01",value:row.qty||"",
+          onChange:e=>updRow(setRows,i,"qty",parseFloat(e.target.value)||0),
+          style:{padding:"5px",border:"1px solid "+C.border,borderRadius:6,
+            fontSize:10,outline:"none",textAlign:"center",width:"100%"}}),
+        h("div",{style:{fontSize:10,color:C.primary,fontWeight:700}},
+          (ing.cost||0)*(row.qty||0)>0?"₱"+((ing.cost||0)*(row.qty||0)).toFixed(2):"—"),
+        h("button",{onClick:()=>delRow(setRows,i),
+          style:{background:"none",border:"none",color:C.danger,cursor:"pointer",fontSize:14}},"×")
+      );
+    }),
+    h("div",{style:{display:"flex",justifyContent:"space-between",
+      padding:"8px 0",borderTop:"1px solid "+C.border,marginTop:6}},
+      h("div",{style:{fontSize:11,fontWeight:700}},"Total Cost"),
+      h("div",{style:{fontSize:13,fontWeight:900,color:C.primary}},
+        "₱"+getCost(rows).toFixed(2))
+    ),
+    h("div",{style:{display:"flex",gap:7,marginTop:8}},
+      h("button",{onClick:()=>addRow(setRows),
+        style:{padding:"7px 12px",background:"#f5f5f5",border:"none",
+          borderRadius:7,fontSize:11,fontWeight:700,cursor:"pointer"}},
+        "+ Add Ingredient"),
+      h("button",{onClick:onSave,disabled:sv,
+        style:{flex:1,padding:"8px",background:sv?"#ccc":C.primary,
+          border:"none",borderRadius:7,color:"#fff",fontWeight:800,
+          fontSize:12,cursor:"pointer"}},
+        sv?"Saving...":"💾 Save BOM")
+    )
+  );
+
   return h("div",null,
-    h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}},
+    // Main tabs
+    h("div",{style:{display:"flex",justifyContent:"space-between",
+      alignItems:"center",marginBottom:14}},
       h("div",{style:{fontSize:17,fontWeight:900}},"🧪 Bill of Materials"),
-      h("div",{style:{display:"flex",gap:8}},
-        [["bom","BOM Editor"],["costing","Costing Report"]].map(([id,lbl])=>
-          h("button",{key:id,onClick:()=>setTab(id),
-            style:{padding:"6px 14px",borderRadius:8,border:"none",cursor:"pointer",
-              fontWeight:700,fontSize:11,
-              background:tab===id?C.primary:"#eee",
-              color:tab===id?"#fff":C.text}},lbl))
+      h("div",{style:{display:"flex",gap:0,border:"1px solid "+C.border,
+        borderRadius:9,overflow:"hidden"}},
+        [["products","📦 Products"],["options","⚙️ Option Groups"]].map(([id,lbl])=>
+          h("button",{key:id,onClick:()=>setMainTab(id),
+            style:{padding:"7px 16px",border:"none",cursor:"pointer",
+              fontSize:11,fontWeight:mainTab===id?800:400,
+              background:mainTab===id?C.primary:"#fff",
+              color:mainTab===id?"#fff":C.text}},lbl))
       )
     ),
 
-    // ── BOM EDITOR TAB ──
-    tab==="bom"&&h("div",{style:{display:"grid",gridTemplateColumns:"280px 1fr",gap:12}},
-
-      // LEFT: Item list
-      h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
-        h("div",{style:{padding:"10px 14px",borderBottom:"1px solid "+C.border,
-          fontSize:11,fontWeight:800,color:C.text}},"Menu Items"),
-        h("div",{style:{overflowY:"auto",maxHeight:"75vh"}},
-          menuItems.map(item=>{
-            const varList=variants(item);
-            const isSelected=selItem&&selItem.id===item.id;
-            return h("div",{key:item.id},
-              // Item header
-              h("div",{style:{padding:"8px 14px",background:isSelected?"#FFF0F0":"#fff",
-                borderBottom:"1px solid #f5f5f5",cursor:"pointer"},
-                onClick:()=>openBOM(item,"default")},
-                h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center"}},
-                  h("div",{style:{fontWeight:isSelected?800:600,fontSize:11}},item.name),
-                  h("div",{style:{fontSize:9,
-                    color:hasBOM(item)?"#2E7D32":C.muted,
-                    background:hasBOM(item)?"#E8F5E9":"#f5f5f5",
-                    padding:"1px 6px",borderRadius:8}},
-                    hasBOM(item)?"✓ BOM":"No BOM")
-                )
-              ),
-              // Variant sub-items
-              varList.length>1&&varList.slice(1).map(v=>
-                h("div",{key:v,
-                  onClick:()=>openBOM(item,v),
-                  style:{padding:"5px 14px 5px 28px",
-                    background:isSelected&&selVariant===v?"#FFF8F0":"#fafafa",
-                    borderBottom:"1px solid #f5f5f5",cursor:"pointer",
-                    display:"flex",justifyContent:"space-between"}},
-                  h("div",{style:{fontSize:10,color:C.muted}},
-                    "↳ "+v),
-                  h("div",{style:{fontSize:8,
-                    color:hasBOM(item,v)?"#2E7D32":C.muted,
-                    background:hasBOM(item,v)?"#E8F5E9":"transparent",
-                    padding:"1px 5px",borderRadius:6}},
-                    hasBOM(item,v)?"✓":"—")
-                ))
-            );
-          })
-        )
+    // ══ PRODUCTS TAB ══
+    mainTab==="products"&&h("div",null,
+      h("div",{style:{display:"flex",gap:8,marginBottom:10}},
+        [["bom","BOM Editor"],["costing","Costing Report"]].map(([id,lbl])=>
+          h("button",{key:id,onClick:()=>setCostTab(id),
+            style:{padding:"5px 14px",borderRadius:7,border:"none",
+              cursor:"pointer",fontSize:11,fontWeight:costTab===id?700:400,
+              background:costTab===id?"#333":"#eee",
+              color:costTab===id?"#fff":C.text}},lbl))
       ),
 
-      // RIGHT: BOM editor
-      h("div",null,
-        !selItem
-          ? h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,
-              padding:"40px",textAlign:"center",color:C.muted}},
-              h("div",{style:{fontSize:32,marginBottom:8}},"🧪"),
-              h("div",{style:{fontSize:13,fontWeight:700}},"Select a menu item to edit its BOM"),
-              h("div",{style:{fontSize:11,marginTop:4}},"Click item or variant on the left"))
+      // BOM Editor
+      costTab==="bom"&&h("div",{style:{display:"grid",
+        gridTemplateColumns:"260px 1fr",gap:12}},
 
-          : h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
-              // Header
-              h("div",{style:{padding:"12px 16px",borderBottom:"1px solid "+C.border,
-                background:"#fafafa",display:"flex",justifyContent:"space-between",alignItems:"center"}},
+        // Item list
+        h("div",{style:{background:"#fff",borderRadius:12,
+          border:"1px solid "+C.border,overflow:"hidden"}},
+          h("div",{style:{padding:"10px 14px",borderBottom:"1px solid "+C.border,
+            fontSize:11,fontWeight:800}},"Menu Items"),
+          h("div",{style:{overflowY:"auto",maxHeight:"70vh"}},
+            menuItems.map(item=>{
+              const isSelected=selItem?.id===item.id;
+              const vList=variantList(item);
+              return h("div",{key:item.id},
+                h("div",{style:{padding:"8px 14px",cursor:"pointer",
+                  background:isSelected&&selVariant==="default"?"#FFF0F0":"#fff",
+                  borderBottom:"1px solid #f5f5f5"},
+                  onClick:()=>openBOM(item,"default")},
+                  h("div",{style:{display:"flex",justifyContent:"space-between"}},
+                    h("div",{style:{fontWeight:isSelected?700:500,fontSize:11}},item.name),
+                    h("span",{style:{fontSize:8,padding:"1px 6px",borderRadius:6,
+                      background:hasBOM(item)?"#E8F5E9":"#f5f5f5",
+                      color:hasBOM(item)?C.success:C.muted,fontWeight:700}},
+                      hasBOM(item)?"✓":"—")
+                  )
+                ),
+                vList.length>1&&vList.slice(1).map(v=>
+                  h("div",{key:v,onClick:()=>openBOM(item,v),
+                    style:{padding:"5px 14px 5px 26px",cursor:"pointer",
+                      background:isSelected&&selVariant===v?"#FFF8F0":"#fafafa",
+                      borderBottom:"1px solid #f5f5f5",
+                      display:"flex",justifyContent:"space-between"}},
+                    h("div",{style:{fontSize:10,color:C.muted}},"↳ "+v),
+                    h("span",{style:{fontSize:8,
+                      color:hasBOM(item,v)?C.success:C.muted}},
+                      hasBOM(item,v)?"✓":"—")
+                  ))
+              );
+            })
+          )
+        ),
+
+        // BOM editor panel
+        !selItem
+          ? h("div",{style:{background:"#fff",borderRadius:12,
+              border:"1px solid "+C.border,padding:"40px",
+              textAlign:"center",color:C.muted}},
+              h("div",{style:{fontSize:32,marginBottom:8}},"🧪"),
+              h("div",{style:{fontWeight:700,fontSize:13}},"Select a menu item"))
+          : h("div",{style:{background:"#fff",borderRadius:12,
+              border:"1px solid "+C.border,overflow:"hidden"}},
+              h("div",{style:{padding:"11px 16px",borderBottom:"1px solid "+C.border,
+                background:"#fafafa",display:"flex",
+                justifyContent:"space-between",alignItems:"center"}},
                 h("div",null,
                   h("div",{style:{fontSize:13,fontWeight:900}},selItem.name),
-                  h("div",{style:{fontSize:10,color:C.muted}},
+                  h("div",{style:{fontSize:9,color:C.muted}},
                     selVariant==="default"?"Base / No Variant":"Variant: "+selVariant)
                 ),
-                // Variant tabs
-                h("div",{style:{display:"flex",gap:5}},
-                  variants(selItem).map(v=>
+                h("div",{style:{display:"flex",gap:4}},
+                  variantList(selItem).map(v=>
                     h("button",{key:v,onClick:()=>openBOM(selItem,v),
                       style:{padding:"4px 10px",borderRadius:6,border:"none",
                         cursor:"pointer",fontSize:10,fontWeight:700,
@@ -2648,133 +2752,178 @@ function BOMPage({menuItems,db,user,showT}){
                       v==="default"?"Base":v))
                 )
               ),
-
-              // BOM rows
-              h("div",{style:{padding:"12px 16px"}},
-                h("div",{style:{display:"grid",
-                  gridTemplateColumns:"1fr 120px 70px 80px 40px",
-                  gap:6,marginBottom:8}},
-                  ["INGREDIENT","UNIT","QTY","COST/UNIT",""].map(h2=>
-                    h("div",{key:h2,style:{fontSize:8,fontWeight:700,
-                      color:C.muted,letterSpacing:1}},h2))
-                ),
-                editBom.map((row,i)=>{
-                  const ing=ingredients.find(x=>x.id===row.ingId)||{};
-                  const lineCost=(ing.cost||0)*(row.qty||0);
-                  return h("div",{key:i,
-                    style:{display:"grid",
-                      gridTemplateColumns:"1fr 120px 70px 80px 40px",
-                      gap:6,marginBottom:6,alignItems:"center"}},
-                    // Ingredient select
-                    h("select",{value:row.ingId||"",
-                      onChange:e=>{
-                        const ing2=ingredients.find(x=>x.id===e.target.value)||{};
-                        updRow(i,"ingId",e.target.value);
-                        updRow(i,"ingName",ing2.name||"");
-                        updRow(i,"unit",ing2.unit||"");
-                      },
-                      style:{padding:"6px",border:"1px solid "+C.border,borderRadius:7,
-                        fontSize:11,outline:"none",width:"100%"}},
-                      h("option",{value:""},"— Select ingredient —"),
-                      ingredients.map(ing2=>h("option",{key:ing2.id,value:ing2.id},
-                        ing2.name+(ing2.unit?" ("+ing2.unit+")":"")))
-                    ),
-                    h("div",{style:{fontSize:11,color:C.muted,padding:"6px 0"}},
-                      row.unit||ing.unit||"—"),
-                    h("input",{type:"number",min:0,step:"0.01",value:row.qty||"",
-                      onChange:e=>updRow(i,"qty",parseFloat(e.target.value)||0),
-                      style:{padding:"6px",border:"1px solid "+C.border,borderRadius:7,
-                        fontSize:11,outline:"none",textAlign:"center",width:"100%"}}),
-                    h("div",{style:{fontSize:11,color:C.primary,fontWeight:700}},
-                      lineCost>0?"₱"+lineCost.toFixed(2):"—"),
-                    h("button",{onClick:()=>delRow(i),
-                      style:{padding:"4px",background:"none",border:"none",
-                        color:C.danger,cursor:"pointer",fontSize:14}},"×")
-                  );
-                }),
-
-                // Total cost
-                h("div",{style:{display:"flex",justifyContent:"space-between",
-                  padding:"10px 0",borderTop:"1px solid "+C.border,marginTop:8}},
-                  h("div",{style:{fontSize:11,fontWeight:700}},"Total Ingredient Cost"),
-                  h("div",{style:{fontSize:14,fontWeight:900,color:C.primary}},
-                    "₱"+editBom.reduce((s,r)=>{
-                      const ing=ingredients.find(x=>x.id===r.ingId)||{};
-                      return s+(ing.cost||0)*(r.qty||0);
-                    },0).toFixed(2))
-                ),
-
-                h("div",{style:{display:"flex",gap:8,marginTop:10}},
-                  h("button",{onClick:addRow,
-                    style:{padding:"8px 14px",background:"#f5f5f5",border:"none",
-                      borderRadius:8,fontSize:11,fontWeight:700,cursor:"pointer"}},
-                    "+ Add Ingredient"),
-                  h("button",{onClick:saveBOM,disabled:saving,
-                    style:{flex:1,padding:"9px",
-                      background:saving?"#ccc":C.primary,border:"none",
-                      borderRadius:8,color:"#fff",fontWeight:800,
-                      fontSize:12,cursor:"pointer"}},
-                    saving?"Saving...":"💾 Save BOM")
-                )
-              )
+              h("div",{style:{padding:"14px 16px"}},
+                h(BOMEditor,{rows:editBom,setRows:setEditBom,
+                  onSave:saveBOM,saving:saving}))
             )
+      ),
+
+      // Costing Report
+      costTab==="costing"&&h("div",{style:{background:"#fff",borderRadius:12,
+        border:"1px solid "+C.border,overflow:"hidden"}},
+        h("div",{style:{padding:"11px 16px",borderBottom:"1px solid "+C.border,
+          fontSize:12,fontWeight:800}},"💰 Costing — Sell Price vs Ingredient Cost"),
+        h("div",{style:{display:"grid",
+          gridTemplateColumns:"1.5fr 90px 90px 90px 70px 70px",
+          padding:"7px 16px",background:"#fafafa",
+          borderBottom:"1px solid "+C.border}},
+          ["ITEM / VARIANT","SELL","COST","MARGIN","MARGIN %","BOM"].map(h2=>
+            h("div",{key:h2,style:{fontSize:8,fontWeight:700,
+              color:C.muted,letterSpacing:1}},h2))
+        ),
+        menuItems.flatMap(item=>
+          variantList(item).map((v,vi)=>{
+            const vObj=item.variants&&item.variants.find(vv=>(vv.label||vv.name)===v);
+            const sell=vi===0?(item.basePrice||0):(item.basePrice||0)+(vObj?.priceAdd||0);
+            const key=getVKey(item,v);
+            const rows=(boms[item.id]&&boms[item.id][key])||boms[key]||[];
+            const cost=getCost(rows);
+            const margin=sell-cost;
+            const pct=sell>0?margin/sell*100:0;
+            const hasB=rows.length>0;
+            return h("div",{key:item.id+v,
+              style:{display:"grid",
+                gridTemplateColumns:"1.5fr 90px 90px 90px 70px 70px",
+                padding:"8px 16px",borderBottom:"1px solid #f5f5f5",
+                alignItems:"center",background:vi===0?"#fff":"#fafafa"}},
+              h("div",null,
+                h("div",{style:{fontWeight:vi===0?700:400,fontSize:11,
+                  paddingLeft:vi===0?0:14,
+                  color:vi===0?C.text:C.muted}},
+                  vi===0?item.name:"↳ "+v)
+              ),
+              h("div",{style:{fontSize:11,fontWeight:700}},"₱"+sell.toFixed(2)),
+              h("div",{style:{fontSize:11,color:cost>0?C.danger:C.muted}},
+                cost>0?"₱"+cost.toFixed(2):"—"),
+              h("div",{style:{fontSize:11,fontWeight:700,
+                color:margin>0?C.success:C.danger}},
+                cost>0?"₱"+margin.toFixed(2):"—"),
+              h("div",{style:{fontSize:11,fontWeight:700,
+                color:pct>50?C.success:pct>30?C.warning:C.danger}},
+                cost>0?pct.toFixed(1)+"%":"—"),
+              h("div",null,h("span",{style:{fontSize:9,padding:"2px 6px",
+                borderRadius:7,fontWeight:700,
+                background:hasB?"#E8F5E9":"#f5f5f5",
+                color:hasB?C.success:C.muted}},hasB?"✓":"—"))
+            );
+          })
+        )
       )
     ),
 
-    // ── COSTING REPORT TAB ──
-    tab==="costing"&&h("div",{style:{background:"#fff",borderRadius:12,
-      border:"1px solid "+C.border,overflow:"hidden"}},
-      h("div",{style:{padding:"12px 16px",borderBottom:"1px solid "+C.border,
-        fontSize:12,fontWeight:800}},"💰 Costing Report — Cost vs Selling Price"),
-      h("div",{style:{display:"grid",
-        gridTemplateColumns:"1fr 100px 100px 100px 80px 80px",
-        padding:"8px 16px",background:"#fafafa",borderBottom:"1px solid "+C.border}},
-        ["ITEM / VARIANT","SELL PRICE","COST","GROSS MARGIN","MARGIN %","BOM"].map(h2=>
-          h("div",{key:h2,style:{fontSize:8,fontWeight:700,color:C.muted,letterSpacing:1}},h2))
+    // ══ OPTIONS TAB ══
+    mainTab==="options"&&h("div",{style:{display:"grid",
+      gridTemplateColumns:"260px 220px 1fr",gap:12}},
+
+      // Column 1: Option Groups list
+      h("div",{style:{background:"#fff",borderRadius:12,
+        border:"1px solid "+C.border,overflow:"hidden"}},
+        h("div",{style:{padding:"10px 14px",borderBottom:"1px solid "+C.border,
+          fontSize:11,fontWeight:800}},"Option Groups"),
+        h("div",{style:{padding:"8px 10px",borderBottom:"1px solid "+C.border,
+          display:"flex",gap:6}},
+          h("input",{value:newGroupName,onChange:e=>setNewGN(e.target.value),
+            placeholder:"New group name...",
+            onKeyDown:e=>e.key==="Enter"&&addGroup(),
+            style:{flex:1,padding:"5px 8px",border:"1px solid "+C.border,
+              borderRadius:6,fontSize:10,outline:"none"}}),
+          h("button",{onClick:addGroup,
+            style:{padding:"5px 10px",background:C.primary,border:"none",
+              borderRadius:6,color:"#fff",fontSize:11,fontWeight:700,
+              cursor:"pointer"}},"+")
+        ),
+        h("div",{style:{overflowY:"auto",maxHeight:"65vh"}},
+          optGroups.map(g=>
+            h("div",{key:g.id,
+              onClick:()=>{setSelGroup(g);setSelOpt(null);},
+              style:{padding:"10px 14px",cursor:"pointer",
+                borderBottom:"1px solid #f5f5f5",
+                background:selGroup?.id===g.id?"#FFF0F0":"#fff"}},
+              h("div",{style:{display:"flex",justifyContent:"space-between",
+                alignItems:"center"}},
+                h("div",null,
+                  h("div",{style:{fontWeight:700,fontSize:11}},g.name),
+                  h("div",{style:{fontSize:9,color:C.muted}},
+                    (g.options||[]).length+" options")
+                ),
+                h("button",{onClick:e=>{e.stopPropagation();delGroup(g);},
+                  style:{background:"none",border:"none",color:C.danger,
+                    cursor:"pointer",fontSize:12,padding:"2px 6px"}},"×")
+              )
+            ))
+        )
       ),
-      menuItems.flatMap(item=>{
-        const varList=variants(item);
-        return varList.map((v,vi)=>{
-          const sellPrice=v==="default"
-            ?(item.basePrice||0)
-            :(()=>{
-              const vObj=item.variants&&item.variants.find(vv=>(vv.label||vv.name)===v);
-              return vObj?(item.basePrice||0)+(vObj.priceAdd||0):(item.basePrice||0);
-            })();
-          const cost=getCost(item,v);
-          const margin=sellPrice-cost;
-          const marginPct=sellPrice>0?margin/sellPrice*100:0;
-          const hasB=hasBOM(item,v);
-          return h("div",{key:item.id+v,
-            style:{display:"grid",
-              gridTemplateColumns:"1fr 100px 100px 100px 80px 80px",
-              padding:"9px 16px",borderBottom:"1px solid #f5f5f5",
-              alignItems:"center",
-              background:vi===0?"#fff":"#fafafa"}},
-            h("div",null,
-              h("div",{style:{fontWeight:vi===0?700:500,fontSize:11,
-                paddingLeft:vi===0?0:12,color:vi===0?C.text:C.muted}},
-                vi===0?item.name:"↳ "+v),
-              vi===0&&item.cat&&h("div",{style:{fontSize:9,color:C.muted}},item.cat)
+
+      // Column 2: Options in selected group
+      h("div",{style:{background:"#fff",borderRadius:12,
+        border:"1px solid "+C.border,overflow:"hidden"}},
+        !selGroup
+          ? h("div",{style:{padding:"30px",textAlign:"center",color:C.muted,fontSize:11}},
+              "Select a group")
+          : h("div",null,
+              h("div",{style:{padding:"10px 14px",borderBottom:"1px solid "+C.border,
+                fontSize:11,fontWeight:800}},selGroup.name),
+              h("div",{style:{padding:"8px 10px",borderBottom:"1px solid "+C.border,
+                display:"flex",gap:6}},
+                h("input",{value:newOptName,onChange:e=>setNewON(e.target.value),
+                  placeholder:"New option...",
+                  onKeyDown:e=>e.key==="Enter"&&addOption(),
+                  style:{flex:1,padding:"5px 8px",border:"1px solid "+C.border,
+                    borderRadius:6,fontSize:10,outline:"none"}}),
+                h("button",{onClick:addOption,
+                  style:{padding:"5px 10px",background:C.primary,border:"none",
+                    borderRadius:6,color:"#fff",fontSize:11,fontWeight:700,
+                    cursor:"pointer"}},"+")
+              ),
+              h("div",{style:{overflowY:"auto",maxHeight:"60vh"}},
+                (selGroup.options||[]).map(opt=>
+                  h("div",{key:opt.id,
+                    onClick:()=>openOptBOM(selGroup,opt),
+                    style:{padding:"9px 14px",cursor:"pointer",
+                      borderBottom:"1px solid #f5f5f5",
+                      background:selOpt?.id===opt.id?"#FFF8F0":"#fff",
+                      display:"flex",justifyContent:"space-between",
+                      alignItems:"center"}},
+                    h("div",null,
+                      h("div",{style:{fontWeight:selOpt?.id===opt.id?700:500,
+                        fontSize:11}},opt.name),
+                      h("div",{style:{fontSize:9,
+                        color:(opt.bom||[]).length>0?C.success:C.muted}},
+                        (opt.bom||[]).length>0
+                          ?"✓ "+opt.bom.length+" ingredient(s)"
+                          :"No BOM")
+                    ),
+                    h("button",{onClick:e=>{e.stopPropagation();delOption(selGroup,opt);},
+                      style:{background:"none",border:"none",color:C.danger,
+                        cursor:"pointer",fontSize:12}},"×")
+                  ))
+              )
+            )
+      ),
+
+      // Column 3: BOM editor for selected option
+      !selOpt
+        ? h("div",{style:{background:"#fff",borderRadius:12,
+            border:"1px solid "+C.border,padding:"40px",
+            textAlign:"center",color:C.muted}},
+            h("div",{style:{fontSize:28,marginBottom:8}},"⚙️"),
+            h("div",{style:{fontWeight:700,fontSize:12}},"Select an option to set its BOM"),
+            h("div",{style:{fontSize:10,marginTop:4,color:C.muted}},
+              "E.g. Buffalo flavor → 30ml Buffalo Sauce")
+          )
+        : h("div",{style:{background:"#fff",borderRadius:12,
+            border:"1px solid "+C.border,overflow:"hidden"}},
+            h("div",{style:{padding:"11px 16px",borderBottom:"1px solid "+C.border,
+              background:"#fafafa"}},
+              h("div",{style:{fontSize:13,fontWeight:900}},
+                selGroup.name+" → "+selOpt.name),
+              h("div",{style:{fontSize:9,color:C.muted}},
+                "Ingredients to deduct when this option is selected")
             ),
-            h("div",{style:{fontSize:11,fontWeight:700}},
-              "₱"+sellPrice.toFixed(2)),
-            h("div",{style:{fontSize:11,color:cost>0?C.danger:C.muted}},
-              cost>0?"₱"+cost.toFixed(2):"—"),
-            h("div",{style:{fontSize:11,fontWeight:700,
-              color:margin>0?C.success:C.danger}},
-              cost>0?"₱"+margin.toFixed(2):"—"),
-            h("div",{style:{fontSize:11,fontWeight:700,
-              color:marginPct>50?C.success:marginPct>30?C.warning:C.danger}},
-              cost>0?marginPct.toFixed(1)+"%":"—"),
-            h("div",null,
-              h("span",{style:{fontSize:9,padding:"2px 7px",borderRadius:8,
-                background:hasB?"#E8F5E9":"#f5f5f5",
-                color:hasB?C.success:C.muted,fontWeight:700}},
-                hasB?"✓":"No BOM"))
-          );
-        });
-      })
+            h("div",{style:{padding:"14px 16px"}},
+              h(BOMEditor,{rows:editOptBom,setRows:setEditOptBom,
+                onSave:saveOptBOM,saving:savingOpt}))
+          )
     )
   );
 }
@@ -4868,6 +5017,38 @@ function App(){
                 at:serverTimestamp()
               });
             }catch(e2){console.warn("BOM deduct failed for",row.ingId,e2);}
+          }
+        }
+
+        // ── Deduct Option Group BOMs (flavors, drinks, etc.) ──
+        const optSnap = await getDocs(collection(db,"option_groups"));
+        const optGroups = optSnap.docs.map(d=>({...d.data(),id:d.id}));
+
+        for(const cartItem of cart){
+          const selectedOpts = cartItem.options||[];
+          for(const optLabel of selectedOpts){
+            // Find matching option in any group
+            for(const group of optGroups){
+              const opt=(group.options||[]).find(o=>o.name===optLabel);
+              if(opt&&opt.bom&&opt.bom.length){
+                for(const row of opt.bom){
+                  if(!row.ingId||!row.qty)continue;
+                  const deductAmt=(row.qty||0)*(cartItem.qty||1);
+                  try{
+                    await updateDoc(doc(db,invCol,row.ingId),{
+                      stock:increment(-deductAmt),
+                      lastDeducted:serverTimestamp()
+                    });
+                    await addDoc(collection(db,logCol),{
+                      itemId:row.ingId,itemName:row.ingName||row.ingId,
+                      unit:row.unit||"",type:"deduct",amount:-deductAmt,
+                      reason:"Option: "+optLabel+" ("+cartItem.name+") Order:"+ord.id,
+                      by:user.name,at:serverTimestamp()
+                    });
+                  }catch(e2){console.warn("Option BOM deduct failed",e2);}
+                }
+              }
+            }
           }
         }
       }catch(bomErr){console.warn("BOM deduction error:",bomErr);}
