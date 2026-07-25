@@ -2088,8 +2088,8 @@ function MenuEditor({menuItems,setMenuItems,db,user,showT}){
                   return h("div",{key:g.id,
                     onClick:()=>{
                       const cur=item.optionGroups||[];
-                      upd("optionGroups",
-                        linked?cur.filter(x=>x!==g.id):[...cur,g.id]);
+                      setField("optionGroups",
+                        linked?cur.filter(function(x){return x!==g.id;}):[...cur,g.id]);
                     },
                     style:{display:"flex",alignItems:"center",gap:7,
                       padding:"7px 10px",borderRadius:8,cursor:"pointer",
