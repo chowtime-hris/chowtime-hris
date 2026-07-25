@@ -1,4 +1,4 @@
-<!DOCTYPE html> 
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
@@ -401,7 +401,7 @@ function ItemCustomizer({item,onAdd,onClose}){
       cartId:Date.now()+Math.random(),id:item.id,
       name:item.name,emoji:item.emoji,unitPrice,qty,
       variant:selV?.label,
-      options:Object.values(selO).flat().map(c=>c.label),
+      options:Object.values(selO).flat().map(function(c){return c.label;}),
       promo:selP?.label,isBogo,note,lineTotal
     });
   };
@@ -483,6 +483,44 @@ function ItemCustomizer({item,onAdd,onClose}){
           })
         )),
         // Note
+        // Linked Option Groups (from BOM setup)
+        ...linkedGroups.map(function(group){
+          const groupKey="og_"+group.id;
+          const selected=selO[groupKey]||[];
+          return h("div",{key:group.id,
+            style:{padding:"13px 0",borderBottom:"1px solid "+C.border}},
+            h("div",{style:{fontSize:11,fontWeight:800,marginBottom:8,
+              display:"flex",gap:7,alignItems:"center"}},
+              group.name,
+              h("span",{style:{fontSize:9,color:C.muted,fontWeight:400}},"• Optional")
+            ),
+            h("div",{style:{display:"grid",
+              gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:6}},
+              (group.options||[]).map(function(opt){
+                const on=selected.some(function(s){return s.id===opt.id;});
+                return h("button",{key:opt.id,
+                  onClick:function(){
+                    setSelO(function(p){
+                      var cur=p[groupKey]||[];
+                      var next=on
+                        ?cur.filter(function(s){return s.id!==opt.id;})
+                        :[...cur,{id:opt.id,label:opt.name}];
+                      var r={};Object.assign(r,p);r[groupKey]=next;return r;
+                    });
+                  },
+                  style:{padding:"8px 10px",borderRadius:9,cursor:"pointer",
+                    textAlign:"center",border:"2px solid "+(on?C.primary:C.border),
+                    background:on?C.primary+"12":"#fff"}},
+                  h("div",{style:{fontSize:11,fontWeight:on?700:400,
+                    color:on?C.primary:C.text}},opt.name),
+                  (opt.bom||[]).length>0&&h("div",{style:{fontSize:8,
+                    color:on?C.primary:C.muted,marginTop:2}},
+                    "BOM ✓")
+                );
+              })
+            )
+          );
+        }),
         h("div",{style:{padding:"13px 0 18px"}},
           h("div",{style:{fontSize:11,fontWeight:800,marginBottom:7}},"📝 Special Instructions ",h("span",{style:{color:C.muted,fontWeight:400}},"• Optional")),
           h("textarea",{value:note,onChange:e=>setNote(e.target.value),placeholder:'"Extra spicy", "No rice", "Separate sauce"',style:{width:"100%",padding:"9px 11px",border:"1px solid "+C.border,borderRadius:9,fontSize:11,outline:"none",resize:"none",fontFamily:"inherit",boxSizing:"border-box",height:58}})
@@ -1841,11 +1879,19 @@ const EMOJI_LIST = ["🍗","🥩","🐟","🍖","🌭","🥟","🍝","🍚","�
 const CAT_LIST = ["Bestsellers","Silog Meals","Rice Toppings","Merienda","Drinks","Add-ons","Specials"];
 
 function MenuEditor({menuItems,setMenuItems,db,user,showT}){
-  const [view,setView]         = useState("list");   // list | edit | additem
+  const [view,setView]         = useState("list");
   const [editItem,setEditItem] = useState(null);
   const [filterCat,setFilter]  = useState("All");
   const [srch,setSrch]         = useState("");
   const [saving,setSaving]     = useState(false);
+  const [optGroups,setOptGrps] = useState([]);
+
+  useEffect(()=>{
+    const unsub=onSnapshot(collection(db,"option_groups"),snap=>{
+      setOptGrps(snap.docs.map(d=>({...d.data(),id:d.id})));
+    },()=>{});
+    return()=>unsub();
+  },[]);
 
   // ── blank template for new item
   const blankItem = ()=>({
@@ -2022,6 +2068,48 @@ function MenuEditor({menuItems,setMenuItems,db,user,showT}){
             style:{padding:"8px 18px",background:canSave?`linear-gradient(135deg,${C.primary},${C.dark})`:"#ddd",
               border:"none",borderRadius:8,color:canSave?"#fff":"#999",fontWeight:700,fontSize:12,cursor:canSave?"pointer":"not-allowed"}},
             saving?"Saving...":"💾 Save Item")
+        ),
+
+        // ── OPTION GROUPS SECTION ──
+        h("div",{style:{marginTop:12,background:"#fff",borderRadius:10,
+          border:"1px solid "+C.border,padding:"12px 16px"}},
+          h("div",{style:{fontSize:11,fontWeight:800,marginBottom:8,
+            display:"flex",justifyContent:"space-between",alignItems:"center"}},
+            h("span",null,"⚙️ Linked Option Groups"),
+            h("span",{style:{fontSize:9,color:C.muted,fontWeight:400}},
+              "Options shown to cashier during ordering")
+          ),
+          optGroups.length===0
+            ? h("div",{style:{fontSize:10,color:C.muted,padding:"8px 0"}},
+                "No option groups yet — create them in BOM → Option Groups")
+            : h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}},
+                optGroups.map(g=>{
+                  const linked=(item.optionGroups||[]).includes(g.id);
+                  return h("div",{key:g.id,
+                    onClick:()=>{
+                      const cur=item.optionGroups||[];
+                      upd("optionGroups",
+                        linked?cur.filter(x=>x!==g.id):[...cur,g.id]);
+                    },
+                    style:{display:"flex",alignItems:"center",gap:7,
+                      padding:"7px 10px",borderRadius:8,cursor:"pointer",
+                      border:"1px solid "+(linked?C.primary:C.border),
+                      background:linked?C.primary+"12":"#fafafa"}},
+                    h("div",{style:{width:16,height:16,borderRadius:4,
+                      border:"2px solid "+(linked?C.primary:C.muted),
+                      background:linked?C.primary:"#fff",
+                      display:"flex",alignItems:"center",justifyContent:"center",
+                      flexShrink:0}},
+                      linked&&h("span",{style:{color:"#fff",fontSize:10,fontWeight:900}},"✓")),
+                    h("div",null,
+                      h("div",{style:{fontSize:11,fontWeight:linked?700:400,
+                        color:linked?C.primary:C.text}},g.name),
+                      h("div",{style:{fontSize:9,color:C.muted}},
+                        (g.options||[]).length+" options")
+                    )
+                  );
+                })
+              )
         )
       ),
 
@@ -4587,6 +4675,7 @@ function App(){
   const [priceType,setPriceType]=useState("retail");
   const [poFilter,setPoFilter]=useState("all");
   const [invLog,setInvLog]=useState([]);
+  const [optGroups,setOptGroups]=useState([]);
   const [companySettings,setCompanySettings]=useState({
     name:"CHOWTIME FAST-FOOD CHAIN",
     email:"tycheventurescorp@gmail.com",
@@ -4888,6 +4977,16 @@ function App(){
       });
     }
   },[advances]);
+
+  // ── LOAD OPTION GROUPS ──────────────────────────────────
+  useEffect(()=>{
+    try{
+      const unsub=onSnapshot(collection(db,"option_groups"),snap=>{
+        setOptGroups(snap.docs.map(d=>({...d.data(),id:d.id})));
+      },()=>{});
+      return()=>unsub();
+    }catch(e){}
+  },[]);
 
   // ── LOAD INVENTORY LOG ───────────────────────────────────
   useEffect(()=>{
@@ -7357,7 +7456,7 @@ function App(){
 
     // ITEM CUSTOMIZER MODAL - always rendered
     h("div",{style:{display:customizing?"block":"none"}},
-      customizing&&h(ItemCustomizer,{item:customizing,onAdd:addToCart,onClose:()=>setCustomizing(null)})
+      customizing&&h(ItemCustomizer,{item:customizing,onAdd:addToCart,onClose:()=>setCustomizing(null),optionGroups:optGroups})
     ),
 
     // CART SIDEBAR - always rendered
