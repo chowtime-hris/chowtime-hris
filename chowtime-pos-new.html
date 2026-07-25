@@ -2469,373 +2469,309 @@ function BranchMenuPage({menuItems,setMenuItems,branchId,curBranch,user,db,showT
 const UNITS = ["pc","pack","box","sack","kg","g","L","mL","cup","gal","tray","dozen","set","sheet","bottle","can","bag"];
 
 function BOMPage({menuItems,db,user,showT}){
-  const [boms,setBoms]         = useState({}); // {menuItemId: [{ingId,ingName,qty,unit}]}
-  const [ingredients,setIngs]  = useState([]); // master ingredient list
-  const [view,setView]         = useState("list"); // list | edit_bom | edit_ing
-  const [selItem,setSelItem]   = useState(null); // menu item being edited
-  const [editBom,setEditBom]   = useState([]); // current BOM rows
-  const [ingModal,setIngModal] = useState(false);
-  const [newIng,setNewIng]     = useState({name:"",unit:"pc",cat:"Frozen",cost:0,minStock:0});
-  const [srch,setSrch]         = useState("");
+  const [selItem,setSelItem]   = useState(null);
+  const [selVariant,setSelVar] = useState("default"); // "default" or variant name
+  const [boms,setBoms]         = useState({}); // {itemId: {variantKey: [{ingId,ingName,unit,qty}]}}
+  const [editBom,setEditBom]   = useState([]);
+  const [ingredients,setIngs]  = useState([]);
   const [saving,setSaving]     = useState(false);
+  const [tab,setTab]           = useState("bom"); // bom | costing
 
   // Load BOM from Firestore
   useEffect(()=>{
-    const unsub = onSnapshot(collection(db,"bom"), snap=>{
+    const unsub=onSnapshot(collection(db,"bom"),snap=>{
       const data={};
-      snap.docs.forEach(d=>{ data[d.id]=d.data().items||[]; });
+      snap.docs.forEach(d=>{data[d.id]={...d.data()};});
       setBoms(data);
     },()=>{});
     return()=>unsub();
   },[]);
 
-  // Load master ingredients
+  // Load ingredients
   useEffect(()=>{
-    const unsub = onSnapshot(collection(db,"ingredients"), snap=>{
-      if(!snap.empty)
-        setIngs(snap.docs.map(d=>({...d.data(),id:d.id})));
-      else
-        setIngs(INIT_INVENTORY.map(i=>({...i,cost:i.cost||0})));
-    },()=>{ setIngs(INIT_INVENTORY.map(i=>({...i,cost:i.cost||0}))); });
+    const unsub=onSnapshot(collection(db,"ingredients"),snap=>{
+      setIngs(snap.docs.map(d=>({...d.data(),id:d.id})));
+    },()=>{});
     return()=>unsub();
   },[]);
 
-  const openBOM = (item)=>{
-    setSelItem(item);
-    setEditBom(boms[item.id]||[]);
-    setView("edit_bom");
+  const getVariantKey=(item,variant)=>{
+    if(!variant||variant==="default")return item.id;
+    return item.id+"__"+variant.replace(/\s+/g,"_");
   };
 
-  const saveBOM = async()=>{
+  const openBOM=(item,variant="default")=>{
+    setSelItem(item);
+    setSelVar(variant);
+    const key=getVariantKey(item,variant);
+    const existing=(boms[item.id]&&boms[item.id][key])||boms[key]||[];
+    setEditBom(existing.length?[...existing]:[{ingId:"",ingName:"",unit:"",qty:1}]);
+  };
+
+  const saveBOM=async()=>{
     if(!selItem)return;
     setSaving(true);
     try{
-      await setDoc(doc(db,"bom",selItem.id),{
-        menuItemId:selItem.id,
-        menuItemName:selItem.name,
-        items:editBom,
-        updatedBy:user.name,
-        updatedAt:serverTimestamp()
-      });
-      showT(selItem.name+" BOM saved ✓");
-      setView("list");
-    }catch(e){showT("Save failed","err");}
+      const key=getVariantKey(selItem,selVariant);
+      const rows=editBom.filter(r=>r.ingId||r.ingName);
+      // Save under item.id doc, with variant keys inside
+      const existingDoc=boms[selItem.id]||{};
+      const newDoc={...existingDoc,[key]:rows};
+      await setDoc(doc(db,"bom",selItem.id),newDoc,{merge:true});
+      showT((selVariant==="default"?selItem.name:selItem.name+" ("+selVariant+")")+" BOM saved ✓");
+    }catch(e){showT("Error saving BOM","err");}
     setSaving(false);
   };
 
-  const addIngRow = ()=>setEditBom(p=>[...p,{ingId:"",ingName:"",qty:1,unit:"pc"}]);
-  const removeRow = (i)=>setEditBom(p=>p.filter((_,idx)=>idx!==i));
-  const setRow = (i,k,v)=>setEditBom(p=>p.map((r,idx)=>idx===i?{...r,[k]:v}:r));
-  const pickIng = (rowIdx,ing)=>{
-    setEditBom(p=>p.map((r,i)=>i===rowIdx?{...r,ingId:ing.id,ingName:ing.name,unit:ing.unit}:r));
+  const addRow=()=>setEditBom(p=>[...p,{ingId:"",ingName:"",unit:"",qty:1}]);
+  const updRow=(i,k,v)=>setEditBom(p=>p.map((r,j)=>j===i?{...r,[k]:v}:r));
+  const delRow=(i)=>setEditBom(p=>p.filter((_,j)=>j!==i));
+
+  const hasBOM=(item,variant="default")=>{
+    const key=getVariantKey(item,variant);
+    const rows=(boms[item.id]&&boms[item.id][key])||boms[key]||[];
+    return rows.length>0;
   };
 
-  const saveIngredient = async()=>{
-    if(!newIng.name){showT("Enter ingredient name","warn");return;}
-    const id = "ing_"+Date.now();
-    const ing = {...newIng,id,stock:0};
-    try{
-      await setDoc(doc(db,"ingredients",id),{...ing,createdBy:user.name,createdAt:serverTimestamp()});
-      showT(newIng.name+" added ✓");
-      setNewIng({name:"",unit:"pc",cat:"Frozen",cost:0,minStock:0});
-      setIngModal(false);
-    }catch(e){showT("Error saving","err");}
+  const getBOMRows=(item,variant="default")=>{
+    const key=getVariantKey(item,variant);
+    return (boms[item.id]&&boms[item.id][key])||boms[key]||[];
   };
 
-  const filteredMenu = menuItems.filter(i=>i.name.toLowerCase().includes(srch.toLowerCase()));
-  const hasBOM = (item)=> boms[item.id]&&boms[item.id].length>0;
+  // Costing: compute cost per item per variant
+  const getCost=(item,variant="default")=>{
+    const rows=getBOMRows(item,variant);
+    return rows.reduce((s,r)=>{
+      const ing=ingredients.find(i=>i.id===r.ingId)||{};
+      return s+(ing.cost||0)*(r.qty||0);
+    },0);
+  };
 
-  // ── LIST VIEW ──
-  if(view==="list") return h("div",null,
-    h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}},
+  const variants=(item)=>{
+    if(!item)return ["default"];
+    const vArr=["default"];
+    if(item.variants&&item.variants.length){
+      item.variants.forEach(v=>{if(v&&v.name)vArr.push(v.name);});
+    }
+    return vArr;
+  };
+
+  return h("div",null,
+    h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}},
+      h("div",{style:{fontSize:17,fontWeight:900}},"🧪 Bill of Materials"),
+      h("div",{style:{display:"flex",gap:8}},
+        [["bom","BOM Editor"],["costing","Costing Report"]].map(([id,lbl])=>
+          h("button",{key:id,onClick:()=>setTab(id),
+            style:{padding:"6px 14px",borderRadius:8,border:"none",cursor:"pointer",
+              fontWeight:700,fontSize:11,
+              background:tab===id?C.primary:"#eee",
+              color:tab===id?"#fff":C.text}},lbl))
+      )
+    ),
+
+    // ── BOM EDITOR TAB ──
+    tab==="bom"&&h("div",{style:{display:"grid",gridTemplateColumns:"280px 1fr",gap:12}},
+
+      // LEFT: Item list
+      h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
+        h("div",{style:{padding:"10px 14px",borderBottom:"1px solid "+C.border,
+          fontSize:11,fontWeight:800,color:C.text}},"Menu Items"),
+        h("div",{style:{overflowY:"auto",maxHeight:"75vh"}},
+          menuItems.map(item=>{
+            const varList=variants(item);
+            const isSelected=selItem&&selItem.id===item.id;
+            return h("div",{key:item.id},
+              // Item header
+              h("div",{style:{padding:"8px 14px",background:isSelected?"#FFF0F0":"#fff",
+                borderBottom:"1px solid #f5f5f5",cursor:"pointer"},
+                onClick:()=>openBOM(item,"default")},
+                h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center"}},
+                  h("div",{style:{fontWeight:isSelected?800:600,fontSize:11}},item.name),
+                  h("div",{style:{fontSize:9,
+                    color:hasBOM(item)?"#2E7D32":C.muted,
+                    background:hasBOM(item)?"#E8F5E9":"#f5f5f5",
+                    padding:"1px 6px",borderRadius:8}},
+                    hasBOM(item)?"✓ BOM":"No BOM")
+                )
+              ),
+              // Variant sub-items
+              varList.length>1&&varList.slice(1).map(v=>
+                h("div",{key:v,
+                  onClick:()=>openBOM(item,v),
+                  style:{padding:"5px 14px 5px 28px",
+                    background:isSelected&&selVariant===v?"#FFF8F0":"#fafafa",
+                    borderBottom:"1px solid #f5f5f5",cursor:"pointer",
+                    display:"flex",justifyContent:"space-between"}},
+                  h("div",{style:{fontSize:10,color:C.muted}},
+                    "↳ "+v),
+                  h("div",{style:{fontSize:8,
+                    color:hasBOM(item,v)?"#2E7D32":C.muted,
+                    background:hasBOM(item,v)?"#E8F5E9":"transparent",
+                    padding:"1px 5px",borderRadius:6}},
+                    hasBOM(item,v)?"✓":"—")
+                ))
+            );
+          })
+        )
+      ),
+
+      // RIGHT: BOM editor
       h("div",null,
-        h("h2",{style:{margin:0,fontSize:17,fontWeight:800}},"🧪 Bill of Materials"),
-        h("div",{style:{fontSize:10,color:C.muted,marginTop:2}},
-          menuItems.filter(i=>hasBOM(i)).length+"/"+menuItems.length+" items have BOM")
-      ),
-      h("div",{style:{display:"flex",gap:7}},
-        h("button",{onClick:()=>setIngModal(true),
-          style:{padding:"8px 14px",background:"#fff",border:"1px solid "+C.border,
-            borderRadius:8,fontSize:11,fontWeight:600,cursor:"pointer"}},"⚗️ Manage Ingredients"),
-        h("div",{style:{position:"relative"}},
-          h("input",{value:srch,onChange:e=>setSrch(e.target.value),
-            placeholder:"Search menu...",
-            style:{padding:"8px 12px 8px 30px",border:"1px solid "+C.border,
-              borderRadius:8,fontSize:11,outline:"none",width:160}}),
-          h("span",{style:{position:"absolute",left:9,top:"50%",transform:"translateY(-50%)",
-            fontSize:12,color:C.muted}},"🔍")
-        )
-      )
-    ),
+        !selItem
+          ? h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,
+              padding:"40px",textAlign:"center",color:C.muted}},
+              h("div",{style:{fontSize:32,marginBottom:8}},"🧪"),
+              h("div",{style:{fontSize:13,fontWeight:700}},"Select a menu item to edit its BOM"),
+              h("div",{style:{fontSize:11,marginTop:4}},"Click item or variant on the left"))
 
-    // Info banner
-    h("div",{style:{background:"#E8F5E9",border:"1px solid #A5D6A7",borderRadius:10,
-      padding:"10px 14px",marginBottom:13,fontSize:11,color:"#1B5E20"}},
-      "🧪 Set the ingredients (BOM) per menu item. Every order will automatically deduct from branch inventory based on BOM quantities."
-    ),
+          : h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
+              // Header
+              h("div",{style:{padding:"12px 16px",borderBottom:"1px solid "+C.border,
+                background:"#fafafa",display:"flex",justifyContent:"space-between",alignItems:"center"}},
+                h("div",null,
+                  h("div",{style:{fontSize:13,fontWeight:900}},selItem.name),
+                  h("div",{style:{fontSize:10,color:C.muted}},
+                    selVariant==="default"?"Base / No Variant":"Variant: "+selVariant)
+                ),
+                // Variant tabs
+                h("div",{style:{display:"flex",gap:5}},
+                  variants(selItem).map(v=>
+                    h("button",{key:v,onClick:()=>openBOM(selItem,v),
+                      style:{padding:"4px 10px",borderRadius:6,border:"none",
+                        cursor:"pointer",fontSize:10,fontWeight:700,
+                        background:selVariant===v?C.primary:"#eee",
+                        color:selVariant===v?"#fff":C.text}},
+                      v==="default"?"Base":v))
+                )
+              ),
 
-    // Menu items grid
-    h("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:8}},
-      filteredMenu.map(item=>{
-        const itemBOM = boms[item.id]||[];
-        const hasB = itemBOM.length>0;
-        return h("div",{key:item.id,
-          style:{background:"#fff",borderRadius:11,
-            border:`2px solid ${hasB?C.success:C.border}`,
-            overflow:"hidden"}},
-          h("div",{style:{height:70,background:hasB?"#E8F5E9":`${C.primary}0D`,
-            display:"flex",alignItems:"center",justifyContent:"center",
-            fontSize:36,position:"relative"}},
-            item.emoji,
-            hasB&&h("div",{style:{position:"absolute",top:6,right:8,
-              background:C.success,color:"#fff",fontSize:8,fontWeight:700,
-              padding:"2px 6px",borderRadius:10}},
-              itemBOM.length+" ing.")
-          ),
-          h("div",{style:{padding:"10px 12px"}},
-            h("div",{style:{fontWeight:800,fontSize:12,marginBottom:3}},item.name),
-            h("div",{style:{fontSize:10,color:C.primary,fontWeight:700,marginBottom:6}},
-              "₱"+item.basePrice),
-            hasB
-              ?h("div",{style:{marginBottom:8}},
-                itemBOM.slice(0,3).map((r,i)=>h("div",{key:i,
-                  style:{fontSize:9,color:C.muted,display:"flex",gap:4,marginBottom:2}},
-                  h("span",{style:{color:C.text,fontWeight:600}},r.qty+" "+r.unit),
-                  r.ingName
-                )),
-                itemBOM.length>3&&h("div",{style:{fontSize:9,color:C.muted}},
-                  "+"+(itemBOM.length-3)+" more ingredients")
+              // BOM rows
+              h("div",{style:{padding:"12px 16px"}},
+                h("div",{style:{display:"grid",
+                  gridTemplateColumns:"1fr 120px 70px 80px 40px",
+                  gap:6,marginBottom:8}},
+                  ["INGREDIENT","UNIT","QTY","COST/UNIT",""].map(h2=>
+                    h("div",{key:h2,style:{fontSize:8,fontWeight:700,
+                      color:C.muted,letterSpacing:1}},h2))
+                ),
+                editBom.map((row,i)=>{
+                  const ing=ingredients.find(x=>x.id===row.ingId)||{};
+                  const lineCost=(ing.cost||0)*(row.qty||0);
+                  return h("div",{key:i,
+                    style:{display:"grid",
+                      gridTemplateColumns:"1fr 120px 70px 80px 40px",
+                      gap:6,marginBottom:6,alignItems:"center"}},
+                    // Ingredient select
+                    h("select",{value:row.ingId||"",
+                      onChange:e=>{
+                        const ing2=ingredients.find(x=>x.id===e.target.value)||{};
+                        updRow(i,"ingId",e.target.value);
+                        updRow(i,"ingName",ing2.name||"");
+                        updRow(i,"unit",ing2.unit||"");
+                      },
+                      style:{padding:"6px",border:"1px solid "+C.border,borderRadius:7,
+                        fontSize:11,outline:"none",width:"100%"}},
+                      h("option",{value:""},"— Select ingredient —"),
+                      ingredients.map(ing2=>h("option",{key:ing2.id,value:ing2.id},
+                        ing2.name+(ing2.unit?" ("+ing2.unit+")":"")))
+                    ),
+                    h("div",{style:{fontSize:11,color:C.muted,padding:"6px 0"}},
+                      row.unit||ing.unit||"—"),
+                    h("input",{type:"number",min:0,step:"0.01",value:row.qty||"",
+                      onChange:e=>updRow(i,"qty",parseFloat(e.target.value)||0),
+                      style:{padding:"6px",border:"1px solid "+C.border,borderRadius:7,
+                        fontSize:11,outline:"none",textAlign:"center",width:"100%"}}),
+                    h("div",{style:{fontSize:11,color:C.primary,fontWeight:700}},
+                      lineCost>0?"₱"+lineCost.toFixed(2):"—"),
+                    h("button",{onClick:()=>delRow(i),
+                      style:{padding:"4px",background:"none",border:"none",
+                        color:C.danger,cursor:"pointer",fontSize:14}},"×")
+                  );
+                }),
+
+                // Total cost
+                h("div",{style:{display:"flex",justifyContent:"space-between",
+                  padding:"10px 0",borderTop:"1px solid "+C.border,marginTop:8}},
+                  h("div",{style:{fontSize:11,fontWeight:700}},"Total Ingredient Cost"),
+                  h("div",{style:{fontSize:14,fontWeight:900,color:C.primary}},
+                    "₱"+editBom.reduce((s,r)=>{
+                      const ing=ingredients.find(x=>x.id===r.ingId)||{};
+                      return s+(ing.cost||0)*(r.qty||0);
+                    },0).toFixed(2))
+                ),
+
+                h("div",{style:{display:"flex",gap:8,marginTop:10}},
+                  h("button",{onClick:addRow,
+                    style:{padding:"8px 14px",background:"#f5f5f5",border:"none",
+                      borderRadius:8,fontSize:11,fontWeight:700,cursor:"pointer"}},
+                    "+ Add Ingredient"),
+                  h("button",{onClick:saveBOM,disabled:saving,
+                    style:{flex:1,padding:"9px",
+                      background:saving?"#ccc":C.primary,border:"none",
+                      borderRadius:8,color:"#fff",fontWeight:800,
+                      fontSize:12,cursor:"pointer"}},
+                    saving?"Saving...":"💾 Save BOM")
+                )
               )
-              :h("div",{style:{fontSize:10,color:C.muted,marginBottom:8,
-                  background:"#FFF8E1",borderRadius:7,padding:"5px 8px"}},
-                "⚠️ No BOM set yet"),
-            h("button",{onClick:()=>openBOM(item),
-              style:{width:"100%",padding:"7px",
-                background:hasB?C.bg:`linear-gradient(135deg,${C.primary},${C.dark})`,
-                border:hasB?"1px solid "+C.border:"none",
-                borderRadius:7,color:hasB?C.text:"#fff",
-                fontSize:11,fontWeight:700,cursor:"pointer"}},
-              hasB?"✏️ Edit BOM":"+ Set BOM")
-          )
-        );
-      })
+            )
+      )
     ),
 
-    // Ingredient modal
-    ingModal&&h("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",
-      display:"flex",alignItems:"center",justifyContent:"center",zIndex:900}},
-      h("div",{style:{background:"#fff",width:500,borderRadius:16,padding:"22px",
-        boxShadow:"0 20px 60px rgba(0,0,0,.3)",maxHeight:"80vh",display:"flex",flexDirection:"column"}},
-        h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:14}},
-          h("b",{style:{fontSize:14}},"⚗️ Master Ingredients"),
-          h("button",{onClick:()=>setIngModal(false),
-            style:{background:"none",border:"none",fontSize:20,cursor:"pointer"}},"×")
-        ),
-        // Add new ingredient
-        h("div",{style:{background:"#F5F5F7",borderRadius:10,padding:"12px",marginBottom:12}},
-          h("div",{style:{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,letterSpacing:1}},
-            "ADD NEW INGREDIENT"),
-          h("div",{style:{display:"grid",gridTemplateColumns:"1fr 80px 80px",gap:7,marginBottom:7}},
-            h("input",{value:newIng.name,onChange:e=>setNewIng(p=>({...p,name:e.target.value})),
-              placeholder:"Ingredient name (e.g. C. Fillet)",
-              style:{padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:12,outline:"none"}}),
-            h("select",{value:newIng.unit,onChange:e=>setNewIng(p=>({...p,unit:e.target.value})),
-              style:{padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none"}},
-              UNITS.map(u=>h("option",{key:u,value:u},u))),
-            h("input",{type:"number",value:newIng.cost||"",
-              onChange:e=>setNewIng(p=>({...p,cost:parseFloat(e.target.value)||0})),
-              placeholder:"Cost ₱",
-              style:{padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:12,outline:"none"}})
-          ),
-          h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:8}},
-            h("select",{value:newIng.cat,onChange:e=>setNewIng(p=>({...p,cat:e.target.value})),
-              style:{padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none"}},
-              ["Frozen","Dry Goods","Beverages","Packaging","Condiments","Others"].map(c=>
-                h("option",{key:c,value:c},c))),
-            h("input",{type:"number",value:newIng.minStock||"",
-              onChange:e=>setNewIng(p=>({...p,minStock:parseInt(e.target.value)||0})),
-              placeholder:"Min stock alert",
-              style:{padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:12,outline:"none"}})
-          ),
-          h("button",{onClick:saveIngredient,
-            style:{width:"100%",padding:"9px",
-              background:`linear-gradient(135deg,${C.primary},${C.dark})`,
-              border:"none",borderRadius:8,color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}},
-            "+ Add Ingredient")
-        ),
-        // Existing ingredients list
-        h("div",{style:{flex:1,overflowY:"auto"}},
-          h("div",{style:{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,letterSpacing:1}},
-            "EXISTING INGREDIENTS ("+ingredients.length+")"),
-          ingredients.map(ing=>h("div",{key:ing.id,
-            style:{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",
-              borderRadius:8,border:"1px solid "+C.border,marginBottom:5,background:"#fafafa"}},
-            h("div",{style:{width:32,height:32,borderRadius:8,background:`${C.primary}15`,
-              display:"flex",alignItems:"center",justifyContent:"center",
-              fontSize:11,fontWeight:800,color:C.primary,flexShrink:0}},
-              ing.name.slice(0,2).toUpperCase()),
-            h("div",{style:{flex:1}},
-              h("div",{style:{fontSize:11,fontWeight:700}},ing.name),
-              h("div",{style:{fontSize:9,color:C.muted}},ing.cat+" · "+ing.unit+
-                (ing.cost?" · ₱"+ing.cost+"/"+ing.unit:""))
+    // ── COSTING REPORT TAB ──
+    tab==="costing"&&h("div",{style:{background:"#fff",borderRadius:12,
+      border:"1px solid "+C.border,overflow:"hidden"}},
+      h("div",{style:{padding:"12px 16px",borderBottom:"1px solid "+C.border,
+        fontSize:12,fontWeight:800}},"💰 Costing Report — Cost vs Selling Price"),
+      h("div",{style:{display:"grid",
+        gridTemplateColumns:"1fr 100px 100px 100px 80px 80px",
+        padding:"8px 16px",background:"#fafafa",borderBottom:"1px solid "+C.border}},
+        ["ITEM / VARIANT","SELL PRICE","COST","GROSS MARGIN","MARGIN %","BOM"].map(h2=>
+          h("div",{key:h2,style:{fontSize:8,fontWeight:700,color:C.muted,letterSpacing:1}},h2))
+      ),
+      menuItems.flatMap(item=>{
+        const varList=variants(item);
+        return varList.map((v,vi)=>{
+          const sellPrice=v==="default"
+            ?(item.basePrice||0)
+            :(item.variants&&item.variants.find(vv=>vv.name===v)?.price||item.basePrice||0);
+          const cost=getCost(item,v);
+          const margin=sellPrice-cost;
+          const marginPct=sellPrice>0?margin/sellPrice*100:0;
+          const hasB=hasBOM(item,v);
+          return h("div",{key:item.id+v,
+            style:{display:"grid",
+              gridTemplateColumns:"1fr 100px 100px 100px 80px 80px",
+              padding:"9px 16px",borderBottom:"1px solid #f5f5f5",
+              alignItems:"center",
+              background:vi===0?"#fff":"#fafafa"}},
+            h("div",null,
+              h("div",{style:{fontWeight:vi===0?700:500,fontSize:11,
+                paddingLeft:vi===0?0:12,color:vi===0?C.text:C.muted}},
+                vi===0?item.name:"↳ "+v),
+              vi===0&&item.cat&&h("div",{style:{fontSize:9,color:C.muted}},item.cat)
             ),
+            h("div",{style:{fontSize:11,fontWeight:700}},
+              "₱"+sellPrice.toFixed(2)),
+            h("div",{style:{fontSize:11,color:cost>0?C.danger:C.muted}},
+              cost>0?"₱"+cost.toFixed(2):"—"),
             h("div",{style:{fontSize:11,fontWeight:700,
-              color:ing.stock<=(ing.minStock||0)?C.danger:C.success}},
-              "Stock: "+(ing.stock||0)+" "+ing.unit)
-          ))
-        )
-      )
+              color:margin>0?C.success:C.danger}},
+              cost>0?"₱"+margin.toFixed(2):"—"),
+            h("div",{style:{fontSize:11,fontWeight:700,
+              color:marginPct>50?C.success:marginPct>30?C.warning:C.danger}},
+              cost>0?marginPct.toFixed(1)+"%":"—"),
+            h("div",null,
+              h("span",{style:{fontSize:9,padding:"2px 7px",borderRadius:8,
+                background:hasB?"#E8F5E9":"#f5f5f5",
+                color:hasB?C.success:C.muted,fontWeight:700}},
+                hasB?"✓":"No BOM"))
+          );
+        });
+      })
     )
   );
-
-  // ── BOM EDITOR ──
-  if(view==="edit_bom") return h("div",null,
-    h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}},
-      h("div",{style:{display:"flex",alignItems:"center",gap:10}},
-        h("button",{onClick:()=>setView("list"),
-          style:{padding:"6px 12px",background:C.bg,border:"1px solid "+C.border,
-            borderRadius:7,fontSize:11,cursor:"pointer"}},"← Back"),
-        h("div",null,
-          h("h2",{style:{margin:0,fontSize:16,fontWeight:800}},
-            selItem?.emoji+" "+selItem?.name+" — BOM"),
-          h("div",{style:{fontSize:10,color:C.muted,marginTop:1}},
-            "Base Price: ₱"+selItem?.basePrice+" · Set ingredients needed per 1 serving")
-        )
-      ),
-      h("button",{onClick:saveBOM,disabled:saving,
-        style:{padding:"9px 20px",
-          background:`linear-gradient(135deg,${C.primary},${C.dark})`,
-          border:"none",borderRadius:9,color:"#fff",fontWeight:700,fontSize:12,
-          cursor:"pointer"}},
-        saving?"Saving...":"💾 Save BOM")
-    ),
-
-    // BOM rows
-    h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,
-      overflow:"hidden",marginBottom:10}},
-      // Header
-      h("div",{style:{display:"grid",gridTemplateColumns:"1fr 80px 100px 36px",
-        padding:"8px 14px",background:"#f9f9f9",borderBottom:"1px solid #eee"}},
-        ["Ingredient","Qty","Unit",""].map(h2=>h("div",{key:h2,
-          style:{fontSize:8,fontWeight:700,color:C.muted,textTransform:"uppercase"}},h2))
-      ),
-      // Rows
-      editBom.length===0&&h("div",{style:{textAlign:"center",padding:"24px",color:C.muted,fontSize:12}},
-        "No ingredients yet — click '+ Add Ingredient' below"
-      ),
-      editBom.map((row,i)=>h("div",{key:i,
-        style:{display:"grid",gridTemplateColumns:"1fr 80px 100px 36px",
-          padding:"8px 14px",borderBottom:"1px solid #f5f5f5",alignItems:"center",gap:8}},
-        // Ingredient selector
-        h("div",{style:{position:"relative"}},
-          h("select",{
-            value:row.ingId,
-            onChange:e=>{
-              const ing = ingredients.find(x=>x.id===e.target.value);
-              if(ing) pickIng(i,ing);
-              else setRow(i,"ingId",e.target.value);
-            },
-            style:{width:"100%",padding:"7px 9px",border:"1px solid "+C.border,
-              borderRadius:7,fontSize:11,outline:"none",
-              color:row.ingId?C.text:C.muted}},
-            h("option",{value:""},"— Select ingredient —"),
-            ingredients.map(ing=>h("option",{key:ing.id,value:ing.id},ing.name+" ("+ing.unit+")"))
-          )
-        ),
-        // Qty
-        h("input",{type:"number",min:0,step:"0.001",value:row.qty,
-          onChange:e=>setRow(i,"qty",parseFloat(e.target.value)||0),
-          style:{padding:"7px",border:"1px solid "+C.border,borderRadius:7,
-            fontSize:12,fontWeight:700,outline:"none",textAlign:"center",width:"100%",boxSizing:"border-box"}}),
-        // Unit
-        h("select",{value:row.unit,onChange:e=>setRow(i,"unit",e.target.value),
-          style:{padding:"7px",border:"1px solid "+C.border,borderRadius:7,
-            fontSize:11,outline:"none",width:"100%"}},
-          UNITS.map(u=>h("option",{key:u,value:u},u))
-        ),
-        // Remove
-        h("button",{onClick:()=>removeRow(i),
-          style:{width:28,height:28,background:"#FFEBEE",border:"none",
-            borderRadius:6,color:C.danger,cursor:"pointer",fontSize:14,fontWeight:700}},
-          "×")
-      )),
-      // Add row button
-      h("div",{style:{padding:"10px 14px"}},
-        h("button",{onClick:addIngRow,
-          style:{width:"100%",padding:"9px",background:C.bg,
-            border:"1px dashed "+C.border,borderRadius:8,
-            color:C.primary,fontWeight:700,fontSize:12,cursor:"pointer"}},
-          "+ Add Ingredient Row")
-      )
-    ),
-
-    // Cost summary
-    editBom.length>0&&h("div",{style:{background:"#fff",borderRadius:12,
-      border:"1px solid "+C.border,padding:"14px 16px"}},
-      h("div",{style:{fontSize:10,fontWeight:700,color:C.muted,marginBottom:10,letterSpacing:1}},
-        "COST SUMMARY"),
-      h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10}},
-        h("div",{style:{background:"#F5F5F7",borderRadius:9,padding:"10px 13px"}},
-          h("div",{style:{fontSize:9,color:C.muted}},"INGREDIENT COST"),
-          h("div",{style:{fontSize:16,fontWeight:900,color:C.text}},
-            "₱"+editBom.reduce((s,r)=>{
-              const ing=ingredients.find(x=>x.id===r.ingId);
-              return s+(ing?ing.cost*(r.qty||0):0);
-            },0).toFixed(2))
-        ),
-        h("div",{style:{background:"#E8F5E9",borderRadius:9,padding:"10px 13px"}},
-          h("div",{style:{fontSize:9,color:C.muted}},"SELLING PRICE"),
-          h("div",{style:{fontSize:16,fontWeight:900,color:C.success}},"₱"+(selItem?.basePrice||0).toFixed(2))
-        ),
-        h("div",{style:{background:"#FFF0F0",borderRadius:9,padding:"10px 13px"}},
-          h("div",{style:{fontSize:9,color:C.muted}},"GROSS MARGIN"),
-          h("div",{style:{fontSize:16,fontWeight:900,color:C.primary}},
-            (()=>{
-              const cost=editBom.reduce((s,r)=>{
-                const ing=ingredients.find(x=>x.id===r.ingId);
-                return s+(ing?ing.cost*(r.qty||0):0);
-              },0);
-              const price=selItem?.basePrice||0;
-              return price>0?((price-cost)/price*100).toFixed(1)+"%":"—";
-            })()
-          )
-        )
-      )
-    )
-  );
-
-  return null;
 }
 
-// ─── BRANCH ACCESS CONTROL ───────────────────────────────
-const FEATURE_DEFS = {
-  cashier: [
-    {key:"pos",         label:"POS / Ordering",        icon:"🛒", always:true},
-    {key:"orders",      label:"View Orders",            icon:"📋", always:true},
-    {key:"x_reading",   label:"X-Reading",              icon:"📊"},
-    {key:"z_reading",   label:"Z-Reading",              icon:"📈"},
-    {key:"cash_count",  label:"Cash Count",             icon:"💰"},
-    {key:"void_order",  label:"Request Void (needs manager approval)", icon:"🚫"},
-    {key:"ca_request",  label:"Cash Advance Request",   icon:"💵"},
-    {key:"loan_request",label:"Loan Request",           icon:"💸"},
-    {key:"kiosk",       label:"HRIS Time Kiosk",        icon:"🕐"},
-  ],
-  crew: [
-    {key:"kitchen",     label:"Kitchen Display",        icon:"👨‍🍳", always:true},
-    {key:"void_order",  label:"Request Void",           icon:"🚫"},
-    {key:"ca_request",  label:"Cash Advance Request",   icon:"💵"},
-    {key:"loan_request",label:"Loan Request",           icon:"💸"},
-    {key:"kiosk",       label:"HRIS Time Kiosk",        icon:"🕐"},
-  ],
-  stockclerk: [
-    {key:"inventory",   label:"Inventory View",         icon:"📦", always:true},
-    {key:"stock_order", label:"Order Stocks (PO)",      icon:"🛒"},
-    {key:"stock_receive",label:"Receive Stocks (DR)",   icon:"📥"},
-    {key:"ca_request",  label:"Cash Advance Request",   icon:"💵"},
-    {key:"loan_request",label:"Loan Request",           icon:"💸"},
-    {key:"kiosk",       label:"HRIS Time Kiosk",        icon:"🕐"},
-  ],
-};
 
 function BranchSettingsPage({branchId,curBranch,user,db,showT}){
   const [perms,setPerms]   = useState({});
@@ -3053,28 +2989,65 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
         });
       }
 
-      // BOM Restock — return ingredients to branch inventory
+      // ── BOM RESTOCK (variant-aware) ──────────────────────
       const invCol = "inventory_"+req.branch;
-      for(const item of (req.voidedItems||req.orderItems||[])){
-        try{
-          const bomSnap = await getDocs(query(collection(db,"bom"),where("menuItemId","==",item.id)));
-          if(!bomSnap.empty){
-            const bomItems = bomSnap.docs[0].data().items||[];
-            for(const bRow of bomItems){
-              if(!bRow.ingId) continue;
-              const restoreQty = (bRow.qty||0)*(item.qty||1);
-              try{
-                await updateDoc(doc(db,invCol,bRow.ingId),{
-                  stock:increment(restoreQty),
-                  lastUpdated:serverTimestamp()
-                });
-              }catch(e){}
-            }
-          }
-        }catch(e){}
-      }
+      const logCol = "inventory_log_"+req.branch;
+      try{
+        const bomSnap = await getDocs(collection(db,"bom"));
+        const bomData = {};
+        bomSnap.docs.forEach(d=>{ bomData[d.id]={...d.data()}; });
 
-      showT((req.isPartial?"Partial void":"Order #"+req.orderId+" voided")+" ✓ Inventory restocked");
+        for(const item of (req.voidedItems||req.orderItems||[])){
+          const itemId = item.id;
+          const variant = item.variant||"default";
+          const vKey = (!variant||variant==="default")
+            ? itemId
+            : itemId+"__"+variant.replace(/\s+/g,"_");
+
+          const itemBOM = bomData[itemId]||{};
+          const rows = itemBOM[vKey]||itemBOM[itemId]||[];
+
+          for(const row of rows){
+            if(!row.ingId||!row.qty) continue;
+            const restoreQty = (row.qty||0)*(item.qty||1);
+            try{
+              await updateDoc(doc(db,invCol,row.ingId),{
+                stock:increment(restoreQty),
+                lastUpdated:serverTimestamp()
+              });
+              // Log the restock
+              await addDoc(collection(db,logCol),{
+                itemId:row.ingId,
+                itemName:row.ingName||row.ingId,
+                unit:row.unit||"",
+                type:"add",
+                amount:restoreQty,
+                reason:"VOID: "+req.orderId+" ("+item.name+(variant!=="default"?" - "+variant:"")+")",
+                by:user.name,
+                at:serverTimestamp()
+              });
+            }catch(e2){console.warn("BOM restock failed",e2);}
+          }
+        }
+      }catch(bomErr){console.warn("BOM restock error:",bomErr);}
+
+      // ── PAYMENT REVERSAL ────────────────────────────────
+      try{
+        const voidAmt = req.voidAmount||(req.voidedItems||[]).reduce((s,i)=>s+(i.price||0)*(i.qty||1),0);
+        await addDoc(collection(db,"cash_log"),{
+          branch:req.branch,
+          type:"void_refund",
+          amount:-voidAmt,
+          orderId:req.orderId,
+          reason:"Void approved: "+(req.reason||""),
+          by:user.name,
+          date:new Date().toISOString().slice(0,10),
+          at:serverTimestamp()
+        });
+      }catch(e){console.warn("Payment reversal log failed",e);}
+
+      showT((req.isPartial?"Partial void":"Order #"+req.orderId+" voided")+
+        " ✓ BOM restocked + Payment reversed");
     }catch(e){showT("Error approving void","err");console.error(e);}
   };
 
@@ -4846,6 +4819,53 @@ function App(){
     };
     try{
       await addDoc(collection(db,"orders"),ord);
+
+      // ── BOM AUTO-DEDUCT ──────────────────────────────────
+      try{
+        const bomSnap = await getDocs(collection(db,"bom"));
+        const bomData = {};
+        bomSnap.docs.forEach(d=>{ bomData[d.id]={...d.data()}; });
+        const invCol = "inventory_"+branchId;
+        const logCol = "inventory_log_"+branchId;
+
+        for(const cartItem of cart){
+          const itemId = cartItem.id;
+          const variant = cartItem.variant||"default";
+          // Build variant key
+          const vKey = (!variant||variant==="default")
+            ? itemId
+            : itemId+"__"+variant.replace(/\s+/g,"_");
+
+          // Get BOM rows for this variant
+          const itemBOM = bomData[itemId]||{};
+          const rows = itemBOM[vKey]||itemBOM[itemId]||[];
+
+          for(const row of rows){
+            if(!row.ingId||!row.qty)continue;
+            const deductAmt = (row.qty||0)*(cartItem.qty||1);
+            try{
+              await updateDoc(doc(db,invCol,row.ingId),{
+                stock: increment(-deductAmt),
+                lastDeducted: serverTimestamp()
+              });
+              await addDoc(collection(db,logCol),{
+                itemId:row.ingId,
+                itemName:row.ingName||row.ingId,
+                unit:row.unit||"",
+                type:"deduct",
+                amount:-deductAmt,
+                prevStock:null,
+                newStock:null,
+                reason:"Order: "+ord.id+" ("+cartItem.name+(variant!=="default"?" - "+variant:"")+") x"+cartItem.qty,
+                by:user.name,
+                at:serverTimestamp()
+              });
+            }catch(e2){console.warn("BOM deduct failed for",row.ingId,e2);}
+          }
+        }
+      }catch(bomErr){console.warn("BOM deduction error:",bomErr);}
+      // ────────────────────────────────────────────────────
+
       setCurOrd(ord);setOrdCounter(c=>c+1);
       setCart([]);setChkCash("");setChkCust("");setChkTable("");
       setChkDisc(DISCS[0]);setChkDiscId("");setChkPay("cash");
