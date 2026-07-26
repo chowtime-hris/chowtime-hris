@@ -474,7 +474,8 @@ function printZ(zd,branchName,cashier){
 }
 
 // ─── ITEM CUSTOMIZER ─────────────────────────────────────
-function ItemCustomizer({item,onAdd,onClose}){
+function ItemCustomizer({item,onAdd,onClose,optionGroups=[]}){
+  const linkedGroups=(optionGroups||[]).filter(function(g){return (item.optionGroups||[]).includes(g.id);});
   const [selV,setSelV]=useState(item.variants[0]);
   const [selO,setSelO]=useState({});
   const [selP,setSelP]=useState(null);
@@ -620,7 +621,17 @@ function ItemCustomizer({item,onAdd,onClose}){
         }),
         h("div",{style:{padding:"13px 0 18px"}},
           h("div",{style:{fontSize:11,fontWeight:800,marginBottom:7}},"📝 Special Instructions ",h("span",{style:{color:C.muted,fontWeight:400}},"• Optional")),
-          h("textarea",{value:note,onChange:e=>setNote(e.target.value),placeholder:'"Extra spicy", "No rice", "Separate sauce"',style:{width:"100%",padding:"9px 11px",border:"1px solid "+C.border,borderRadius:9,fontSize:11,outline:"none",resize:"none",fontFamily:"inherit",boxSizing:"border-box",height:58}})
+          h("textarea",{value:note,readOnly:true,
+  onClick:function(){
+    // Use native keyboard on mobile, text KB on tablet
+    // Check if touch device and no keyboard
+    if(window.navigator.maxTouchPoints>0){
+      var n=note;
+      var result=window.prompt("Special Instructions:",n);
+      if(result!==null)setNote(result);
+    }
+  },
+  onChange:e=>setNote(e.target.value),placeholder:'"Extra spicy", "No rice", "Separate sauce"',style:{width:"100%",padding:"9px 11px",border:"1px solid "+C.border,borderRadius:9,fontSize:11,outline:"none",resize:"none",fontFamily:"inherit",boxSizing:"border-box",height:58}})
         )
       ),
       // Footer
@@ -774,7 +785,12 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
         h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}},
           h("div",null,
             h("div",{style:{fontSize:8,color:C.muted,fontWeight:700,letterSpacing:1,marginBottom:3}},"NOTES / REMARKS"),
-            h("textarea",{value:notes,onChange:e=>setNotes(e.target.value),
+            h("textarea",{value:notes,
+  onClick:function(){
+    var result=window.prompt("Notes:",notes);
+    if(result!==null)setNotes(result);
+  },
+  onChange:e=>setNotes(e.target.value),
               placeholder:"Additional notes for commissary...",
               style:{width:"100%",padding:"7px",border:"1px solid "+C.border,borderRadius:7,
                 fontSize:11,outline:"none",resize:"none",height:44,
@@ -4359,6 +4375,125 @@ function VoidBadge({branchId,db,setPage,visible=true}){
 
 
 
+
+// ─── ON-SCREEN TEXT KEYBOARD ─────────────────────────────
+function TextKeyboard({value="",onChange,onClose,label="",multiline=false}){
+  const [text,setText] = useState(String(value||""));
+  const [caps,setCaps] = useState(false);
+  const [shift,setShift] = useState(false);
+
+  const rows=[
+    ["q","w","e","r","t","y","u","i","o","p"],
+    ["a","s","d","f","g","h","j","k","l"],
+    ["z","x","c","v","b","n","m"]
+  ];
+  const nums=["1","2","3","4","5","6","7","8","9","0"];
+  const specials=["-","_","@",".",",","!","?","(",")"," "];
+
+  const press=function(ch){
+    var c=caps||shift?ch.toUpperCase():ch;
+    setText(function(p){return p+c;});
+    if(shift){setShift(false);}
+  };
+  const pressSpecial=function(ch){setText(function(p){return p+ch;});};
+  const backspace=function(){setText(function(p){return p.slice(0,-1);});};
+  const clear=function(){setText("");};
+
+  const confirm=function(){onChange(text);onClose();};
+
+  const btnStyle=function(bg,color,size){
+    return {
+      padding:size==="sm"?"6px 4px":"8px 6px",
+      fontSize:size==="sm"?10:13,
+      fontWeight:700,borderRadius:7,border:"none",
+      cursor:"pointer",background:bg||"#fff",
+      color:color||"#222",
+      boxShadow:"0 1px 3px rgba(0,0,0,.1)",
+      minWidth:size==="sm"?28:32,
+      textAlign:"center"
+    };
+  };
+
+  return h("div",{
+    style:{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",
+      display:"flex",alignItems:"flex-end",justifyContent:"center",
+      zIndex:9999},
+    onClick:function(e){if(e.target===e.currentTarget)onClose();}},
+
+    h("div",{style:{background:"#f0f0f0",width:"100%",maxWidth:600,
+      borderRadius:"20px 20px 0 0",padding:"12px 10px",
+      boxShadow:"0 -8px 30px rgba(0,0,0,.2)"}},
+
+      // Label + text display
+      h("div",{style:{marginBottom:8}},
+        label&&h("div",{style:{fontSize:9,fontWeight:700,
+          color:"#666",letterSpacing:1,marginBottom:4}},label),
+        h("div",{style:{background:"#fff",borderRadius:8,
+          padding:"8px 12px",border:"2px solid #1565C0",
+          minHeight:40,fontSize:13,wordBreak:"break-all",
+          color:text?"#222":"#aaa"}},
+          text||"Tap keys to type...")
+      ),
+
+      // Number row
+      h("div",{style:{display:"flex",gap:4,marginBottom:6,justifyContent:"center"}},
+        nums.map(function(n){
+          return h("button",{key:n,onClick:function(){pressSpecial(n);},
+            style:btnStyle("#fff","#222","sm")},n);
+        }),
+        h("button",{onClick:backspace,
+          style:{...btnStyle("#FFF3E0","#E65100","sm"),minWidth:36}},"⌫")
+      ),
+
+      // Letter rows
+      rows.map(function(row,ri){
+        return h("div",{key:ri,style:{display:"flex",gap:4,
+          marginBottom:6,justifyContent:"center"}},
+          row.map(function(ch){
+            return h("button",{key:ch,
+              onClick:function(){press(ch);},
+              style:btnStyle("#fff","#222","md")},
+              caps||shift?ch.toUpperCase():ch);
+          })
+        );
+      }),
+
+      // Bottom row: Shift, special chars, Space, Confirm
+      h("div",{style:{display:"flex",gap:4,marginBottom:6,
+        justifyContent:"center",flexWrap:"wrap"}},
+        h("button",{onClick:function(){setShift(!shift);setCaps(false);},
+          style:btnStyle(shift?"#1565C0":"#ddd",shift?"#fff":"#333","sm")},
+          "⇧"),
+        h("button",{onClick:function(){setCaps(!caps);setShift(false);},
+          style:btnStyle(caps?"#E65100":"#ddd",caps?"#fff":"#333","sm")},
+          "CAPS"),
+        specials.map(function(s){
+          return h("button",{key:s,
+            onClick:function(){pressSpecial(s);},
+            style:btnStyle("#e8e8e8","#444","sm")},
+            s===" "?"SPACE":s);
+        }),
+        h("button",{onClick:clear,
+          style:btnStyle("#FFEBEE","#C62828","sm")},"CLR")
+      ),
+
+      // Action row
+      h("div",{style:{display:"flex",gap:8}},
+        h("button",{onClick:onClose,
+          style:{flex:1,padding:"12px",borderRadius:9,border:"none",
+            cursor:"pointer",background:"#ddd",color:"#333",
+            fontWeight:700,fontSize:13}},"Cancel"),
+        h("button",{onClick:confirm,
+          style:{flex:2,padding:"12px",borderRadius:9,border:"none",
+            cursor:"pointer",
+            background:"linear-gradient(135deg,#1565C0,#0D47A1)",
+            color:"#fff",fontWeight:800,fontSize:14}},
+          "✓ Done — "+text.slice(0,20)+(text.length>20?"...":""))
+      )
+    )
+  );
+}
+
 // ─── SHARED NUMPAD MODAL ─────────────────────────────────
 // Usage: h(NumpadModal, {value, onChange, onClose, label, allowDecimal, allowNegative})
 function NumpadModal({value="",onChange,onClose,label="",allowDecimal=true,allowNegative=false}){
@@ -5384,6 +5519,8 @@ function App(){
   const [menuSrch,setMenuSrch]=useState("");
   const [cartOpen,setCartOpen]=useState(false);
   const [showCashNumpad,setShowCashNumpad]=useState(false);
+  const [textKB,setTextKB]=useState(null); // {value,label,onChange}
+  const [numKB,setNumKB]=useState(null);   // {value,label,onChange}
   // Checkout fields
   const [chkDisc,setChkDisc]=useState(DISCS[0]);
   const [chkDiscId,setChkDiscId]=useState("");
@@ -6745,8 +6882,21 @@ function App(){
               h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:14}},h("b",null,"Add Expense"),h("button",{onClick:()=>setModal(null),style:{background:"none",border:"none",fontSize:17,cursor:"pointer"}},"×")),
               h("div",{style:{display:"grid",gap:8}},
                 h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"CATEGORY"),h("select",{value:newExp.cat,onChange:e=>setNewExp(p=>({...p,cat:e.target.value})),style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none"}},EXPENSE_CATS.map(c=>h("option",{key:c},c)))),
-                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"DESCRIPTION"),h("input",{value:newExp.desc,onChange:e=>setNewExp(p=>({...p,desc:e.target.value})),placeholder:"e.g. Meralco bill",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box"}})),
-                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"AMOUNT (₱)"),h("input",{type:"number",value:newExp.amount,onChange:e=>setNewExp(p=>({...p,amount:e.target.value})),placeholder:"0.00",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:14,fontWeight:700,outline:"none",boxSizing:"border-box"}})),
+                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"DESCRIPTION"),h("input",{value:newExp.desc,readOnly:true,
+  onClick:function(){setTextKB({value:newExp.desc,label:"DESCRIPTION",
+    onChange:function(v){setNewExp(function(p){return {...p,desc:v};});}});},
+  placeholder:"Tap to enter description",
+  style:{width:"100%",padding:"8px",border:"1px solid "+C.border,
+    borderRadius:7,fontSize:11,outline:"none",
+    boxSizing:"border-box",cursor:"pointer",background:"#f9f9f9"}})),
+                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"AMOUNT (₱)"),h("input",{type:"number",value:newExp.amount,readOnly:true,
+  onClick:function(){setNumKB({value:newExp.amount,label:"AMOUNT (₱)",
+    allowDecimal:true,
+    onChange:function(v){setNewExp(function(p){return {...p,amount:v};});}});},
+  placeholder:"Tap to enter amount",
+  style:{width:"100%",padding:"8px",border:"1px solid "+C.border,
+    borderRadius:7,fontSize:14,fontWeight:700,outline:"none",
+    boxSizing:"border-box",cursor:"pointer",background:"#f9f9f9"}})),
                 h("button",{onClick:async()=>{
                   if(!newExp.desc||!newExp.amount){showT("Fill all fields","warn");return;}
                   await addDoc(collection(db,"expenses"),{branch:branchId,cat:newExp.cat,desc:newExp.desc,amount:parseFloat(newExp.amount),date:new Date().toISOString().slice(0,10),by:user.name,status:user.role==="owner"?"approved":"pending",timestamp:serverTimestamp()});
@@ -8299,6 +8449,24 @@ function App(){
         onClose:()=>setModal(null)
       })
     ),
+
+    // ON-SCREEN TEXT KEYBOARD (global)
+    textKB&&h(TextKeyboard,{
+      value:textKB.value||"",
+      label:textKB.label||"",
+      onChange:function(v){textKB.onChange(v);setTextKB(null);},
+      onClose:function(){setTextKB(null);}
+    }),
+
+    // ON-SCREEN NUMBER KEYBOARD (global)
+    numKB&&h(NumpadModal,{
+      value:numKB.value||"",
+      label:numKB.label||"",
+      allowDecimal:numKB.allowDecimal!==false,
+      allowNegative:numKB.allowNegative===true,
+      onChange:function(v){numKB.onChange(v);setNumKB(null);},
+      onClose:function(){setNumKB(null);}
+    }),
 
     // STOCK EDIT MODAL
     modal&&modal.startsWith("stock_edit_")&&h("div",{
