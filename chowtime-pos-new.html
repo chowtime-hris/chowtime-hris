@@ -304,46 +304,143 @@ function SectionHeader({title,action,actionLabel}){
   );
 }
 
-function printReceipt(ord,branchName){
-  const da=ord.discAmt||0,s=ord.subtotal||0,vatable=(s-da)/1.12,vat=(s-da)-vatable;
-  const dtLabel=ord.discType?.label||"";
-  const w=window.open("","_blank","width=400,height=720");
-  if(!w)return;
-  w.document.write(`<!DOCTYPE html><html><head><title>Receipt</title>
-  <style>*{margin:0;padding:0;}body{font-family:'Courier New',monospace;font-size:11px;width:80mm;margin:0 auto;padding:8px;}
-  .c{text-align:center;}.b{font-weight:bold;}.hr{border-top:1px dashed #000;margin:6px 0;}
-  .row{display:flex;justify-content:space-between;margin-bottom:2px;}.big{font-size:14px;font-weight:bold;}</style>
-  </head><body>
-  <div class="c"><b style="font-size:18px;letter-spacing:3px">CHOWTIME</b><br>
-  <b>FAST-FOOD CHAIN</b><br>${branchName}<br>VAT REG: 000-123-456-000 | TIN: 123-456-789</div>
-  <div class="hr"></div>
-  <div class="row"><span>OR#: ${ord.id||ord._docId||"—"}</span><span>${ord.time||""}</span></div>
-  <div class="row"><span>Type: ${(ord.orderType||"dine-in").toUpperCase()}</span>${ord.tableNo?`<span>Table: ${ord.tableNo}</span>`:""}</div>
-  ${ord.custName?`<div>Customer: ${ord.custName}</div>`:""}
-  ${ord.cashier?`<div>Cashier: ${ord.cashier}</div>`:""}
-  <div>Payment: ${{cash:"Cash",gcash:"GCash",maya:"Maya/PayMaya",bank:"Bank Transfer",foodpanda:"FoodPanda",grabfood:"GrabFood"}[ord.payMethod||"cash"]||ord.payMethod||"Cash"}</div>
-  <div class="hr"></div>
-  ${(ord.items||[]).map(i=>`<div class="row"><span>${i.qty}x ${i.name}</span><span>P${(i.lineTotal||0).toFixed(2)}</span></div>
-  ${i.variant?`<div style="padding-left:14px;font-size:10px">Size: ${i.variant}</div>`:""}
-  ${(i.options||[]).length?`<div style="padding-left:14px;font-size:10px">${i.options.join(", ")}</div>`:""}
-  ${i.isBogo?`<div style="padding-left:14px;font-size:10px">* BOGO: 1 FREE!</div>`:""}`).join("")}
-  <div class="hr"></div>
-  <div class="row"><span>Subtotal:</span><span>P${s.toFixed(2)}</span></div>
-  ${da>0?`<div class="row"><span>Discount (${dtLabel}):</span><span>-P${da.toFixed(2)}</span></div>`:""}
-  <div class="row"><span>VATable Sales:</span><span>P${vatable.toFixed(2)}</span></div>
-  <div class="row"><span>VAT (12%):</span><span>P${vat.toFixed(2)}</span></div>
-  <div class="hr"></div>
-  <div class="row big"><span>TOTAL:</span><span>P${(ord.total||0).toFixed(2)}</span></div>
-  ${ord.cash&&parseFloat(ord.cash)>0?`<div class="row"><span>Cash:</span><span>P${parseFloat(ord.cash).toFixed(2)}</span></div>
-  <div class="row b"><span>Change:</span><span>P${(parseFloat(ord.cash)-(ord.total||0)).toFixed(2)}</span></div>`:""}
-  ${da>0?`<div class="hr"></div><div>${dtLabel} ID: ${ord.discId||"___________"}</div><div>Sig: ________________</div>`:""}
-  <div class="hr"></div>
-  <div class="c">Salamat! Kain na! &#x1F60A;<br><b>CHOWTIME FAST-FOOD CHAIN</b><br>
-  <small>Powered by ChowTime POS v5.0 + Firebase</small></div>
-  </body></html>`);
-  w.document.close();
-  setTimeout(()=>w.print(),500);
+function printReceipt(ord, branchName, companySettings, paperSize){
+  companySettings = companySettings||{};
+  paperSize = paperSize||companySettings.paperSize||"80mm";
+  const isVAT = companySettings.vatMode!=="nonvat";
+  const zerovat = companySettings.vatMode==="zerovat";
+  const w = paperSize==="58mm" ? 220 : 302; // px width
+  const mmW = paperSize==="58mm" ? "58mm" : "80mm";
+  const da = ord.discAmt||0;
+  const sub = ord.subtotal||0;
+  const net = sub-da;
+  const vatable = isVAT&&!zerovat ? net/1.12 : 0;
+  const vatAmt  = isVAT&&!zerovat ? net-vatable : 0;
+  const dtLabel = (ord.discType&&ord.discType.label)||"";
+
+  const pw = window.open("","_blank","width="+w+",height=800");
+  if(!pw)return;
+
+  const fs = paperSize==="58mm"?"10px":"12px";
+  const fsb = paperSize==="58mm"?"13px":"16px";
+  const fsh = paperSize==="58mm"?"16px":"20px";
+
+  pw.document.write("<!DOCTYPE html><html><head><title>Receipt "+ord.id+"</title>"+
+  "<style>"+
+  "*{margin:0;padding:0;box-sizing:border-box;}"+
+  "body{font-family:'Courier New',monospace;font-size:"+fs+";width:"+mmW+";margin:0 auto;padding:8px 6px;}"+
+  ".c{text-align:center;}.b{font-weight:bold;}"+
+  ".hr{border-top:1px dashed #000;margin:5px 0;}"+
+  ".row{display:flex;justify-content:space-between;margin-bottom:2px;padding:0 2px;}"+
+  ".row span:last-child{text-align:right;min-width:60px;}"+
+  ".big{font-size:"+fsb+";font-weight:bold;}"+
+  ".hdr{font-size:"+fsh+";font-weight:900;letter-spacing:3px;}"+
+  ".sub{font-size:"+fs+"}"+
+  ".total{font-size:"+fsb+";font-weight:900;border-top:2px solid #000;margin-top:4px;padding-top:4px;}"+
+  "@media print{@page{margin:0;size:"+mmW+" auto;}body{padding:4px 2px;}}"+
+  "</style></head><body>"+
+  // HEADER
+  "<div class='c'>"+
+  "<div class='hdr'>"+(companySettings.name||"CHOWTIME")+"</div>"+
+  "<div class='b sub'>"+(companySettings.tagline||"FAST-FOOD CHAIN")+"</div>"+
+  "<div class='sub'>"+branchName+"</div>"+
+  (companySettings.address?"<div class='sub'>"+companySettings.address+"</div>":"")+
+  (companySettings.phone?"<div class='sub'>Tel: "+companySettings.phone+"</div>":"")+
+  (isVAT&&!zerovat?"<div class='sub'>VAT REG TIN: "+(companySettings.tin||"000-000-000-000")+"</div>":"")+
+  "</div>"+
+  "<div class='hr'></div>"+
+  // ORDER INFO
+  "<div class='row'><span>Order #:</span><span class='b'>"+ord.id+"</span></div>"+
+  "<div class='row'><span>Date:</span><span>"+ord.date+" "+ord.time+"</span></div>"+
+  "<div class='row'><span>Cashier:</span><span>"+(ord.cashier||ord.by||"")+"</span></div>"+
+  (ord.custName?"<div class='row'><span>Customer:</span><span>"+ord.custName+"</span></div>":"")+
+  "<div class='hr'></div>"+
+  // ITEMS
+  (ord.items||[]).map(function(i){
+    var vLine="";
+    if(i.variant)vLine="<div class='row sub' style='padding-left:8px'><span>"+i.variant+"</span></div>";
+    var oLine="";
+    if(i.options&&i.options.length)
+      oLine="<div class='row sub' style='padding-left:8px;color:#555'><span>"+i.options.join(", ")+"</span></div>";
+    return "<div class='row b'><span>"+i.name+"</span><span></span></div>"+
+      vLine+oLine+
+      "<div class='row'><span style='padding-left:8px'>x"+i.qty+
+      " @ \u20b1"+(i.unitPrice||0).toFixed(2)+"</span>"+
+      "<span class='b'>\u20b1"+(i.lineTotal||((i.unitPrice||0)*i.qty)).toFixed(2)+"</span></div>";
+  }).join("")+
+  "<div class='hr'></div>"+
+  // TOTALS
+  (da>0?"<div class='row'><span>Subtotal</span><span>\u20b1"+sub.toFixed(2)+"</span></div>"+
+    "<div class='row'><span>Discount ("+dtLabel+")</span><span>-\u20b1"+da.toFixed(2)+"</span></div>":"") +
+  (isVAT&&!zerovat?
+    "<div class='row sub'><span>VATable Sales</span><span>\u20b1"+vatable.toFixed(2)+"</span></div>"+
+    "<div class='row sub'><span>VAT Amount (12%)</span><span>\u20b1"+vatAmt.toFixed(2)+"</span></div>":"")+
+  (zerovat?"<div class='row sub'><span>Zero-Rated Sales</span><span>\u20b1"+net.toFixed(2)+"</span></div>":"")+
+  (!isVAT?"<div class='row sub'><span>Non-VAT</span><span></span></div>":"")+
+  "<div class='row total'><span>TOTAL</span><span>\u20b1"+net.toFixed(2)+"</span></div>"+
+  "<div class='row'><span>Payment ("+((ord.payments&&ord.payments[0]&&ord.payments[0].method)||ord.payMethod||"Cash").toUpperCase()+")</span>"+
+  "<span>\u20b1"+((ord.payments&&ord.payments.reduce(function(s,p){return s+(p.amount||0);},0))||ord.cashPaid||net).toFixed(2)+"</span></div>"+
+  (ord.change>0?"<div class='row b'><span>CHANGE</span><span>\u20b1"+ord.change.toFixed(2)+"</span></div>":"")+
+  "<div class='hr'></div>"+
+  // FOOTER
+  (isVAT&&!zerovat?
+    "<div class='c sub'>This serves as your Official Receipt<br>"+
+    "VATable: \u20b1"+vatable.toFixed(2)+" | VAT: \u20b1"+vatAmt.toFixed(2)+"</div>":
+    "<div class='c sub'>This serves as your Official Receipt</div>")+
+  "<div class='c sub' style='margin-top:4px'>"+(companySettings.receiptFooter||"Thank you for dining with us!")+"</div>"+
+  "<div class='c b' style='margin-top:8px;font-size:14px'>*** "+
+  (isVAT&&!zerovat?"VAT RECEIPT":zerovat?"ZERO-RATED RECEIPT":"NON-VAT RECEIPT")+" ***</div>"+
+  "<br><br></body></html>");
+  pw.document.close();
+  setTimeout(function(){pw.print();},400);
 }
+
+function printKOT(ord, branchName, companySettings, paperSize){
+  companySettings = companySettings||{};
+  paperSize = paperSize||companySettings.paperSize||"80mm";
+  const mmW = paperSize==="58mm"?"58mm":"80mm";
+  const fs = paperSize==="58mm"?"11px":"13px";
+
+  const pw = window.open("","_blank","width=300,height=600");
+  if(!pw)return;
+
+  pw.document.write("<!DOCTYPE html><html><head><title>KOT "+ord.id+"</title>"+
+  "<style>"+
+  "*{margin:0;padding:0;box-sizing:border-box;}"+
+  "body{font-family:'Courier New',monospace;font-size:"+fs+";width:"+mmW+";margin:0 auto;padding:8px 6px;}"+
+  ".c{text-align:center;}.b{font-weight:bold;}"+
+  ".hr{border-top:2px dashed #000;margin:6px 0;}"+
+  ".row{display:flex;justify-content:space-between;margin-bottom:3px;}"+
+  ".item{font-size:15px;font-weight:900;}"+
+  "@media print{@page{margin:0;size:"+mmW+" auto;}body{padding:4px;}}"+
+  "</style></head><body>"+
+  "<div class='c b' style='font-size:18px'>KOT</div>"+
+  "<div class='c' style='font-size:11px'>KITCHEN ORDER TICKET</div>"+
+  "<div class='hr'></div>"+
+  "<div class='row b'><span>Order: "+ord.id+"</span><span>"+ord.time+"</span></div>"+
+  "<div class='row'><span>"+branchName+"</span><span>"+ord.date+"</span></div>"+
+  (ord.custName?"<div class='row b'><span>Customer: "+ord.custName+"</span></div>":"")+
+  "<div class='hr'></div>"+
+  // ITEMS - big and bold for kitchen
+  (ord.items||[]).map(function(i,ix){
+    var vLine = i.variant?"  ["+i.variant+"]":"";
+    var oLine = (i.options&&i.options.length)?"  ("+i.options.join(", ")+")":"";
+    var noteL = i.note?"  **"+i.note+"**":"";
+    return "<div style='margin-bottom:8px;border-bottom:1px dotted #000;padding-bottom:4px'>"+
+      "<div class='row'><span class='item'>"+i.qty+"x "+i.name+"</span></div>"+
+      (vLine?"<div style='font-size:12px;font-weight:700;padding-left:12px'>"+vLine+"</div>":"")+
+      (oLine?"<div style='font-size:11px;padding-left:12px'>"+oLine+"</div>":"")+
+      (noteL?"<div style='font-size:11px;font-weight:900;padding-left:12px'>"+noteL+"</div>":"")+
+      "</div>";
+  }).join("")+
+  "<div class='hr'></div>"+
+  (ord.note?"<div class='b'>Note: "+ord.note+"</div><div class='hr'></div>":"")+
+  "<div class='c' style='font-size:10px'>Printed: "+new Date().toLocaleTimeString("en-PH")+"</div>"+
+  "<br></body></html>");
+  pw.document.close();
+  setTimeout(function(){pw.print();},400);
+}
+
 
 function printZ(zd,branchName,cashier){
   const w=window.open("","_blank","width=400,height=600");
@@ -5975,9 +6072,23 @@ function App(){
             h("div",{style:{marginTop:2}},h("b",null,"Sig: "),"________________")
           ),
           h("div",{style:{textAlign:"center",fontSize:9,color:C.muted,margin:"8px 0"}},"Salamat! Kain na! 😊 · VAT REG: 000-123-456-000"),
-          h("div",{style:{display:"flex",gap:6}},
-            h("button",{onClick:()=>printReceipt(ord,curBranch.full),style:{flex:1,padding:"9px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:8,color:"#fff",fontWeight:700,fontSize:11,cursor:"pointer"}},"🖨️ Print"),
-            h("button",{onClick:()=>setModal(null),style:{flex:1,padding:"9px",background:C.bg,border:"1px solid "+C.border,borderRadius:8,color:C.text,fontWeight:700,fontSize:11,cursor:"pointer"}},"Close")
+          h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginTop:4}},
+            h("button",{onClick:()=>printReceipt(ord,curBranch.full,companySettings),
+              style:{padding:"10px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,
+                border:"none",borderRadius:8,color:"#fff",fontWeight:700,fontSize:11,cursor:"pointer"}},
+              "🖨️ Receipt"),
+            h("button",{onClick:()=>printKOT(ord,curBranch.full,companySettings),
+              style:{padding:"10px",background:"linear-gradient(135deg,#E65100,#BF360C)",
+                border:"none",borderRadius:8,color:"#fff",fontWeight:700,fontSize:11,cursor:"pointer"}},
+              "🍳 KOT"),
+            h("button",{onClick:()=>{printReceipt(ord,curBranch.full,companySettings);printKOT(ord,curBranch.full,companySettings);},
+              style:{padding:"9px",background:C.success,
+                border:"none",borderRadius:8,color:"#fff",fontWeight:700,fontSize:10,cursor:"pointer"}},
+              "🖨️ Both"),
+            h("button",{onClick:()=>setCurOrd(null),
+              style:{padding:"9px",background:C.bg,border:"1px solid "+C.border,
+                borderRadius:8,color:C.text,fontWeight:700,fontSize:11,cursor:"pointer"}},
+              "Close")
           )
         )
       )
@@ -7444,7 +7555,69 @@ function App(){
               style:{padding:"9px 20px",background:C.primary,border:"none",
                 borderRadius:8,color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}},
               "💾 Save Company Settings")
-          )
+          ),
+
+        // ── PRINT SETTINGS ──
+        h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,
+          padding:"16px",marginTop:12}},
+          h("div",{style:{fontSize:13,fontWeight:800,marginBottom:12}},"🖨️ Print Settings"),
+          h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}},
+            h("div",null,
+              h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:6}},
+                "PAPER SIZE"),
+              h("div",{style:{display:"flex",gap:6}},
+                ["80mm","58mm"].map(s=>
+                  h("button",{key:s,
+                    onClick:()=>setCompanySettings(p=>({...p,paperSize:s})),
+                    style:{flex:1,padding:"10px",borderRadius:8,border:"none",
+                      cursor:"pointer",fontWeight:700,fontSize:12,
+                      background:(companySettings.paperSize||"80mm")===s?C.primary:"#eee",
+                      color:(companySettings.paperSize||"80mm")===s?"#fff":C.text}},s))
+              )
+            ),
+            h("div",null,
+              h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:6}},
+                "TAX MODE"),
+              h("div",{style:{display:"flex",flexDirection:"column",gap:4}},
+                [["vat","VAT (12%)"],["nonvat","Non-VAT"],["zerovat","Zero-Rated"]].map(([id,lbl])=>
+                  h("button",{key:id,
+                    onClick:()=>setCompanySettings(p=>({...p,vatMode:id})),
+                    style:{padding:"7px",borderRadius:7,border:"none",
+                      cursor:"pointer",fontWeight:700,fontSize:11,
+                      background:(companySettings.vatMode||"vat")===id?C.primary:"#eee",
+                      color:(companySettings.vatMode||"vat")===id?"#fff":C.text}},lbl))
+              )
+            )
+          ),
+          h("div",{style:{marginTop:10}},
+            h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:4}},
+              "RECEIPT FOOTER MESSAGE"),
+            h("input",{value:companySettings.receiptFooter||"",
+              onChange:e=>setCompanySettings(p=>({...p,receiptFooter:e.target.value})),
+              placeholder:"Thank you for dining with us!",
+              style:{width:"100%",padding:"8px",border:"1px solid "+C.border,
+                borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box"}})
+          ),
+          h("div",{style:{marginTop:10}},
+            h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:4}},
+              "VAT TIN NUMBER"),
+            h("input",{value:companySettings.tin||"",
+              onChange:e=>setCompanySettings(p=>({...p,tin:e.target.value})),
+              placeholder:"000-000-000-000",
+              style:{width:"100%",padding:"8px",border:"1px solid "+C.border,
+                borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box"}})
+          ),
+          h("button",{
+            onClick:async()=>{
+              try{
+                await setDoc(doc(db,"settings","company"),companySettings,{merge:true});
+                showT("Print settings saved ✓");
+              }catch(e){showT("Error","err");}
+            },
+            style:{marginTop:10,padding:"9px 20px",background:C.primary,border:"none",
+              borderRadius:8,color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}},
+            "💾 Save Print Settings")
+        )
         ),
 
         // ══ CREW MGMT ══
