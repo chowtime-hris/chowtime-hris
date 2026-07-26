@@ -2659,13 +2659,13 @@ function BOMPage({menuItems,db,user,showT}){
   const delGroup=async(g)=>{
     if(!confirm("Delete group '"+g.name+"'?"))return;
     await deleteDoc(doc(db,"option_groups",g.id));
-    if(selGroup?.id===g.id){setSelGroup(null);setSelOpt(null);}
+    if((selGroup&&selGroup.id===g.id)){setSelGroup(null);setSelOpt(null);}
   };
 
   const delOption=async(g,opt)=>{
     const updOpts=(g.options||[]).filter(o=>o.id!==opt.id);
     await updateDoc(doc(db,"option_groups",g.id),{options:updOpts});
-    if(selOpt?.id===opt.id)setSelOpt(null);
+    if((selOpt&&selOpt.id===opt.id))setSelOpt(null);
   };
 
   const addRow=(setter)=>setter(p=>[...p,{ingId:"",ingName:"",unit:"",qty:1}]);
@@ -2782,7 +2782,7 @@ function BOMPage({menuItems,db,user,showT}){
             fontSize:11,fontWeight:800}},"Menu Items"),
           h("div",{style:{overflowY:"auto",maxHeight:"70vh"}},
             menuItems.map(item=>{
-              const isSelected=selItem?.id===item.id;
+              const isSelected=(selItem&&selItem.id===item.id);
               const vList=variantList(item);
               return h("div",{key:item.id},
                 h("div",{style:{padding:"8px 14px",cursor:"pointer",
@@ -2914,10 +2914,10 @@ function BOMPage({menuItems,db,user,showT}){
                           h("div",{style:{fontSize:11,fontWeight:700,
                             marginBottom:10,color:C.text}},
                             "BOM for: "+
-                            ((selItem.options||[]).find(o=>o.id===selOptChoice.optId)?.label||"")+
+                            ((selItem.options||[]).find(o=>o.id===selOptChoice.optId)||{}).label||"")+
                             " → "+
-                            ((selItem.options||[]).find(o=>o.id===selOptChoice.optId)?.choices||[])
-                              .find(c=>c.id===selOptChoice.choiceId)?.label
+                            ((selItem.options||[]).find(o=>o.id===selOptChoice.optId)||{}).choices||[])
+                              .find(c=>c.id===selOptChoice.choiceId)||{}).label
                           ),
                           h(BOMEditor,{
                             rows:editOptChoiceBom,
@@ -2938,8 +2938,6 @@ function BOMPage({menuItems,db,user,showT}){
                           })
                         )
                   )
-              )
-            )
       ),
 
       // Costing Report
@@ -2958,7 +2956,7 @@ function BOMPage({menuItems,db,user,showT}){
         menuItems.flatMap(item=>
           variantList(item).map((v,vi)=>{
             const vObj=item.variants&&item.variants.find(vv=>(vv.label||vv.name)===v);
-            const sell=vi===0?(item.basePrice||0):(item.basePrice||0)+(vObj?.priceAdd||0);
+            const sell=vi===0?(item.basePrice||0):(item.basePrice||0)+((vObj&&vObj.priceAdd)||0);
             const key=getVKey(item,v);
             const rows=(boms[item.id]&&boms[item.id][key])||boms[key]||[];
             const cost=getCost(rows);
@@ -2993,7 +2991,7 @@ function BOMPage({menuItems,db,user,showT}){
           })
         )
       )
-    ),
+    ,
 
     // ══ OPTIONS TAB ══
     mainTab==="options"&&h("div",{style:{display:"grid",
@@ -3022,7 +3020,7 @@ function BOMPage({menuItems,db,user,showT}){
               onClick:()=>{setSelGroup(g);setSelOpt(null);},
               style:{padding:"10px 14px",cursor:"pointer",
                 borderBottom:"1px solid #f5f5f5",
-                background:selGroup?.id===g.id?"#FFF0F0":"#fff"}},
+                background:(selGroup&&selGroup.id===g.id)?"#FFF0F0":"#fff"}},
               h("div",{style:{display:"flex",justifyContent:"space-between",
                 alignItems:"center"}},
                 h("div",null,
@@ -3065,11 +3063,11 @@ function BOMPage({menuItems,db,user,showT}){
                     onClick:()=>openOptBOM(selGroup,opt),
                     style:{padding:"9px 14px",cursor:"pointer",
                       borderBottom:"1px solid #f5f5f5",
-                      background:selOpt?.id===opt.id?"#FFF8F0":"#fff",
+                      background:(selOpt&&selOpt.id===opt.id)?"#FFF8F0":"#fff",
                       display:"flex",justifyContent:"space-between",
                       alignItems:"center"}},
                     h("div",null,
-                      h("div",{style:{fontWeight:selOpt?.id===opt.id?700:500,
+                      h("div",{style:{fontWeight:(selOpt&&selOpt.id===opt.id)?700:500,
                         fontSize:11}},opt.name),
                       h("div",{style:{fontSize:9,
                         color:(opt.bom||[]).length>0?C.success:C.muted}},
