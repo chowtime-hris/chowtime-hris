@@ -6679,7 +6679,7 @@ function App(){
         ),
 
         // ══ POS ══
-        page==="pos"&&h("div",{style:{height:"100%",display:"flex",flexDirection:"column",overflow:"hidden"}},
+        page==="pos"&&h("div",{style:{height:"100%",display:"flex",flexDirection:"column",overflow:"hidden",position:"relative"}},
           h("div",{style:{background:"#fff",borderBottom:"1px solid "+C.border,padding:"0 14px",display:"flex",gap:0,alignItems:"center",flexShrink:0}},
             h("div",{style:{position:"relative",marginRight:8}},
               h("span",{style:{position:"absolute",left:8,top:"50%",transform:"translateY(-50%)",fontSize:11,color:C.muted}},"🔍"),
@@ -6722,9 +6722,10 @@ function App(){
           ),
 
           // ── FLOATING CART / CHARGE BUTTON ──
-          cart.length>0&&h("div",{style:{position:"sticky",bottom:0,
+          cart.length>0&&h("div",{style:{
             padding:"10px 14px",background:"#fff",
             borderTop:"2px solid "+C.primary,
+            flexShrink:0,
             boxShadow:"0 -4px 20px rgba(0,0,0,.1)"}},
             h("button",{
               onClick:function(){setCartOpen(true);},
