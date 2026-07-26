@@ -2560,6 +2560,10 @@ function BOMPage({menuItems,db,user,showT}){
   const [mainTab,setMainTab] = useState("products"); // products | options
   const [selItem,setSelItem] = useState(null);
   const [selVariant,setSelVar] = useState("default");
+  const [itemBomTab,setItemBomTab] = useState("variants");
+  const [selOptChoice,setSelOptChoice] = useState(null);
+  const [editOptChoiceBom,setEditOCBom] = useState([]);
+  const [savingOC,setSavingOC] = useState(false);
   const [boms,setBoms]       = useState({});
   const [editBom,setEditBom] = useState([]);
   const [ingredients,setIngs]= useState([]);
@@ -2605,6 +2609,7 @@ function BOMPage({menuItems,db,user,showT}){
 
   const openBOM=(item,v="default")=>{
     setSelItem(item); setSelVar(v);
+    setItemBomTab("variants"); setSelOptChoice(null);
     const key=getVKey(item,v);
     const rows=(boms[item.id]&&boms[item.id][key])||boms[key]||[];
     setEditBom(rows.length?[...rows]:[{ingId:"",ingName:"",unit:"",qty:1}]);
