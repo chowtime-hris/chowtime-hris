@@ -4238,18 +4238,50 @@ function StockEditModal({item,db,user,branchId,showT,onClose}){
   var invCol=isOwner?"inventory":"inventory_"+branchId;
   var logCol=isOwner?"inventory_log":"inventory_log_"+branchId;
 
-  var [mode,setMode]=useState("adjust");
-  var [amount,setAmount]=useState("");
+  var [mode,setMode]=useState("adjust"); // adjust | set
+  var [display,setDisplay]=useState(""); // what shows on numpad screen
   var [reason,setReason]=useState("");
   var [saving,setSaving]=useState(false);
 
   var current=item.stock||0;
-  var adj=parseFloat(amount)||0;
-  var preview=mode==="adjust"?Math.max(0,current+adj):Math.max(0,parseFloat(amount)||0);
+  var numVal=parseFloat(display)||0;
+  var preview=mode==="adjust"
+    ? Math.max(0,current+(display.startsWith("-")?-numVal:numVal))
+    : Math.max(0,numVal);
+  var isNeg=display.startsWith("-");
+
+  // Numpad press handler
+  var numPress=function(key){
+    if(key==="C"){setDisplay("");return;}
+    if(key==="⌫"){
+      var d=display;
+      if(d==="-")setDisplay("");
+      else setDisplay(d.slice(0,-1));
+      return;
+    }
+    if(key==="-"){
+      if(mode==="adjust"){
+        setDisplay(function(p){return p.startsWith("-")?p.slice(1):"-"+p;});
+      }
+      return;
+    }
+    if(key==="."){
+      if(!display.includes(".")){
+        setDisplay(function(p){return (p||"0")+".";});
+      }
+      return;
+    }
+    // number
+    setDisplay(function(p){
+      if(p==="-")return "-"+key;
+      if(p==="0")return key;
+      return p+key;
+    });
+  };
 
   var save=async function(){
-    if(!amount){showT("Enter amount","warn");return;}
-    if(!reason){showT("Enter reason","warn");return;}
+    if(!display){showT("Enter amount","warn");return;}
+    if(!reason){showT("Select reason","warn");return;}
     setSaving(true);
     try{
       await updateDoc(doc(db,invCol,item.id),{
@@ -4259,107 +4291,152 @@ function StockEditModal({item,db,user,branchId,showT,onClose}){
       });
       await addDoc(collection(db,logCol),{
         itemId:item.id,itemName:item.name,unit:item.unit||"",
-        type:mode==="set"?"set":adj>0?"add":"deduct",
-        amount:mode==="adjust"?adj:preview,
+        type:mode==="set"?"set":isNeg?"deduct":"add",
+        amount:mode==="adjust"?(isNeg?-numVal:numVal):numVal,
         prevStock:current,newStock:preview,
         reason:reason,by:user.name,at:serverTimestamp()
       });
       showT("Stock updated: "+item.name+" → "+String(preview)+" "+(item.unit||"")+" ✓");
       onClose();
-    }catch(e){showT("Error","err");console.error(e);}
+    }catch(e){showT("Error saving","err");console.error(e);}
     setSaving(false);
   };
 
-  return h("div",{style:{background:"#fff",width:400,borderRadius:14,
-    overflow:"hidden",boxShadow:"0 20px 50px rgba(0,0,0,.35)"}},
+  var KEYS=[
+    ["7","8","9"],
+    ["4","5","6"],
+    ["1","2","3"],
+    [mode==="adjust"?"-":".",  "0","⌫"],
+  ];
+
+  return h("div",{style:{background:"#fff",width:380,borderRadius:16,
+    overflow:"hidden",boxShadow:"0 20px 50px rgba(0,0,0,.4)"}},
+
+    // Header
     h("div",{style:{background:"linear-gradient(135deg,#1565C0,#0D47A1)",
-      padding:"14px 18px",display:"flex",justifyContent:"space-between",alignItems:"center"}},
+      padding:"14px 18px",display:"flex",justifyContent:"space-between",
+      alignItems:"center"}},
       h("div",null,
-        h("div",{style:{color:"rgba(255,255,255,.6)",fontSize:9,letterSpacing:2,fontWeight:700}},
-          "MANUAL STOCK ADJUSTMENT"),
-        h("div",{style:{color:"#fff",fontWeight:900,fontSize:14}},item.name),
-        h("div",{style:{color:"rgba(255,255,255,.5)",fontSize:9}},
+        h("div",{style:{color:"rgba(255,255,255,.6)",fontSize:9,
+          letterSpacing:2,fontWeight:700}},"STOCK ADJUSTMENT"),
+        h("div",{style:{color:"#fff",fontWeight:900,fontSize:15}},item.name),
+        h("div",{style:{color:"rgba(255,255,255,.5)",fontSize:10}},
           "Current: "+String(current)+" "+(item.unit||""))
       ),
       h("button",{onClick:onClose,
         style:{background:"rgba(255,255,255,.15)",border:"none",color:"#fff",
-          width:26,height:26,borderRadius:7,fontSize:15,cursor:"pointer"}},"x")
+          width:28,height:28,borderRadius:8,fontSize:16,cursor:"pointer"}},"×")
     ),
-    h("div",{style:{padding:"16px 18px"}},
-      // Current stock
-      h("div",{style:{display:"flex",justifyContent:"center",marginBottom:14}},
-        h("div",{style:{background:"#E3F2FD",borderRadius:10,padding:"10px 24px",textAlign:"center"}},
-          h("div",{style:{fontSize:9,color:"#1565C0",fontWeight:700,marginBottom:2}},"CURRENT STOCK"),
-          h("div",{style:{fontSize:26,fontWeight:900,color:"#1565C0"}},
-            String(current)+" "+(item.unit||""))
-        )
-      ),
+
+    h("div",{style:{padding:"14px 16px"}},
+
       // Mode toggle
-      h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:12}},
-        h("button",{onClick:function(){setMode("adjust");setAmount("");},
-          style:{padding:"8px",borderRadius:8,border:"none",cursor:"pointer",
-            fontWeight:700,fontSize:11,
+      h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",
+        gap:6,marginBottom:12}},
+        h("button",{onClick:function(){setMode("adjust");setDisplay("");},
+          style:{padding:"9px",borderRadius:9,border:"none",cursor:"pointer",
+            fontWeight:700,fontSize:12,
             background:mode==="adjust"?"#1565C0":"#f0f0f0",
             color:mode==="adjust"?"#fff":"#333"}},
-          "+ / - Adjust"),
-        h("button",{onClick:function(){setMode("set");setAmount(String(current));},
-          style:{padding:"8px",borderRadius:8,border:"none",cursor:"pointer",
-            fontWeight:700,fontSize:11,
+          "➕/➖ Adjust"),
+        h("button",{onClick:function(){setMode("set");setDisplay("");},
+          style:{padding:"9px",borderRadius:9,border:"none",cursor:"pointer",
+            fontWeight:700,fontSize:12,
             background:mode==="set"?"#1565C0":"#f0f0f0",
             color:mode==="set"?"#fff":"#333"}},
           "= Set Exact")
       ),
-      // Amount
-      h("div",{style:{marginBottom:10}},
-        h("div",{style:{fontSize:9,color:"#888",fontWeight:700,marginBottom:4,letterSpacing:1}},
-          mode==="adjust"?"ADJUSTMENT (+/-)":"SET STOCK TO"),
-        h("input",{type:"number",value:amount,
-          onChange:function(e){setAmount(e.target.value);},
-          placeholder:mode==="adjust"?"e.g. 10 or -5":"e.g. 50",
-          style:{width:"100%",padding:"10px",border:"2px solid #1565C0",
-            borderRadius:8,fontSize:16,fontWeight:700,outline:"none",
-            boxSizing:"border-box",textAlign:"center",color:"#1565C0"}})
+
+      // Display screen
+      h("div",{style:{background:"#f0f4ff",borderRadius:12,
+        padding:"14px 18px",marginBottom:12,textAlign:"right",
+        border:"2px solid #1565C0"}},
+        h("div",{style:{fontSize:10,color:"#888",marginBottom:2,textAlign:"left"}},
+          mode==="adjust"
+            ?(isNeg?"DEDUCT":"ADD")+" AMOUNT"
+            :"SET STOCK TO"),
+        h("div",{style:{fontSize:32,fontWeight:900,color:"#1565C0",
+          minHeight:44,letterSpacing:2}},
+          display||"0"),
+        // Preview
+        display&&h("div",{style:{fontSize:11,color:"#666",marginTop:4,
+          borderTop:"1px solid #ddd",paddingTop:6,textAlign:"left"}},
+          "New stock → ",
+          h("span",{style:{fontWeight:800,
+            color:preview<(item.minStock||0)?"#C62828":"#1B5E20",
+            fontSize:14}},
+            String(preview)+" "+(item.unit||""))
+        )
       ),
-      // Preview
-      amount&&h("div",{style:{marginBottom:10,padding:"8px 14px",
-        background:preview<(item.minStock||0)?"#FFEBEE":"#E8F5E9",
-        borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center"}},
-        h("span",{style:{fontSize:11,color:"#555"}},"New stock:"),
-        h("span",{style:{fontSize:18,fontWeight:900,
-          color:preview<(item.minStock||0)?"#C62828":"#2E7D32"}},
-          String(preview)+" "+(item.unit||""))
+
+      // Numpad
+      h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",
+        gap:8,marginBottom:12}},
+        KEYS.flat().map(function(key){
+          var isAction=key==="⌫"||key==="C"||key==="-";
+          return h("button",{key:key,
+            onClick:function(){numPress(key);},
+            style:{
+              padding:"16px 8px",
+              fontSize:key==="⌫"?20:18,
+              fontWeight:700,
+              borderRadius:10,
+              border:"none",
+              cursor:"pointer",
+              background:key==="C"?"#FFEBEE":
+                key==="⌫"?"#FFF3E0":
+                key==="-"&&isNeg?"#1565C0":
+                isAction?"#e8eaf6":"#fff",
+              color:key==="C"?"#C62828":
+                key==="-"&&isNeg?"#fff":
+                isAction?"#1565C0":"#222",
+              boxShadow:"0 2px 4px rgba(0,0,0,.1)",
+              transition:"all .1s",
+            }},
+            key);
+        }),
+        // Clear button (full width)
+        h("button",{
+          onClick:function(){numPress("C");},
+          style:{gridColumn:"1/-1",padding:"14px",fontSize:14,
+            fontWeight:700,borderRadius:10,border:"none",
+            cursor:"pointer",background:"#FFEBEE",color:"#C62828",
+            boxShadow:"0 2px 4px rgba(0,0,0,.1)"}},
+          "CLEAR")
       ),
+
       // Reason
-      h("div",{style:{marginBottom:14}},
-        h("div",{style:{fontSize:9,color:"#888",fontWeight:700,marginBottom:6,letterSpacing:1}},
-          "REASON *"),
-        h("div",{style:{display:"flex",gap:5,flexWrap:"wrap",marginBottom:6}},
-          ["Physical Count","Spoilage","Wastage","Transfer","Correction","Other"].map(function(r){
+      h("div",{style:{marginBottom:12}},
+        h("div",{style:{fontSize:9,fontWeight:700,color:"#888",
+          letterSpacing:1,marginBottom:6}},"REASON *"),
+        h("div",{style:{display:"flex",gap:5,flexWrap:"wrap"}},
+          ["Physical Count","Spoilage","Wastage",
+           "Transfer","Correction","Received","Other"].map(function(r){
             return h("button",{key:r,onClick:function(){setReason(r);},
-              style:{padding:"4px 10px",borderRadius:20,fontSize:10,cursor:"pointer",
-                border:"none",
+              style:{padding:"6px 12px",borderRadius:20,fontSize:10,
+                cursor:"pointer",border:"none",
                 background:reason===r?"#1565C0":"#eee",
                 color:reason===r?"#fff":"#333",
                 fontWeight:reason===r?700:400}},r);
           })
-        ),
-        h("input",{value:reason,
-          onChange:function(e){setReason(e.target.value);},
-          placeholder:"Or type custom reason...",
-          style:{width:"100%",padding:"7px",border:"1px solid #ddd",borderRadius:7,
-            fontSize:11,outline:"none",boxSizing:"border-box"}})
+        )
       ),
-      h("button",{onClick:save,disabled:saving||!amount||!reason,
-        style:{width:"100%",padding:"11px",
-          background:saving||!amount||!reason?"#ccc":"linear-gradient(135deg,#1565C0,#0D47A1)",
-          border:"none",borderRadius:9,color:"#fff",fontWeight:800,fontSize:13,
-          cursor:saving||!amount||!reason?"not-allowed":"pointer"}},
-        saving?"Saving...":"Save Stock Adjustment")
+
+      // Save button
+      h("button",{onClick:save,
+        disabled:saving||!display||!reason,
+        style:{width:"100%",padding:"14px",
+          background:saving||!display||!reason?"#ccc":
+            "linear-gradient(135deg,#1565C0,#0D47A1)",
+          border:"none",borderRadius:10,color:"#fff",
+          fontWeight:800,fontSize:14,cursor:"pointer",
+          letterSpacing:1}},
+        saving?"Saving...":"💾 SAVE")
     )
   );
 }
 
-// ─── RECEIVE ITEMS MODAL ─────────────────────────────────
+
 function ReceiveItemsModal({po,db,user,showT,branchId,onClose}){
   if(!po)return null;
   const drItems = po.deliveredItems||po.items||[];
