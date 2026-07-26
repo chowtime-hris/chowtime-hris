@@ -342,7 +342,7 @@ function printReceipt(ord, branchName, companySettings, paperSize){
   // HEADER
   "<div class='c'>"+
   "<div class='hdr'>"+(companySettings.name||"CHOWTIME")+"</div>"+
-  "<div class='b sub'>"+(companySettings.tagline||"FAST-FOOD CHAIN")+"</div>"+
+  
   "<div class='sub'>"+branchName+"</div>"+
   (companySettings.address?"<div class='sub'>"+companySettings.address+"</div>":"")+
   (companySettings.phone?"<div class='sub'>Tel: "+companySettings.phone+"</div>":"")+
@@ -365,7 +365,7 @@ function printReceipt(ord, branchName, companySettings, paperSize){
     return "<div class='row b'><span>"+i.name+"</span><span></span></div>"+
       vLine+oLine+
       "<div class='row'><span style='padding-left:8px'>x"+i.qty+
-      " @ \u20b1"+(i.unitPrice||0).toFixed(2)+"</span>"+
+      " @ \u20b1"+((i.lineTotal&&i.qty?(i.lineTotal/i.qty):(i.unitPrice||i.price||0))).toFixed(2)+"</span>"+
       "<span class='b'>\u20b1"+(i.lineTotal||((i.unitPrice||0)*i.qty)).toFixed(2)+"</span></div>";
   }).join("")+
   "<div class='hr'></div>"+
@@ -5867,13 +5867,15 @@ function App(){
     const now=new Date().toLocaleTimeString("en-PH",{hour:"2-digit",minute:"2-digit"});
     const ord={
       id,branch:branchId,
-      items:cart.map(i=>({qty:i.qty,name:i.name,emoji:i.emoji,variant:i.variant||"",
-        options:i.options||[],lineTotal:i.lineTotal,isBogo:i.isBogo||false,
-        promo:i.promo||"",note:i.note||""})),
+      items:cart.map(i=>({qty:i.qty,name:i.name,emoji:i.emoji,
+        variant:i.variant||"",options:i.options||[],
+        unitPrice:getPriceByType(i),
+        lineTotal:getPriceByType(i)*(i.qty||1),
+        isBogo:i.isBogo||false,promo:i.promo||"",note:i.note||""})),
       subtotal:chkSub,discAmt:chkDiscAmt,
       discType:{id:chkDisc.id,label:chkDisc.label,rate:chkDisc.rate},
       discId:chkDiscId,custName:chkCust,tableNo:chkTable,
-      cash:chkCash,total:chkTotal,time:now,
+      cash:chkCash,total:chkTotal,time:now,date:new Date().toISOString().slice(0,10),
       status:"pending",orderType:chkType,payMethod:chkPay,priceType,cashier:user.name,
       bomDeducted:false,
       timestamp:serverTimestamp()
