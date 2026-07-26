@@ -454,16 +454,16 @@ function printReceipt(ord, branchName, companySettings, paperSize){
   pw.document.write("<!DOCTYPE html><html><head><title>Receipt "+ord.id+"</title>"+
   "<style>"+
   "*{margin:0;padding:0;box-sizing:border-box;}"+
-  "body{font-family:'Courier New',monospace;font-size:"+fs+";width:"+mmW+";margin:0 auto;padding:8px 6px;}"+
+  "html,body{width:"+mmW+";max-width:"+mmW+";}"+
+  "body{font-family:'Courier New',monospace;font-size:"+fs+";margin:0;padding:6px 4px;}"+
   ".c{text-align:center;}.b{font-weight:bold;}"+
-  ".hr{border-top:1px dashed #000;margin:5px 0;}"+
-  ".row{display:flex;justify-content:space-between;margin-bottom:2px;padding:0 2px;}"+
-  ".row span:last-child{text-align:right;min-width:60px;}"+
-  ".big{font-size:"+fsb+";font-weight:bold;}"+
-  ".hdr{font-size:"+fsh+";font-weight:900;letter-spacing:3px;}"+
-  ".sub{font-size:"+fs+"}"+
-  ".total{font-size:"+fsb+";font-weight:900;border-top:2px solid #000;margin-top:4px;padding-top:4px;}"+
-  "@media print{@page{margin:0;size:"+mmW+" auto;}body{padding:4px 2px;}}"+
+  ".hr{border-top:1px dashed #000;margin:4px 0;}"+
+  ".row{display:flex;justify-content:space-between;margin-bottom:2px;}"+
+  ".row span:last-child{text-align:right;flex-shrink:0;margin-left:4px;}"+
+  ".hdr{font-size:"+fsh+";font-weight:900;letter-spacing:2px;}"+
+  ".total{font-size:"+fsb+";font-weight:900;border-top:2px solid #000;padding-top:3px;margin-top:3px;}"+
+  "@page{margin:0;size:"+mmW+" auto;}"+
+  "@media print{body{padding:2px;}*{-webkit-print-color-adjust:exact;}}"+
   "</style></head><body>"+
   // HEADER
   "<div class='c'>"+
@@ -483,16 +483,12 @@ function printReceipt(ord, branchName, companySettings, paperSize){
   "<div class='hr'></div>"+
   // ITEMS
   (ord.items||[]).map(function(i){
-    var vLine="";
-    if(i.variant)vLine="<div class='row sub' style='padding-left:8px'><span>"+i.variant+"</span></div>";
-    var oLine="";
-    if(i.options&&i.options.length)
-      oLine="<div class='row sub' style='padding-left:8px;color:#555'><span>"+i.options.join(", ")+"</span></div>";
-    return "<div class='row b'><span>"+i.name+"</span><span></span></div>"+
-      vLine+oLine+
-      "<div class='row'><span style='padding-left:8px'>x"+i.qty+
-      " @ \u20b1"+((i.lineTotal&&i.qty?(i.lineTotal/i.qty):(i.unitPrice||i.price||0))).toFixed(2)+"</span>"+
-      "<span class='b'>\u20b1"+(i.lineTotal||((i.unitPrice||0)*i.qty)).toFixed(2)+"</span></div>";
+    var price=i.lineTotal&&i.qty?(i.lineTotal/i.qty):(i.unitPrice||i.price||0);
+    var total=i.lineTotal||(price*(i.qty||1));
+    var name=i.name+(i.variant?" ["+i.variant+"]":"")+(i.options&&i.options.length?" ("+i.options.join(", ")+")":"");
+    return "<div class='row'><span class='b' style='flex:1;margin-right:4px'>"+name+"</span>"+
+      "<span class='b'>\u20b1"+total.toFixed(2)+"</span></div>"+
+      "<div style='padding-left:8px;margin-bottom:3px;color:#555'>x"+i.qty+" @ \u20b1"+price.toFixed(2)+"</div>";
   }).join("")+
   "<div class='hr'></div>"+
   // TOTALS
@@ -518,7 +514,13 @@ function printReceipt(ord, branchName, companySettings, paperSize){
   (isVAT&&!zerovat?"VAT RECEIPT":zerovat?"ZERO-RATED RECEIPT":"NON-VAT RECEIPT")+" ***</div>"+
   "<br><br></body></html>");
   pw.document.close();
-  setTimeout(function(){pw.print();},400);
+  setTimeout(function(){
+    pw.print();
+    // Auto-close after print on mobile
+    setTimeout(function(){
+      try{pw.close();}catch(e){}
+    },1000);
+  },400);
 }
 
 function printKOT(ord, branchName, companySettings, paperSize){
