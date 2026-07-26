@@ -8166,23 +8166,48 @@ function App(){
               borderRadius:8,color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}},
             "💾 Save Print Settings"),
 
-          // BT Printer connect
-          h("div",{style:{marginTop:12,padding:"10px 14px",
-            background:"#E3F2FD",borderRadius:8,
-            border:"1px solid #90CAF9"}},
-            h("div",{style:{fontSize:11,fontWeight:700,marginBottom:6,color:"#1565C0"}},
-              "📡 Bluetooth Printer (Xprinter)"),
-            h("div",{style:{fontSize:10,color:"#555",marginBottom:8}},
-              "Connect your Xprinter via Bluetooth for direct printing without dialog"),
-            h("button",{
-              onClick:async function(){
-                var ok=await btConnect();
-                if(ok)showT("Bluetooth printer connected! ✓");
-                else showT("Could not connect — check Bluetooth is ON and printer is paired","warn");
-              },
-              style:{padding:"8px 16px",background:"#1565C0",border:"none",
-                borderRadius:8,color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}},
-              "🔗 Connect Bluetooth Printer")
+          // BT Printer connect - PROMINENT
+          h("div",{style:{marginTop:14,background:"#fff",borderRadius:10,
+            border:"2px solid #1565C0",overflow:"hidden"}},
+            h("div",{style:{background:"#1565C0",padding:"10px 14px",
+              display:"flex",justifyContent:"space-between",alignItems:"center"}},
+              h("div",{style:{color:"#fff",fontWeight:800,fontSize:12}},
+                "📡 Bluetooth Printer"),
+              h("div",{style:{fontSize:9,color:"rgba(255,255,255,.7)"}},
+                "Xprinter direct print — walang dialog")
+            ),
+            h("div",{style:{padding:"12px 14px"}},
+              h("div",{style:{fontSize:10,color:"#555",marginBottom:10}},
+                "1. I-on ang Xprinter",
+                h("br"),
+                "2. I-pair sa Tablet Bluetooth Settings",
+                h("br"),
+                "3. I-click ang button sa baba → select Xprinter",
+                h("br"),
+                "4. Done! Gamitin ang 📡 BT Print sa receipt"
+              ),
+              h("button",{
+                onClick:async function(){
+                  showT("Opening Bluetooth scanner...","ok");
+                  var ok=await btConnect();
+                  if(ok){
+                    showT("✅ Xprinter connected! Pwede nang mag-print","ok");
+                  } else {
+                    showT("❌ Hindi ma-connect — i-check kung naka-pair sa Bluetooth settings","warn");
+                  }
+                },
+                style:{width:"100%",padding:"12px",
+                  background:"linear-gradient(135deg,#1565C0,#0D47A1)",
+                  border:"none",borderRadius:9,color:"#fff",
+                  fontWeight:800,fontSize:13,cursor:"pointer",
+                  display:"flex",alignItems:"center",justifyContent:"center",
+                  gap:8}},
+                h("span",{style:{fontSize:18}},"📡"),
+                h("span",null,"Connect Bluetooth Printer")
+              ),
+              h("div",{style:{marginTop:8,fontSize:9,color:"#888",textAlign:"center"}},
+                "Requires Chrome browser + Bluetooth enabled")
+            )
           )
           )
         ),
