@@ -305,6 +305,71 @@ function SectionHeader({title,action,actionLabel}){
 }
 
 
+
+// ─── TEST PRINT ──────────────────────────────────────────
+function testPrint(cs,paperSize,showT){
+  cs=cs||{}; paperSize=paperSize||"80mm";
+  var mmW=paperSize==="58mm"?"58mm":"80mm";
+  var pw=window.open("","_blank","width=300,height=500");
+  if(!pw){if(showT)showT("Pop-up blocked — allow pop-ups in Chrome","warn");return;}
+  var body="<!DOCTYPE html><html><head><title>Test Print</title>"+
+    "<style>*{margin:0;padding:0;box-sizing:border-box;}"+
+    "body{font-family:'Courier New',monospace;font-size:12px;"+
+    "width:"+mmW+";padding:8px;}"+
+    ".c{text-align:center;}.b{font-weight:bold;}"+
+    ".hr{border-top:1px dashed #000;margin:5px 0;}"+
+    "@page{margin:0;size:"+mmW+" auto;}"+
+    "</style></head><body>"+
+    "<div class='c b' style='font-size:16px'>"+(cs.name||"CHOWTIME")+"</div>"+
+    "<div class='c'>** TEST PRINT **</div>"+
+    "<div class='hr'></div>"+
+    "<div>Branch: "+(cs.address||"—")+"</div>"+
+    "<div>Phone: "+(cs.phone||"—")+"</div>"+
+    "<div>Paper: "+paperSize+"</div>"+
+    "<div>Date: "+new Date().toLocaleString("en-PH")+"</div>"+
+    "<div class='hr'></div>"+
+    "<div class='c b' style='font-size:14px'>Printer is Ready!</div>"+
+    "<div class='hr'></div>"+
+    "<div class='c' style='font-size:10px'>If you can read this, print is working.</div>"+
+    "<br><br></body></html>";
+  pw.document.write(body);
+  pw.document.close();
+  setTimeout(function(){pw.print();setTimeout(function(){try{pw.close();}catch(e){}},1500);},400);
+  if(showT)showT("Test print sent — select Xprinter in dialog","ok");
+}
+
+async function testPrintBT(cs,paperSize,showT){
+  cs=cs||{}; paperSize=paperSize||"80mm";
+  if(!_btChar){
+    var ok=await btConnect();
+    if(!ok){if(showT)showT("Connect printer first","warn");return;}
+  }
+  var W=paperSize==="58mm"?32:48;
+  var enc=new TextEncoder();
+  var ESC=0x1B,GS=0x1D,NL=0x0A;
+  var parts=[],a=function(v){parts.push(v instanceof Uint8Array?v:new Uint8Array(v));};
+  var ln=function(s){return enc.encode(s+"\n");};
+  a([ESC,0x40]);
+  a([ESC,0x61,0x01]);
+  a([ESC,0x21,0x20]);
+  a(ln(cs.name||"CHOWTIME"));
+  a([ESC,0x21,0x00]);
+  a(ln("** TEST PRINT **"));
+  a(ln("-".repeat(W)));
+  a(ln("Paper: "+paperSize));
+  a(ln(new Date().toLocaleString("en-PH")));
+  a(ln("-".repeat(W)));
+  a([ESC,0x45,0x01]);
+  a(ln("Printer is Ready!"));
+  a([ESC,0x45,0x00]);
+  a(new Uint8Array([NL,NL,NL,GS,0x56,0x41,0x10]));
+  var total=0;parts.forEach(function(p){total+=p.length;});
+  var out=new Uint8Array(total),off=0;
+  parts.forEach(function(p){out.set(p,off);off+=p.length;});
+  var ok=await btPrint(out);
+  if(showT)ok?showT("✅ BT Test print OK!","ok"):showT("❌ BT print failed","warn");
+}
+
 // ─── ESC/POS BLUETOOTH PRINTER ───────────────────────────
 var _btDevice=null, _btChar=null;
 
@@ -6523,7 +6588,27 @@ function App(){
             h("button",{onClick:()=>setCurOrd(null),
               style:{padding:"9px",background:C.bg,border:"1px solid "+C.border,
                 borderRadius:8,color:C.text,fontWeight:700,fontSize:11,cursor:"pointer"}},
-              "Close")
+              "Close"),
+            h("div",{style:{gridColumn:"1/-1",display:"flex",gap:6}},
+              h("button",{
+                onClick:async function(){
+                  showT("Scanning for Bluetooth printer...","ok");
+                  var ok=await btConnect();
+                  if(ok)showT("✅ Printer connected! Tap 📡 BT Print","ok");
+                  else showT("❌ Check Bluetooth — pair Xprinter first","warn");
+                },
+                style:{flex:1,padding:"8px",background:"#1565C0",
+                  border:"none",borderRadius:8,color:"#fff",
+                  fontWeight:700,fontSize:11,cursor:"pointer"}},
+                "📡 Connect Printer"),
+              h("button",{
+                onClick:function(){testPrint(companySettings,
+                  companySettings.paperSize||"80mm",showT);},
+                style:{flex:1,padding:"8px",background:"#fff",
+                  border:"2px solid #1565C0",borderRadius:8,
+                  color:"#1565C0",fontWeight:700,fontSize:11,cursor:"pointer"}},
+                "🖨️ Test Print")
+            )
           )
         )
       )
@@ -8107,9 +8192,9 @@ function App(){
 
         // ── PRINT SETTINGS ──
         h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,
-          padding:"16px",marginTop:12}},
-          h("div",{style:{fontSize:13,fontWeight:800,marginBottom:12}},"🖨️ Print Settings"),
-          h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}},
+          padding:"12px",marginTop:8}},
+          h("div",{style:{fontSize:12,fontWeight:800,marginBottom:8}},"🖨️ Print Settings"),
+          h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}},
             h("div",null,
               h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:6}},
                 "PAPER SIZE"),
@@ -8177,14 +8262,8 @@ function App(){
                 "Xprinter direct print — walang dialog")
             ),
             h("div",{style:{padding:"12px 14px"}},
-              h("div",{style:{fontSize:10,color:"#555",marginBottom:10}},
-                "1. I-on ang Xprinter",
-                h("br"),
-                "2. I-pair sa Tablet Bluetooth Settings",
-                h("br"),
-                "3. I-click ang button sa baba → select Xprinter",
-                h("br"),
-                "4. Done! Gamitin ang 📡 BT Print sa receipt"
+              h("div",{style:{fontSize:10,color:"#555",marginBottom:8,lineHeight:1.6}},
+                "1. I-on Xprinter → 2. Pair sa Tablet Bluetooth → 3. I-tap Connect"
               ),
               h("button",{
                 onClick:async function(){
