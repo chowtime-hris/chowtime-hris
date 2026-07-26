@@ -304,6 +304,132 @@ function SectionHeader({title,action,actionLabel}){
   );
 }
 
+
+// ─── ESC/POS BLUETOOTH PRINTER ───────────────────────────
+var _btDevice=null, _btChar=null;
+
+async function btConnect(){
+  try{
+    var dev=await navigator.bluetooth.requestDevice({
+      filters:[{namePrefix:"Xprinter"},{namePrefix:"XP-"},
+               {namePrefix:"RPP"},{namePrefix:"MTP"},
+               {namePrefix:"Printer"},{namePrefix:"BlueTooth"}],
+      optionalServices:["000018f0-0000-1000-8000-00805f9b34fb"]
+    });
+    var srv=await dev.gatt.connect();
+    var svc=await srv.getPrimaryService("000018f0-0000-1000-8000-00805f9b34fb");
+    _btChar=await svc.getCharacteristic("00002af1-0000-1000-8000-00805f9b34fb");
+    _btDevice=dev;
+    dev.addEventListener("gattserverdisconnected",function(){_btDevice=null;_btChar=null;});
+    return true;
+  }catch(e){console.warn("BT connect:",e);return false;}
+}
+
+async function btPrint(bytes){
+  if(!_btChar){var ok=await btConnect();if(!ok)return false;}
+  try{
+    for(var i=0;i<bytes.length;i+=20){
+      await _btChar.writeValue(bytes.slice(i,i+20));
+    }
+    return true;
+  }catch(e){console.warn("BT print:",e);_btChar=null;return false;}
+}
+
+function buildEscPos(ord,bName,cs,paperSize){
+  cs=cs||{};
+  var isVAT=cs.vatMode!=="nonvat";
+  var zerovat=cs.vatMode==="zerovat";
+  var da=ord.discAmt||0, sub=ord.subtotal||0, net=sub-da;
+  var vatable=isVAT&&!zerovat?net/1.12:0;
+  var vatAmt=isVAT&&!zerovat?net-vatable:0;
+  var W=paperSize==="58mm"?32:48;
+  var NL=0x0A, ESC=0x1B, GS=0x1D;
+
+  var enc=new TextEncoder();
+  var T=function(s){return enc.encode(s);};
+  var B=function(arr){return new Uint8Array(arr);};
+
+  function pad(s,len,right){
+    s=String(s||"");
+    if(s.length>len)s=s.slice(0,len);
+    while(s.length<len)right?s+=" ":s=" "+s;
+    return s;
+  }
+  function row(l,r){return T(pad(l,W-String(r).length,true)+r+"\n");}
+  function ln(t){return T(t+"\n");}
+  function dash(){return T("-".repeat(W)+"\n");}
+
+  var parts=[];
+  var a=function(v){parts.push(v instanceof Uint8Array?v:B(v));};
+
+  a([ESC,0x40]);         // INIT
+  a([ESC,0x61,0x01]);    // CENTER
+  a([ESC,0x21,0x30]);    // DOUBLE SIZE
+  a(ln(cs.name||"CHOWTIME"));
+  a([ESC,0x21,0x00]);    // NORMAL
+  a([ESC,0x45,0x01]);    // BOLD ON
+  a(ln(bName));
+  a([ESC,0x45,0x00]);    // BOLD OFF
+  if(cs.address)a(ln(cs.address));
+  if(cs.phone)a(ln("Tel: "+cs.phone));
+  if(isVAT&&!zerovat)a(ln("TIN: "+(cs.tin||"000-000-000-000")));
+  a(dash());
+  a([ESC,0x61,0x00]);    // LEFT
+  a(row("Order #:",(ord.id||"—")));
+  a(row("Date:",(ord.date||new Date().toISOString().slice(0,10))+" "+(ord.time||"")));
+  a(row("Cashier:",(ord.cashier||"")));
+  if(ord.custName)a(row("Customer:",ord.custName));
+  a(dash());
+
+  (ord.items||[]).forEach(function(i){
+    a([ESC,0x45,0x01]);
+    a(ln(i.name));
+    a([ESC,0x45,0x00]);
+    if(i.variant)a(ln("  ["+i.variant+"]"));
+    if(i.options&&i.options.length)a(ln("  "+i.options.join(", ")));
+    var p=i.lineTotal&&i.qty?(i.lineTotal/i.qty):(i.unitPrice||i.price||0);
+    a(row("  x"+i.qty+" @ P"+p.toFixed(2),"P"+(i.lineTotal||(p*i.qty)).toFixed(2)));
+  });
+
+  a(dash());
+  if(da>0){a(row("Subtotal","P"+sub.toFixed(2)));a(row("Discount","- P"+da.toFixed(2)));}
+  if(isVAT&&!zerovat){a(row("VATable","P"+vatable.toFixed(2)));a(row("VAT 12%","P"+vatAmt.toFixed(2)));}
+  if(!isVAT&&!zerovat)a(ln("Non-VAT"));
+  if(zerovat)a(ln("Zero-Rated"));
+
+  a([ESC,0x45,0x01]);a([ESC,0x21,0x10]);
+  a(row("TOTAL","P"+net.toFixed(2)));
+  a([ESC,0x21,0x00]);a([ESC,0x45,0x00]);
+
+  var paid=(ord.payments&&ord.payments.reduce(function(s,p){return s+(p.amount||0);},0))||parseFloat(ord.cash||0)||net;
+  a(row("Payment ("+(ord.payMethod||"CASH").toUpperCase()+")","P"+paid.toFixed(2)));
+  if(paid>net)a(row("CHANGE","P"+(paid-net).toFixed(2)));
+
+  a(dash());
+  a([ESC,0x61,0x01]);
+  a(ln("This serves as your Official Receipt"));
+  a(B([NL]));
+  a(ln(cs.receiptFooter||"Thank you for dining with us!"));
+  a(B([NL]));
+  a([ESC,0x45,0x01]);
+  a(ln(isVAT&&!zerovat?"*** VAT RECEIPT ***":zerovat?"*** ZERO-RATED ***":"*** NON-VAT RECEIPT ***"));
+  a([ESC,0x45,0x00]);
+  a(B([NL,NL,NL]));
+  a([GS,0x56,0x41,0x10]); // PARTIAL CUT
+
+  var total=0;
+  parts.forEach(function(p){total+=p.length;});
+  var out=new Uint8Array(total), off=0;
+  parts.forEach(function(p){out.set(p,off);off+=p.length;});
+  return out;
+}
+
+async function printEscPos(ord,bName,cs,paperSize){
+  var data=buildEscPos(ord,bName,cs,paperSize);
+  return await btPrint(data);
+}
+
+
 function printReceipt(ord, branchName, companySettings, paperSize){
   companySettings = companySettings||{};
   paperSize = paperSize||companySettings.paperSize||"80mm";
@@ -6369,6 +6495,17 @@ function App(){
               style:{padding:"10px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,
                 border:"none",borderRadius:8,color:"#fff",fontWeight:700,fontSize:11,cursor:"pointer"}},
               "🖨️ Receipt"),
+            h("button",{
+              onClick:async function(){
+                var ok=await printEscPos(ord,curBranch.full,companySettings,
+                  (companySettings&&companySettings.paperSize)||"80mm");
+                if(!ok)showT("BT print failed — use 🖨️ Receipt instead","warn");
+                else showT("Printed via Bluetooth ✓");
+              },
+              style:{padding:"10px",background:"#1565C0",
+                border:"none",borderRadius:8,color:"#fff",
+                fontWeight:700,fontSize:11,cursor:"pointer"}},
+              "📡 BT Print"),
             h("button",{onClick:()=>printKOT(ord,curBranch.full,companySettings),
               style:{padding:"10px",background:"linear-gradient(135deg,#E65100,#BF360C)",
                 border:"none",borderRadius:8,color:"#fff",fontWeight:700,fontSize:11,cursor:"pointer"}},
@@ -8021,7 +8158,26 @@ function App(){
             },
             style:{marginTop:10,padding:"9px 20px",background:C.primary,border:"none",
               borderRadius:8,color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}},
-            "💾 Save Print Settings")
+            "💾 Save Print Settings"),
+
+          // BT Printer connect
+          h("div",{style:{marginTop:12,padding:"10px 14px",
+            background:"#E3F2FD",borderRadius:8,
+            border:"1px solid #90CAF9"}},
+            h("div",{style:{fontSize:11,fontWeight:700,marginBottom:6,color:"#1565C0"}},
+              "📡 Bluetooth Printer (Xprinter)"),
+            h("div",{style:{fontSize:10,color:"#555",marginBottom:8}},
+              "Connect your Xprinter via Bluetooth for direct printing without dialog"),
+            h("button",{
+              onClick:async function(){
+                var ok=await btConnect();
+                if(ok)showT("Bluetooth printer connected! ✓");
+                else showT("Could not connect — check Bluetooth is ON and printer is paired","warn");
+              },
+              style:{padding:"8px 16px",background:"#1565C0",border:"none",
+                borderRadius:8,color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}},
+              "🔗 Connect Bluetooth Printer")
+          )
           )
         ),
 
