@@ -648,6 +648,7 @@ function ItemCustomizer({item,onAdd,onClose}){
 function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvances,branches=BRANCHES}){
   const [items,setItems]     = useState(INIT_INVENTORY.map(i=>({...i,orderQty:0,note:""})));
   const [deliveryReq,setDeliveryReq] = useState("");
+  const [PONumpad,setPONumpad] = useState(null);
   const [notes,setNotes]     = useState("");
   const [discount,setDiscount] = useState(0);
   const today = new Date().toISOString().slice(0,10);
@@ -847,7 +848,15 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
               border:"none",borderRadius:9,color:ordered.length?"#fff":"#999",
               fontWeight:700,fontSize:12,cursor:ordered.length?"pointer":"not-allowed"}},
             "📤 Submit SO / Purchase Order →")
-        )
+        ),
+        // PO Numpad
+        PONumpad&&h(NumpadModal,{
+          value:PONumpad.value||"",
+          label:PONumpad.label||"",
+          allowDecimal:false,
+          onChange:function(v){PONumpad.onChange(v);setPONumpad(null);},
+          onClose:function(){setPONumpad(null);}
+        })
       )
     )
   );
@@ -2913,6 +2922,7 @@ function BOMPage({menuItems,db,user,showT,inventory=[]}){
   const [selOptChoice,setSelOptChoice] = useState(null);
   const [editOptChoiceBom,setEditOCBom] = useState([]);
   const [savingOC,setSavingOC] = useState(false);
+  const [numpadTarget,setNumpadTarget] = useState(null);
   const [boms,setBoms]       = useState({});
   const [editBom,setEditBom] = useState([]);
   const [ingredients,setIngs]= useState([]);
@@ -3072,10 +3082,21 @@ function BOMPage({menuItems,db,user,showT,inventory=[]}){
             g.name+(g.unit?" ("+g.unit+")":"")+(g.stock!=null?" — stock:"+g.stock:"")))
         ),
         h("div",{style:{fontSize:10,color:C.muted}},row.unit||ing.unit||"—"),
-        h("input",{type:"number",min:0,step:"0.01",value:row.qty||"",
-          onChange:e=>updRow(setRows,i,"qty",parseFloat(e.target.value)||0),
+        h("input",{type:"number",min:0,step:"0.01",
+          value:row.qty||"",
+          readOnly:true,
+          onClick:function(){
+            var savedI=i;
+            setNumpadTarget({
+              value:String(row.qty||""),
+              label:"QTY — "+row.ingName,
+              allowDecimal:true,
+              onChange:function(v){updRow(setRows,savedI,"qty",parseFloat(v)||0);}
+            });
+          },
           style:{padding:"5px",border:"1px solid "+C.border,borderRadius:6,
-            fontSize:10,outline:"none",textAlign:"center",width:"100%"}}),
+            fontSize:10,outline:"none",textAlign:"center",width:"100%",
+            cursor:"pointer",background:"#f9f9f9"}}),
         h("div",{style:{fontSize:10,color:C.primary,fontWeight:700}},
           (ing.cost||0)*(row.qty||0)>0?"₱"+((ing.cost||0)*(row.qty||0)).toFixed(2):"—"),
         h("button",{onClick:()=>delRow(setRows,i),
@@ -3349,6 +3370,15 @@ function BOMPage({menuItems,db,user,showT,inventory=[]}){
         )
       )
     ,
+
+    // Numpad for BOM qty
+    numpadTarget&&h(NumpadModal,{
+      value:numpadTarget.value||"",
+      label:numpadTarget.label||"",
+      allowDecimal:numpadTarget.allowDecimal!==false,
+      onChange:function(v){numpadTarget.onChange(v);setNumpadTarget(null);},
+      onClose:function(){setNumpadTarget(null);}
+    }),
 
     // ══ OPTIONS TAB ══
     mainTab==="options"&&h("div",{style:{display:"grid",
@@ -4328,6 +4358,116 @@ function VoidBadge({branchId,db,setPage,visible=true}){
 // ─── RECEIVE ITEMS MODAL (Branch) ────────────────────────
 
 
+
+// ─── SHARED NUMPAD MODAL ─────────────────────────────────
+// Usage: h(NumpadModal, {value, onChange, onClose, label, allowDecimal, allowNegative})
+function NumpadModal({value="",onChange,onClose,label="",allowDecimal=true,allowNegative=false}){
+  const [display,setDisplay] = useState(String(value||""));
+
+  const press=function(key){
+    if(key==="C"){setDisplay("");return;}
+    if(key==="⌫"){setDisplay(function(p){return p.slice(0,-1)||"";});return;}
+    if(key==="-"){
+      if(!allowNegative)return;
+      setDisplay(function(p){return p.startsWith("-")?p.slice(1):"-"+p;});
+      return;
+    }
+    if(key==="."){
+      if(!allowDecimal)return;
+      setDisplay(function(p){return p.includes(".")?p:(p||"0")+".";});
+      return;
+    }
+    setDisplay(function(p){
+      if(p==="-")return "-"+key;
+      if(p==="0")return key;
+      return p+key;
+    });
+  };
+
+  const confirm=function(){
+    onChange(display);
+    onClose();
+  };
+
+  const rows=[
+    ["7","8","9"],
+    ["4","5","6"],
+    ["1","2","3"],
+    [allowNegative?"-":(allowDecimal?".":""), "0","⌫"],
+  ];
+
+  return h("div",{
+    style:{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",
+      display:"flex",alignItems:"flex-end",justifyContent:"center",
+      zIndex:9999},
+    onClick:function(e){if(e.target===e.currentTarget)onClose();}},
+    h("div",{style:{background:"#fff",width:"100%",maxWidth:360,
+      borderRadius:"20px 20px 0 0",padding:"16px",
+      boxShadow:"0 -8px 30px rgba(0,0,0,.2)"}},
+
+      // Label + display
+      h("div",{style:{marginBottom:12}},
+        label&&h("div",{style:{fontSize:10,fontWeight:700,color:C.muted,
+          letterSpacing:1,marginBottom:6}},label),
+        h("div",{style:{background:"#f0f4ff",borderRadius:10,
+          padding:"12px 16px",textAlign:"right",
+          border:"2px solid #1565C0",minHeight:52}},
+          h("div",{style:{fontSize:30,fontWeight:900,color:"#1565C0",
+            letterSpacing:2,minHeight:36}},
+            display||"0")
+        )
+      ),
+
+      // Number keys
+      h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}},
+        rows.flat().map(function(key){
+          var isSpecial=key==="⌫"||key==="-"||key===".";
+          return h("button",{key:key||"dot",
+            onClick:function(){press(key);},
+            style:{padding:"16px 8px",fontSize:key==="⌫"?20:20,
+              fontWeight:700,borderRadius:10,border:"none",
+              cursor:"pointer",
+              background:key==="⌫"?"#FFF3E0":
+                key==="-"&&display.startsWith("-")?"#1565C0":
+                isSpecial?"#e8eaf6":"#fff",
+              color:key==="-"&&display.startsWith("-")?"#fff":
+                isSpecial?"#1565C0":"#222",
+              boxShadow:"0 2px 4px rgba(0,0,0,.08)"}},
+            key||"");
+        }),
+        // Confirm button - full width
+        h("button",{
+          onClick:confirm,
+          style:{gridColumn:"1/-1",padding:"15px",fontSize:16,
+            fontWeight:800,borderRadius:10,border:"none",
+            cursor:"pointer",
+            background:"linear-gradient(135deg,#1565C0,#0D47A1)",
+            color:"#fff",boxShadow:"0 3px 8px rgba(21,101,192,.4)",
+            letterSpacing:1}},
+          "✓ OK — "+display)
+      )
+    )
+  );
+}
+
+// Hook to manage numpad state
+function useNumpad(){
+  var [numpadConfig,setNumpadConfig] = useState(null);
+  var openNumpad=function(config){setNumpadConfig(config);};
+  var closeNumpad=function(){setNumpadConfig(null);};
+  var NumpadEl = numpadConfig
+    ? h(NumpadModal,{
+        value:numpadConfig.value||"",
+        onChange:numpadConfig.onChange,
+        onClose:closeNumpad,
+        label:numpadConfig.label||"",
+        allowDecimal:numpadConfig.allowDecimal!==false,
+        allowNegative:numpadConfig.allowNegative===true
+      })
+    : null;
+  return {openNumpad,NumpadEl};
+}
+
 // ─── STOCK EDIT MODAL ────────────────────────────────────
 function StockEditModal({item,db,user,branchId,showT,onClose}){
   if(!item)return null;
@@ -5243,6 +5383,7 @@ function App(){
   const [menuCat,setMenuCat]=useState("All");
   const [menuSrch,setMenuSrch]=useState("");
   const [cartOpen,setCartOpen]=useState(false);
+  const [showCashNumpad,setShowCashNumpad]=useState(false);
   // Checkout fields
   const [chkDisc,setChkDisc]=useState(DISCS[0]);
   const [chkDiscId,setChkDiscId]=useState("");
@@ -5982,9 +6123,10 @@ function App(){
           ),
           h("input",{type:"number",
             id:"cash-tendered-input",
-            defaultValue:chkCash||"",
-            onBlur:e=>setChkCash(e.target.value),
-            placeholder:"Type amount here...",
+            value:chkCash||"",
+            readOnly:true,
+            onClick:()=>setShowCashNumpad(true),
+            placeholder:"Tap to enter amount",
             style:{width:"100%",padding:"10px 12px",border:"2px solid "+C.primary,
               borderRadius:9,fontSize:15,fontWeight:700,outline:"none",
               boxSizing:"border-box",color:C.primary}}),
@@ -6008,15 +6150,26 @@ function App(){
       h("div",{style:{padding:"11px 18px 17px",borderTop:"1px solid "+C.border}},
         h("button",{
           onClick:()=>{
-            const inp=document.getElementById("cash-tendered-input");
-            if(inp&&inp.value) setChkCash(inp.value);
             setTimeout(placeOrder,50);
           },
           style:{width:"100%",padding:"13px",
             background:`linear-gradient(135deg,${C.primary},${C.dark})`,
             border:"none",borderRadius:10,color:"#fff",
             fontSize:14,fontWeight:800,cursor:"pointer"}},
-          "✓ Confirm & Print Receipt")
+          "✓ Confirm & Print Receipt"),
+        // Cash numpad
+        showCashNumpad&&h(NumpadModal,{
+          value:chkCash||"",
+          label:"CASH TENDERED",
+          allowDecimal:false,
+          allowNegative:false,
+          onChange:function(v){
+            setChkCash(v);
+            var inp=document.getElementById("cash-tendered-input");
+            if(inp)inp.value=v;
+          },
+          onClose:function(){setShowCashNumpad(false);}
+        })
       )
     )
   );
