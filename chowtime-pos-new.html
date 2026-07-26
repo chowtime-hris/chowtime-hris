@@ -6468,8 +6468,11 @@ function App(){
     h("div",{style:{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}},
 
       // PAGE CONTENT
-      h("div",{style:{flex:1,overflow:"auto",padding:page==="pos"||page==="kitchen"?0:"16px 18px",
-          display:"flex",flexDirection:"column"}},
+      h("div",{style:{flex:1,
+          overflow:page==="pos"||page==="kitchen"?"hidden":"auto",
+          padding:page==="pos"||page==="kitchen"?0:"16px 18px",
+          display:"flex",flexDirection:"column",
+          height:page==="pos"||page==="kitchen"?"100%":"auto"}},
 
         // STICKY MINI HEADER - always at top
         page!=="pos"&&page!=="kitchen"&&h("div",{style:{
