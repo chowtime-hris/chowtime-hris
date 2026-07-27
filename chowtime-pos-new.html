@@ -1250,7 +1250,8 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
               h("button",{onClick:()=>setActualQtys(p=>({...p,[i.id]:Math.max(0,(p[i.id]??i.qty)-1)})),
                 style:{width:20,height:20,borderRadius:4,border:"1px solid "+C.border,
                   background:"#fff",cursor:"pointer",fontSize:12,fontWeight:700}},"−"),
-              h("input",{type:"number",min:0,value:actual,
+              h("input",{type:"number",min:0,value:actual,readOnly:true,
+                onClick:function(){var id=i.id;window._openNumpad&&window._openNumpad({value:String(actual||""),label:"ACTUAL QTY — "+i.name,allowDecimal:false,onChange:function(v){setActualQtys(function(p){var n={...p};n[id]=parseFloat(v)||0;return n;});}});},
                 onChange:e=>setActualQtys(p=>({...p,[i.id]:parseFloat(e.target.value)||0})),
                 style:{width:36,textAlign:"center",padding:"2px",border:"1px solid "+C.border,
                   borderRadius:5,fontSize:11,fontWeight:700,outline:"none",
@@ -1264,7 +1265,8 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
             // Price
             h("div",{style:{display:"flex",alignItems:"center",gap:3}},
               h("span",{style:{fontSize:10,color:C.muted}},"₱"),
-              h("input",{type:"number",min:0,step:"0.01",value:price||"",
+              h("input",{type:"number",min:0,step:"0.01",value:price||"",readOnly:true,
+                onClick:function(){var id=i.id;window._openNumpad&&window._openNumpad({value:String(price||""),label:"PRICE — "+i.name,allowDecimal:true,onChange:function(v){setPrices(function(p){var n={...p};n[id]=parseFloat(v)||0;return n;});}});},
                 onChange:e=>setPrices(p=>({...p,[i.id]:parseFloat(e.target.value)||0})),
                 placeholder:"0.00",
                 style:{width:65,padding:"5px",border:"1px solid "+C.border,borderRadius:6,
@@ -1446,7 +1448,7 @@ const DENOMS = [
   {label:"25¢",  value:0.25,type:"coin",color:"#78909C"},
 ];
 
-function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
+function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT,setNumKB,setTextKB}){
   const today = new Date().toISOString().slice(0,10);
   const [counts,setCounts]   = useState(DENOMS.reduce((a,d)=>({...a,[d.value]:0}),{}));
   const [remit,setRemit]     = useState("");
@@ -1675,6 +1677,13 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
                 h("button",{onClick:()=>setCounts(p=>({...p,[d.value]:Math.max(0,(p[d.value]||0)-1)})),
                   style:{width:28,height:28,borderRadius:7,border:"1px solid "+C.border,background:"#fff",cursor:"pointer",fontSize:15,fontWeight:700}},"−"),
                 h("input",{type:"number",min:0,value:counts[d.value]||0,
+                  readOnly:true,
+                  onClick:(()=>{var dv=d.value;return function(){
+                    setNumKB&&setNumKB({value:String(counts[dv]||""),
+                      label:"COUNT — ₱"+dv,allowDecimal:false,
+                      onChange:function(v){setCounts(function(p){
+                        var n={...p};n[dv]=parseInt(v)||0;return n;});}});
+                  };})(),
                   onChange:e=>setCounts(p=>({...p,[d.value]:parseInt(e.target.value)||0})),
                   style:{width:52,textAlign:"center",padding:"4px",border:"1px solid "+C.border,borderRadius:6,fontSize:13,fontWeight:700,outline:"none"}}),
                 h("button",{onClick:()=>setCounts(p=>({...p,[d.value]:(p[d.value]||0)+1})),
@@ -1702,6 +1711,13 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
                 h("button",{onClick:()=>setCounts(p=>({...p,[d.value]:Math.max(0,(p[d.value]||0)-1)})),
                   style:{width:28,height:28,borderRadius:7,border:"1px solid "+C.border,background:"#fff",cursor:"pointer",fontSize:15,fontWeight:700}},"−"),
                 h("input",{type:"number",min:0,value:counts[d.value]||0,
+                  readOnly:true,
+                  onClick:(()=>{var dv=d.value;return function(){
+                    setNumKB&&setNumKB({value:String(counts[dv]||""),
+                      label:"COUNT — ₱"+dv,allowDecimal:false,
+                      onChange:function(v){setCounts(function(p){
+                        var n={...p};n[dv]=parseInt(v)||0;return n;});}});
+                  };})(),
                   onChange:e=>setCounts(p=>({...p,[d.value]:parseInt(e.target.value)||0})),
                   style:{width:52,textAlign:"center",padding:"4px",border:"1px solid "+C.border,borderRadius:6,fontSize:13,fontWeight:700,outline:"none"}}),
                 h("button",{onClick:()=>setCounts(p=>({...p,[d.value]:(p[d.value]||0)+1})),
@@ -1763,7 +1779,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
           h("div",{style:{fontSize:10,color:C.muted,marginTop:2,marginBottom:10}},"Enter amount to be remitted/deposited. The rest stays in the cash box as tomorrow's opening fund."),
           h("div",{style:{marginBottom:8}},
             h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"REMITTANCE AMOUNT (₱)"),
-            h("input",{type:"number",value:remit,onChange:e=>setRemit(e.target.value),placeholder:"0.00",
+            h("input",{type:"number",value:remit,readOnly:true,onClick:function(){setNumKB&&setNumKB({value:String(remit||""),label:"REMITTANCE AMOUNT",allowDecimal:true,onChange:function(v){setRemit(v);}});},placeholder:"Tap to enter amount",
               style:{width:"100%",padding:"10px 12px",border:"2px solid "+C.warning,borderRadius:9,fontSize:16,fontWeight:700,outline:"none",boxSizing:"border-box",color:C.warning}})
           ),
           h("div",{style:{background:"#F3E5F5",borderRadius:9,padding:"10px 13px",display:"flex",justifyContent:"space-between",alignItems:"center"}},
@@ -1892,7 +1908,7 @@ function CALoanPage({user,branchId,curBranch,db,hrisDB,showT,mode,hrisEmps=[]}){
           // Amount
           h("div",{style:{marginBottom:11}},
             h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,marginBottom:5,letterSpacing:1}},"AMOUNT REQUESTED (₱)"),
-            h("input",{type:"number",value:amount,onChange:e=>setAmount(e.target.value),
+            h("input",{type:"number",value:amount,readOnly:true,onClick:()=>window._openNumpad&&window._openNumpad({value:String(amount||""),label:"AMOUNT (₱)",allowDecimal:true,onChange:v=>setAmount(v)}),
               placeholder:"0.00",
               style:{width:"100%",padding:"12px",border:`2px solid ${isCA?C.primary:"#1565C0"}`,
                 borderRadius:9,fontSize:20,fontWeight:700,outline:"none",
@@ -3073,7 +3089,8 @@ function IngredientsPage({db,user,showT}){
                 h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,
                   letterSpacing:1,marginBottom:4}},"COST PER UNIT (₱) *"),
                 h("input",{type:"number",min:0,step:"0.01",
-                  value:editing.cost||"",
+                  value:editing.cost||"",readOnly:true,
+                  onClick:()=>window._openNumpad&&window._openNumpad({value:String(editing.cost||""),label:"COST PER UNIT (₱)",allowDecimal:true,onChange:v=>setEditing(p=>({...p,cost:parseFloat(v)||0}))}),
                   onChange:e=>setEditing(p=>({...p,cost:parseFloat(e.target.value)||0})),
                   placeholder:"0.00",
                   style:{width:"100%",padding:"9px",border:"1px solid "+C.border,
@@ -3297,6 +3314,10 @@ function BOMPage({menuItems,db,user,showT,inventory=[]}){
           readOnly:true,
           onClick:function(){
             var savedI=i;
+            if(window._openNumpad){window._openNumpad({
+              value:String(row.qty||""),label:"QTY — "+row.ingName,allowDecimal:true,
+              onChange:function(v){updRow(setRows,savedI,"qty",parseFloat(v)||0);}
+            });return;}
             setNumpadTarget({
               value:String(row.qty||""),
               label:"QTY — "+row.ingName,
@@ -5092,7 +5113,8 @@ function ReceiveItemsModal({po,db,user,showT,branchId,onClose}){
           h("div",{style:{display:"flex",alignItems:"center",gap:3}},
             h("button",{onClick:function(){setReceived(function(p){var r={};Object.assign(r,p);r[i.id]=Math.max(0,(p[i.id]!=null?p[i.id]:drQty)-1);return r;});},
               style:{width:20,height:20,borderRadius:4,border:"1px solid #ddd",background:"#fff",cursor:"pointer",fontSize:12}},"-"),
-            h("input",{type:"number",min:0,
+            h("input",{type:"number",min:0,readOnly:true,
+              onClick:function(){var id=i.id,dq=drQty;window._openNumpad&&window._openNumpad({value:String(received[id]!=null?received[id]:dq),label:"RECEIVED QTY — "+i.name,allowDecimal:false,onChange:function(v){setReceived(function(p){var n={...p};n[id]=parseInt(v)||0;return n;});}});},
               value:(received[i.id]!=null?received[i.id]:drQty),
               onChange:function(e){var v=parseFloat(e.target.value)||0;setReceived(function(p){var r={};Object.assign(r,p);r[i.id]=v;return r;});},
               style:{width:36,textAlign:"center",padding:"2px",
@@ -5675,9 +5697,11 @@ function SettingsPage({db,user,showT,branches,companySettings,setCompanySettings
   const F=(key,lbl)=>h("div",{key:key},
     h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:4}},lbl),
     h("input",{value:companySettings[key]||"",
+      readOnly:true,
+      onClick:()=>window._openTextKB&&window._openTextKB({value:companySettings[key]||"",label:lbl,onChange:v=>setCompanySettings(p=>({...p,[key]:v}))}),
       onChange:e=>setCompanySettings(p=>({...p,[key]:e.target.value})),
       style:{width:"100%",padding:"8px",border:"1px solid "+C.border,
-        borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box"}})
+        borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box",cursor:"pointer"}})
   );
   const save=async(msg)=>{
     try{await setDoc(doc(db,"settings","company"),companySettings,{merge:true});showT(msg||"Saved");}
@@ -6080,7 +6104,7 @@ function PayrollPage({db,hrisDB,user,showT,branches,branchId,staff,advances}){
             // Daily rate input
             h("input",{type:"number",value:s.dailyRate||"",
               readOnly:true,
-              onClick:()=>setNumKB&&setNumKB({
+              onClick:()=>window._openNumpad&&window._openNumpad({
                 value:String(s.dailyRate||""),
                 label:"DAILY RATE — "+s.name,
                 allowDecimal:false,
@@ -6096,7 +6120,7 @@ function PayrollPage({db,hrisDB,user,showT,branches,branchId,staff,advances}){
             // Days worked input
             h("input",{type:"number",value:s.daysWorked||"",
               readOnly:true,
-              onClick:()=>setNumKB&&setNumKB({
+              onClick:()=>window._openNumpad&&window._openNumpad({
                 value:String(s.daysWorked||""),
                 label:"DAYS WORKED — "+s.name,
                 allowDecimal:false,
@@ -6249,6 +6273,12 @@ function App(){
   const [showCashNumpad,setShowCashNumpad]=useState(false);
   const [textKB,setTextKB]=useState(null); // {value,label,onChange}
   const [numKB,setNumKB]=useState(null);   // {value,label,onChange}
+  // Expose globally so any sub-component can use without prop drilling
+  useEffect(()=>{
+    window._openNumpad=function(cfg){setNumKB(cfg);};
+    window._openTextKB=function(cfg){setTextKB(cfg);};
+    return()=>{window._openNumpad=null;window._openTextKB=null;};
+  },[]);
   // Checkout fields
   const [chkDisc,setChkDisc]=useState(DISCS[0]);
   const [chkDiscId,setChkDiscId]=useState("");
@@ -7812,7 +7842,7 @@ function App(){
                 [["in","💰 Cash In"],["out","💸 Cash Out"]].map(([t,l])=>h("button",{key:t,onClick:()=>setNewCash(p=>({...p,type:t})),style:{flex:1,padding:"9px",borderRadius:8,border:`2px solid ${newCash.type===t?(t==="in"?C.success:C.danger):C.border}`,background:newCash.type===t?(t==="in"?"#E8F5E9":"#FFEBEE"):"#fff",color:newCash.type===t?(t==="in"?C.success:C.danger):C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}},l))
               ),
               h("div",{style:{display:"grid",gap:8}},
-                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"DESCRIPTION"),h("input",{value:newCash.desc,onChange:e=>setNewCash(p=>({...p,desc:e.target.value})),placeholder:"e.g. Ice delivery",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box"}})),
+                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"DESCRIPTION"),h("input",{value:newCash.desc,readOnly:true,onClick:()=>setTextKB&&setTextKB({value:newCash.desc||"",label:"DESCRIPTION",onChange:v=>setNewCash(p=>({...p,desc:v}))}),placeholder:"e.g. Ice delivery",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box"}})),
                 h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"AMOUNT (₱)"),h("input",{type:"number",value:newCash.amount,readOnly:true,onClick:()=>setNumKB({value:newCash.amount,label:"AMOUNT (₱)",allowDecimal:true,onChange:v=>setNewCash(p=>({...p,amount:v}))}),style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:14,cursor:"pointer",fontWeight:700,outline:"none",boxSizing:"border-box"}})),
                 h("button",{onClick:async()=>{
                   if(!newCash.desc||!newCash.amount){showT("Fill all fields","warn");return;}
@@ -8166,7 +8196,8 @@ function App(){
         // ══ CASH COUNT ══
         page==="cash_count"&&h(CashCountPage,{
           branchId,curBranch,user,db,orders,cashLog,showT,
-          key:branchId  // remount per branch
+          setNumKB,setTextKB,
+          key:branchId
         }),
 
         // ══ BRANCH DASH ══
