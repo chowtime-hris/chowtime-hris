@@ -670,13 +670,14 @@ function printZ(zd,branchName,cashier){
 }
 
 // ─── ITEM CUSTOMIZER ─────────────────────────────────────
-function ItemCustomizer({item,onAdd,onClose,optionGroups=[]}){
+function ItemCustomizer({item,onAdd,onClose,optionGroups=[],priceType="retail",userRole="cashier"}){
   const [selV,setSelV]=useState(item.variants[0]);
-  // Derived: linked groups from variant + item level
-  const variantGroupIds=(selV&&selV.optionGroups)||[];
+  // Item-level groups: always shown for all variants (Flavor, Sauce, etc.)
   const itemGroupIds=(item.optionGroups)||[];
-  // Only show variant-linked groups (item-level groups always show separately)
-  const allLinkedIds=[...new Set([...variantGroupIds,...itemGroupIds])];
+  // Variant-level groups: only shown when THIS variant is selected
+  const variantGroupIds=(selV&&selV.optionGroups)||[];
+  // Combined: item groups always + variant-specific groups
+  const allLinkedIds=[...new Set([...itemGroupIds,...variantGroupIds])];
   const linkedGroups=(optionGroups||[]).filter(function(g){return allLinkedIds.includes(g.id);});
 
   const [selO,setSelO]=useState({});
@@ -701,7 +702,19 @@ function ItemCustomizer({item,onAdd,onClose,optionGroups=[]}){
   });
   const ck=(oid,cid)=>(selO[oid]||[]).some(c=>c.id===cid);
   const optsTotal=Object.values(selO).flat().reduce((s,c)=>s+(c.priceAdd||0),0);
-  const unitPrice=item.basePrice+(selV?.priceAdd||0)+optsTotal+(selP?.priceAdd||0);
+  // Get base price by priceType (for Main/commissary account)
+  const getBase=()=>{
+    if(priceType==="franchisee"&&item.franchiseePrice) return item.franchiseePrice;
+    if(priceType==="wholesale"&&item.wholesalePrice) return item.wholesalePrice;
+    return item.basePrice||0;
+  };
+  // Variant price: if variant has its own price field use it, else add to base
+  // If all variants have priceAdd > 0, treat variant priceAdd as TOTAL price
+  const hasVariants=(item.variants||[]).length>1;
+  const variantIsTotal=hasVariants&&(item.variants||[]).every(v=>v.priceAdd>0||(v.label||"").toLowerCase()==="base"||v.priceAdd===0);
+  const baseForCalc=variantIsTotal?(selV?.priceAdd||getBase()):getBase();
+  const variantAdd=variantIsTotal?0:(selV?.priceAdd||0);
+  const unitPrice=baseForCalc+variantAdd+optsTotal+(selP?.priceAdd||0);
   const isBogo=selP?.discount==="bogo";
   // Add prices from linked option groups
   const linkedGroupsPrice=Object.entries(selO).filter(([k])=>k.startsWith("og_")).reduce((sum,[,choices])=>{
@@ -3811,86 +3824,68 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
                     const isSel=selChoice&&selChoice.id===ch.id;
                     const has=!!(boms[bomDocId]&&(boms[bomDocId][key]||[]).length>0);
                     return h("div",{key:ch.id,
-                      style:{borderBottom:"1px solid #f5f5f5",
-                        display:"flex",justifyContent:"space-between",alignItems:"center",
-                        background:isSel?"#FFF0F0":"#fff"}},
-                      h("div",{
-                        onClick:()=>{
-                          const bomDocId2="optgrp_"+selGroup.id;
-                          const k="optgrp_"+selGroup.id+"__"+ch.id;
-                          const rows=(boms[bomDocId2]&&boms[bomDocId2][k])||[];
-                          setSelChoice({...ch,key:k,groupName:selGroup.name});
-                          setEditOptBom(rows.length?[...rows]:[{ingId:"",ingName:"",unit:"",qty:1,convFactor:1,markup:0}]);
-                          setEditingChoice(null);
-                        },
-                        style:{flex:1,padding:"9px 14px",cursor:"pointer"}},
-                        editingChoice===ch.id
-                          ? h("div",{style:{display:"flex",gap:5},onClick:e=>e.stopPropagation()},
-                              h("input",{
-                                defaultValue:ch.label,key:"edit-ch-"+ch.id,autoFocus:true,
-                                onKeyDown:async e=>{
-                                  if(e.key==="Enter"){
-                                    const newLabel=e.target.value.trim();
-                                    if(newLabel&&newLabel!==ch.label){
-                                      const newChoices=(selGroup.choices||[]).map(c=>c.id===ch.id?{...c,label:newLabel}:c);
-                                      try{
-                                        await updateDoc(doc(db,"option_groups",selGroup.id),{choices:newChoices});
-                                        showT("Renamed ✓");
-                                      }catch(err){showT("Error","err");}
-                                    }
-                                    setEditingChoice(null);
-                                  }
-                                  if(e.key==="Escape")setEditingChoice(null);
-                                },
-                                style:{flex:1,padding:"3px 7px",border:"2px solid "+C.primary,
-                                  borderRadius:5,fontSize:11,outline:"none"}}),
-                              h("button",{
-                                onClick:async e=>{
-                                  e.stopPropagation();
-                                  const inp=e.target.closest("div").querySelector("input");
-                                  const newLabel=inp?inp.value.trim():"";
-                                  if(newLabel&&newLabel!==ch.label){
-                                    const newChoices=(selGroup.choices||[]).map(c=>c.id===ch.id?{...c,label:newLabel}:c);
-                                    try{
-                                      await updateDoc(doc(db,"option_groups",selGroup.id),{choices:newChoices});
-                                      showT("Saved ✓");
-                                    }catch(err){showT("Error","err");}
-                                  }
-                                  setEditingChoice(null);
-                                },
-                                style:{background:C.primary,border:"none",borderRadius:5,
-                                  color:"#fff",fontSize:10,fontWeight:700,cursor:"pointer",
-                                  padding:"3px 8px"}},
-                                "Save"),
-                              h("button",{onClick:e=>{e.stopPropagation();setEditingChoice(null);},
-                                style:{background:"none",border:"none",color:C.muted,
-                                  fontSize:14,cursor:"pointer",padding:"0 4px"}},
-                                "✕")
-                            )
-                          : h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center"}},
-                              h("div",null,
-                                h("span",{style:{fontSize:12,fontWeight:isSel?700:400}},ch.label),
-                                (ch.priceAdd||0)>0&&h("span",{style:{fontSize:9,color:C.primary,
-                                  marginLeft:5,fontWeight:600}},"+₱"+(ch.priceAdd||0))
-                              ),
-                              h("span",{style:{fontSize:9,fontWeight:700,
-                                color:has?C.success:C.muted}},has?"✓ BOM":"—")
-                            )
-                      ),
-                      !editingChoice&&h("div",{style:{display:"flex",gap:2,alignItems:"center"},
-                        onClick:e=>e.stopPropagation()},
-                        h("button",{onClick:e=>{e.stopPropagation();setEditingChoice(ch.id);},
-                          style:{background:"none",border:"none",color:C.primary,
-                            fontSize:11,cursor:"pointer",padding:"0 6px",opacity:0.8},
-                          title:"Rename"},
-                          "✏️"),
-                        h("button",{onClick:()=>deleteChoice(ch),
-                          style:{background:"none",border:"none",color:C.danger,
-                            fontSize:11,cursor:"pointer",padding:"0 6px",opacity:0.7},
-                          title:"Delete"},
-                          "×")
-                      )
-                    );
+                    style:{borderBottom:"1px solid #f5f5f5",
+                      background:editingChoice===ch.id?"#FFF8E1":isSel?"#FFF0F0":"#fff"}},
+                    editingChoice===ch.id
+                      // EDIT MODE - full row replacement
+                      ? h("div",{style:{display:"flex",gap:6,alignItems:"center",padding:"8px 14px"}},
+                          h("input",{id:"edit-ch-input",
+                            defaultValue:ch.label,key:"inp-"+ch.id,autoFocus:true,
+                            style:{flex:1,padding:"6px 10px",border:"2px solid "+C.primary,
+                              borderRadius:7,fontSize:12,outline:"none"}}),
+                          h("button",{
+                            onClick:async()=>{
+                              const inp=document.getElementById("edit-ch-input");
+                              const newLabel=inp?inp.value.trim():"";
+                              if(newLabel&&newLabel!==ch.label){
+                                const newChoices=(selGroup.choices||[]).map(c=>c.id===ch.id?{...c,label:newLabel}:c);
+                                try{
+                                  await updateDoc(doc(db,"option_groups",selGroup.id),{choices:newChoices});
+                                  showT("Saved ✓");
+                                }catch(err){showT("Error","err");}
+                              }
+                              setEditingChoice(null);
+                            },
+                            style:{padding:"6px 14px",background:C.primary,border:"none",
+                              borderRadius:7,color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}},
+                            "💾 Save"),
+                          h("button",{
+                            onClick:()=>setEditingChoice(null),
+                            style:{padding:"6px 10px",background:"#eee",border:"none",
+                              borderRadius:7,color:C.text,fontSize:12,cursor:"pointer"}},
+                            "Cancel")
+                        )
+                      // NORMAL MODE
+                      : h("div",{style:{display:"flex",justifyContent:"space-between",
+                            alignItems:"center",padding:"9px 14px",cursor:"pointer"},
+                            onClick:()=>{
+                              const bomDocId2="optgrp_"+selGroup.id;
+                              const k="optgrp_"+selGroup.id+"__"+ch.id;
+                              const rows=(boms[bomDocId2]&&boms[bomDocId2][k])||[];
+                              setSelChoice({...ch,key:k,groupName:selGroup.name});
+                              setEditOptBom(rows.length?[...rows]:[{ingId:"",ingName:"",unit:"",qty:1,convFactor:1,markup:0}]);
+                            }},
+                          h("div",null,
+                            h("span",{style:{fontSize:12,fontWeight:isSel?700:400}},ch.label),
+                            (ch.priceAdd||0)>0&&h("span",{style:{fontSize:9,color:C.primary,
+                              marginLeft:5,fontWeight:600}},"+₱"+(ch.priceAdd||0))
+                          ),
+                          h("div",{style:{display:"flex",gap:6,alignItems:"center"}},
+                            h("span",{style:{fontSize:9,fontWeight:700,
+                              color:has?C.success:C.muted}},has?"✓ BOM":"—"),
+                            h("button",{
+                              onClick:e=>{e.stopPropagation();setEditingChoice(ch.id);},
+                              style:{background:"none",border:"none",color:C.primary,
+                                fontSize:12,cursor:"pointer",padding:"2px 5px"},title:"Rename"},
+                              "✏️"),
+                            h("button",{
+                              onClick:e=>{e.stopPropagation();deleteChoice(ch);},
+                              style:{background:"none",border:"none",color:C.danger,
+                                fontSize:12,cursor:"pointer",padding:"2px 5px"},title:"Delete"},
+                              "×")
+                          )
+                        )
+                  );
                   })
                 )
         ),
@@ -10271,7 +10266,7 @@ function App(){
 
     // ITEM CUSTOMIZER MODAL - always rendered
     h("div",{style:{display:customizing?"block":"none"}},
-      customizing&&h(ItemCustomizer,{item:customizing,onAdd:addToCart,onClose:()=>setCustomizing(null),optionGroups:optGroups})
+      customizing&&h(ItemCustomizer,{item:customizing,onAdd:addToCart,onClose:()=>setCustomizing(null),optionGroups:optGroups,priceType,userRole:user.role})
     ),
 
     // CART SIDEBAR - always rendered
