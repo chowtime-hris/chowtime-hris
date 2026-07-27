@@ -815,16 +815,7 @@ function ItemCustomizer({item,onAdd,onClose,optionGroups=[]}){
         }),
         h("div",{style:{padding:"13px 0 18px"}},
           h("div",{style:{fontSize:11,fontWeight:800,marginBottom:7}},"📝 Special Instructions ",h("span",{style:{color:C.muted,fontWeight:400}},"• Optional")),
-          h("textarea",{value:note,readOnly:true,
-  onClick:function(){
-    // Use native keyboard on mobile, text KB on tablet
-    // Check if touch device and no keyboard
-    if(window.navigator.maxTouchPoints>0){
-      var n=note;
-      var result=window.prompt("Special Instructions:",n);
-      if(result!==null)setNote(result);
-    }
-  },
+          h("textarea",{value:note,
   onChange:e=>setNote(e.target.value),placeholder:'"Extra spicy", "No rice", "Separate sauce"',style:{width:"100%",padding:"9px 11px",border:"1px solid "+C.border,borderRadius:9,fontSize:11,outline:"none",resize:"none",fontFamily:"inherit",boxSizing:"border-box",height:58}})
         )
       ),
@@ -980,10 +971,6 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
           h("div",null,
             h("div",{style:{fontSize:8,color:C.muted,fontWeight:700,letterSpacing:1,marginBottom:3}},"NOTES / REMARKS"),
             h("textarea",{value:notes,
-  onClick:function(){
-    var result=window.prompt("Notes:",notes);
-    if(result!==null)setNotes(result);
-  },
   onChange:e=>setNotes(e.target.value),
               placeholder:"Additional notes for commissary...",
               style:{width:"100%",padding:"7px",border:"1px solid "+C.border,borderRadius:7,
@@ -5691,7 +5678,6 @@ function SettingsPage({db,user,showT,branches,companySettings,setCompanySettings
   const F=(key,lbl)=>h("div",{key:key},
     h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:4}},lbl),
     h("input",{value:companySettings[key]||"",
-      onClick:()=>window._openTextKB&&window._openTextKB({value:companySettings[key]||"",label:lbl,onChange:v=>setCompanySettings(p=>({...p,[key]:v}))}),
       onChange:e=>setCompanySettings(p=>({...p,[key]:e.target.value})),
       style:{width:"100%",padding:"8px",border:"1px solid "+C.border,
         borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box",cursor:"text"}})
@@ -8484,14 +8470,14 @@ function App(){
                     h("div",{style:{marginBottom:10}},
                       h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:4}},"NAME"),
                       h("input",{value:editingStaff.name||"",
-                        onClick:()=>window._openTextKB&&window._openTextKB({value:editingStaff.name||"",label:"FULL NAME",onChange:v=>setEditingStaff(p=>({...p,name:v}))}),
+                        onChange:e=>setEditingStaff(p=>({...p,name:e.target.value})),
                         style:{width:"100%",padding:"8px",border:"1px solid "+C.border,
-                          borderRadius:7,fontSize:12,outline:"none",boxSizing:"border-box",cursor:"text"}})
+                          borderRadius:7,fontSize:12,outline:"none",boxSizing:"border-box"}})
                     ),
                     h("div",{style:{marginBottom:10}},
                       h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:4}},"LOGIN EMAIL (Firebase Auth)"),
                       h("input",{value:editingStaff.email||"",
-                        onClick:()=>window._openTextKB&&window._openTextKB({value:editingStaff.email||"",label:"LOGIN EMAIL",onChange:v=>setEditingStaff(p=>({...p,email:v}))}),
+                        onChange:e=>setEditingStaff(p=>({...p,email:e.target.value})),
                         placeholder:"e.g. cffc.wsfp.cashier@gmail.com",
                         style:{width:"100%",padding:"8px",border:"1px solid "+C.border,
                           borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box",cursor:"text"}})
@@ -8862,7 +8848,6 @@ function App(){
                       h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:4}},"FULL NAME"),
                       h("input",{value:editingStaff.name||"",
                         onChange:e=>setEditingStaff(p=>({...p,name:e.target.value})),
-                        onClick:()=>window._openTextKB&&window._openTextKB({value:editingStaff.name||"",label:"FULL NAME",onChange:v=>setEditingStaff(p=>({...p,name:v}))}),
                         placeholder:"Enter full name",
                         style:{width:"100%",padding:"9px",border:"1px solid "+C.border,
                           borderRadius:7,fontSize:12,outline:"none",boxSizing:"border-box",cursor:"text"}})
@@ -8870,7 +8855,7 @@ function App(){
                     h("div",{style:{marginBottom:10}},
                       h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:4}},"LOGIN EMAIL"),
                       h("input",{value:editingStaff.email||"",
-                        onClick:()=>window._openTextKB&&window._openTextKB({value:editingStaff.email||"",label:"LOGIN EMAIL",onChange:v=>setEditingStaff(p=>({...p,email:v}))}),
+                        onChange:e=>setEditingStaff(p=>({...p,email:e.target.value})),
                         placeholder:"cffc.wsfp.cashier@gmail.com",
                         style:{width:"100%",padding:"9px",border:"1px solid "+C.border,
                           borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box",cursor:"text"}})
