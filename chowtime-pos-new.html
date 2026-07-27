@@ -8885,6 +8885,27 @@ function App(){
                           borderRadius:7,fontSize:14,outline:"none",
                           letterSpacing:4,boxSizing:"border-box"}})
                     ),
+                    // Create Login Account button
+                    editingStaff.email&&h("button",{
+                      onClick:async()=>{
+                        if(!editingStaff.email){showT("Enter email first","warn");return;}
+                        var tempPw=editingStaff.pin||"chowtime1234";
+                        try{
+                          await createUserWithEmailAndPassword(auth,editingStaff.email,tempPw);
+                          showT("✅ Login account created! Password: "+tempPw,"ok");
+                        }catch(e){
+                          if(e.code==="auth/email-already-in-use"){
+                            showT("Account already exists — just update staff record","ok");
+                          }else{
+                            showT("Error: "+e.message,"err");
+                          }
+                        }
+                      },
+                      style:{width:"100%",padding:"10px",marginBottom:8,
+                        background:"#1565C0",border:"none",borderRadius:9,
+                        color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}},
+                      "🔑 Create Login Account"),
+
                     h("button",{
                       onClick:async()=>{
                         if(!editingStaff.name){showT("Enter name","warn");return;}
@@ -8892,13 +8913,15 @@ function App(){
                           if(editingStaff._isNew){
                             await addDoc(collection(db,"staff_accounts"),{
                               name:editingStaff.name,role:editingStaff.role,
-                              branch:branchId,pin:editingStaff.pin||"1234",
+                              branch:branchId,email:editingStaff.email||"",
+                              pin:editingStaff.pin||"1234",
                               createdAt:serverTimestamp(),createdBy:user.name
                             });
                             showT(editingStaff.name+" added ✓");
                           } else {
                             await updateDoc(doc(db,"staff_accounts",editingStaff.id),{
                               name:editingStaff.name,role:editingStaff.role,
+                              email:editingStaff.email||"",
                               pin:editingStaff.pin,updatedAt:serverTimestamp(),
                               updatedBy:user.name
                             });
