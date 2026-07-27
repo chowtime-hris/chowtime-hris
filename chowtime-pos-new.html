@@ -5925,7 +5925,50 @@ function PayrollPage({db,hrisDB,user,showT,branches,branchId,staff,advances}){
 // ─── NEW INVENTORY ITEM FORM ──────────────────────────────
 function NewInventoryItemForm({db,user,branchId,showT,onClose,invBranch,inventory}){
   const UNITS=["pc","kg","g","L","ml","pack","box","tray","sachet","EA","roll"];
-  const CATS=["Frozen","Produce","Protein","Sauce","Dry Goods","Packaging","Beverage","Other"];
+  const DEFAULT_CATS=["Frozen","Produce","Protein","Sauce","Dry Goods","Packaging","Beverage","Other"];
+  const [cats,setCats]=useState(DEFAULT_CATS);
+  const [newCat,setNewCat]=useState("");
+  const [showCatMgr,setShowCatMgr]=useState(false);
+
+  // Load custom categories from Firebase
+  useEffect(()=>{
+    try{
+      const unsub=onSnapshot(doc(db,"settings","inv_cats"),snap=>{
+        if(snap.exists()&&snap.data().cats){
+          setCats([...DEFAULT_CATS,...snap.data().cats.filter(c=>!DEFAULT_CATS.includes(c))]);
+        }
+      },()=>{});
+      return()=>unsub();
+    }catch(e){}
+  },[]);
+
+  const addCat=async()=>{
+    if(!newCat.trim())return;
+    const trimmed=newCat.trim();
+    if(cats.includes(trimmed)){showT("Category already exists","warn");return;}
+    const newList=[...cats,trimmed];
+    setCats(newList);
+    setForm(p=>({...p,cat:trimmed}));
+    setNewCat("");
+    // Save to Firebase
+    try{
+      const custom=newList.filter(c=>!DEFAULT_CATS.includes(c));
+      await setDoc(doc(db,"settings","inv_cats"),{cats:custom},{merge:true});
+      showT(trimmed+" category added ✓");
+    }catch(e){}
+  };
+
+  const delCat=async(cat)=>{
+    if(DEFAULT_CATS.includes(cat)){showT("Cannot delete default category","warn");return;}
+    const newList=cats.filter(c=>c!==cat);
+    setCats(newList);
+    try{
+      const custom=newList.filter(c=>!DEFAULT_CATS.includes(c));
+      await setDoc(doc(db,"settings","inv_cats"),{cats:custom},{merge:true});
+      showT(cat+" removed ✓");
+    }catch(e){}
+  };
+
   const [form,setForm]=useState({
     name:"",unit:"pc",cat:"Other",
     stock:0,minStock:10,price:0,cost:0
@@ -6037,6 +6080,17 @@ function App(){
   const prevPOStatuses=useRef({});
   const [inventory,setInventory]=useState(INIT_INVENTORY);
   const [invBranch,setInvBranch]=useState("main"); // which branch inventory to view
+  const [invCustomCats,setInvCustomCats]=useState([]); // custom inventory categories
+
+  // Load custom inventory categories
+  useEffect(()=>{
+    try{
+      const unsub=onSnapshot(doc(db,"settings","inv_cats"),snap=>{
+        if(snap.exists()&&snap.data().cats)setInvCustomCats(snap.data().cats);
+      },()=>{});
+      return()=>unsub();
+    }catch(e){}
+  },[]);
   const [staff,setStaff]=useState([]);
   const [hrisEmps,setHrisEmps]=useState([]); // employees from HRIS RTDB
   const [menuItems,setMenuItems]=useState(MENU_CATALOG);
