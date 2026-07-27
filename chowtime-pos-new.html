@@ -126,9 +126,9 @@ const BRANCHES = [
 
 const ROLES = {
   owner:     {label:"Owner / Admin",    emoji:"\u{1F451}", color:"#C8151B",
-    nav:["dashboard","branches","pos","orders","all_orders","analytics","z_reading","cash_count","expenses","cash_monitor","inventory","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","kiosk","settings","printer"]},
+    nav:["dashboard","branches","pos","orders","all_orders","analytics","z_reading","cash_count","expenses","cash_monitor","inventory","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","payroll","kiosk","settings","printer"]},
   manager:   {label:"Branch Manager",   emoji:"\u{1F3EA}", color:"#007AFF",
-    nav:["branch_dash","pos","orders","analytics","z_reading","cash_count","expenses","inventory","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","bom_mgmt","kiosk","branch_settings","printer"]},
+    nav:["branch_dash","pos","orders","analytics","z_reading","cash_count","expenses","inventory","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","bom_mgmt","payroll","kiosk","branch_settings","printer"]},
   cashier:   {label:"Cashier",          emoji:"\u{1F4B3}", color:"#34C759",
     nav:["pos","orders","x_reading","z_reading","cash_count","ca_request","loan_request","kiosk","void_request"]},
   crew:      {label:"Crew / Kitchen",   emoji:"\u{1F9D1}\u{200D}\u{1F373}", color:"#FF9500",
@@ -5921,6 +5921,280 @@ function PrinterPage({db,user,showT,companySettings,setCompanySettings}){
   );
 }
 
+
+// ─── PAYROLL PAGE ─────────────────────────────────────────
+function PayrollPage({db,hrisDB,user,showT,branches,branchId,staff,advances}){
+  const [cutoff,setCutoff]   = useState(()=>{
+    const now=new Date();
+    const day=now.getDate();
+    const m=String(now.getMonth()+1).padStart(2,"0");
+    const y=now.getFullYear();
+    return day<=15?y+"-"+m+"-15":y+"-"+m+"-30";
+  });
+  const [selBranch,setSelBranch] = useState(branchId);
+  const [requests,setRequests]   = useState([]);
+  const [processing,setProcessing] = useState(false);
+
+  // Load all CA/Loan requests
+  useEffect(()=>{
+    try{
+      const unsub=onSnapshot(
+        query(collection(db,"hris_requests"),orderBy("timestamp","desc"),limit(500)),
+        snap=>setRequests(snap.docs.map(d=>({...d.data(),_docId:d.id}))),
+        ()=>{}
+      );
+      return()=>unsub();
+    }catch(e){}
+  },[]);
+
+  // Filter staff for selected branch
+  const isOwner=user.role==="owner"||user.role==="commissary";
+  const viewBranch=isOwner?selBranch:branchId;
+  const branchStaff=staff.filter(s=>s.branch===viewBranch&&s.role!=="owner");
+
+  // Get approved deductions per staff
+  const getDeductions=(staffName)=>{
+    return requests.filter(r=>
+      r.staffName===staffName&&
+      r.status==="approved"&&
+      (r.balance||0)>0
+    );
+  };
+
+  // Calculate payroll for a staff member
+  const calcPay=(s)=>{
+    const deductions=getDeductions(s.name);
+    const totalDeduct=deductions.reduce((sum,r)=>sum+(r.cutoffDeduct||0),0);
+    const dailyRate=s.dailyRate||0;
+    const daysWorked=s.daysWorked||0;
+    const grossPay=dailyRate*daysWorked;
+    const netPay=Math.max(0,grossPay-totalDeduct);
+    return {grossPay,totalDeduct,netPay,deductions,dailyRate,daysWorked};
+  };
+
+  // Process payroll - mark deductions as deducted
+  const processPayroll=async()=>{
+    if(!confirm("Process payroll for "+cutoff+"? This will mark all deductions as deducted."))return;
+    setProcessing(true);
+    let count=0;
+    for(const s of branchStaff){
+      const deductions=getDeductions(s.name);
+      for(const d of deductions){
+        try{
+          const newBalance=Math.max(0,(d.balance||d.amount||0)-(d.cutoffDeduct||0));
+          await updateDoc(doc(db,"hris_requests",d._docId),{
+            balance:newBalance,
+            lastDeductDate:cutoff,
+            status:newBalance<=0?"completed":"approved",
+            updatedAt:serverTimestamp()
+          });
+          count++;
+        }catch(e){}
+      }
+    }
+    showT("Payroll processed! "+count+" deduction(s) updated ✓","ok");
+    setProcessing(false);
+  };
+
+  return h("div",{style:{maxWidth:900}},
+    h(SectionHeader,{title:"💹 Payroll & CA Deductions"}),
+
+    // Controls
+    h("div",{style:{display:"flex",gap:10,marginBottom:14,
+      flexWrap:"wrap",alignItems:"center"}},
+      // Branch selector (owner only)
+      isOwner&&h("div",{style:{display:"flex",gap:6}},
+        branches.filter(b=>b.id!=="ct-main").map(b=>
+          h("button",{key:b.id,onClick:()=>setSelBranch(b.id),
+            style:{padding:"6px 14px",borderRadius:20,border:"none",cursor:"pointer",
+              fontSize:11,fontWeight:700,
+              background:selBranch===b.id?C.primary:"#eee",
+              color:selBranch===b.id?"#fff":C.text}},b.name||b.id))
+      ),
+      // Cutoff date
+      h("div",{style:{display:"flex",gap:8,alignItems:"center",marginLeft:"auto"}},
+        h("div",{style:{fontSize:11,fontWeight:700,color:C.muted}},"Cutoff:"),
+        h("select",{value:cutoff,onChange:e=>setCutoff(e.target.value),
+          style:{padding:"7px 12px",border:"1px solid "+C.border,
+            borderRadius:8,fontSize:11,outline:"none"}},
+          ["-15","-30"].map(d=>{
+            const now=new Date();
+            return [0,1,2].map(mo=>{
+              const dt=new Date(now.getFullYear(),now.getMonth()-mo,1);
+              const y=dt.getFullYear();
+              const m=String(dt.getMonth()+1).padStart(2,"0");
+              return y+"-"+m+(d);
+            });
+          }).flat().map(v=>h("option",{key:v,value:v},v))
+        ),
+        h("button",{onClick:processPayroll,disabled:processing,
+          style:{padding:"8px 18px",background:C.primary,border:"none",
+            borderRadius:8,color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}},
+          processing?"Processing...":"⚡ Process Payroll")
+      )
+    ),
+
+    // Summary stats
+    h("div",{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:14}},
+      h(Stat,{label:"Staff Count",value:branchStaff.length,icon:"👥",color:C.primary}),
+      h(Stat,{label:"Total CA/Loans",
+        value:"₱"+requests.filter(r=>r.status==="approved"&&(r.balance||0)>0&&
+          branchStaff.some(s=>s.name===r.staffName)).reduce((s,r)=>s+(r.balance||0),0).toLocaleString(),
+        icon:"💰",color:C.danger}),
+      h(Stat,{label:"This Cutoff Deductions",
+        value:"₱"+branchStaff.reduce((s,st)=>s+getDeductions(st.name).reduce((ds,d)=>ds+(d.cutoffDeduct||0),0),0).toLocaleString(),
+        icon:"💸",color:C.warning}),
+      h(Stat,{label:"Pending Requests",
+        value:requests.filter(r=>r.status==="pending"&&branchStaff.some(s=>s.name===r.staffName)).length,
+        icon:"⏳",color:"#6A1B9A"})
+    ),
+
+    // Staff payroll table
+    h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
+      h("div",{style:{display:"grid",
+        gridTemplateColumns:"1.5fr 80px 80px 100px 120px 100px 80px",
+        padding:"8px 14px",background:"#f5f5f5",
+        fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1}},
+        "STAFF NAME","DAILY RATE","DAYS","GROSS PAY","CA/LOAN DEDUCT","NET PAY","STATUS"
+      ),
+      branchStaff.length===0&&h("div",{style:{padding:"30px",textAlign:"center",color:C.muted}},
+        "No staff found for this branch. Add staff in 👥 My Crew."
+      ),
+      branchStaff.map(s=>{
+        const {grossPay,totalDeduct,netPay,deductions,dailyRate,daysWorked}=calcPay(s);
+        const ri=ROLES[s.role]||{color:C.muted,emoji:"👤"};
+        return h("div",{key:s.id},
+          // Main row
+          h("div",{style:{display:"grid",
+            gridTemplateColumns:"1.5fr 80px 80px 100px 120px 100px 80px",
+            padding:"10px 14px",borderBottom:"1px solid #f5f5f5",
+            alignItems:"center",
+            background:deductions.length>0?"#FFFDE7":"#fff"}},
+            h("div",null,
+              h("div",{style:{fontWeight:700,fontSize:12}},s.name),
+              h("div",{style:{fontSize:9}},
+                h("span",{style:{background:ri.color,color:"#fff",
+                  borderRadius:6,padding:"1px 6px",fontWeight:700,fontSize:8}},
+                  ri.emoji+" "+ri.label))
+            ),
+            // Daily rate input
+            h("input",{type:"number",value:s.dailyRate||"",
+              readOnly:true,
+              onClick:()=>setNumKB&&setNumKB({
+                value:String(s.dailyRate||""),
+                label:"DAILY RATE — "+s.name,
+                allowDecimal:false,
+                onChange:async v=>{
+                  try{await updateDoc(doc(db,"staff_accounts",s.id),{dailyRate:parseInt(v)||0});}
+                  catch(e){}
+                }
+              }),
+              placeholder:"₱/day",
+              style:{width:"100%",padding:"4px 6px",border:"1px solid "+C.border,
+                borderRadius:6,fontSize:11,textAlign:"center",
+                cursor:"pointer",background:"#f9f9f9"}}),
+            // Days worked input
+            h("input",{type:"number",value:s.daysWorked||"",
+              readOnly:true,
+              onClick:()=>setNumKB&&setNumKB({
+                value:String(s.daysWorked||""),
+                label:"DAYS WORKED — "+s.name,
+                allowDecimal:false,
+                onChange:async v=>{
+                  try{await updateDoc(doc(db,"staff_accounts",s.id),{daysWorked:parseInt(v)||0});}
+                  catch(e){}
+                }
+              }),
+              placeholder:"days",
+              style:{width:"100%",padding:"4px 6px",border:"1px solid "+C.border,
+                borderRadius:6,fontSize:11,textAlign:"center",
+                cursor:"pointer",background:"#f9f9f9"}}),
+            h("div",{style:{fontWeight:700,fontSize:12,textAlign:"right",
+              color:grossPay>0?C.text:C.muted}},
+              grossPay>0?"₱"+grossPay.toLocaleString():"—"),
+            h("div",{style:{fontWeight:700,fontSize:12,textAlign:"right",
+              color:totalDeduct>0?C.danger:C.muted}},
+              totalDeduct>0?"- ₱"+totalDeduct.toLocaleString():"₱0"),
+            h("div",{style:{fontWeight:900,fontSize:13,textAlign:"right",
+              color:netPay>0?C.success:C.muted}},
+              netPay>0?"₱"+netPay.toLocaleString():"—"),
+            h("div",{style:{fontSize:9,textAlign:"center"}},
+              deductions.length>0
+                ?h("span",{style:{background:C.danger+"20",color:C.danger,
+                    borderRadius:6,padding:"2px 6px",fontWeight:700}},
+                  deductions.length+" deduct")
+                :h("span",{style:{color:C.success,fontWeight:700}},"✅ Clean")
+            )
+          ),
+          // Deduction details
+          deductions.length>0&&h("div",{style:{
+            background:"#FFF8E1",borderBottom:"1px solid #f5f5f5",
+            padding:"6px 14px 8px 40px"}},
+            h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,
+              letterSpacing:1,marginBottom:4}},"CA/LOAN DEDUCTIONS:"),
+            h("div",{style:{display:"flex",gap:8,flexWrap:"wrap"}},
+              deductions.map((d,i)=>h("div",{key:i,
+                style:{background:"#fff",borderRadius:8,padding:"6px 10px",
+                  border:"1px solid #FFE082",fontSize:10}},
+                h("div",{style:{fontWeight:700}},d.type||"CA"),
+                h("div",{style:{color:C.danger}},
+                  "₱"+d.cutoffDeduct+"/cutoff · Bal: ₱"+(d.balance||0).toFixed(2)),
+                h("div",{style:{color:C.muted}},d.reason||"")
+              ))
+            )
+          )
+        );
+      })
+    ),
+
+    // Pending CA requests that need approval
+    requests.filter(r=>r.status==="pending"&&
+      (isOwner||branchStaff.some(s=>s.name===r.staffName))).length>0&&
+    h("div",{style:{marginTop:14,background:"#fff",borderRadius:12,
+      border:"2px solid "+C.warning,overflow:"hidden"}},
+      h("div",{style:{background:C.warning+"20",padding:"10px 14px",
+        borderBottom:"1px solid "+C.warning+"40",
+        fontWeight:800,fontSize:12}},
+        "⏳ Pending CA/Loan Requests — Need Approval"),
+      requests.filter(r=>r.status==="pending"&&
+        (isOwner||branchStaff.some(s=>s.name===r.staffName)))
+      .map(r=>h("div",{key:r._docId,
+        style:{padding:"10px 14px",borderBottom:"1px solid #f5f5f5",
+          display:"flex",justifyContent:"space-between",alignItems:"center"}},
+        h("div",null,
+          h("div",{style:{fontWeight:700,fontSize:12}},
+            r.staffName+" — "+r.type),
+          h("div",{style:{fontSize:10,color:C.muted}},
+            "₱"+r.amount+" · "+r.reason+" · "+r.date)
+        ),
+        h("div",{style:{display:"flex",gap:6}},
+          h("button",{
+            onClick:async()=>{
+              await updateDoc(doc(db,"hris_requests",r._docId),{
+                status:"approved",approvedBy:user.name,
+                approvedAt:serverTimestamp(),balance:r.amount
+              });
+              showT(r.staffName+"'s "+r.type+" APPROVED ✓","ok");
+            },
+            style:{padding:"6px 14px",background:C.success,border:"none",
+              borderRadius:7,color:"#fff",fontWeight:700,fontSize:11,cursor:"pointer"}},
+            "✅ Approve"),
+          h("button",{
+            onClick:async()=>{
+              await updateDoc(doc(db,"hris_requests",r._docId),{
+                status:"rejected",rejectedBy:user.name,rejectedAt:serverTimestamp()
+              });
+              showT(r.staffName+"'s request rejected");
+            },
+            style:{padding:"6px 14px",background:C.danger,border:"none",
+              borderRadius:7,color:"#fff",fontWeight:700,fontSize:11,cursor:"pointer"}},
+            "❌ Reject")
+        )
+      ))
+    )
+  );
+}
+
 // ─── MAIN APP ─────────────────────────────────────────────
 function App(){
   // Auth
@@ -8460,24 +8734,9 @@ function App(){
         ),
 
         // ══ PAYROLL (redirect to HRIS) ══
-        page==="payroll"&&h("div",null,
-          h(SectionHeader,{title:"Payroll System (HRIS)"}),
-          h("div",{style:{background:"#fff",borderRadius:13,border:"1px solid "+C.border,padding:"32px",textAlign:"center"}},
-            h("div",{style:{fontSize:52,marginBottom:12}},"💼"),
-            h("div",{style:{fontSize:16,fontWeight:800,marginBottom:8}},"HRIS Payroll System"),
-            h("div",{style:{fontSize:12,color:C.muted,marginBottom:20}},
-              "Ang payroll system ay naka-host sa GitHub Pages.",h("br",null),
-              "CA at Loan approvals dito sa POS ay automatic na lalabas sa payroll deductions."
-            ),
-            h("a",{href:"https://chowtime-hris.github.io/chowtime-hris/chowtime-payroll.html",target:"_blank",
-              style:{display:"inline-flex",alignItems:"center",gap:8,padding:"13px 28px",
-                background:`linear-gradient(135deg,${C.primary},${C.dark})`,
-                borderRadius:11,color:"#fff",fontWeight:800,fontSize:13,
-                textDecoration:"none"}},
-              "🚀 Open HRIS Payroll System")
-          )
-        ),
-
+        page==="payroll"&&h(PayrollPage,{
+          db,hrisDB,user,showT,branches,branchId,staff,advances
+        }),
 
 
         // ══ SETTINGS ══
