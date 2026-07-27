@@ -679,6 +679,15 @@ function ItemCustomizer({item,onAdd,onClose,optionGroups=[],priceType="retail",u
   // Combined: item groups always + variant-specific groups
   const allLinkedIds=[...new Set([...itemGroupIds,...variantGroupIds])];
   const linkedGroups=(optionGroups||[]).filter(function(g){return allLinkedIds.includes(g.id);});
+  // FIX: Firebase writes choices[] (see BOMPage). Old code read options[] -> always empty.
+  const grpChoices=function(g){return (g&&(g.choices||g.options))||[];};
+  // A group named "Get 1" / "[R] Get 2" is a freebie picker. N = free picks per unit ordered.
+  const getPerUnit=function(g){
+    if(typeof g.getPerUnit==="number")return g.getPerUnit;
+    var m=/get\s*(\d+)/i.exec((g&&g.name)||"");
+    return m?parseInt(m[1],10):0;
+  };
+  const isFreeGrp=function(g){return getPerUnit(g)>0;};
 
   const [selO,setSelO]=useState({});
   const [selP,setSelP]=useState(null);
@@ -695,13 +704,50 @@ function ItemCustomizer({item,onAdd,onClose,optionGroups=[],priceType="retail",u
       return newSel;
     });
   };
+  const freeQty=(gid,cid)=>{const a=selO["og_"+gid]||[];const f=a.find(x=>x.id===cid);return f?(f.qty||0):0;};
+  const freeTotal=(gid)=>(selO["og_"+gid]||[]).reduce((s,c)=>s+(c.qty||0),0);
+  const bumpFree=(gid,ch,d,cap)=>setSelO(p=>{
+    const k="og_"+gid;const cur=(p[k]||[]).slice();
+    const i=cur.findIndex(x=>x.id===ch.id);
+    const now=i>=0?(cur[i].qty||0):0;
+    const tot=cur.reduce((s,c)=>s+(c.qty||0),0);
+    if(d>0&&tot>=cap)return p;
+    let next=now+d; if(next<0)next=0;
+    if(i>=0){ if(next===0)cur.splice(i,1); else cur[i]=Object.assign({},cur[i],{qty:next}); }
+    else if(next>0){ cur.push({id:ch.id,label:ch.label||ch.name,priceAdd:ch.priceAdd||0,qty:next}); }
+    const r=Object.assign({},p);r[k]=cur;return r;
+  });
+  // qty change must re-cap freebies (4 BOGO -> 4 picks; drop to 2 -> trim to 2)
+  const setQtySafe=(nq)=>{
+    const q=Math.max(1,nq);
+    setQty(q);
+    setSelO(p=>{
+      const r=Object.assign({},p);
+      linkedGroups.forEach(function(g){
+        if(!isFreeGrp(g))return;
+        const k="og_"+g.id,cap=getPerUnit(g)*q;
+        let cur=(r[k]||[]).map(function(c){return Object.assign({},c);});
+        let tot=cur.reduce(function(s,c){return s+(c.qty||0);},0);
+        while(tot>cap&&cur.length){
+          const last=cur[cur.length-1];
+          const take=Math.min(last.qty,tot-cap);
+          last.qty-=take;tot-=take;
+          if(last.qty<=0)cur.pop();
+        }
+        r[k]=cur;
+      });
+      return r;
+    });
+  };
   const tog=(oid,ch,multi)=>setSelO(p=>{
     const cur=p[oid]||[];
     if(multi){const ex=cur.find(c=>c.id===ch.id);return ex?{...p,[oid]:cur.filter(c=>c.id!==ch.id)}:{...p,[oid]:[...cur,ch]};}
     const ex=cur.find(c=>c.id===ch.id);return ex?{...p,[oid]:[]}:{...p,[oid]:[ch]};
   });
   const ck=(oid,cid)=>(selO[oid]||[]).some(c=>c.id===cid);
-  const optsTotal=Object.values(selO).flat().reduce((s,c)=>s+(c.priceAdd||0),0);
+  // FIX: og_ groups were counted here AND again in linkedGroupsPrice = double charge
+  const optsTotal=Object.entries(selO).filter(([k])=>!k.startsWith("og_"))
+    .reduce((s,[,cs])=>s+(cs||[]).reduce((a,c)=>a+(c.priceAdd||0),0),0);
   // Get base price by priceType (for Main/commissary account)
   const getBase=()=>{
     if(priceType==="franchisee"&&item.franchiseePrice) return item.franchiseePrice;
@@ -715,21 +761,45 @@ function ItemCustomizer({item,onAdd,onClose,optionGroups=[],priceType="retail",u
   const baseForCalc=variantIsTotal?(selV?.priceAdd||getBase()):getBase();
   const variantAdd=variantIsTotal?0:(selV?.priceAdd||0);
   const unitPrice=baseForCalc+variantAdd+optsTotal+(selP?.priceAdd||0);
-  const isBogo=selP?.discount==="bogo";
-  // Add prices from linked option groups
-  const linkedGroupsPrice=Object.entries(selO).filter(([k])=>k.startsWith("og_")).reduce((sum,[,choices])=>{
-    return sum+(choices||[]).reduce((s,c)=>s+(c.priceAdd||0),0);
-  },0);
-  const lineTotal=isBogo?unitPrice:(unitPrice+linkedGroupsPrice)*qty;
+  // BOGO can come from a promo OR from a variant labelled "BOGO w/ Drink" etc.
+  const isBogoVariant=/bogo|buy\s*1\s*get/i.test((selV&&selV.label)||"");
+  const isBogo=(selP&&selP.discount==="bogo")||isBogoVariant;
+  // normal linked groups: per-unit upcharge
+  const linkedPerUnit=linkedGroups.filter(g=>!isFreeGrp(g))
+    .reduce((s,g)=>s+((selO["og_"+g.id]||[]).reduce((a,c)=>a+(c.priceAdd||0),0)),0);
+  // freebie upcharges: already picked N times, do NOT multiply by qty again
+  const freebieAdd=linkedGroups.filter(isFreeGrp)
+    .reduce((s,g)=>s+((selO["og_"+g.id]||[]).reduce((a,c)=>a+((c.priceAdd||0)*(c.qty||0)),0)),0);
+  // FIX: old code returned unitPrice (qty ignored) for BOGO -> 4 BOGO charged as 1
+  const lineTotal=(unitPrice+linkedPerUnit)*qty+freebieAdd;
   const missing=item.options.filter(o=>o.required&&!(selO[o.id]||[]).length).map(o=>o.label);
+  const freeGaps=linkedGroups.filter(isFreeGrp).map(function(g){
+    return {name:g.name,need:getPerUnit(g)*qty,got:freeTotal(g.id)};
+  }).filter(function(x){return x.got!==x.need;});
+  const blocked=missing.length>0||freeGaps.length>0;
 
   const handleAdd=()=>{
-    if(missing.length)return;
+    if(blocked)return;
+    const freebies=[],optionRefs=[],labels=[];
+    Object.entries(selO).filter(([k])=>!k.startsWith("og_"))
+      .forEach(([,cs])=>(cs||[]).forEach(c=>labels.push(c.label)));
+    linkedGroups.forEach(function(g){
+      const free=isFreeGrp(g);
+      (selO["og_"+g.id]||[]).forEach(function(c){
+        const n=free?(c.qty||0):1;
+        if(n<=0)return;
+        optionRefs.push({groupId:g.id,groupName:g.name,choiceId:c.id,label:c.label,qty:n,free:free});
+        if(free)freebies.push({groupId:g.id,groupName:g.name,id:c.id,label:c.label,qty:n,priceAdd:c.priceAdd||0});
+        else labels.push(c.label);
+      });
+    });
     onAdd({
       cartId:Date.now()+Math.random(),id:item.id,
       name:item.name,emoji:item.emoji,unitPrice,qty,
       variant:selV?.label,
-      options:Object.values(selO).flat().map(function(c){return c.label;}),
+      options:labels,
+      freebies:freebies,optionRefs:optionRefs,
+      freePerUnit:linkedGroups.filter(isFreeGrp).reduce((s,g)=>s+getPerUnit(g),0),
       promo:selP?.label,isBogo,note,lineTotal
     });
   };
@@ -815,24 +885,64 @@ function ItemCustomizer({item,onAdd,onClose,optionGroups=[],priceType="retail",u
         ...linkedGroups.map(function(group){
           const groupKey="og_"+group.id;
           const selected=selO[groupKey]||[];
+          const per=getPerUnit(group);
+          const free=per>0;
+          const cap=per*qty;
+          const got=selected.reduce(function(a,c){return a+(c.qty||0);},0);
+          const short=free&&got!==cap;
+          const choices=grpChoices(group);
           return h("div",{key:group.id,
             style:{padding:"13px 0",borderBottom:"1px solid "+C.border}},
-            h("div",{style:{fontSize:11,fontWeight:800,marginBottom:8,
-              display:"flex",gap:7,alignItems:"center"}},
-              group.name,
-              h("span",{style:{fontSize:9,color:C.muted,fontWeight:400}},"• Optional")
+            h("div",{style:{fontSize:11,fontWeight:800,marginBottom:6,
+              display:"flex",gap:7,alignItems:"center",flexWrap:"wrap"}},
+              free?String(group.name||"").replace(/get\s*\d+/i,"Get "+cap):group.name,
+              free
+                ?h("span",{style:{background:short?C.danger:"#2E7D32",color:"#fff",fontSize:9,
+                    padding:"1px 7px",borderRadius:20}},got+"/"+cap+(short?" • Required":" ✓"))
+                :h("span",{style:{fontSize:9,color:C.muted,fontWeight:400}},"• Optional")
             ),
+            free&&h("div",{style:{fontSize:9,color:C.muted,marginBottom:7}},
+              "Pumili ng "+cap+" na libre — pwedeng ulitin ang parehong item."),
+            choices.length===0&&h("div",{style:{fontSize:10,color:C.danger,background:"#FFEBEE",
+              padding:"8px 10px",borderRadius:8}},
+              "⚠️ Walang choices ang group na ito. Idagdag sa Menu & BOM → Option Groups."),
             h("div",{style:{display:"grid",
               gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:6}},
-              (group.options||[]).map(function(opt){
-                const on=selected.some(function(s){return s.id===opt.id;});
+              choices.map(function(opt){
+                const lbl=opt.label||opt.name;
+                if(free){
+                  const n=freeQty(group.id,opt.id);
+                  const canAdd=got<cap;
+                  return h("div",{key:opt.id,
+                    style:{padding:"7px 8px",borderRadius:9,textAlign:"center",
+                      border:"2px solid "+(n>0?C.primary:C.border),
+                      background:n>0?C.primary+"12":"#fff"}},
+                    h("div",{style:{fontSize:11,fontWeight:n>0?700:400,
+                      color:n>0?C.primary:C.text,marginBottom:5}},lbl),
+                    (opt.priceAdd||0)>0&&h("div",{style:{fontSize:9,color:C.primary,
+                      fontWeight:700,marginBottom:3}},"+₱"+(opt.priceAdd||0)+" ea"),
+                    h("div",{style:{display:"flex",alignItems:"center",
+                      justifyContent:"center",gap:8}},
+                      h("button",{onClick:function(){bumpFree(group.id,opt,-1,cap);},
+                        style:{width:24,height:24,borderRadius:6,border:"none",
+                          background:n>0?C.primary:"#eee",color:n>0?"#fff":"#bbb",
+                          fontSize:14,fontWeight:900,cursor:n>0?"pointer":"default"}},"−"),
+                      h("span",{style:{minWidth:14,fontWeight:900,fontSize:12}},n),
+                      h("button",{onClick:function(){bumpFree(group.id,opt,1,cap);},
+                        style:{width:24,height:24,borderRadius:6,border:"none",
+                          background:canAdd?C.primary:"#eee",color:canAdd?"#fff":"#bbb",
+                          fontSize:14,fontWeight:900,cursor:canAdd?"pointer":"default"}},"+")
+                    )
+                  );
+                }
+                const on=selected.some(function(x){return x.id===opt.id;});
                 return h("button",{key:opt.id,
                   onClick:function(){
                     setSelO(function(p){
                       var cur=p[groupKey]||[];
                       var next=on
-                        ?cur.filter(function(s){return s.id!==opt.id;})
-                        :[...cur,{id:opt.id,label:opt.label||opt.name,priceAdd:opt.priceAdd||0}];
+                        ?cur.filter(function(x){return x.id!==opt.id;})
+                        :[...cur,{id:opt.id,label:lbl,priceAdd:opt.priceAdd||0}];
                       var r={};Object.assign(r,p);r[groupKey]=next;return r;
                     });
                   },
@@ -840,12 +950,9 @@ function ItemCustomizer({item,onAdd,onClose,optionGroups=[],priceType="retail",u
                     textAlign:"center",border:"2px solid "+(on?C.primary:C.border),
                     background:on?C.primary+"12":"#fff"}},
                   h("div",{style:{fontSize:11,fontWeight:on?700:400,
-                    color:on?C.primary:C.text}},opt.label||opt.name),
+                    color:on?C.primary:C.text}},lbl),
                   (opt.priceAdd||0)>0&&h("div",{style:{fontSize:9,color:C.primary,fontWeight:700}},
-                    "+₱"+(opt.priceAdd||0)),
-                  (opt.bom||[]).length>0&&h("div",{style:{fontSize:8,
-                    color:on?C.primary:C.muted,marginTop:2}},
-                    "BOM ✓")
+                    "+₱"+(opt.priceAdd||0))
                 );
               })
             )
@@ -860,14 +967,16 @@ function ItemCustomizer({item,onAdd,onClose,optionGroups=[],priceType="retail",u
       // Footer
       h("div",{style:{padding:"11px 18px 16px",borderTop:"1px solid "+C.border}},
         missing.length>0&&h("div",{style:{background:"#FFEBEE",borderRadius:8,padding:"7px 11px",marginBottom:8,fontSize:11,color:C.danger,fontWeight:600}},"⚠️ Select: "+missing.join(", ")),
+        freeGaps.length>0&&h("div",{style:{background:"#FFEBEE",borderRadius:8,padding:"7px 11px",marginBottom:8,fontSize:11,color:C.danger,fontWeight:600}},
+          freeGaps.map(function(g){return g.name+": "+g.got+"/"+g.need;}).join(" · ")+" — kulang pa ang pili"),
         isBogo&&h("div",{style:{background:"#FFF8E1",borderRadius:8,padding:"7px 11px",marginBottom:8,fontSize:11,color:"#E65100",fontWeight:600}},"🎉 BOGO: Order "+qty+", get "+qty+" FREE!"),
         h("div",{style:{display:"flex",gap:9,alignItems:"center"}},
           h("div",{style:{display:"flex",alignItems:"center",gap:7,background:C.bg,borderRadius:9,padding:"4px"}},
-            h("button",{onClick:()=>setQty(q=>Math.max(1,q-1)),style:{width:30,height:30,borderRadius:7,border:"none",background:qty>1?"#fff":"#eee",cursor:qty>1?"pointer":"default",fontSize:16,fontWeight:700,color:qty>1?C.primary:C.muted}},"−"),
+            h("button",{onClick:()=>setQtySafe(qty-1),style:{width:30,height:30,borderRadius:7,border:"none",background:qty>1?"#fff":"#eee",cursor:qty>1?"pointer":"default",fontSize:16,fontWeight:700,color:qty>1?C.primary:C.muted}},"−"),
             h("span",{style:{minWidth:20,textAlign:"center",fontWeight:900,fontSize:14}},qty),
-            h("button",{onClick:()=>setQty(q=>q+1),style:{width:30,height:30,borderRadius:7,border:"none",background:"#fff",cursor:"pointer",fontSize:16,fontWeight:700,color:C.primary}},"+")
+            h("button",{onClick:()=>setQtySafe(qty+1),style:{width:30,height:30,borderRadius:7,border:"none",background:"#fff",cursor:"pointer",fontSize:16,fontWeight:700,color:C.primary}},"+")
           ),
-          h("button",{onClick:handleAdd,disabled:!!missing.length,style:{flex:1,padding:"12px",background:missing.length?"#ddd":`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:10,color:missing.length?"#999":"#fff",fontWeight:800,fontSize:13,cursor:missing.length?"not-allowed":"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:9}},
+          h("button",{onClick:handleAdd,disabled:blocked,style:{flex:1,padding:"12px",background:blocked?"#ddd":`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:10,color:blocked?"#999":"#fff",fontWeight:800,fontSize:13,cursor:blocked?"not-allowed":"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:9}},
             "Add to Order",
             h("span",{style:{background:"rgba(255,255,255,.22)",padding:"2px 9px",borderRadius:20,fontSize:12}},"₱"+lineTotal.toFixed(2))
           )
@@ -7363,7 +7472,27 @@ function App(){
   // ── CART ACTIONS ─────────────────────────────────────────
   const addToCart=ci=>{setCart(p=>[...p,ci]);setCustomizing(null);showT(ci.name+" added!");};
   const rmCart=cid=>setCart(p=>p.filter(i=>i.cartId!==cid));
-  const chgQty=(cid,d)=>setCart(p=>p.map(i=>i.cartId===cid?{...i,qty:Math.max(1,i.qty+d),lineTotal:i.isBogo?i.unitPrice:i.unitPrice*Math.max(1,i.qty+d)}:i));
+  // FIX: old code froze lineTotal at unitPrice for BOGO -> 4 BOGO billed as 1.
+  // Also rescales freebie picks so count always matches qty.
+  const chgQty=(cid,d)=>setCart(p=>p.map(i=>{
+    if(i.cartId!==cid)return i;
+    const q=Math.max(1,(i.qty||1)+d);
+    const per=i.freePerUnit||0;
+    let fr=(i.freebies||[]).map(f=>Object.assign({},f));
+    if(per>0){
+      const cap=per*q;
+      let tot=fr.reduce((a,f)=>a+(f.qty||0),0);
+      while(tot>cap&&fr.length){                      // qty down -> trim from the end
+        const last=fr[fr.length-1];
+        const take=Math.min(last.qty,tot-cap);
+        last.qty-=take;tot-=take;
+        if(last.qty<=0)fr.pop();
+      }
+      if(tot<cap&&fr.length){fr[0].qty+=(cap-tot);}   // qty up -> top up the first pick
+    }
+    const freeAdd=fr.reduce((a,f)=>a+((f.priceAdd||0)*(f.qty||0)),0);
+    return Object.assign({},i,{qty:q,freebies:fr,lineTotal:(i.unitPrice||0)*q+freeAdd});
+  }));
 
   // ── PLACE ORDER (Firebase) ───────────────────────────────
   const placeOrder=async()=>{
@@ -7381,8 +7510,10 @@ function App(){
       id,branch:branchId,
       items:cart.map(i=>({qty:i.qty,name:i.name,emoji:i.emoji,
         variant:i.variant||"",options:i.options||[],
+        freebies:i.freebies||[],optionRefs:i.optionRefs||[],freePerUnit:i.freePerUnit||0,
         unitPrice:getPriceByType(i),
-        lineTotal:getPriceByType(i)*(i.qty||1),
+        lineTotal:getPriceByType(i)*(i.qty||1)
+          +(i.freebies||[]).reduce((a,f)=>a+((f.priceAdd||0)*(f.qty||0)),0),
         isBogo:i.isBogo||false,promo:i.promo||"",note:i.note||""})),
       subtotal:chkSub,discAmt:chkDiscAmt,
       discType:{id:chkDisc.id,label:chkDisc.label,rate:chkDisc.rate},
@@ -7486,41 +7617,42 @@ function App(){
           }
         }
 
-        // ── Deduct Option Group BOMs (flavors, drinks, etc.) ──
-        const optSnap = await getDocs(collection(db,"option_groups"));
-        const optGroups = optSnap.docs.map(d=>({...d.data(),id:d.id}));
-
+        // ── Deduct Option Group BOMs (flavors, drinks, freebies) ──
+        // FIX: old code read group.options (Firebase writes choices[]) and looked for
+        // an embedded opt.bom — BOMs actually live in bom/optgrp_<groupId>.
+        // Result: option-group ingredients were NEVER deducted. Now keyed by ID.
+        const bomCache={};
         for(const cartItem of cart){
-          const selectedOpts = cartItem.options||[];
-          for(const optLabel of selectedOpts){
-            // Find matching option in any group
-            for(const group of optGroups){
-              const opt=(group.options||[]).find(o=>o.name===optLabel);
-              if(opt&&opt.bom&&opt.bom.length){
-                for(const row of opt.bom){
-                  if(!row.ingId||!row.qty)continue;
-                  const deductAmt=(row.qty||0)*(cartItem.qty||1);
-                  const convFactor=row.convFactor||1;
-                  const actualDeduct=deductAmt/convFactor;
-                  try{
-                    await updateDoc(doc(db,invCol,row.ingId),{
-                      stock:increment(-actualDeduct),
-                      lastDeducted:serverTimestamp()
-                    });
-                    await addDoc(collection(db,logCol),{
-                      itemId:row.ingId,itemName:row.ingName||row.ingId,
-                      unit:row.unit||"",type:"deduct",amount:-actualDeduct,
-                      transactionId:ord.id,
-                      orderId:ord.id,
-                      menuItem:cartItem.name,
-                      optionLabel:optLabel,
-                      branch:branchId,
-                      reason:"Order: "+ord.id+" — "+cartItem.name+" ["+optLabel+"]",
-                      by:user.name,at:serverTimestamp()
-                    });
-                  }catch(e2){console.warn("Option BOM deduct failed",e2);}
-                }
-              }
+          for(const ref of (cartItem.optionRefs||[])){
+            if(!ref.groupId||!ref.choiceId)continue;
+            const docId="optgrp_"+ref.groupId;
+            if(!(docId in bomCache)){
+              try{const bs=await getDoc(doc(db,"bom",docId));bomCache[docId]=bs.exists()?bs.data():{};}
+              catch(e2){bomCache[docId]={};}
+            }
+            const rows=bomCache[docId][docId+"__"+ref.choiceId]||[];
+            // freebie qty already counts every free unit; paid options scale with line qty
+            const mult=ref.free?(ref.qty||1):((ref.qty||1)*(cartItem.qty||1));
+            for(const row of rows){
+              if(!row.ingId||!row.qty)continue;
+              const actualDeduct=((row.qty||0)*mult)/(row.convFactor||1);
+              try{
+                await updateDoc(doc(db,invCol,row.ingId),{
+                  stock:increment(-actualDeduct),
+                  lastDeducted:serverTimestamp()
+                });
+                await addDoc(collection(db,logCol),{
+                  itemId:row.ingId,itemName:row.ingName||row.ingId,
+                  unit:row.unit||"",type:"deduct",amount:-actualDeduct,
+                  transactionId:ord.id,
+                  orderId:ord.id,
+                  menuItem:cartItem.name,
+                  optionLabel:ref.label+(ref.free?" (FREE x"+ref.qty+")":""),
+                  branch:branchId,
+                  reason:"Order: "+ord.id+" — "+cartItem.name+" ["+ref.label+"]",
+                  by:user.name,at:serverTimestamp()
+                });
+              }catch(e2){console.warn("Option BOM deduct failed",e2);}
             }
           }
         }
@@ -7690,6 +7822,8 @@ function App(){
               h("div",{style:{fontSize:11,fontWeight:700}},i.qty+"x "+i.name,i.isBogo&&h("span",{style:{background:"#FF4B2B",color:"#fff",fontSize:8,padding:"1px 5px",borderRadius:20,marginLeft:4}},"BOGO")),
               i.variant&&h("div",{style:{fontSize:9,color:C.muted}},"📦 "+i.variant),
               i.options?.length>0&&h("div",{style:{fontSize:9,color:C.muted}},"✓ "+i.options.join(" · ")),
+              (i.freebies||[]).map((f,fi)=>h("div",{key:fi,style:{fontSize:9,color:"#2E7D32",fontWeight:700}},
+                "🎁 FREE: "+f.label+" ×"+f.qty)),
               i.note&&h("div",{style:{fontSize:9,color:C.muted,fontStyle:"italic"}},'"'+i.note+'"')
             ),
             h("div",{style:{textAlign:"right",flexShrink:0}},
@@ -7910,7 +8044,9 @@ function App(){
               ),
               i.variant&&h("div",{style:{fontSize:9,color:C.muted,paddingLeft:18}},"📦 "+i.variant),
               (i.options||[]).length>0&&h("div",{style:{fontSize:9,color:C.muted,paddingLeft:18}},"✓ "+i.options.join(", ")),
-              i.isBogo&&h("div",{style:{fontSize:9,color:"#FF4B2B",fontWeight:700,paddingLeft:18}},"🎉 BOGO – 1 FREE!"),
+              (i.freebies||[]).map((f,fi)=>h("div",{key:fi,style:{fontSize:9,color:"#2E7D32",fontWeight:700,paddingLeft:18}},
+                "🎁 FREE: "+f.label+" ×"+f.qty)),
+              i.isBogo&&(i.freebies||[]).length===0&&h("div",{style:{fontSize:9,color:"#FF4B2B",fontWeight:700,paddingLeft:18}},"🎉 BOGO – "+(i.qty||1)+" FREE!"),
               i.note&&h("div",{style:{fontSize:9,color:C.muted,fontStyle:"italic",paddingLeft:18}},'"'+i.note+'"')
             ))
           ),
@@ -10292,7 +10428,9 @@ function App(){
                   ),
                   item.variant&&h("div",{style:{fontSize:9,color:C.muted}},"📦 "+item.variant),
                   item.options?.length>0&&h("div",{style:{fontSize:9,color:C.muted}},"✓ "+item.options.join(" · ")),
-                  item.isBogo&&h("div",{style:{fontSize:9,color:"#FF4B2B",fontWeight:700}},"🎉 BOGO – 1 FREE!"),
+                  (item.freebies||[]).map((f,fi)=>h("div",{key:fi,style:{fontSize:9,color:"#2E7D32",fontWeight:700}},
+                    "🎁 FREE: "+f.label+" ×"+f.qty)),
+                  item.isBogo&&(item.freebies||[]).length===0&&h("div",{style:{fontSize:9,color:"#FF4B2B",fontWeight:700}},"🎉 BOGO – "+(item.qty||1)+" FREE!"),
                   item.note&&h("div",{style:{fontSize:9,color:C.muted,fontStyle:"italic"}},'"'+item.note+'"')
                 )
               ),
