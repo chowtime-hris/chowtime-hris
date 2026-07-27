@@ -181,6 +181,7 @@ const NAV_META = {
   analytics:       {icon:"📈",label:"Analytics"},
   void_requests:   {icon:"🚫",label:"Void Requests"},
   void_request:    {icon:"🚫",label:"Request Void"},
+  inv_log:         {icon:"📋",label:"Inv. Log"},
 };
 
 const MENU_CATALOG = [
@@ -2883,7 +2884,7 @@ function BranchMenuPage({menuItems,setMenuItems,branchId,curBranch,user,db,showT
             h("span",{style:{color:C.muted,fontSize:11}},"₱"),
             h("input",{type:"number",
               value:price||"",
-              onChange:e=>savePrice(item,e.target.value),
+              onChange:e=>{savePrice(item,e.target.value);},
               style:{width:70,padding:"5px 6px",
                 border:"1px solid "+(priceChanged?C.warning:C.border),
                 borderRadius:6,fontSize:12,fontWeight:priceChanged?700:400,
@@ -6098,13 +6099,13 @@ function PayrollPage({db,hrisDB,user,showT,branches,branchId,staff,advances}){
             ),
             // Daily rate input
             h("input",{type:"number",value:s.dailyRate||"",
-              onChange:async e=>{try{await updateDoc(doc(db,"staff_accounts",s.id),{dailyRate:parseInt(e.target.value)||0});}catch(e){}},
+              onChange:e=>{(async()=>{try{await updateDoc(doc(db,"staff_accounts",s.id),{dailyRate:parseInt(e.target.value)||0});}catch(ex){}})();},
               placeholder:"₱/day",
               style:{width:"100%",padding:"4px 6px",border:"1px solid "+C.border,
                 borderRadius:6,fontSize:11,textAlign:"center"}}),
             // Days worked input
             h("input",{type:"number",value:s.daysWorked||"",
-              onChange:async e=>{try{await updateDoc(doc(db,"staff_accounts",s.id),{daysWorked:parseInt(e.target.value)||0});}catch(e){}},
+              onChange:e=>{(async()=>{try{await updateDoc(doc(db,"staff_accounts",s.id),{daysWorked:parseInt(e.target.value)||0});}catch(ex){}})();},
               placeholder:"days",
               style:{width:"100%",padding:"4px 6px",border:"1px solid "+C.border,
                 borderRadius:6,fontSize:11,textAlign:"center",
