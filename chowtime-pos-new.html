@@ -130,11 +130,11 @@ const ROLES = {
   manager:   {label:"Branch Manager",   emoji:"\u{1F3EA}", color:"#007AFF",
     nav:["branch_dash","pos","orders","analytics","z_reading","cash_count","expenses","inventory","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","bom_mgmt","payroll","kiosk","branch_settings","printer"]},
   cashier:   {label:"Cashier",          emoji:"\u{1F4B3}", color:"#34C759",
-    nav:["pos","orders","x_reading","z_reading","cash_count","ca_request","loan_request","kiosk","void_request"]},
+    nav:["pos","orders","x_reading","z_reading","cash_count","expenses","inventory","ca_request","loan_request","kiosk","void_request"]},
   crew:      {label:"Crew / Kitchen",   emoji:"\u{1F9D1}\u{200D}\u{1F373}", color:"#FF9500",
-    nav:["kitchen","ca_request","loan_request","kiosk"]},
+    nav:["kitchen","ca_request","loan_request","kiosk","pos","orders"]},
   stockclerk:{label:"Stock Clerk",      emoji:"\u{1F4E6}", color:"#AF52DE",
-    nav:["inventory","stock_order","stock_receive","ca_request","loan_request","kiosk"]},
+    nav:["inventory","stock_order","stock_receive","ca_request","loan_request","kiosk","pos","orders","expenses"]},
   commissary:{label:"Commissary Staff", emoji:"\u{1F3ED}", color:"#32ADE6",
     nav:["comm_dash","comm_inv","comm_orders","comm_dr"]},
 };
@@ -5769,25 +5769,20 @@ function printPODR(po){
 function PermissionsTab({db,showT,companySettings,setCompanySettings}){
   // Default permissions per role
   const DEFAULT_PERMS = {
-    manager: {
-      pos:true, orders:true, analytics:true, z_reading:true,
-      cash_count:true, expenses:true, inventory:true,
-      stock_order:true, branch_menu:true, crew_mgmt:true,
-      void_requests:true, ca_request:true, loan_request:true,
-      bom_mgmt:true, payroll:true, branch_settings:true, printer:true
-    },
     cashier: {
       pos:true, orders:true, x_reading:true, z_reading:true,
-      cash_count:true, ca_request:true, loan_request:true,
-      void_request:true, expenses:false, inventory:false
+      cash_count:true, expenses:true, inventory:true,
+      ca_request:true, loan_request:true,
+      void_request:true, kiosk:true
     },
     crew: {
-      kitchen:true, ca_request:true, loan_request:true,
-      kiosk:true
+      kitchen:true, pos:true, orders:true,
+      ca_request:true, loan_request:true, kiosk:true
     },
     stockclerk: {
       inventory:true, stock_order:true, stock_receive:true,
-      ca_request:true, loan_request:true
+      pos:true, orders:true, expenses:true,
+      ca_request:true, loan_request:true, kiosk:true
     }
   };
 
@@ -5798,25 +5793,6 @@ function PermissionsTab({db,showT,companySettings,setCompanySettings}){
 
   // Nav items per role with labels
   const ROLE_NAVS = {
-    manager: [
-      {key:"pos",label:"🛒 POS"},
-      {key:"orders",label:"📋 Orders"},
-      {key:"analytics",label:"📊 Analytics"},
-      {key:"z_reading",label:"📊 Z-Reading"},
-      {key:"cash_count",label:"💵 Cash Count"},
-      {key:"expenses",label:"💸 Expenses"},
-      {key:"inventory",label:"📦 Inventory"},
-      {key:"stock_order",label:"🚚 Stock Order"},
-      {key:"branch_menu",label:"🍽️ Branch Menu"},
-      {key:"crew_mgmt",label:"👥 My Crew"},
-      {key:"void_requests",label:"🚫 Void Requests"},
-      {key:"ca_request",label:"💵 Cash Advance"},
-      {key:"loan_request",label:"🏦 Loan Request"},
-      {key:"bom_mgmt",label:"🧪 BOM"},
-      {key:"payroll",label:"💹 Payroll"},
-      {key:"branch_settings",label:"⚙️ Branch Settings"},
-      {key:"printer",label:"🖨️ Printer"},
-    ],
     cashier: [
       {key:"pos",label:"🛒 POS"},
       {key:"orders",label:"📋 Orders"},
@@ -5845,11 +5821,11 @@ function PermissionsTab({db,showT,companySettings,setCompanySettings}){
   };
 
   const ROLE_COLORS = {
-    manager:"#007AFF", cashier:"#34C759",
+    cashier:"#34C759",
     crew:"#FF9500", stockclerk:"#AF52DE"
   };
   const ROLE_LABELS = {
-    manager:"🏪 Branch Manager", cashier:"💳 Cashier",
+    cashier:"💳 Cashier",
     crew:"🧑‍🍳 Crew / Kitchen", stockclerk:"📦 Stock Clerk"
   };
 
@@ -5876,9 +5852,12 @@ function PermissionsTab({db,showT,companySettings,setCompanySettings}){
   };
 
   return h("div",null,
+    h("div",{style:{background:"#E3F2FD",borderRadius:10,
+      padding:"10px 14px",marginBottom:8,fontSize:11,color:"#1565C0"}},
+      "👔 Branch Manager — always has FULL ACCESS to all features. Cannot be restricted."),
     h("div",{style:{background:"#fff3cd",borderRadius:10,
       padding:"10px 14px",marginBottom:14,fontSize:11,color:"#856404"}},
-      "⚠️ Changes take effect on next login. Owner account is not affected by these settings."),
+      "⚠️ All features are ON by default. I-OFF lang ang hindi kailangan. Changes take effect on next login."),
 
     h("div",{style:{display:"grid",gap:12}},
       Object.keys(ROLE_NAVS).map(role=>
@@ -7547,11 +7526,15 @@ function App(){
       ),
       h("nav",{style:{flex:1,padding:"3px 6px",overflowY:"auto",minHeight:0}},
         (role?.nav||[]).filter(p=>{
-          // Apply permission overrides from Settings
+          // Owner/commissary/manager = always full access
+          if(user?.role==="owner"||user?.role==="commissary"||user?.role==="manager")return true;
+          // Check saved permissions
           const rolePerms=(companySettings?.rolePerms||{})[user?.role];
-          if(!rolePerms)return true; // no perms set = all allowed
-          if(user?.role==="owner"||user?.role==="commissary")return true; // owner always full
-          return rolePerms[p]!==false; // false = blocked
+          if(!rolePerms){
+            // No perms saved yet - ALL ON by default
+            return true;
+          }
+          return rolePerms[p]!==false;
         }).map(p=>{const m=NAV_META[p];if(!m)return null;return h("button",{key:p,onClick:()=>setPage(p),
           style:{width:"100%",display:"flex",alignItems:"center",gap:6,padding:"5px 9px",borderRadius:7,border:"none",
             background:page===p?"rgba(200,21,27,.22)":"transparent",
