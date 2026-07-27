@@ -6202,7 +6202,7 @@ function PayrollPage({db,hrisDB,user,showT,branches,branchId,staff,advances}){
 function NewInventoryItemForm({db,user,branchId,showT,onClose,invBranch,inventory}){
   const UNITS=["pc","kg","g","L","ml","pack","box","tray","sachet","EA","roll"];
   const DEFAULT_CATS=["Frozen","Produce","Protein","Sauce","Dry Goods","Packaging","Beverage","Other"];
-  const [cats,setCats]=useState(DEFAULT_CATS);
+  const [cats,setCats]=useState(DEFAULT_CATS.slice()); // always array of strings
   const [newCat,setNewCat]=useState("");
   const [showCatMgr,setShowCatMgr]=useState(false);
 
@@ -6211,7 +6211,8 @@ function NewInventoryItemForm({db,user,branchId,showT,onClose,invBranch,inventor
     try{
       const unsub=onSnapshot(doc(db,"settings","inv_cats"),snap=>{
         if(snap.exists()&&snap.data().cats){
-          setCats([...DEFAULT_CATS,...snap.data().cats.filter(c=>!DEFAULT_CATS.includes(c))]);
+          const loaded=snap.data().cats.filter(c=>typeof c==="string"&&!DEFAULT_CATS.includes(c));
+          setCats([...DEFAULT_CATS,...loaded]);
         }
       },()=>{});
       return()=>unsub();
@@ -6298,7 +6299,7 @@ function NewInventoryItemForm({db,user,branchId,showT,onClose,invBranch,inventor
     inp("Item Name *","name"),
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
       inp("Unit","unit","text",UNITS),
-      inp("Category","cat","text",CATS)
+      inp("Category","cat","text",cats)
     ),
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
       inp("Current Stock","stock","number"),
