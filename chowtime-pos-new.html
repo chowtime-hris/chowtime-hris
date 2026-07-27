@@ -2670,198 +2670,267 @@ function MenuEditor({menuItems,setMenuItems,db,user,showT}){
 
 // ─── BRANCH MENU PAGE (toggle + price override) ──────────
 function BranchMenuPage({menuItems,setMenuItems,branchId,curBranch,user,db,showT,branches=BRANCHES}){
-  const [overrides,setOverrides] = useState({}); // {itemId: {avail,price}}
-  const [editPrice,setEditPrice] = useState(null); // itemId being edited
-  const [tempPrice,setTempPrice] = useState("");
-  const [saving,setSaving]       = useState(null);
+  const [overrides,setOverrides] = useState({});
+  const [exclusives,setExclusives] = useState([]); // branch-only items
   const [filterCat,setFilter]    = useState("All");
+  const [saving,setSaving]       = useState(null);
+  const [showAddExclusive,setShowAddExclusive] = useState(false);
+  const [newExItem,setNewExItem] = useState({name:"",basePrice:"",cat:"",emoji:"🍽️",desc:""});
+  const [srch,setSrch]           = useState("");
 
-  // Load existing overrides for this branch
+  // Load overrides for this branch
   useEffect(()=>{
-    const q = query(collection(db,"menu_overrides"),where("branch","==",branchId));
-    const unsub = onSnapshot(q, snap=>{
+    const q=query(collection(db,"menu_overrides"),where("branch","==",branchId));
+    const unsub=onSnapshot(q,snap=>{
       const ov={};
+      const ex=[];
       snap.docs.forEach(d=>{
-        const data=d.data();
-        ov[data.itemId]={avail:data.avail,price:data.price,docId:d.id};
+        const data={...d.data(),_docId:d.id};
+        if(data.isExclusive){
+          ex.push(data);
+        } else {
+          ov[data.itemId]={avail:data.avail,price:data.price,docId:d.id};
+        }
       });
       setOverrides(ov);
+      setExclusives(ex);
     },()=>{});
     return()=>unsub();
   },[branchId]);
 
-  const getPrice = (item)=> overrides[item.id]?.price ?? item.basePrice;
-  const getAvail = (item)=> overrides[item.id]?.avail ?? item.avail ?? true;
+  const getAvail=(item)=>overrides[item.id]?.avail!==false;
+  const getPrice=(item)=>overrides[item.id]?.price??item.basePrice;
 
-  const saveOverride = async(item, fields)=>{
+  const saveOverride=async(item,payload)=>{
     setSaving(item.id);
-    const existing = overrides[item.id]||{};
-    const payload = {
-      branch:branchId,
-      branchName:curBranch.full,
-      itemId:item.id,
-      itemName:item.name,
-      avail: fields.avail ?? existing.avail ?? true,
-      price: fields.price ?? existing.price ?? null,
-      updatedBy:user.name,
-      updatedAt:serverTimestamp()
-    };
     try{
-      await setDoc(doc(db,"menu_overrides",branchId+"_"+item.id),payload);
+      await setDoc(doc(db,"menu_overrides",branchId+"_"+item.id),
+        {itemId:item.id,branch:branchId,...payload},
+        {merge:true});
       showT(item.name+" updated ✓");
-    }catch(e){ showT("Save failed","err"); }
+    }catch(e){showT("Save failed","err");}
     setSaving(null);
   };
 
-  const toggleAvail = async(item)=>{
-    const newAvail = !getAvail(item);
+  const toggleAvail=async(item)=>{
+    const newAvail=!getAvail(item);
     await saveOverride(item,{avail:newAvail});
-    setOverrides(p=>({...p,[item.id]:{...p[item.id],avail:newAvail}}));
-    showT(item.name+" "+(newAvail?"enabled ✓":"hidden 🚫"));
   };
 
-  const savePrice = async(item)=>{
-    const price = parseFloat(tempPrice);
-    if(isNaN(price)||price<=0){showT("Invalid price","warn");return;}
-    await saveOverride(item,{price});
-    setOverrides(p=>({...p,[item.id]:{...p[item.id],price}}));
-    setEditPrice(null);setTempPrice("");
+  const savePrice=async(item,price)=>{
+    await saveOverride(item,{price:parseFloat(price)||item.basePrice});
   };
 
-  const resetPrice = async(item)=>{
-    await saveOverride(item,{price:null});
-    setOverrides(p=>{const n={...p};if(n[item.id])delete n[item.id].price;return n;});
-    showT(item.name+" price reset to default ✓");
-    setEditPrice(null);setTempPrice("");
+  const resetItem=async(item)=>{
+    if(!overrides[item.id]?.docId)return;
+    await deleteDoc(doc(db,"menu_overrides",overrides[item.id].docId));
+    showT(item.name+" reset to main menu ✓");
   };
 
-  const cats = ["All",...new Set(menuItems.map(i=>i.cat))];
-  const filtered = menuItems.filter(i=>filterCat==="All"||i.cat===filterCat);
-  const overrideCount = Object.values(overrides).filter(o=>o.price!=null).length;
-  const hiddenCount   = Object.values(overrides).filter(o=>o.avail===false).length;
+  const addExclusive=async()=>{
+    if(!newExItem.name||!newExItem.basePrice){showT("Fill name and price","warn");return;}
+    try{
+      const id="ex_"+branchId+"_"+Date.now();
+      await setDoc(doc(db,"menu_overrides",id),{
+        isExclusive:true,
+        branch:branchId,
+        id,
+        name:newExItem.name,
+        basePrice:parseFloat(newExItem.basePrice)||0,
+        cat:newExItem.cat||"Others",
+        emoji:newExItem.emoji||"🍽️",
+        desc:newExItem.desc||"",
+        avail:true,
+        createdAt:serverTimestamp(),
+        createdBy:user.name
+      });
+      showT(newExItem.name+" added as branch-exclusive ✓");
+      setNewExItem({name:"",basePrice:"",cat:"",emoji:"🍽️",desc:""});
+      setShowAddExclusive(false);
+    }catch(e){showT("Error","err");}
+  };
+
+  const deleteExclusive=async(ex)=>{
+    if(!confirm("Remove "+ex.name+" from branch menu?"))return;
+    await deleteDoc(doc(db,"menu_overrides",ex._docId));
+    showT(ex.name+" removed ✓");
+  };
+
+  const cats=["All",...new Set(menuItems.map(i=>i.cat).filter(Boolean))];
+  const filtered=menuItems.filter(i=>{
+    if(filterCat!=="All"&&i.cat!==filterCat)return false;
+    if(srch&&!i.name.toLowerCase().includes(srch.toLowerCase()))return false;
+    return true;
+  });
+
+  const overrideCount=Object.keys(overrides).length;
+  const hiddenCount=Object.values(overrides).filter(o=>o.avail===false).length;
+  const priceCount=Object.values(overrides).filter(o=>o.price!=null).length;
 
   return h("div",null,
-    h(SectionHeader,{title:"Branch Menu — "+curBranch.name}),
-
-    // Info banner
-    h("div",{style:{background:"#E3F2FD",border:"1px solid #90CAF9",borderRadius:10,
-      padding:"10px 14px",marginBottom:13,fontSize:11,color:"#1565C0"}},
-      "🍽️ Toggle items ON/OFF for this branch only. Set a different price if needed — other branches won't be affected."
-    ),
+    h(SectionHeader,{title:"🍽️ Branch Menu — "+curBranch.name}),
 
     // Stats
-    h("div",{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:13}},
-      h(Stat,{label:"Total Items",value:menuItems.length,icon:"🍽️",color:C.primary}),
-      h(Stat,{label:"Active",value:menuItems.filter(i=>getAvail(i)).length,icon:"✅",color:C.success}),
-      h(Stat,{label:"Hidden",value:hiddenCount,icon:"🚫",color:C.muted}),
-      h(Stat,{label:"Price Overrides",value:overrideCount,icon:"💰",color:C.warning})
+    h("div",{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:12}},
+      h(Stat,{label:"Main Menu Items",value:menuItems.length,icon:"📋",color:C.primary}),
+      h(Stat,{label:"Hidden Items",value:hiddenCount,icon:"🚫",color:C.danger}),
+      h(Stat,{label:"Price Overrides",value:priceCount,icon:"💰",color:C.warning}),
+      h(Stat,{label:"Branch Exclusive",value:exclusives.length,icon:"⭐",color:C.success})
     ),
 
-    // Category tabs
-    h("div",{style:{display:"flex",gap:0,borderBottom:"1px solid "+C.border,marginBottom:13,overflowX:"auto"}},
+    // Action buttons
+    h("div",{style:{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}},
+      h("button",{onClick:()=>setShowAddExclusive(!showAddExclusive),
+        style:{padding:"8px 16px",background:C.success,border:"none",
+          borderRadius:8,color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}},
+        "⭐ Add Branch-Exclusive Item"),
+      h("button",{
+        onClick:async()=>{
+          if(!confirm("Reset ALL overrides to main menu defaults?"))return;
+          const q2=query(collection(db,"menu_overrides"),where("branch","==",branchId));
+          const snap=await getDocs(q2);
+          for(const d of snap.docs) await deleteDoc(d.ref);
+          showT("All overrides reset ✓");
+        },
+        style:{padding:"8px 16px",background:"#fff",border:"1px solid "+C.danger,
+          borderRadius:8,color:C.danger,fontWeight:700,fontSize:12,cursor:"pointer"}},
+        "🔄 Reset to Main Menu")
+    ),
+
+    // Add Exclusive Item form
+    showAddExclusive&&h("div",{style:{background:"#E8F5E9",borderRadius:12,
+      padding:"14px",marginBottom:12,border:"1px solid #A5D6A7"}},
+      h("div",{style:{fontSize:12,fontWeight:800,marginBottom:10,color:C.success}},
+        "⭐ Add Branch-Exclusive Item ("+curBranch.name+" only)"),
+      h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:8}},
+        h("input",{value:newExItem.name,onChange:e=>setNewExItem(p=>({...p,name:e.target.value})),
+          placeholder:"Item name",
+          style:{padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:12,outline:"none"}}),
+        h("input",{type:"number",value:newExItem.basePrice,
+          onChange:e=>setNewExItem(p=>({...p,basePrice:e.target.value})),
+          onClick:()=>window._openNumpad&&window._openNumpad({value:newExItem.basePrice,label:"PRICE",allowDecimal:false,onChange:v=>setNewExItem(p=>({...p,basePrice:v}))}),
+          placeholder:"Price",
+          style:{padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:12,outline:"none"}}),
+        h("input",{value:newExItem.cat,onChange:e=>setNewExItem(p=>({...p,cat:e.target.value})),
+          placeholder:"Category",
+          style:{padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:12,outline:"none"}})
+      ),
+      h("div",{style:{display:"grid",gridTemplateColumns:"80px 1fr",gap:8,marginBottom:8}},
+        h("input",{value:newExItem.emoji,onChange:e=>setNewExItem(p=>({...p,emoji:e.target.value})),
+          placeholder:"Emoji",
+          style:{padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:16,outline:"none",textAlign:"center"}}),
+        h("input",{value:newExItem.desc,onChange:e=>setNewExItem(p=>({...p,desc:e.target.value})),
+          placeholder:"Description (optional)",
+          style:{padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:12,outline:"none"}})
+      ),
+      h("div",{style:{display:"flex",gap:8}},
+        h("button",{onClick:addExclusive,
+          style:{padding:"9px 20px",background:C.success,border:"none",
+            borderRadius:8,color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}},
+          "✅ Add Item"),
+        h("button",{onClick:()=>setShowAddExclusive(false),
+          style:{padding:"9px 16px",background:"#fff",border:"1px solid "+C.border,
+            borderRadius:8,fontSize:12,cursor:"pointer"}},"Cancel")
+      )
+    ),
+
+    // Search + filter
+    h("div",{style:{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap",alignItems:"center"}},
+      h("input",{value:srch,onChange:e=>setSrch(e.target.value),
+        placeholder:"🔍 Search menu...",
+        style:{flex:1,padding:"8px 14px",border:"1px solid "+C.border,
+          borderRadius:20,fontSize:12,outline:"none",minWidth:180}}),
       cats.map(c=>h("button",{key:c,onClick:()=>setFilter(c),
-        style:{padding:"7px 13px",border:"none",background:"transparent",
-          color:filterCat===c?C.primary:C.muted,
-          fontWeight:filterCat===c?700:400,fontSize:11,cursor:"pointer",
-          borderBottom:`2px solid ${filterCat===c?C.primary:"transparent"}`,
-          whiteSpace:"nowrap"}},
-        c))
+        style:{padding:"5px 12px",borderRadius:20,fontSize:10,border:"none",
+          cursor:"pointer",fontWeight:filterCat===c?700:400,
+          background:filterCat===c?C.primary:"#eee",
+          color:filterCat===c?"#fff":C.muted}},c))
     ),
 
-    // Item list
-    h("div",{style:{display:"grid",gap:7}},
-      filtered.map(item=>{
-        const avail   = getAvail(item);
-        const price   = getPrice(item);
-        const hasOvr  = overrides[item.id]?.price!=null;
-        const isEdit  = editPrice===item.id;
-        const isSaving= saving===item.id;
+    // Branch-exclusive items section
+    exclusives.length>0&&h("div",{style:{marginBottom:14}},
+      h("div",{style:{fontSize:10,fontWeight:700,color:C.success,
+        letterSpacing:1,marginBottom:6,display:"flex",alignItems:"center",gap:6}},
+        "⭐ BRANCH-EXCLUSIVE ITEMS ("+curBranch.name+" only)"),
+      h("div",{style:{background:"#fff",borderRadius:10,border:"2px solid "+C.success,overflow:"hidden"}},
+        exclusives.map((ex,i)=>h("div",{key:ex._docId,
+          style:{display:"grid",gridTemplateColumns:"40px 1fr 80px 80px 80px",
+            padding:"10px 14px",alignItems:"center",
+            borderBottom:i<exclusives.length-1?"1px solid #f5f5f5":"none",
+            background:"#F1F8E9"}},
+          h("div",{style:{fontSize:24}},ex.emoji||"🍽️"),
+          h("div",null,
+            h("div",{style:{fontWeight:700,fontSize:12}},ex.name),
+            h("div",{style:{fontSize:9,color:C.muted}},ex.cat+" · "+ex.desc)
+          ),
+          h("div",{style:{fontWeight:800,color:C.success,fontSize:13}},
+            "₱"+parseFloat(ex.basePrice||0).toFixed(0)),
+          h("div",{style:{fontSize:9,padding:"2px 8px",background:C.success+"20",
+            color:C.success,borderRadius:10,fontWeight:700}},"Exclusive"),
+          h("button",{onClick:()=>deleteExclusive(ex),
+            style:{background:"none",border:"none",color:C.danger,
+              cursor:"pointer",fontSize:14,fontWeight:700}},"×")
+        ))
+      )
+    ),
 
+    // Main menu items with overrides
+    h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
+      h("div",{style:{display:"grid",
+        gridTemplateColumns:"36px 1fr 120px 100px 80px 80px",
+        padding:"8px 14px",background:"#f5f5f5",
+        fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1}},
+        "","ITEM","BRANCH PRICE","MAIN PRICE","STATUS","RESET"),
+      filtered.map((item,i)=>{
+        const avail=getAvail(item);
+        const price=getPrice(item);
+        const hasOverride=overrides[item.id]!=null;
+        const priceChanged=overrides[item.id]?.price!=null&&overrides[item.id].price!==item.basePrice;
         return h("div",{key:item.id,
-          style:{background:"#fff",borderRadius:11,
-            border:`2px solid ${avail?hasOvr?"#FF9500":C.border:"#eee"}`,
-            opacity:avail?1:.6,transition:"all .2s",
-            padding:"11px 14px",display:"flex",alignItems:"center",gap:12}},
-
-          // Emoji
-          h("div",{style:{width:44,height:44,borderRadius:10,
-            background:avail?`${C.primary}10`:"#f5f5f5",
-            display:"flex",alignItems:"center",justifyContent:"center",
-            fontSize:24,flexShrink:0,position:"relative"}},
-            item.emoji,
-            !avail&&h("div",{style:{position:"absolute",inset:0,background:"rgba(255,255,255,.6)",
-              display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}},"🚫")
+          style:{display:"grid",
+            gridTemplateColumns:"36px 1fr 120px 100px 80px 80px",
+            padding:"10px 14px",alignItems:"center",
+            borderBottom:i<filtered.length-1?"1px solid #f5f5f5":"none",
+            background:!avail?"#FFEBEE":priceChanged?"#FFF8E1":"#fff",
+            opacity:avail?1:0.7}},
+          h("div",{style:{fontSize:22}},item.emoji||"🍽️"),
+          h("div",null,
+            h("div",{style:{fontWeight:700,fontSize:12,color:avail?C.text:"#999"}},
+              item.name+(hasOverride?" ✏️":"")),
+            h("div",{style:{fontSize:9,color:C.muted}},item.cat)
           ),
-
-          // Info
-          h("div",{style:{flex:1,minWidth:0}},
-            h("div",{style:{fontWeight:700,fontSize:12,color:avail?C.text:C.muted}},item.name),
-            h("div",{style:{fontSize:8,color:C.muted,marginTop:1}},item.cat),
-            // Price display
-            h("div",{style:{display:"flex",alignItems:"center",gap:7,marginTop:4}},
-              h("div",{style:{fontSize:13,fontWeight:900,
-                color:hasOvr?C.warning:avail?C.primary:C.muted}},
-                "₱"+price.toFixed(2)),
-              hasOvr&&h("div",{style:{fontSize:9,color:C.muted,textDecoration:"line-through"}},
-                "₱"+item.basePrice.toFixed(2)),
-              hasOvr&&h("span",{style:{fontSize:8,padding:"1px 6px",background:"#FFF8E1",
-                color:C.warning,borderRadius:10,fontWeight:700,border:"1px solid #FFE082"}},
-                "BRANCH PRICE")
-            )
+          // Branch price (editable)
+          h("div",{style:{display:"flex",gap:4,alignItems:"center"}},
+            h("span",{style:{color:C.muted,fontSize:11}},"₱"),
+            h("input",{type:"number",
+              value:price||"",
+              onChange:e=>savePrice(item,e.target.value),
+              onClick:()=>window._openNumpad&&window._openNumpad({
+                value:String(price||""),
+                label:"PRICE — "+item.name,
+                allowDecimal:false,
+                onChange:v=>savePrice(item,v)
+              }),
+              style:{width:70,padding:"5px 6px",
+                border:"1px solid "+(priceChanged?C.warning:C.border),
+                borderRadius:6,fontSize:12,fontWeight:priceChanged?700:400,
+                color:priceChanged?C.warning:C.text,outline:"none",
+                background:priceChanged?"#FFFDE7":"#fff"}})
           ),
-
-          // Price override controls
-          h("div",{style:{display:"flex",flexDirection:"column",gap:5,alignItems:"flex-end"}},
-            // Edit price section
-            isEdit
-              ?h("div",{style:{display:"flex",gap:5,alignItems:"center"}},
-                  h("span",{style:{fontSize:11,color:C.muted}},"₱"),
-                  h("input",{
-                    type:"number",
-                    value:tempPrice,
-                    onChange:e=>setTempPrice(e.target.value),
-                    autoFocus:true,
-                    onKeyDown:e=>{if(e.key==="Enter")savePrice(item);if(e.key==="Escape"){setEditPrice(null);setTempPrice("");}},
-                    placeholder:item.basePrice,
-                    style:{width:70,padding:"5px 8px",border:"2px solid "+C.warning,
-                      borderRadius:7,fontSize:13,fontWeight:700,outline:"none",textAlign:"center"}
-                  }),
-                  h("button",{onClick:()=>savePrice(item),
-                    style:{padding:"5px 9px",background:C.warning,border:"none",
-                      borderRadius:6,color:"#fff",fontSize:10,fontWeight:700,cursor:"pointer"}},
-                    "✓"),
-                  hasOvr&&h("button",{onClick:()=>resetPrice(item),
-                    style:{padding:"5px 9px",background:"#f5f5f5",border:"1px solid #ddd",
-                      borderRadius:6,color:C.muted,fontSize:10,cursor:"pointer"}},
-                    "Reset"),
-                  h("button",{onClick:()=>{setEditPrice(null);setTempPrice("");},
-                    style:{padding:"5px 8px",background:"none",border:"none",
-                      color:C.muted,fontSize:13,cursor:"pointer"}},
-                    "×")
-                )
-              :h("button",{
-                  onClick:()=>{setEditPrice(item.id);setTempPrice(price.toString());},
-                  style:{padding:"4px 10px",background:hasOvr?"#FFF8E1":"#f5f5f5",
-                    border:`1px solid ${hasOvr?C.warning:C.border}`,
-                    borderRadius:6,color:hasOvr?C.warning:C.muted,
-                    fontSize:10,fontWeight:hasOvr?700:400,cursor:"pointer"}},
-                  hasOvr?"✏️ ₱"+price.toFixed(2):"Set Price"),
-
-            // Toggle switch
-            h("div",{style:{display:"flex",alignItems:"center",gap:6}},
-              h("button",{onClick:()=>toggleAvail(item),disabled:isSaving,
-                style:{width:38,height:21,borderRadius:11,border:"none",
-                  background:avail?C.success:"#ccc",
-                  cursor:"pointer",position:"relative",transition:"all .2s",flexShrink:0}},
-                h("div",{style:{width:15,height:15,borderRadius:"50%",background:"#fff",
-                  position:"absolute",top:3,transition:"all .2s",
-                  left:avail?"calc(100% - 18px)":"3px",
-                  boxShadow:"0 1px 3px rgba(0,0,0,.3)"}})
-              ),
-              h("span",{style:{fontSize:9,color:avail?C.success:C.muted,fontWeight:700,minWidth:22}},
-                avail?"ON":"OFF")
-            )
-          )
+          // Main price (reference)
+          h("div",{style:{fontSize:11,color:C.muted}},"₱"+item.basePrice),
+          // Toggle
+          h("button",{onClick:()=>toggleAvail(item),
+            style:{padding:"5px 10px",borderRadius:20,border:"none",
+              cursor:"pointer",fontSize:10,fontWeight:700,
+              background:avail?C.success+"20":C.danger+"20",
+              color:avail?C.success:C.danger}},
+            saving===item.id?"...":(avail?"✅ ON":"🚫 OFF")),
+          // Reset
+          hasOverride?h("button",{onClick:()=>resetItem(item),
+            style:{padding:"4px 8px",background:"#fff",border:"1px solid "+C.border,
+              borderRadius:6,fontSize:9,cursor:"pointer",color:C.muted}},"↺ Reset")
+          :h("div",{style:{fontSize:9,color:"#ddd"}},"—")
         );
       })
     )
@@ -2869,7 +2938,6 @@ function BranchMenuPage({menuItems,setMenuItems,branchId,curBranch,user,db,showT
 }
 
 
-// ─── INGREDIENTS MASTER LIST ─────────────────────────────
 function IngredientsPage({db,user,showT}){
   const [ings,setIngs]       = useState([]);
   const [editing,setEditing] = useState(null); // null | "new" | {id,...}
@@ -5666,6 +5734,211 @@ function printPODR(po){
 }
 
 
+
+// ─── PERMISSIONS TAB ──────────────────────────────────────
+function PermissionsTab({db,showT,companySettings,setCompanySettings}){
+  // Default permissions per role
+  const DEFAULT_PERMS = {
+    manager: {
+      pos:true, orders:true, analytics:true, z_reading:true,
+      cash_count:true, expenses:true, inventory:true,
+      stock_order:true, branch_menu:true, crew_mgmt:true,
+      void_requests:true, ca_request:true, loan_request:true,
+      bom_mgmt:true, payroll:true, branch_settings:true, printer:true
+    },
+    cashier: {
+      pos:true, orders:true, x_reading:true, z_reading:true,
+      cash_count:true, ca_request:true, loan_request:true,
+      void_request:true, expenses:false, inventory:false
+    },
+    crew: {
+      kitchen:true, ca_request:true, loan_request:true,
+      kiosk:true
+    },
+    stockclerk: {
+      inventory:true, stock_order:true, stock_receive:true,
+      ca_request:true, loan_request:true
+    }
+  };
+
+  const [perms,setPerms] = useState(()=>{
+    return companySettings.rolePerms || DEFAULT_PERMS;
+  });
+  const [saving,setSaving] = useState(false);
+
+  // Nav items per role with labels
+  const ROLE_NAVS = {
+    manager: [
+      {key:"pos",label:"🛒 POS"},
+      {key:"orders",label:"📋 Orders"},
+      {key:"analytics",label:"📊 Analytics"},
+      {key:"z_reading",label:"📊 Z-Reading"},
+      {key:"cash_count",label:"💵 Cash Count"},
+      {key:"expenses",label:"💸 Expenses"},
+      {key:"inventory",label:"📦 Inventory"},
+      {key:"stock_order",label:"🚚 Stock Order"},
+      {key:"branch_menu",label:"🍽️ Branch Menu"},
+      {key:"crew_mgmt",label:"👥 My Crew"},
+      {key:"void_requests",label:"🚫 Void Requests"},
+      {key:"ca_request",label:"💵 Cash Advance"},
+      {key:"loan_request",label:"🏦 Loan Request"},
+      {key:"bom_mgmt",label:"🧪 BOM"},
+      {key:"payroll",label:"💹 Payroll"},
+      {key:"branch_settings",label:"⚙️ Branch Settings"},
+      {key:"printer",label:"🖨️ Printer"},
+    ],
+    cashier: [
+      {key:"pos",label:"🛒 POS"},
+      {key:"orders",label:"📋 Orders"},
+      {key:"x_reading",label:"📊 X-Reading"},
+      {key:"z_reading",label:"📊 Z-Reading"},
+      {key:"cash_count",label:"💵 Cash Count"},
+      {key:"expenses",label:"💸 Expenses"},
+      {key:"inventory",label:"📦 Inventory"},
+      {key:"ca_request",label:"💵 Cash Advance"},
+      {key:"loan_request",label:"🏦 Loan Request"},
+      {key:"void_request",label:"🚫 Void Request"},
+    ],
+    crew: [
+      {key:"kitchen",label:"🍳 Kitchen"},
+      {key:"ca_request",label:"💵 Cash Advance"},
+      {key:"loan_request",label:"🏦 Loan Request"},
+      {key:"kiosk",label:"📺 Kiosk"},
+    ],
+    stockclerk: [
+      {key:"inventory",label:"📦 Inventory"},
+      {key:"stock_order",label:"🚚 Stock Order"},
+      {key:"stock_receive",label:"📥 Receive Stock"},
+      {key:"ca_request",label:"💵 Cash Advance"},
+      {key:"loan_request",label:"🏦 Loan Request"},
+    ]
+  };
+
+  const ROLE_COLORS = {
+    manager:"#007AFF", cashier:"#34C759",
+    crew:"#FF9500", stockclerk:"#AF52DE"
+  };
+  const ROLE_LABELS = {
+    manager:"🏪 Branch Manager", cashier:"💳 Cashier",
+    crew:"🧑‍🍳 Crew / Kitchen", stockclerk:"📦 Stock Clerk"
+  };
+
+  const toggle=(role,key)=>{
+    setPerms(p=>({
+      ...p,
+      [role]:{...p[role],[key]:!p[role]?.[key]}
+    }));
+  };
+
+  const save=async()=>{
+    setSaving(true);
+    try{
+      await setDoc(doc(db,"settings","company"),
+        {rolePerms:perms},{merge:true});
+      setCompanySettings(p=>({...p,rolePerms:perms}));
+      showT("Permissions saved ✓ — takes effect on next login","ok");
+    }catch(e){showT("Error saving","err");}
+    setSaving(false);
+  };
+
+  const resetRole=(role)=>{
+    setPerms(p=>({...p,[role]:{...DEFAULT_PERMS[role]}}));
+  };
+
+  return h("div",null,
+    h("div",{style:{background:"#fff3cd",borderRadius:10,
+      padding:"10px 14px",marginBottom:14,fontSize:11,color:"#856404"}},
+      "⚠️ Changes take effect on next login. Owner account is not affected by these settings."),
+
+    h("div",{style:{display:"grid",gap:12}},
+      Object.keys(ROLE_NAVS).map(role=>
+        h("div",{key:role,style:{background:"#fff",borderRadius:12,
+          border:"2px solid "+(ROLE_COLORS[role]||C.border),overflow:"hidden"}},
+
+          // Role header
+          h("div",{style:{
+            background:ROLE_COLORS[role]||C.primary,
+            padding:"10px 16px",
+            display:"flex",justifyContent:"space-between",alignItems:"center"}},
+            h("div",{style:{color:"#fff",fontWeight:800,fontSize:13}},
+              ROLE_LABELS[role]||role),
+            h("div",{style:{display:"flex",gap:8}},
+              h("button",{onClick:()=>resetRole(role),
+                style:{padding:"4px 10px",background:"rgba(255,255,255,.2)",
+                  border:"none",borderRadius:6,color:"#fff",
+                  fontSize:10,fontWeight:700,cursor:"pointer"}},
+                "↺ Reset"),
+              h("button",{
+                onClick:()=>{
+                  // Enable all
+                  const all={};
+                  ROLE_NAVS[role].forEach(n=>all[n.key]=true);
+                  setPerms(p=>({...p,[role]:all}));
+                },
+                style:{padding:"4px 10px",background:"rgba(255,255,255,.2)",
+                  border:"none",borderRadius:6,color:"#fff",
+                  fontSize:10,fontWeight:700,cursor:"pointer"}},
+                "✅ All On"),
+              h("button",{
+                onClick:()=>{
+                  // Disable optional ones (keep pos for cashier)
+                  const none={};
+                  ROLE_NAVS[role].forEach(n=>none[n.key]=
+                    (role==="cashier"&&n.key==="pos")?true:false);
+                  setPerms(p=>({...p,[role]:none}));
+                },
+                style:{padding:"4px 10px",background:"rgba(255,255,255,.2)",
+                  border:"none",borderRadius:6,color:"#fff",
+                  fontSize:10,fontWeight:700,cursor:"pointer"}},
+                "🚫 All Off")
+            )
+          ),
+
+          // Toggle grid
+          h("div",{style:{padding:"12px 16px",
+            display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",
+            gap:8}},
+            ROLE_NAVS[role].map(nav=>{
+              const isOn=perms[role]?.[nav.key]!==false;
+              const isRequired=
+                (role==="cashier"&&nav.key==="pos")||
+                (role==="crew"&&nav.key==="kitchen");
+              return h("button",{key:nav.key,
+                onClick:()=>!isRequired&&toggle(role,nav.key),
+                style:{padding:"8px 12px",borderRadius:8,
+                  border:"2px solid "+(isOn?ROLE_COLORS[role]:C.border),
+                  background:isOn?(ROLE_COLORS[role]+"15"):"#f9f9f9",
+                  cursor:isRequired?"not-allowed":"pointer",
+                  display:"flex",alignItems:"center",gap:6,
+                  fontSize:11,fontWeight:isOn?700:400,
+                  color:isOn?ROLE_COLORS[role]:C.muted,
+                  opacity:isRequired?0.7:1}},
+                h("span",null,isOn?"✅":"⬜"),
+                h("span",null,nav.label),
+                isRequired&&h("span",{style:{fontSize:8,color:C.muted}}," (required)")
+              );
+            })
+          )
+        )
+      )
+    ),
+
+    h("div",{style:{marginTop:14,display:"flex",gap:8}},
+      h("button",{onClick:()=>setPerms(DEFAULT_PERMS),
+        style:{padding:"10px 20px",background:"#fff",
+          border:"1px solid "+C.border,borderRadius:9,
+          fontSize:12,fontWeight:700,cursor:"pointer"}},
+        "↺ Reset All to Default"),
+      h("button",{onClick:save,disabled:saving,
+        style:{flex:1,padding:"11px",
+          background:saving?"#ccc":"linear-gradient(135deg,"+C.primary+","+C.dark+")",
+          border:"none",borderRadius:9,color:"#fff",
+          fontWeight:800,fontSize:13,cursor:"pointer"}},
+        saving?"Saving...":"💾 Save Permissions")
+    )
+  );
+}
+
 // ─── SETTINGS PAGE ────────────────────────────────────────
 function SettingsPage({db,user,showT,branches,companySettings,setCompanySettings}){
   const [tab,setTab]=useState("print");
@@ -5689,7 +5962,7 @@ function SettingsPage({db,user,showT,branches,companySettings,setCompanySettings
   return h("div",{style:{maxWidth:660}},
     h(SectionHeader,{title:"Settings"}),
     h("div",{style:{display:"flex",gap:0,marginBottom:14,borderBottom:"2px solid "+C.border}},
-      T("print","🖨️ Print & Printer"),T("company","🏢 Company"),T("branches","🏪 Branches")),
+      T("print","🖨️ Print & Printer"),T("company","🏢 Company"),T("branches","🏪 Branches"),T("perms","🔐 Permissions")),
     tab==="company"&&h("div",{style:{display:"flex",flexDirection:"column",gap:12}},
       h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,padding:"16px"}},
         h("div",{style:{fontSize:12,fontWeight:800,marginBottom:10}},"🏢 Company Info"),
@@ -5784,7 +6057,9 @@ function SettingsPage({db,user,showT,branches,companySettings,setCompanySettings
           h("div",{style:{fontSize:10,color:C.muted}},b.id+" · "+(b.address||""))
         ))
       )
-    )
+    ),
+
+    tab==="perms"&&h(PermissionsTab,{db,showT,companySettings,setCompanySettings})
   );
 }
 
@@ -6202,6 +6477,7 @@ function App(){
   const [user,setUser]=useState(null);
   const [branches,setBranches]=useState(BRANCHES);
   const [branchOverrides,setBranchOverrides]=useState({});
+  const [branchExclusives,setBranchExclusives]=useState([]);
   const [branchPerms,setBranchPerms]=useState({});
   const [priceType,setPriceType]=useState("retail");
   const [poFilter,setPoFilter]=useState("all");
@@ -6406,13 +6682,17 @@ function App(){
     const timer = setTimeout(()=>setAuthLoading(false), 8000);
     const unsub = onAuthStateChanged(auth, async fbUser=>{
       if(fbUser){
+        setLoginLoading(false); // Auth succeeded - stop loading spinner
         try{
           // Look up profile in Firestore staff_accounts by email
           const q = query(
             collection(db,"staff_accounts"),
             where("email","==",fbUser.email)
           );
-          const snap = await getDocs(q);
+          // Add timeout - if Firestore is slow, don't get stuck
+          const snapPromise = getDocs(q);
+          const timeoutPromise = new Promise((_,rej)=>setTimeout(()=>rej(new Error("timeout")),5000));
+          const snap = await Promise.race([snapPromise,timeoutPromise]);
           if(!snap.empty){
             const profile = snap.docs[0].data();
             setUser({...profile, uid:fbUser.uid, email:fbUser.email});
@@ -6428,6 +6708,7 @@ function App(){
           setUser({...found, uid:fbUser.uid});
           setPage(ROLES[found.role]?.nav[0]||"dashboard");
           setLoginErr("");
+          setLoginLoading(false);
         }else{
           // No staff_accounts record found - check by uid
           try{
@@ -6445,7 +6726,7 @@ function App(){
           await signOut(auth);
           setUser(null);
           setPage(null);
-          setLoginErr("Account not found in system. Contact your admin to add your email to your staff account.");
+          setLoginErr("Account not found. Ask admin to: 1) Add your email in Users/My Crew, 2) Click 'Create Login Account'.");
         }
       }else{
         setUser(null);
@@ -6617,11 +6898,21 @@ function App(){
   const chkDiscAmt=chkSub*chkDisc.rate;
   const chkTotal=chkSub-chkDiscAmt;
   const myOrders=user?.role==="owner"?orders:orders.filter(o=>o.branch===branchId);
-  const menuWithOverrides=menuItems.map(i=>({
-    ...i,
-    avail:(branchOverrides[i.id]?.avail??i.avail)!==false,
-    basePrice:branchOverrides[i.id]?.price??i.basePrice
-  }));
+  const menuWithOverrides=[
+    // Main menu items with branch overrides
+    ...menuItems.map(i=>({
+      ...i,
+      avail:(branchOverrides[i.id]?.avail??i.avail)!==false,
+      basePrice:branchOverrides[i.id]?.price??i.basePrice
+    })),
+    // Branch-exclusive items (from menu_overrides where isExclusive:true)
+    ...(branchExclusives||[]).map(ex=>({
+      ...ex,
+      avail:true,
+      variants:[{label:"Regular",price:ex.basePrice}],
+      options:[],promos:[]
+    }))
+  ];
   const filtMenu=menuWithOverrides.filter(i=>(menuCat==="All"||i.cat===menuCat)&&i.name.toLowerCase().includes(menuSrch.toLowerCase())&&i.avail);
   const sBg={pending:"#FFF8E1",preparing:"#E3F2FD",served:"#E8F5E9",cancelled:"#FFEBEE"};
   const sCol={pending:C.warning,preparing:C.info,served:C.success,cancelled:C.danger};
@@ -7225,7 +7516,13 @@ function App(){
         )
       ),
       h("nav",{style:{flex:1,padding:"3px 6px",overflowY:"auto",minHeight:0}},
-        (role?.nav||[]).map(p=>{const m=NAV_META[p];if(!m)return null;return h("button",{key:p,onClick:()=>setPage(p),
+        (role?.nav||[]).filter(p=>{
+          // Apply permission overrides from Settings
+          const rolePerms=(companySettings?.rolePerms||{})[user?.role];
+          if(!rolePerms)return true; // no perms set = all allowed
+          if(user?.role==="owner"||user?.role==="commissary")return true; // owner always full
+          return rolePerms[p]!==false; // false = blocked
+        }).map(p=>{const m=NAV_META[p];if(!m)return null;return h("button",{key:p,onClick:()=>setPage(p),
           style:{width:"100%",display:"flex",alignItems:"center",gap:6,padding:"5px 9px",borderRadius:7,border:"none",
             background:page===p?"rgba(200,21,27,.22)":"transparent",
             color:page===p?C.primary:"rgba(255,255,255,.38)",
