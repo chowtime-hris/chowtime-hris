@@ -6989,35 +6989,53 @@ function App(){
         const bomSnap = await getDocs(collection(db,"bom"));
         const bomData = {};
         bomSnap.docs.forEach(d=>{ bomData[d.id]={...d.data()}; });
-        const invCol = "inventory_"+branchId;
         const logCol = "inventory_log_"+branchId;
+        let totalDeductions = 0;
 
         for(const cartItem of cart){
           const itemId = cartItem.id;
           const variant = cartItem.variant||"default";
-          // Build variant key
           const vKey = (!variant||variant==="default")
             ? itemId
             : itemId+"__"+variant.replace(/\s+/g,"_");
 
-          // Get BOM rows for this variant
           const itemBOM = bomData[itemId]||{};
           const rows = itemBOM[vKey]||itemBOM[itemId]||[];
 
           for(const row of rows){
             if(!row.ingId||!row.qty)continue;
-            const deductAmt = (row.qty||0)*(cartItem.qty||1);
+            const convFactor = row.convFactor||1;
+            const deductAmt = ((row.qty||0)*(cartItem.qty||1))/convFactor;
+            
+            // Try branch inventory first, then main inventory
+            const branchInvCol = "inventory_"+branchId;
+            const mainInvCol = "inventory";
+            let deductCol = branchInvCol;
+            
+            // Check if item exists in branch inventory
             try{
-              await updateDoc(doc(db,invCol,row.ingId),{
+              const branchInvDoc = await getDoc(doc(db,branchInvCol,row.ingId));
+              if(!branchInvDoc.exists()){
+                // Fall back to main inventory
+                const mainInvDoc = await getDoc(doc(db,mainInvCol,row.ingId));
+                if(mainInvDoc.exists()) deductCol = mainInvCol;
+              }
+            }catch(e){ deductCol = branchInvCol; }
+            
+            try{
+              await updateDoc(doc(db,deductCol,row.ingId),{
                 stock: increment(-deductAmt),
                 lastDeducted: serverTimestamp()
               });
+              totalDeductions++;
               await addDoc(collection(db,logCol),{
                 itemId:row.ingId,
                 itemName:row.ingName||row.ingId,
                 unit:row.unit||"",
                 type:"deduct",
                 amount:-deductAmt,
+                convFactor:convFactor,
+                invCol:deductCol,
                 prevStock:null,
                 newStock:null,
                 transactionId:ord.id,
@@ -7092,6 +7110,11 @@ function App(){
               }
             }
           }
+        }
+        if(totalDeductions>0){
+          await updateDoc(doc(db,"orders",ord._docId||ord.id),{
+            bomDeducted:true,deductedAt:serverTimestamp()
+          }).catch(()=>{});
         }
       }catch(bomErr){console.warn("BOM deduction error:",bomErr);}
       // ────────────────────────────────────────────────────
