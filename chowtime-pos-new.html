@@ -671,8 +671,24 @@ function printZ(zd,branchName,cashier){
 
 // ─── ITEM CUSTOMIZER ─────────────────────────────────────
 function ItemCustomizer({item,onAdd,onClose,optionGroups=[]}){
-  const linkedGroups=(optionGroups||[]).filter(function(g){return (item.optionGroups||[]).includes(g.id);});
+  // Linked groups from VARIANT level (if any) + item level
+  const variantGroupIds=(selV&&selV.optionGroups)||[];
+  const itemGroupIds=(item.optionGroups)||[];
+  const allLinkedIds=[...new Set([...variantGroupIds,...itemGroupIds])];
+  const linkedGroups=(optionGroups||[]).filter(function(g){return allLinkedIds.includes(g.id);});
   const [selV,setSelV]=useState(item.variants[0]);
+  // When variant changes, keep only relevant option group selections
+  const changeVariant=(v)=>{
+    setSelV(v);
+    // Clear linked group selections that don't apply to new variant
+    setSelO(function(prev){
+      const newSel={};
+      Object.keys(prev).forEach(function(k){
+        if(!k.startsWith("og_"))newSel[k]=prev[k]; // keep item-level options
+      });
+      return newSel;
+    });
+  };
   const [selO,setSelO]=useState({});
   const [selP,setSelP]=useState(null);
   const [qty,setQty]=useState(1);
@@ -686,7 +702,11 @@ function ItemCustomizer({item,onAdd,onClose,optionGroups=[]}){
   const optsTotal=Object.values(selO).flat().reduce((s,c)=>s+(c.priceAdd||0),0);
   const unitPrice=item.basePrice+(selV?.priceAdd||0)+optsTotal+(selP?.priceAdd||0);
   const isBogo=selP?.discount==="bogo";
-  const lineTotal=isBogo?unitPrice:unitPrice*qty;
+  // Add prices from linked option groups
+  const linkedGroupsPrice=Object.entries(selO).filter(([k])=>k.startsWith("og_")).reduce((sum,[,choices])=>{
+    return sum+(choices||[]).reduce((s,c)=>s+(c.priceAdd||0),0);
+  },0);
+  const lineTotal=isBogo?unitPrice:(unitPrice+linkedGroupsPrice)*qty;
   const missing=item.options.filter(o=>o.required&&!(selO[o.id]||[]).length).map(o=>o.label);
 
   const handleAdd=()=>{
@@ -746,7 +766,7 @@ function ItemCustomizer({item,onAdd,onClose,optionGroups=[]}){
           h("div",{style:{fontSize:11,fontWeight:800,marginBottom:8}},"Size / Quantity ",h("span",{style:{color:C.primary,fontSize:10}},"• Required")),
           item.variants.map(v=>{
             const on=selV?.id===v.id;
-            return h("button",{key:v.id,onClick:()=>setSelV(v),style:{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:10,border:`2px solid ${on?C.primary:C.border}`,background:on?"#FFF0F0":"#fff",cursor:"pointer",textAlign:"left",width:"100%",marginBottom:6}},
+            return h("button",{key:v.id,onClick:()=>changeVariant(v),style:{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:10,border:`2px solid ${on?C.primary:C.border}`,background:on?"#FFF0F0":"#fff",cursor:"pointer",textAlign:"left",width:"100%",marginBottom:6}},
               h("div",{style:{width:19,height:19,borderRadius:"50%",border:`2px solid ${on?C.primary:C.border}`,background:on?C.primary:"#fff",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}},
                 on&&h("div",{style:{width:7,height:7,borderRadius:"50%",background:"#fff"}})
               ),
@@ -798,7 +818,7 @@ function ItemCustomizer({item,onAdd,onClose,optionGroups=[]}){
                       var cur=p[groupKey]||[];
                       var next=on
                         ?cur.filter(function(s){return s.id!==opt.id;})
-                        :[...cur,{id:opt.id,label:opt.name}];
+                        :[...cur,{id:opt.id,label:opt.label||opt.name,priceAdd:opt.priceAdd||0}];
                       var r={};Object.assign(r,p);r[groupKey]=next;return r;
                     });
                   },
@@ -806,7 +826,9 @@ function ItemCustomizer({item,onAdd,onClose,optionGroups=[]}){
                     textAlign:"center",border:"2px solid "+(on?C.primary:C.border),
                     background:on?C.primary+"12":"#fff"}},
                   h("div",{style:{fontSize:11,fontWeight:on?700:400,
-                    color:on?C.primary:C.text}},opt.name),
+                    color:on?C.primary:C.text}},opt.label||opt.name),
+                  (opt.priceAdd||0)>0&&h("div",{style:{fontSize:9,color:C.primary,fontWeight:700}},
+                    "+₱"+(opt.priceAdd||0)),
                   (opt.bom||[]).length>0&&h("div",{style:{fontSize:8,
                     color:on?C.primary:C.muted,marginTop:2}},
                     "BOM ✓")
@@ -3189,6 +3211,7 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
   // New group/choice form
   const [newGrpName,setNewGrpName]   = useState("");
   const [newChoiceLbl,setNewChoiceLbl] = useState("");
+  const [newChoicePrice,setNewChoicePrice] = useState("");
   const [showAddGrp,setShowAddGrp]   = useState(false);
   const [showAddChoice,setShowAddChoice] = useState(false);
   const [editingGrp,setEditingGrp]   = useState(null); // group id being renamed
@@ -3269,10 +3292,11 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
     const label=newChoiceLbl.trim();
     if(!label||!selGroup){showT("Enter choice name","warn");return;}
     if((selGroup.choices||[]).find(c=>c.label===label)){showT("Choice already exists","warn");return;}
-    const newChoices=[...(selGroup.choices||[]),{id:"ch_"+Date.now(),label}];
+    const price=parseFloat(newChoicePrice)||0;
+    const newChoices=[...(selGroup.choices||[]),{id:"ch_"+Date.now(),label,priceAdd:price}];
     try{
       await updateDoc(doc(db,"option_groups",selGroup.id),{choices:newChoices});
-      setNewChoiceLbl(""); setShowAddChoice(false);
+      setNewChoiceLbl(""); setNewChoicePrice(""); setShowAddChoice(false);
       showT(label+" added ✓");
     }catch(e){showT("Error","err");}
   };
@@ -3701,12 +3725,21 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
           // Add choice form
           selGroup&&showAddChoice&&h("div",{style:{padding:"8px 14px",
             borderBottom:"1px solid "+C.border,background:"#f0f8ff",
-            display:"flex",gap:6}},
+            display:"flex",gap:6,flexWrap:"wrap"}},
             h("input",{value:newChoiceLbl,onChange:e=>setNewChoiceLbl(e.target.value),
               onKeyDown:e=>e.key==="Enter"&&addChoice(),
               placeholder:"Choice name (e.g. Buffalo)",
-              style:{flex:1,padding:"6px 10px",border:"1px solid "+C.primary,
+              style:{flex:2,minWidth:120,padding:"6px 10px",border:"1px solid "+C.primary,
                 borderRadius:7,fontSize:11,outline:"none"}}),
+            h("div",{style:{display:"flex",alignItems:"center",gap:4}},
+              h("span",{style:{fontSize:11,color:C.muted,fontWeight:700}},"₱+"),
+              h("input",{type:"number",min:0,step:"0.5",
+                value:newChoicePrice,
+                onChange:e=>setNewChoicePrice(e.target.value),
+                placeholder:"0",
+                style:{width:60,padding:"6px 8px",border:"1px solid "+C.primary,
+                  borderRadius:7,fontSize:11,outline:"none",textAlign:"center"}})
+            ),
             h("button",{onClick:addChoice,
               style:{padding:"6px 14px",background:C.primary,border:"none",
                 borderRadius:7,color:"#fff",fontWeight:700,fontSize:11,cursor:"pointer"}},
@@ -3765,7 +3798,11 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
                                 "✕")
                             )
                           : h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center"}},
-                              h("span",{style:{fontSize:12,fontWeight:isSel?700:400}},ch.label),
+                              h("div",null,
+                                h("span",{style:{fontSize:12,fontWeight:isSel?700:400}},ch.label),
+                                (ch.priceAdd||0)>0&&h("span",{style:{fontSize:9,color:C.primary,
+                                  marginLeft:5,fontWeight:600}},"+₱"+(ch.priceAdd||0))
+                              ),
                               h("span",{style:{fontSize:9,fontWeight:700,
                                 color:has?C.success:C.muted}},has?"✓ BOM":"—")
                             )
