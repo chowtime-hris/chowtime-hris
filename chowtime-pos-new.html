@@ -8531,6 +8531,36 @@ function App(){
                         "Inventory management · Stock receiving"
                       )
                     ),
+                    // Password field
+                    h("div",{style:{marginBottom:12}},
+                      h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,
+                        letterSpacing:1,marginBottom:4}},"PASSWORD"),
+                      h("input",{type:"password",value:editingStaff.password||"",
+                        onChange:e=>setEditingStaff(p=>({...p,password:e.target.value})),
+                        placeholder:"Min 6 characters",
+                        style:{width:"100%",padding:"9px",border:"1px solid "+C.border,
+                          borderRadius:7,fontSize:13,outline:"none",boxSizing:"border-box"}})
+                    ),
+
+                    // Create Login Account button
+                    editingStaff.email&&h("button",{
+                      onClick:async()=>{
+                        var pw=editingStaff.password||"";
+                        if(!pw||pw.length<6){showT("Enter password (min 6 chars)","warn");return;}
+                        try{
+                          await createUserWithEmailAndPassword(auth,editingStaff.email,pw);
+                          showT("✅ Login account created for "+editingStaff.name+"!","ok");
+                        }catch(e){
+                          if(e.code==="auth/email-already-in-use"){
+                            showT("Account already exists","ok");
+                          }else{showT("Error: "+e.message,"err");}
+                        }
+                      },
+                      style:{width:"100%",padding:"10px",marginBottom:8,
+                        background:"#1565C0",border:"none",borderRadius:9,
+                        color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}},
+                      "🔑 Create Login Account"),
+
                     // Save button
                     h("button",{
                       onClick:async()=>{
@@ -8877,19 +8907,20 @@ function App(){
                       )
                     ),
                     h("div",{style:{marginBottom:12}},
-                      h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:4}},"PIN (4 digits)"),
-                      h("input",{type:"password",maxLength:4,value:editingStaff.pin||"",
-                        onChange:e=>setEditingStaff(p=>({...p,pin:e.target.value})),
-                        placeholder:"1234",
+                      h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:4}},"PASSWORD (login password)"),
+                      h("input",{type:"password",value:editingStaff.password||"",
+                        onChange:e=>setEditingStaff(p=>({...p,password:e.target.value})),
+                        placeholder:"Min 6 characters",
                         style:{width:"100%",padding:"9px",border:"1px solid "+C.border,
-                          borderRadius:7,fontSize:14,outline:"none",
-                          letterSpacing:4,boxSizing:"border-box"}})
+                          borderRadius:7,fontSize:13,outline:"none",
+                          boxSizing:"border-box"}})
                     ),
                     // Create Login Account button
                     editingStaff.email&&h("button",{
                       onClick:async()=>{
                         if(!editingStaff.email){showT("Enter email first","warn");return;}
-                        var tempPw=editingStaff.pin||"chowtime1234";
+                        var tempPw=editingStaff.password||"";
+                          if(!tempPw||tempPw.length<6){showT("Enter password (min 6 chars)","warn");return;}
                         try{
                           await createUserWithEmailAndPassword(auth,editingStaff.email,tempPw);
                           showT("✅ Login account created! Password: "+tempPw,"ok");
@@ -8914,7 +8945,6 @@ function App(){
                             await addDoc(collection(db,"staff_accounts"),{
                               name:editingStaff.name,role:editingStaff.role,
                               branch:branchId,email:editingStaff.email||"",
-                              pin:editingStaff.pin||"1234",
                               createdAt:serverTimestamp(),createdBy:user.name
                             });
                             showT(editingStaff.name+" added ✓");
@@ -8922,7 +8952,7 @@ function App(){
                             await updateDoc(doc(db,"staff_accounts",editingStaff.id),{
                               name:editingStaff.name,role:editingStaff.role,
                               email:editingStaff.email||"",
-                              pin:editingStaff.pin,updatedAt:serverTimestamp(),
+                              updatedAt:serverTimestamp(),
                               updatedBy:user.name
                             });
                             showT(editingStaff.name+" updated ✓");
