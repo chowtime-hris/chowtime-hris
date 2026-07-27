@@ -7400,8 +7400,37 @@ function App(){
         )
       ),
       h("div",{style:{padding:"11px 18px 17px",borderTop:"1px solid "+C.border}},
+        // Exact amount button
+        h("button",{
+          onClick:()=>setChkCash(String(chkTotal.toFixed(2))),
+          style:{width:"100%",padding:"9px",marginBottom:8,
+            background:"#E3F2FD",border:"1px solid #90CAF9",
+            borderRadius:8,color:"#1565C0",
+            fontSize:12,fontWeight:700,cursor:"pointer"}},
+          "💵 Exact Amount — ₱"+chkTotal.toFixed(2)),
+
+        // Void/Cancel transaction
         h("button",{
           onClick:()=>{
+            if(!confirm("Cancel this transaction?"))return;
+            setCart([]);setChkCash("");setModal(null);
+            showT("Transaction cancelled","warn");
+          },
+          style:{width:"100%",padding:"9px",marginBottom:8,
+            background:"#FFEBEE",border:"1px solid #FFCDD2",
+            borderRadius:8,color:C.danger,
+            fontSize:12,fontWeight:700,cursor:"pointer"}},
+          "🚫 Cancel Transaction"),
+
+        // Confirm button - with payment validation
+        h("button",{
+          onClick:()=>{
+            const cash=parseFloat(chkCash)||0;
+            const isCredit=chkPay==="credit"||chkPay==="gcash"||chkPay==="maya"||chkPay==="bank";
+            if(!isCredit&&cash<chkTotal){
+              showT("₱"+(chkTotal-cash).toFixed(2)+" short — enter full payment","err");
+              return;
+            }
             setTimeout(placeOrder,50);
           },
           style:{width:"100%",padding:"13px",
@@ -8026,7 +8055,23 @@ function App(){
                 o.status==="pending"&&h("button",{onClick:()=>{if(o._docId)updateStatus(o._docId,"preparing");showT((o.id||"")+"→Prep","info");},style:{padding:"3px 7px",background:"#E3F2FD",border:"none",borderRadius:6,color:C.info,fontSize:9,fontWeight:700,cursor:"pointer"}},"Prepare"),
                 o.status==="preparing"&&h("button",{onClick:()=>{if(o._docId)updateStatus(o._docId,"served");showT((o.id||"")+" ✓");},style:{padding:"3px 7px",background:"#E8F5E9",border:"none",borderRadius:6,color:C.success,fontSize:9,fontWeight:700,cursor:"pointer"}},"Served✓"),
                 h(Badge,{label:o.status||"—",color:({"pending":C.warning,"preparing":C.info,"served":C.success})[o.status]||C.muted}),
-                h("button",{onClick:()=>{setCurOrd(o);setModal("receipt");},style:{width:24,height:24,background:"#FFF0F0",border:"none",borderRadius:5,color:C.primary,cursor:"pointer",fontSize:11}},"🖨️")
+                h("button",{onClick:()=>{setCurOrd(o);setModal("receipt");},style:{width:24,height:24,background:"#FFF0F0",border:"none",borderRadius:5,color:C.primary,cursor:"pointer",fontSize:11}},"🖨️"),
+                // Void button - manager/owner only, non-voided orders
+                (user.role==="manager"||user.role==="owner")&&o.status!=="void"&&o.status!=="cancelled"&&
+                h("button",{
+                  onClick:async()=>{
+                    if(!confirm("Void order "+o.id+"? This cannot be undone."))return;
+                    try{
+                      await updateDoc(doc(db,"orders",o._docId),{
+                        status:"void",voidedBy:user.name,
+                        voidedAt:serverTimestamp()
+                      });
+                      showT("Order "+o.id+" voided ✓","warn");
+                    }catch(e){showT("Error voiding","err");}
+                  },
+                  style:{padding:"3px 7px",background:"#FFEBEE",border:"none",
+                    borderRadius:6,color:C.danger,fontSize:9,fontWeight:700,cursor:"pointer"}},
+                  "🚫 Void")
               )
             )),
             orders.length===0&&h("div",{style:{textAlign:"center",padding:"30px",color:C.muted,fontSize:12}},"Loading from Firebase...")
