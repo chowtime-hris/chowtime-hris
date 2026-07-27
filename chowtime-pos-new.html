@@ -126,9 +126,9 @@ const BRANCHES = [
 
 const ROLES = {
   owner:     {label:"Owner / Admin",    emoji:"\u{1F451}", color:"#C8151B",
-    nav:["dashboard","branches","pos","orders","all_orders","analytics","z_reading","cash_count","expenses","cash_monitor","inventory","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","kiosk","settings"]},
+    nav:["dashboard","branches","pos","orders","all_orders","analytics","z_reading","cash_count","expenses","cash_monitor","inventory","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","kiosk","settings","printer"]},
   manager:   {label:"Branch Manager",   emoji:"\u{1F3EA}", color:"#007AFF",
-    nav:["branch_dash","pos","orders","analytics","z_reading","cash_count","expenses","inventory","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","bom_mgmt","kiosk","branch_settings"]},
+    nav:["branch_dash","pos","orders","analytics","z_reading","cash_count","expenses","inventory","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","bom_mgmt","kiosk","branch_settings","printer"]},
   cashier:   {label:"Cashier",          emoji:"\u{1F4B3}", color:"#34C759",
     nav:["pos","orders","x_reading","z_reading","cash_count","ca_request","loan_request","kiosk","void_request"]},
   crew:      {label:"Crew / Kitchen",   emoji:"\u{1F9D1}\u{200D}\u{1F373}", color:"#FF9500",
@@ -154,6 +154,7 @@ const NAV_META = {
   menu_mgmt:   {icon:"🍽️",label:"Menu"},
   user_mgmt:   {icon:"👥",label:"Users"},
   settings:    {icon:"⚙️",label:"Settings"},
+  printer:         {icon:"🖨️",label:"Printer"},
   branch_dash: {icon:"📊",label:"Dashboard"},
   pos:         {icon:"🛒",label:"POS"},
   orders:      {icon:"📋",label:"Orders"},
@@ -5661,6 +5662,265 @@ function printPODR(po){
   setTimeout(function(){w.print();},400);
 }
 
+
+// ─── SETTINGS PAGE ────────────────────────────────────────
+function SettingsPage({db,user,showT,branches,companySettings,setCompanySettings}){
+  const [tab,setTab]=useState("print");
+  const T=(id,lbl)=>h("button",{key:id,onClick:()=>setTab(id),
+    style:{padding:"9px 18px",border:"none",background:"none",cursor:"pointer",
+      fontSize:12,fontWeight:tab===id?800:400,
+      color:tab===id?C.primary:C.muted,
+      borderBottom:"3px solid "+(tab===id?C.primary:"transparent"),
+      marginBottom:-2}},lbl);
+  const F=(key,lbl)=>h("div",{key:key},
+    h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:4}},lbl),
+    h("input",{value:companySettings[key]||"",
+      onChange:e=>setCompanySettings(p=>({...p,[key]:e.target.value})),
+      style:{width:"100%",padding:"8px",border:"1px solid "+C.border,
+        borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box"}})
+  );
+  const save=async(msg)=>{
+    try{await setDoc(doc(db,"settings","company"),companySettings,{merge:true});showT(msg||"Saved");}
+    catch(e){showT("Error","err");}
+  };
+  return h("div",{style:{maxWidth:660}},
+    h(SectionHeader,{title:"Settings"}),
+    h("div",{style:{display:"flex",gap:0,marginBottom:14,borderBottom:"2px solid "+C.border}},
+      T("print","🖨️ Print & Printer"),T("company","🏢 Company"),T("branches","🏪 Branches")),
+    tab==="company"&&h("div",{style:{display:"flex",flexDirection:"column",gap:12}},
+      h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,padding:"16px"}},
+        h("div",{style:{fontSize:12,fontWeight:800,marginBottom:10}},"🏢 Company Info"),
+        h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
+          F("name","Company Name"),F("phone","Phone"),F("email","Email"),F("address","Address")),
+        h("button",{onClick:()=>save("Company info saved"),
+          style:{marginTop:10,padding:"9px 20px",background:C.primary,border:"none",borderRadius:8,color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}},
+          "💾 Save Company Info")
+      ),
+      h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,padding:"16px"}},
+        h("div",{style:{fontSize:12,fontWeight:800,marginBottom:10,color:"#1565C0"}},"💳 Bank Details"),
+        h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}},
+          F("bankName","Bank Name"),F("bankAccount","Account Name"),F("bankNumber","Account No.")),
+        h("button",{onClick:()=>save("Bank details saved"),
+          style:{marginTop:10,padding:"9px 20px",background:"#1565C0",border:"none",borderRadius:8,color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}},
+          "💾 Save Bank Details")
+      )
+    ),
+    tab==="print"&&h("div",{style:{background:"#fff",borderRadius:12,
+      border:"1px solid "+C.border,overflow:"hidden"}},
+      // Header
+      h("div",{style:{background:"linear-gradient(135deg,#1565C0,#0D47A1)",
+        padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}},
+        h("div",{style:{color:"#fff",fontWeight:800,fontSize:13}},"🖨️ Print & Bluetooth Printer"),
+        h("div",{style:{fontSize:10,color:"rgba(255,255,255,.8)"}},
+          _btChar?"✅ BT Connected":"⚪ BT Not connected")
+      ),
+      h("div",{style:{padding:"14px 16px",display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}},
+        // LEFT: Print settings
+        h("div",null,
+          h("div",{style:{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8}},"PAPER SIZE"),
+          h("div",{style:{display:"flex",gap:6,marginBottom:12}},
+            ["80mm","58mm"].map(s=>h("button",{key:s,
+              onClick:()=>setCompanySettings(p=>({...p,paperSize:s})),
+              style:{flex:1,padding:"9px",borderRadius:8,border:"none",cursor:"pointer",
+                fontWeight:700,fontSize:12,
+                background:(companySettings.paperSize||"80mm")===s?C.primary:"#eee",
+                color:(companySettings.paperSize||"80mm")===s?"#fff":C.text}},s))
+          ),
+          h("div",{style:{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8}},"TAX MODE"),
+          h("div",{style:{display:"flex",flexDirection:"column",gap:4,marginBottom:12}},
+            [["vat","VAT (12%)"],["nonvat","Non-VAT"],["zerovat","Zero-Rated"]].map(([id,lbl])=>
+              h("button",{key:id,onClick:()=>setCompanySettings(p=>({...p,vatMode:id})),
+                style:{padding:"7px",borderRadius:7,border:"none",cursor:"pointer",fontWeight:700,fontSize:11,
+                  background:(companySettings.vatMode||"vat")===id?C.primary:"#eee",
+                  color:(companySettings.vatMode||"vat")===id?"#fff":C.text}},lbl))
+          ),
+          h("div",{style:{fontSize:10,fontWeight:700,color:C.muted,marginBottom:4}},"RECEIPT FOOTER"),
+          h("input",{value:companySettings.receiptFooter||"",
+            onChange:e=>setCompanySettings(p=>({...p,receiptFooter:e.target.value})),
+            placeholder:"Thank you for dining with us!",
+            style:{width:"100%",padding:"7px",border:"1px solid "+C.border,
+              borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box",marginBottom:10}}),
+          h("button",{onClick:()=>save("Saved ✓"),
+            style:{width:"100%",padding:"9px",background:C.primary,border:"none",
+              borderRadius:8,color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}},
+            "💾 Save Settings")
+        ),
+        // RIGHT: BT Printer
+        h("div",null,
+          h("div",{style:{fontSize:10,fontWeight:700,color:"#1565C0",marginBottom:8}},"BLUETOOTH PRINTER"),
+          h("div",{style:{fontSize:10,color:"#555",marginBottom:10,lineHeight:1.7}},
+            "① I-on ang Xprinter",h("br"),
+            "② Tablet → Bluetooth → Pair Xprinter",h("br"),
+            "③ I-tap Connect sa baba"
+          ),
+          h("button",{onClick:async function(){
+            showT("Scanning...","ok");
+            var ok=await btConnect();
+            showT(ok?"✅ Connected!":"❌ I-pair muna sa Bluetooth",ok?"ok":"warn");
+          },style:{width:"100%",padding:"11px",marginBottom:8,
+            background:"linear-gradient(135deg,#1565C0,#0D47A1)",
+            border:"none",borderRadius:9,color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer"}},
+            "📡 Connect Printer"),
+          h("button",{onClick:()=>testPrint(companySettings,companySettings.paperSize||"80mm",showT),
+            style:{width:"100%",padding:"9px",marginBottom:6,background:"#fff",
+              border:"2px solid "+C.primary,borderRadius:8,color:C.primary,
+              fontWeight:700,fontSize:12,cursor:"pointer"}},
+            "🖨️ Test Print"),
+          h("button",{onClick:()=>testPrintBT(companySettings,companySettings.paperSize||"80mm",showT),
+            style:{width:"100%",padding:"9px",background:"#1565C0",border:"none",
+              borderRadius:8,color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}},
+            "📡 BT Test Print")
+        )
+      )
+    ),
+    tab==="branches"&&h("div",null,
+      h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,padding:"16px"}},
+        h("div",{style:{fontSize:12,fontWeight:800,marginBottom:10}},"🏪 Branches"),
+        branches.map(b=>h("div",{key:b.id,style:{padding:"10px",background:"#fafafa",borderRadius:8,marginBottom:8}},
+          h("div",{style:{fontWeight:700,fontSize:12}},b.name||b.full),
+          h("div",{style:{fontSize:10,color:C.muted}},b.id+" · "+(b.address||""))
+        ))
+      )
+    )
+  );
+}
+
+
+// ─── PRINTER PAGE ─────────────────────────────────────────
+function PrinterPage({db,user,showT,companySettings,setCompanySettings}){
+  const save=async()=>{
+    try{
+      await setDoc(doc(db,"settings","company"),companySettings,{merge:true});
+      showT("Print settings saved ✓");
+    }catch(e){showT("Error","err");}
+  };
+
+  return h("div",{style:{maxWidth:600}},
+    h(SectionHeader,{title:"🖨️ Printer & Print Settings"}),
+
+    // Print Settings card
+    h("div",{style:{background:"#fff",borderRadius:12,
+      border:"1px solid "+C.border,padding:"16px",marginBottom:14}},
+      h("div",{style:{fontSize:13,fontWeight:800,marginBottom:14}},"🖨️ Print Settings"),
+
+      // Paper size + Tax mode in grid
+      h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}},
+        h("div",null,
+          h("div",{style:{fontSize:10,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:8}},"PAPER SIZE"),
+          h("div",{style:{display:"flex",gap:8}},
+            ["80mm","58mm"].map(s=>h("button",{key:s,
+              onClick:()=>setCompanySettings(p=>({...p,paperSize:s})),
+              style:{flex:1,padding:"12px 8px",borderRadius:9,border:"none",
+                cursor:"pointer",fontWeight:700,fontSize:13,
+                background:(companySettings.paperSize||"80mm")===s?C.primary:"#f0f0f0",
+                color:(companySettings.paperSize||"80mm")===s?"#fff":C.text}},s))
+          )
+        ),
+        h("div",null,
+          h("div",{style:{fontSize:10,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:8}},"TAX MODE"),
+          h("div",{style:{display:"flex",flexDirection:"column",gap:6}},
+            [["vat","VAT (12%)"],["nonvat","Non-VAT"],["zerovat","Zero-Rated"]].map(([id,lbl])=>
+              h("button",{key:id,
+                onClick:()=>setCompanySettings(p=>({...p,vatMode:id})),
+                style:{padding:"9px",borderRadius:8,border:"none",cursor:"pointer",
+                  fontWeight:700,fontSize:12,textAlign:"left",paddingLeft:12,
+                  background:(companySettings.vatMode||"vat")===id?C.primary:"#f0f0f0",
+                  color:(companySettings.vatMode||"vat")===id?"#fff":C.text}},
+                lbl))
+          )
+        )
+      ),
+
+      // Receipt footer
+      h("div",{style:{marginBottom:14}},
+        h("div",{style:{fontSize:10,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:6}},"RECEIPT FOOTER MESSAGE"),
+        h("input",{value:companySettings.receiptFooter||"",
+          onChange:e=>setCompanySettings(p=>({...p,receiptFooter:e.target.value})),
+          placeholder:"Thank you for dining with us!",
+          style:{width:"100%",padding:"9px",border:"1px solid "+C.border,
+            borderRadius:8,fontSize:12,outline:"none",boxSizing:"border-box"}})
+      ),
+
+      h("button",{onClick:save,
+        style:{width:"100%",padding:"11px",background:C.primary,
+          border:"none",borderRadius:9,color:"#fff",fontWeight:800,
+          fontSize:13,cursor:"pointer"}},
+        "💾 Save Print Settings")
+    ),
+
+    // Bluetooth Printer card
+    h("div",{style:{background:"#fff",borderRadius:12,
+      border:"2px solid #1565C0",overflow:"hidden"}},
+      h("div",{style:{background:"linear-gradient(135deg,#1565C0,#0D47A1)",
+        padding:"14px 16px",display:"flex",justifyContent:"space-between",
+        alignItems:"center"}},
+        h("div",{style:{color:"#fff",fontWeight:800,fontSize:14}},"📡 Bluetooth Printer"),
+        h("div",{style:{display:"flex",alignItems:"center",gap:6}},
+          h("div",{style:{width:8,height:8,borderRadius:"50%",
+            background:_btChar?"#4CAF50":"#ff5252"}}),
+          h("div",{style:{fontSize:11,color:"#fff"}},
+            _btChar?"Connected":"Not connected")
+        )
+      ),
+
+      h("div",{style:{padding:"16px"}},
+        // Steps
+        h("div",{style:{background:"#f0f4ff",borderRadius:10,
+          padding:"12px 14px",marginBottom:14}},
+          h("div",{style:{fontSize:11,fontWeight:700,color:"#1565C0",marginBottom:8}},
+            "Setup Steps:"),
+          ["I-on ang Xprinter (power button)",
+           "Tablet → Settings → Bluetooth → I-on",
+           "Hanapin ang Xprinter sa list → I-tap → Pair",
+           'Bumalik dito → I-tap "Connect Bluetooth Printer"',
+           'Mag-order → Receipt → "📡 BT Print"'].map((s,i)=>
+            h("div",{key:i,style:{display:"flex",gap:8,marginBottom:6,fontSize:11}},
+              h("div",{style:{background:"#1565C0",color:"#fff",borderRadius:"50%",
+                width:20,height:20,display:"flex",alignItems:"center",
+                justifyContent:"center",fontSize:10,fontWeight:700,flexShrink:0}},i+1),
+              h("div",{style:{color:"#333"}},s)
+            ))
+        ),
+
+        // Connect button
+        h("button",{
+          onClick:async function(){
+            showT("Opening Bluetooth scanner...","ok");
+            var ok=await btConnect();
+            if(ok){
+              showT("✅ Xprinter connected! Ready to print","ok");
+            } else {
+              showT("❌ Hindi ma-connect. I-check kung naka-pair ang Xprinter sa Bluetooth","warn");
+            }
+          },
+          style:{width:"100%",padding:"14px",
+            background:"linear-gradient(135deg,#1565C0,#0D47A1)",
+            border:"none",borderRadius:10,color:"#fff",
+            fontWeight:800,fontSize:14,cursor:"pointer",
+            marginBottom:10}},
+          "📡 Connect Bluetooth Printer"),
+
+        // Test print buttons
+        h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}},
+          h("button",{
+            onClick:()=>testPrint(companySettings,companySettings.paperSize||"80mm",showT),
+            style:{padding:"11px",background:"#fff",border:"2px solid #1565C0",
+              borderRadius:9,color:"#1565C0",fontWeight:700,fontSize:12,cursor:"pointer"}},
+            "🖨️ Test Print\n(Window)"),
+          h("button",{
+            onClick:()=>testPrintBT(companySettings,companySettings.paperSize||"80mm",showT),
+            style:{padding:"11px",background:"#1565C0",border:"none",
+              borderRadius:9,color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}},
+            "📡 BT Test Print")
+        ),
+
+        h("div",{style:{marginTop:10,fontSize:10,color:C.muted,textAlign:"center"}},
+          "Requires Chrome browser • Bluetooth must be enabled")
+      )
+    )
+  );
+}
+
 // ─── MAIN APP ─────────────────────────────────────────────
 function App(){
   // Auth
@@ -7718,6 +7978,11 @@ function App(){
           menuItems,db,user,showT,inventory,key:"bom"
         }),
 
+        // ══ PRINTER SETTINGS ══
+        page==="printer"&&h(PrinterPage,{
+          db,user,showT,companySettings,setCompanySettings
+        }),
+
         // ══ MENU MGMT (Full Editor) ══
         page==="menu_mgmt"&&h(MenuEditor,{
           menuItems,setMenuItems,db,user,showT,
@@ -8011,285 +8276,11 @@ function App(){
 
 
         // ══ SETTINGS ══
-        page==="settings"&&h("div",{style:{maxWidth:600}},
-          h(SectionHeader,{title:"Settings"}),
-          // Branch Editor
-          h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,padding:"16px",marginBottom:14}},
-            h("div",{style:{fontWeight:800,fontSize:13,marginBottom:12,color:C.primary}},"🏪 Branch Management"),
-            h("div",{style:{display:"grid",gap:8}},
-              branches.map((b,bi)=>h("div",{key:b.id,style:{display:"flex",gap:8,alignItems:"center",padding:"8px 10px",borderRadius:8,background:C.bg,border:"1px solid "+C.border}},
-                h("div",{style:{width:70,fontSize:10,fontWeight:700,color:C.primary}},b.name),
-                h("input",{
-                  value:b.full,
-                  onChange:e=>{
-                    const updated=[...branches];
-                    updated[bi]={...updated[bi],full:e.target.value};
-                    setBranches(updated);
-                  },
-                  placeholder:"Branch full name",
-                  style:{flex:1,padding:"6px 10px",border:"1px solid "+C.border,borderRadius:7,fontSize:12,outline:"none"}
-                }),
-                h("input",{
-                  value:b.loc,
-                  onChange:e=>{
-                    const updated=[...branches];
-                    updated[bi]={...updated[bi],loc:e.target.value};
-                    setBranches(updated);
-                  },
-                  placeholder:"Location",
-                  style:{flex:1,padding:"6px 10px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none",color:C.muted}
-                }),
-                h("select",{
-                  value:b.status||"active",
-                  onChange:e=>{
-                    const updated=[...branches];
-                    updated[bi]={...updated[bi],status:e.target.value};
-                    setBranches(updated);
-                  },
-                  style:{padding:"6px 8px",border:"1px solid "+C.border,borderRadius:7,fontSize:10,outline:"none"}
-                },
-                  h("option",{value:"active"},"Active"),
-                  h("option",{value:"closed"},"Closed")
-                ),
-                h("button",{
-                  onClick:()=>{
-                    if(!confirm("Delete "+b.name+"? This cannot be undone."))return;
-                    setBranches(p=>p.filter((_,i)=>i!==bi));
-                  },
-                  style:{width:28,height:28,background:"#FFEBEE",border:"none",borderRadius:6,
-                    color:C.danger,cursor:"pointer",fontSize:14,fontWeight:700,flexShrink:0}
-                },"×")
-              ))
-            ),
-            h("div",{style:{display:"flex",gap:8,marginTop:10}},
-              h("button",{
-                onClick:()=>{
-                  const newId="ct-"+Date.now().toString().slice(-4);
-                  setBranches(p=>[...p,{id:newId,name:newId.toUpperCase(),full:"New Branch",loc:"Location",status:"active"}]);
-                },
-                style:{padding:"9px 16px",background:"#fff",border:"1px solid "+C.border,borderRadius:8,fontWeight:700,fontSize:12,cursor:"pointer"}
-              },"+ Add Branch"),
-              h("button",{
-                onClick:async()=>{
-                  try{
-                    await setDoc(doc(db,"settings","branches"),{branches,updatedBy:user.name,updatedAt:serverTimestamp()});
-                    showT("Branches saved ✓");
-                  }catch(e){showT("Error saving","err");}
-                },
-                style:{padding:"9px 20px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:8,color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}
-              },"💾 Save Branch Names")
-            )
-          ),
-          [
-            {title:"Business Info",fields:[["Business Name","Chowtime Fast-Food Chain"],["TIN","000-123-456-789"],["VAT Reg","000-123-456-000"],["Address","Pampanga, Philippines"]]},
-            {title:"Receipt",fields:[["Header","CHOWTIME FAST-FOOD CHAIN"],["Footer","Salamat! Kain na! 😊"]]},
-            {title:"Franchise",fields:[["Royalty Fee %","5"],["Commissary Lead Time","48 hours"],["Min Order","₱500"]]},
-            {title:"Firebase",fields:[["Project ID","chowtime-pos"],["Region","asia-southeast1"],["Plan","Spark (Free)"]]}
-          ].map((s,si)=>h("div",{key:si,style:{background:"#fff",borderRadius:11,padding:"13px 15px",marginBottom:9,border:"1px solid "+C.border}},
-            h("b",{style:{fontSize:12}},s.title),
-            h("div",{style:{marginTop:9}},
-              s.fields.map(([l,v])=>h("div",{key:l,style:{marginBottom:8}},
-                h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:3,letterSpacing:1}},l.toUpperCase()),
-                h("input",{defaultValue:v,style:{width:"100%",padding:"7px 10px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box"}})
-              ))
-            )
-          )),
-          h("button",{onClick:()=>showT("Settings saved!"),style:{padding:"10px 24px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:8,color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}},"Save Settings"),
-          h("div",{style:{marginTop:16,background:"#E3F2FD",borderRadius:10,padding:"12px 15px",fontSize:11,color:C.info}},
-            h("b",null,"🔥 Firebase Status: "),isOnline?"Connected — real-time sync active":"Offline — orders queued locally"
-          ),
+        page==="settings"&&h(SettingsPage,{
+          db,user,showT,branches,companySettings,
+          setCompanySettings,branchId
+        }),
 
-          // ── Company & Bank Settings ──────────────────────
-          h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,
-            padding:"16px",marginTop:14}},
-            h("div",{style:{fontSize:12,fontWeight:800,marginBottom:12,
-              display:"flex",alignItems:"center",gap:6}},
-              "🏦 Company & Bank Settings"),
-
-            // Company info
-            h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}},
-              [
-                {key:"name",label:"Company Name"},
-                {key:"email",label:"Email"},
-                {key:"address",label:"Address"},
-                {key:"phone",label:"Phone"},
-              ].map(f=>h("div",{key:f.key},
-                h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,
-                  letterSpacing:1,marginBottom:4}},f.label.toUpperCase()),
-                h("input",{value:companySettings[f.key]||"",
-                  onChange:e=>setCompanySettings(p=>({...p,[f.key]:e.target.value})),
-                  style:{width:"100%",padding:"8px",border:"1px solid "+C.border,
-                    borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box"}})
-              ))
-            ),
-
-            // Bank info
-            h("div",{style:{fontSize:10,fontWeight:800,color:"#1565C0",
-              marginBottom:8,marginTop:4}},"💳 Bank Payment Details"),
-            h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:12}},
-              [
-                {key:"bankName",label:"Bank Name"},
-                {key:"bankAccount",label:"Account Name"},
-                {key:"bankNumber",label:"Account Number"},
-              ].map(f=>h("div",{key:f.key},
-                h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,
-                  letterSpacing:1,marginBottom:4}},f.label.toUpperCase()),
-                h("input",{value:companySettings[f.key]||"",
-                  onChange:e=>setCompanySettings(p=>({...p,[f.key]:e.target.value})),
-                  style:{width:"100%",padding:"8px",border:"1px solid #BBDEFB",
-                    borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box",
-                    color:"#1565C0"}})
-              ))
-            ),
-
-            // QR Code upload
-            h("div",{style:{marginBottom:12}},
-              h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,
-                letterSpacing:1,marginBottom:6}},"BANK QR CODE (for DR payment)"),
-              h("div",{style:{display:"flex",gap:12,alignItems:"flex-start"}},
-                companySettings.bankQR&&h("div",{style:{flexShrink:0}},
-                  h("img",{src:companySettings.bankQR,
-                    style:{width:100,height:100,objectFit:"contain",
-                      border:"1px solid "+C.border,borderRadius:8,padding:4}})
-                ),
-                h("div",null,
-                  h("label",{style:{display:"inline-block",padding:"8px 14px",
-                    background:"#E3F2FD",border:"1px solid #90CAF9",borderRadius:8,
-                    cursor:"pointer",fontSize:11,fontWeight:700,color:"#1565C0"}},
-                    companySettings.bankQR?"🔄 Change QR Code":"📷 Upload QR Code",
-                    h("input",{type:"file",accept:"image/*",style:{display:"none"},
-                      onChange:e=>{
-                        const file=e.target.files[0];
-                        if(!file)return;
-                        const reader=new FileReader();
-                        reader.onload=ev=>setCompanySettings(p=>({...p,bankQR:ev.target.result}));
-                        reader.readAsDataURL(file);
-                      }})
-                  ),
-                  h("div",{style:{fontSize:9,color:C.muted,marginTop:4}},
-                    "Upload QR image — will appear on printed DR"),
-                  companySettings.bankQR&&h("button",{
-                    onClick:()=>setCompanySettings(p=>({...p,bankQR:""})),
-                    style:{marginTop:4,padding:"4px 8px",background:"#FFEBEE",
-                      border:"1px solid #FFCDD2",borderRadius:6,color:C.danger,
-                      fontSize:10,cursor:"pointer",fontWeight:700}},
-                    "✕ Remove QR")
-                )
-              )
-            ),
-
-            // Save button
-            h("button",{onClick:async()=>{
-                try{
-                  await setDoc(doc(db,"settings","company"),companySettings,{merge:true});
-                  showT("Company settings saved ✓");
-                }catch(e){showT("Error saving settings","err");}
-              },
-              style:{padding:"9px 20px",background:C.primary,border:"none",
-                borderRadius:8,color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}},
-              "💾 Save Company Settings")
-          ),
-
-        // ── PRINT SETTINGS ──
-        h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,
-          padding:"12px",marginTop:8}},
-          h("div",{style:{fontSize:12,fontWeight:800,marginBottom:8}},"🖨️ Print Settings"),
-          h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}},
-            h("div",null,
-              h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:6}},
-                "PAPER SIZE"),
-              h("div",{style:{display:"flex",gap:6}},
-                ["80mm","58mm"].map(s=>
-                  h("button",{key:s,
-                    onClick:()=>setCompanySettings(p=>({...p,paperSize:s})),
-                    style:{flex:1,padding:"10px",borderRadius:8,border:"none",
-                      cursor:"pointer",fontWeight:700,fontSize:12,
-                      background:(companySettings.paperSize||"80mm")===s?C.primary:"#eee",
-                      color:(companySettings.paperSize||"80mm")===s?"#fff":C.text}},s))
-              )
-            ),
-            h("div",null,
-              h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:6}},
-                "TAX MODE"),
-              h("div",{style:{display:"flex",flexDirection:"column",gap:4}},
-                [["vat","VAT (12%)"],["nonvat","Non-VAT"],["zerovat","Zero-Rated"]].map(([id,lbl])=>
-                  h("button",{key:id,
-                    onClick:()=>setCompanySettings(p=>({...p,vatMode:id})),
-                    style:{padding:"7px",borderRadius:7,border:"none",
-                      cursor:"pointer",fontWeight:700,fontSize:11,
-                      background:(companySettings.vatMode||"vat")===id?C.primary:"#eee",
-                      color:(companySettings.vatMode||"vat")===id?"#fff":C.text}},lbl))
-              )
-            )
-          ),
-          h("div",{style:{marginTop:10}},
-            h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:4}},
-              "RECEIPT FOOTER MESSAGE"),
-            h("input",{value:companySettings.receiptFooter||"",
-              onChange:e=>setCompanySettings(p=>({...p,receiptFooter:e.target.value})),
-              placeholder:"Thank you for dining with us!",
-              style:{width:"100%",padding:"8px",border:"1px solid "+C.border,
-                borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box"}})
-          ),
-          h("div",{style:{marginTop:10}},
-            h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:4}},
-              "VAT TIN NUMBER"),
-            h("input",{value:companySettings.tin||"",
-              onChange:e=>setCompanySettings(p=>({...p,tin:e.target.value})),
-              placeholder:"000-000-000-000",
-              style:{width:"100%",padding:"8px",border:"1px solid "+C.border,
-                borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box"}})
-          ),
-          h("button",{
-            onClick:async()=>{
-              try{
-                await setDoc(doc(db,"settings","company"),companySettings,{merge:true});
-                showT("Print settings saved ✓");
-              }catch(e){showT("Error","err");}
-            },
-            style:{marginTop:10,padding:"9px 20px",background:C.primary,border:"none",
-              borderRadius:8,color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}},
-            "💾 Save Print Settings"),
-
-          // BT Printer connect - PROMINENT
-          h("div",{style:{marginTop:14,background:"#fff",borderRadius:10,
-            border:"2px solid #1565C0",overflow:"hidden"}},
-            h("div",{style:{background:"#1565C0",padding:"10px 14px",
-              display:"flex",justifyContent:"space-between",alignItems:"center"}},
-              h("div",{style:{color:"#fff",fontWeight:800,fontSize:12}},
-                "📡 Bluetooth Printer"),
-              h("div",{style:{fontSize:9,color:"rgba(255,255,255,.7)"}},
-                "Xprinter direct print — walang dialog")
-            ),
-            h("div",{style:{padding:"12px 14px"}},
-              h("div",{style:{fontSize:10,color:"#555",marginBottom:8,lineHeight:1.6}},
-                "1. I-on Xprinter → 2. Pair sa Tablet Bluetooth → 3. I-tap Connect"
-              ),
-              h("button",{
-                onClick:async function(){
-                  showT("Opening Bluetooth scanner...","ok");
-                  var ok=await btConnect();
-                  if(ok){
-                    showT("✅ Xprinter connected! Pwede nang mag-print","ok");
-                  } else {
-                    showT("❌ Hindi ma-connect — i-check kung naka-pair sa Bluetooth settings","warn");
-                  }
-                },
-                style:{width:"100%",padding:"12px",
-                  background:"linear-gradient(135deg,#1565C0,#0D47A1)",
-                  border:"none",borderRadius:9,color:"#fff",
-                  fontWeight:800,fontSize:13,cursor:"pointer",
-                  display:"flex",alignItems:"center",justifyContent:"center",
-                  gap:8}},
-                h("span",{style:{fontSize:18}},"📡"),
-                h("span",null,"Connect Bluetooth Printer")
-              ),
-              h("div",{style:{marginTop:8,fontSize:9,color:"#888",textAlign:"center"}},
-                "Requires Chrome browser + Bluetooth enabled")
-            )
-          )
-          )
-        ),
 
         // ══ CREW MGMT ══
         page==="crew_mgmt"&&h("div",null,
