@@ -7235,16 +7235,7 @@ function App(){
         )
       ),
       h("nav",{style:{flex:1,padding:"3px 6px",overflowY:"auto",minHeight:0}},
-        (()=>{
-          try{
-            const rp=(branchPerms||{})[user?.role]||{};
-            return (role?.nav||[]).filter(p=>{
-              if(!user?.role||user.role==="owner"||user.role==="manager")return true;
-              if(["pos","orders","kitchen","inventory"].includes(p))return true;
-              return rp[p]!==false;
-            });
-          }catch(e){ return (role&&role?.nav||[])||[]; }
-        })().map(p=>{const m=NAV_META[p];if(!m)return null;return h("button",{key:p,onClick:()=>setPage(p),
+        (role?.nav||[]).map(p=>{const m=NAV_META[p];if(!m)return null;return h("button",{key:p,onClick:()=>setPage(p),
           style:{width:"100%",display:"flex",alignItems:"center",gap:6,padding:"5px 9px",borderRadius:7,border:"none",
             background:page===p?"rgba(200,21,27,.22)":"transparent",
             color:page===p?C.primary:"rgba(255,255,255,.38)",
