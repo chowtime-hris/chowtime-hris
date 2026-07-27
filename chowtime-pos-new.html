@@ -1250,8 +1250,7 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
               h("button",{onClick:()=>setActualQtys(p=>({...p,[i.id]:Math.max(0,(p[i.id]??i.qty)-1)})),
                 style:{width:20,height:20,borderRadius:4,border:"1px solid "+C.border,
                   background:"#fff",cursor:"pointer",fontSize:12,fontWeight:700}},"−"),
-              h("input",{type:"number",min:0,value:actual,readOnly:true,
-                onClick:function(){var id=i.id;window._openNumpad&&window._openNumpad({value:String(actual||""),label:"ACTUAL QTY — "+i.name,allowDecimal:false,onChange:function(v){setActualQtys(function(p){var n={...p};n[id]=parseFloat(v)||0;return n;});}});},
+              h("input",{type:"number",min:0,value:actual,onClick:function(){var id=i.id;window._openNumpad&&window._openNumpad({value:String(actual||""),label:"ACTUAL QTY — "+i.name,allowDecimal:false,onChange:function(v){setActualQtys(function(p){var n={...p};n[id]=parseFloat(v)||0;return n;});}});},
                 onChange:e=>setActualQtys(p=>({...p,[i.id]:parseFloat(e.target.value)||0})),
                 style:{width:36,textAlign:"center",padding:"2px",border:"1px solid "+C.border,
                   borderRadius:5,fontSize:11,fontWeight:700,outline:"none",
@@ -1265,8 +1264,7 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
             // Price
             h("div",{style:{display:"flex",alignItems:"center",gap:3}},
               h("span",{style:{fontSize:10,color:C.muted}},"₱"),
-              h("input",{type:"number",min:0,step:"0.01",value:price||"",readOnly:true,
-                onClick:function(){var id=i.id;window._openNumpad&&window._openNumpad({value:String(price||""),label:"PRICE — "+i.name,allowDecimal:true,onChange:function(v){setPrices(function(p){var n={...p};n[id]=parseFloat(v)||0;return n;});}});},
+              h("input",{type:"number",min:0,step:"0.01",value:price||"",onClick:function(){var id=i.id;window._openNumpad&&window._openNumpad({value:String(price||""),label:"PRICE — "+i.name,allowDecimal:true,onChange:function(v){setPrices(function(p){var n={...p};n[id]=parseFloat(v)||0;return n;});}});},
                 onChange:e=>setPrices(p=>({...p,[i.id]:parseFloat(e.target.value)||0})),
                 placeholder:"0.00",
                 style:{width:65,padding:"5px",border:"1px solid "+C.border,borderRadius:6,
@@ -1677,7 +1675,6 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT,setNumKB
                 h("button",{onClick:()=>setCounts(p=>({...p,[d.value]:Math.max(0,(p[d.value]||0)-1)})),
                   style:{width:28,height:28,borderRadius:7,border:"1px solid "+C.border,background:"#fff",cursor:"pointer",fontSize:15,fontWeight:700}},"−"),
                 h("input",{type:"number",min:0,value:counts[d.value]||0,
-                  readOnly:true,
                   onClick:(()=>{var dv=d.value;return function(){
                     setNumKB&&setNumKB({value:String(counts[dv]||""),
                       label:"COUNT — ₱"+dv,allowDecimal:false,
@@ -1711,7 +1708,6 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT,setNumKB
                 h("button",{onClick:()=>setCounts(p=>({...p,[d.value]:Math.max(0,(p[d.value]||0)-1)})),
                   style:{width:28,height:28,borderRadius:7,border:"1px solid "+C.border,background:"#fff",cursor:"pointer",fontSize:15,fontWeight:700}},"−"),
                 h("input",{type:"number",min:0,value:counts[d.value]||0,
-                  readOnly:true,
                   onClick:(()=>{var dv=d.value;return function(){
                     setNumKB&&setNumKB({value:String(counts[dv]||""),
                       label:"COUNT — ₱"+dv,allowDecimal:false,
@@ -1779,7 +1775,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT,setNumKB
           h("div",{style:{fontSize:10,color:C.muted,marginTop:2,marginBottom:10}},"Enter amount to be remitted/deposited. The rest stays in the cash box as tomorrow's opening fund."),
           h("div",{style:{marginBottom:8}},
             h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"REMITTANCE AMOUNT (₱)"),
-            h("input",{type:"number",value:remit,readOnly:true,onClick:function(){setNumKB&&setNumKB({value:String(remit||""),label:"REMITTANCE AMOUNT",allowDecimal:true,onChange:function(v){setRemit(v);}});},placeholder:"Tap to enter amount",
+            h("input",{type:"number",value:remit,onClick:function(){setNumKB&&setNumKB({value:String(remit||""),label:"REMITTANCE AMOUNT",allowDecimal:true,onChange:function(v){setRemit(v);}});},placeholder:"Tap to enter amount",
               style:{width:"100%",padding:"10px 12px",border:"2px solid "+C.warning,borderRadius:9,fontSize:16,fontWeight:700,outline:"none",boxSizing:"border-box",color:C.warning}})
           ),
           h("div",{style:{background:"#F3E5F5",borderRadius:9,padding:"10px 13px",display:"flex",justifyContent:"space-between",alignItems:"center"}},
@@ -1908,7 +1904,7 @@ function CALoanPage({user,branchId,curBranch,db,hrisDB,showT,mode,hrisEmps=[]}){
           // Amount
           h("div",{style:{marginBottom:11}},
             h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,marginBottom:5,letterSpacing:1}},"AMOUNT REQUESTED (₱)"),
-            h("input",{type:"number",value:amount,readOnly:true,onClick:()=>window._openNumpad&&window._openNumpad({value:String(amount||""),label:"AMOUNT (₱)",allowDecimal:true,onChange:v=>setAmount(v)}),
+            h("input",{type:"number",value:amount,onClick:()=>window._openNumpad&&window._openNumpad({value:String(amount||""),label:"AMOUNT (₱)",allowDecimal:true,onChange:v=>setAmount(v)}),
               placeholder:"0.00",
               style:{width:"100%",padding:"12px",border:`2px solid ${isCA?C.primary:"#1565C0"}`,
                 borderRadius:9,fontSize:20,fontWeight:700,outline:"none",
@@ -3089,8 +3085,7 @@ function IngredientsPage({db,user,showT}){
                 h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,
                   letterSpacing:1,marginBottom:4}},"COST PER UNIT (₱) *"),
                 h("input",{type:"number",min:0,step:"0.01",
-                  value:editing.cost||"",readOnly:true,
-                  onClick:()=>window._openNumpad&&window._openNumpad({value:String(editing.cost||""),label:"COST PER UNIT (₱)",allowDecimal:true,onChange:v=>setEditing(p=>({...p,cost:parseFloat(v)||0}))}),
+                  value:editing.cost||"",onClick:()=>window._openNumpad&&window._openNumpad({value:String(editing.cost||""),label:"COST PER UNIT (₱)",allowDecimal:true,onChange:v=>setEditing(p=>({...p,cost:parseFloat(v)||0}))}),
                   onChange:e=>setEditing(p=>({...p,cost:parseFloat(e.target.value)||0})),
                   placeholder:"0.00",
                   style:{width:"100%",padding:"9px",border:"1px solid "+C.border,
@@ -5113,8 +5108,7 @@ function ReceiveItemsModal({po,db,user,showT,branchId,onClose}){
           h("div",{style:{display:"flex",alignItems:"center",gap:3}},
             h("button",{onClick:function(){setReceived(function(p){var r={};Object.assign(r,p);r[i.id]=Math.max(0,(p[i.id]!=null?p[i.id]:drQty)-1);return r;});},
               style:{width:20,height:20,borderRadius:4,border:"1px solid #ddd",background:"#fff",cursor:"pointer",fontSize:12}},"-"),
-            h("input",{type:"number",min:0,readOnly:true,
-              onClick:function(){var id=i.id,dq=drQty;window._openNumpad&&window._openNumpad({value:String(received[id]!=null?received[id]:dq),label:"RECEIVED QTY — "+i.name,allowDecimal:false,onChange:function(v){setReceived(function(p){var n={...p};n[id]=parseInt(v)||0;return n;});}});},
+            h("input",{type:"number",min:0,onClick:function(){var id=i.id,dq=drQty;window._openNumpad&&window._openNumpad({value:String(received[id]!=null?received[id]:dq),label:"RECEIVED QTY — "+i.name,allowDecimal:false,onChange:function(v){setReceived(function(p){var n={...p};n[id]=parseInt(v)||0;return n;});}});},
               value:(received[i.id]!=null?received[i.id]:drQty),
               onChange:function(e){var v=parseFloat(e.target.value)||0;setReceived(function(p){var r={};Object.assign(r,p);r[i.id]=v;return r;});},
               style:{width:36,textAlign:"center",padding:"2px",
@@ -5697,7 +5691,6 @@ function SettingsPage({db,user,showT,branches,companySettings,setCompanySettings
   const F=(key,lbl)=>h("div",{key:key},
     h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:4}},lbl),
     h("input",{value:companySettings[key]||"",
-      readOnly:true,
       onClick:()=>window._openTextKB&&window._openTextKB({value:companySettings[key]||"",label:lbl,onChange:v=>setCompanySettings(p=>({...p,[key]:v}))}),
       onChange:e=>setCompanySettings(p=>({...p,[key]:e.target.value})),
       style:{width:"100%",padding:"8px",border:"1px solid "+C.border,
@@ -6103,7 +6096,6 @@ function PayrollPage({db,hrisDB,user,showT,branches,branchId,staff,advances}){
             ),
             // Daily rate input
             h("input",{type:"number",value:s.dailyRate||"",
-              readOnly:true,
               onClick:()=>window._openNumpad&&window._openNumpad({
                 value:String(s.dailyRate||""),
                 label:"DAILY RATE — "+s.name,
@@ -6119,7 +6111,6 @@ function PayrollPage({db,hrisDB,user,showT,branches,branchId,staff,advances}){
                 cursor:"pointer",background:"#f9f9f9"}}),
             // Days worked input
             h("input",{type:"number",value:s.daysWorked||"",
-              readOnly:true,
               onClick:()=>window._openNumpad&&window._openNumpad({
                 value:String(s.daysWorked||""),
                 label:"DAYS WORKED — "+s.name,
@@ -7812,8 +7803,8 @@ function App(){
               h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:14}},h("b",null,"Add Expense"),h("button",{onClick:()=>setModal(null),style:{background:"none",border:"none",fontSize:17,cursor:"pointer"}},"×")),
               h("div",{style:{display:"grid",gap:8}},
                 h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"CATEGORY"),h("select",{value:newExp.cat,onChange:e=>setNewExp(p=>({...p,cat:e.target.value})),style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none"}},EXPENSE_CATS.map(c=>h("option",{key:c},c)))),
-                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"DESCRIPTION"),h("input",{value:newExp.desc,readOnly:true,onClick:()=>setTextKB({value:newExp.desc,label:"DESCRIPTION",onChange:v=>setNewExp(p=>({...p,desc:v}))}),placeholder:"Tap to enter description",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box",cursor:"pointer",background:"#f9f9f9"}})),
-                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"AMOUNT (₱)"),h("input",{type:"number",value:newExp.amount,readOnly:true,onClick:()=>setNumKB({value:String(newExp.amount||""),label:"AMOUNT (₱)",allowDecimal:true,onChange:v=>setNewExp(p=>({...p,amount:v}))}),placeholder:"Tap to enter amount",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:14,fontWeight:700,outline:"none",boxSizing:"border-box",cursor:"pointer",background:"#f9f9f9"}})),
+                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"DESCRIPTION"),h("input",{value:newExp.desc,onClick:()=>setTextKB({value:newExp.desc,label:"DESCRIPTION",onChange:v=>setNewExp(p=>({...p,desc:v}))}),placeholder:"Tap to enter description",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box",cursor:"pointer",background:"#f9f9f9"}})),
+                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"AMOUNT (₱)"),h("input",{type:"number",value:newExp.amount,onClick:()=>setNumKB({value:String(newExp.amount||""),label:"AMOUNT (₱)",allowDecimal:true,onChange:v=>setNewExp(p=>({...p,amount:v}))}),placeholder:"Tap to enter amount",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:14,fontWeight:700,outline:"none",boxSizing:"border-box",cursor:"pointer",background:"#f9f9f9"}})),
                 h("button",{onClick:async()=>{
                   if(!newExp.desc||!newExp.amount){showT("Fill all fields","warn");return;}
                   await addDoc(collection(db,"expenses"),{branch:branchId,cat:newExp.cat,desc:newExp.desc,amount:parseFloat(newExp.amount),date:new Date().toISOString().slice(0,10),by:user.name,status:user.role==="owner"?"approved":"pending",timestamp:serverTimestamp()});
@@ -7846,8 +7837,8 @@ function App(){
                 [["in","💰 Cash In"],["out","💸 Cash Out"]].map(([t,l])=>h("button",{key:t,onClick:()=>setNewCash(p=>({...p,type:t})),style:{flex:1,padding:"9px",borderRadius:8,border:`2px solid ${newCash.type===t?(t==="in"?C.success:C.danger):C.border}`,background:newCash.type===t?(t==="in"?"#E8F5E9":"#FFEBEE"):"#fff",color:newCash.type===t?(t==="in"?C.success:C.danger):C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}},l))
               ),
               h("div",{style:{display:"grid",gap:8}},
-                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"DESCRIPTION"),h("input",{value:newCash.desc,readOnly:true,onClick:()=>setTextKB&&setTextKB({value:newCash.desc||"",label:"DESCRIPTION",onChange:v=>setNewCash(p=>({...p,desc:v}))}),placeholder:"e.g. Ice delivery",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box"}})),
-                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"AMOUNT (₱)"),h("input",{type:"number",value:newCash.amount,readOnly:true,onClick:()=>setNumKB({value:newCash.amount,label:"AMOUNT (₱)",allowDecimal:true,onChange:v=>setNewCash(p=>({...p,amount:v}))}),style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:14,cursor:"pointer",fontWeight:700,outline:"none",boxSizing:"border-box"}})),
+                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"DESCRIPTION"),h("input",{value:newCash.desc,onClick:()=>setTextKB&&setTextKB({value:newCash.desc||"",label:"DESCRIPTION",onChange:v=>setNewCash(p=>({...p,desc:v}))}),placeholder:"e.g. Ice delivery",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box"}})),
+                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"AMOUNT (₱)"),h("input",{type:"number",value:newCash.amount,onClick:()=>setNumKB({value:newCash.amount,label:"AMOUNT (₱)",allowDecimal:true,onChange:v=>setNewCash(p=>({...p,amount:v}))}),style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:14,cursor:"pointer",fontWeight:700,outline:"none",boxSizing:"border-box"}})),
                 h("button",{onClick:async()=>{
                   if(!newCash.desc||!newCash.amount){showT("Fill all fields","warn");return;}
                   const now=new Date();
@@ -7880,7 +7871,7 @@ function App(){
               h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:13}},h("b",null,"Cash Advance Request"),h("button",{onClick:()=>setModal(null),style:{background:"none",border:"none",fontSize:17,cursor:"pointer"}},"×")),
               h("div",{style:{display:"grid",gap:8}},
                 h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"STAFF NAME"),h("input",{value:newAdv.staff,onChange:e=>setNewAdv(p=>({...p,staff:e.target.value})),placeholder:"Name",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box"}})),
-                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"AMOUNT (₱)"),h("input",{type:"number",value:newAdv.amount,readOnly:true,onClick:()=>setNumKB({value:String(newAdv.amount||""),label:"AMOUNT (₱)",allowDecimal:true,onChange:v=>setNewAdv(p=>({...p,amount:v}))}),style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:14,fontWeight:700,outline:"none",boxSizing:"border-box"}})),
+                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"AMOUNT (₱)"),h("input",{type:"number",value:newAdv.amount,onClick:()=>setNumKB({value:String(newAdv.amount||""),label:"AMOUNT (₱)",allowDecimal:true,onChange:v=>setNewAdv(p=>({...p,amount:v}))}),style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:14,fontWeight:700,outline:"none",boxSizing:"border-box"}})),
                 h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"REASON"),h("input",{value:newAdv.reason,onChange:e=>setNewAdv(p=>({...p,reason:e.target.value})),placeholder:"e.g. Medical",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box"}})),
                 h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"DEDUCTION DATE"),h("input",{type:"date",value:newAdv.deductDate,onChange:e=>setNewAdv(p=>({...p,deductDate:e.target.value})),style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box"}})),
                 h("button",{onClick:async()=>{
@@ -8006,8 +7997,7 @@ function App(){
                   style:{padding:"4px 10px",background:"#1565C0",border:"none",
                     borderRadius:6,color:"#fff",fontSize:10,fontWeight:700,cursor:"pointer"}},
                   "✏️ Edit"),
-                h("input",{type:"number",placeholder:"qty",readOnly:true,
-                  onClick:function(e){var item=e.target.closest?e.target:null; setNumKB({value:"",label:"ADJUST STOCK",allowDecimal:false,allowNegative:true,onChange:function(v){var el=e.target;el.value=v;el.dispatchEvent(new Event("change",{bubbles:true}));}});},
+                h("input",{type:"number",placeholder:"qty",onClick:function(e){var item=e.target.closest?e.target:null; setNumKB({value:"",label:"ADJUST STOCK",allowDecimal:false,allowNegative:true,onChange:function(v){var el=e.target;el.value=v;el.dispatchEvent(new Event("change",{bubbles:true}));}});},
                   style:{width:44,padding:"4px",border:"1px solid "+C.border,
                     borderRadius:6,fontSize:10,textAlign:"center",outline:"none"},
                   onKeyDown:async function(e){
@@ -8375,7 +8365,7 @@ function App(){
         // ══ USER MGMT ══
         page==="user_mgmt"&&h("div",null,
           h(SectionHeader,{title:"👥 User Management",
-            action:()=>setModal("add_staff"),actionLabel:"+ Add User"}),
+            action:()=>setEditingStaff({_isNew:true,name:"",role:"cashier",branch:branchId,pin:"1234",email:""}),actionLabel:"+ Add User"}),
 
           // Role legend
           h("div",{style:{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}},
@@ -8494,7 +8484,6 @@ function App(){
                     h("div",{style:{marginBottom:10}},
                       h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:4}},"NAME"),
                       h("input",{value:editingStaff.name||"",
-                        readOnly:true,
                         onClick:()=>window._openTextKB&&window._openTextKB({value:editingStaff.name||"",label:"FULL NAME",onChange:v=>setEditingStaff(p=>({...p,name:v}))}),
                         style:{width:"100%",padding:"8px",border:"1px solid "+C.border,
                           borderRadius:7,fontSize:12,outline:"none",boxSizing:"border-box",cursor:"pointer"}})
@@ -8502,7 +8491,6 @@ function App(){
                     h("div",{style:{marginBottom:10}},
                       h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:4}},"LOGIN EMAIL (Firebase Auth)"),
                       h("input",{value:editingStaff.email||"",
-                        readOnly:true,
                         onClick:()=>window._openTextKB&&window._openTextKB({value:editingStaff.email||"",label:"LOGIN EMAIL",onChange:v=>setEditingStaff(p=>({...p,email:v}))}),
                         placeholder:"e.g. cffc.wsfp.cashier@gmail.com",
                         style:{width:"100%",padding:"8px",border:"1px solid "+C.border,
@@ -8873,7 +8861,7 @@ function App(){
                     h("div",{style:{marginBottom:10}},
                       h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:4}},"FULL NAME"),
                       h("input",{value:editingStaff.name||"",
-                        readOnly:true,
+                        onChange:e=>setEditingStaff(p=>({...p,name:e.target.value})),
                         onClick:()=>window._openTextKB&&window._openTextKB({value:editingStaff.name||"",label:"FULL NAME",onChange:v=>setEditingStaff(p=>({...p,name:v}))}),
                         placeholder:"Enter full name",
                         style:{width:"100%",padding:"9px",border:"1px solid "+C.border,
@@ -8882,7 +8870,6 @@ function App(){
                     h("div",{style:{marginBottom:10}},
                       h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:4}},"LOGIN EMAIL"),
                       h("input",{value:editingStaff.email||"",
-                        readOnly:true,
                         onClick:()=>window._openTextKB&&window._openTextKB({value:editingStaff.email||"",label:"LOGIN EMAIL",onChange:v=>setEditingStaff(p=>({...p,email:v}))}),
                         placeholder:"cffc.wsfp.cashier@gmail.com",
                         style:{width:"100%",padding:"9px",border:"1px solid "+C.border,
