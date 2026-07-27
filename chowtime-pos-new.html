@@ -126,15 +126,15 @@ const BRANCHES = [
 
 const ROLES = {
   owner:     {label:"Owner / Admin",    emoji:"\u{1F451}", color:"#C8151B",
-    nav:["dashboard","branches","pos","orders","all_orders","analytics","z_reading","cash_count","expenses","cash_monitor","inventory","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","payroll","kiosk","settings","printer"]},
+    nav:["dashboard","branches","pos","orders","all_orders","analytics","z_reading","cash_count","expenses","cash_monitor","inventory","inv_log","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","payroll","kiosk","settings","printer"]},
   manager:   {label:"Branch Manager",   emoji:"\u{1F3EA}", color:"#007AFF",
-    nav:["branch_dash","pos","orders","analytics","z_reading","cash_count","expenses","inventory","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","bom_mgmt","payroll","kiosk","branch_settings","printer"]},
+    nav:["branch_dash","pos","orders","analytics","z_reading","cash_count","expenses","inventory","inv_log","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","bom_mgmt","payroll","kiosk","branch_settings","printer"]},
   cashier:   {label:"Cashier",          emoji:"\u{1F4B3}", color:"#34C759",
     nav:["pos","orders","x_reading","z_reading","cash_count","expenses","inventory","ca_request","loan_request","kiosk","void_request"]},
   crew:      {label:"Crew / Kitchen",   emoji:"\u{1F9D1}\u{200D}\u{1F373}", color:"#FF9500",
     nav:["kitchen","ca_request","loan_request","kiosk","pos","orders"]},
   stockclerk:{label:"Stock Clerk",      emoji:"\u{1F4E6}", color:"#AF52DE",
-    nav:["inventory","stock_order","stock_receive","ca_request","loan_request","kiosk","pos","orders","expenses"]},
+    nav:["inventory","inv_log","stock_order","stock_receive","ca_request","loan_request","kiosk","pos","orders","expenses"]},
   commissary:{label:"Commissary Staff", emoji:"\u{1F3ED}", color:"#32ADE6",
     nav:["comm_dash","comm_inv","comm_orders","comm_dr"]},
 };
@@ -4357,46 +4357,57 @@ function VoidBadge({branchId,db,setPage,visible=true}){
 
 
 // ─── STOCK EDIT MODAL ────────────────────────────────────
-function StockEditModal({item,db,user,branchId,showT,onClose}){
+function StockEditModal({item,db,user,branchId,showT,onClose,boms=[]}){
   if(!item)return null;
   var isOwner=user.role==="owner"||user.role==="commissary";
   var invCol=isOwner?"inventory":"inventory_"+branchId;
   var logCol=isOwner?"inventory_log":"inventory_log_"+branchId;
 
-  var [mode,setMode]=useState("adjust"); // adjust | set
-  var [display,setDisplay]=useState(""); // what shows on numpad screen
-  var [reason,setReason]=useState("");
+  var DEFAULT_CATS=["Frozen","Produce","Protein","Sauce","Dry Goods","Packaging","Beverage","Other"];
+  var UNITS=["pc","kg","g","L","ml","pack","box","tray","sachet","EA","roll"];
+
+  var [tab,setTab]=useState("stock"); // stock | details
   var [saving,setSaving]=useState(false);
+
+  // Stock adjustment state
+  var [mode,setMode]=useState("adjust");
+  var [display,setDisplay]=useState("");
+  var [reason,setReason]=useState("");
+
+  // Details edit state
+  var [details,setDetails]=useState({
+    name:item.name||"",
+    unit:item.unit||"pc",
+    cat:item.cat||"Other",
+    price:item.price||0,
+    cost:item.cost||0,
+    minStock:item.minStock||10,
+  });
 
   var current=item.stock||0;
   var numVal=parseFloat(display)||0;
-  var preview=mode==="adjust"
-    ? Math.max(0,current+(display.startsWith("-")?-numVal:numVal))
-    : Math.max(0,numVal);
   var isNeg=display.startsWith("-");
+  var preview=mode==="adjust"
+    ? Math.max(0,current+(isNeg?-numVal:numVal))
+    : Math.max(0,numVal);
 
-  // Numpad press handler
-  var numPress=function(key){
+  // Check if item is used in any BOM
+  var usedInBOM=boms.some(function(bomDoc){
+    if(!bomDoc)return false;
+    var bomData=typeof bomDoc==="object"?bomDoc:{};
+    return Object.values(bomData).some(function(rows){
+      return Array.isArray(rows)&&rows.some(function(r){return r.ingId===item.id||r.ingName===item.name;});
+    });
+  });
+
+  var press=function(key){
     if(key==="C"){setDisplay("");return;}
-    if(key==="⌫"){
-      var d=display;
-      if(d==="-")setDisplay("");
-      else setDisplay(d.slice(0,-1));
-      return;
-    }
+    if(key==="⌫"){setDisplay(function(p){return p.slice(0,-1)||"";});return;}
     if(key==="-"){
-      if(mode==="adjust"){
-        setDisplay(function(p){return p.startsWith("-")?p.slice(1):"-"+p;});
-      }
+      if(mode==="adjust")setDisplay(function(p){return p.startsWith("-")?p.slice(1):"-"+p;});
       return;
     }
-    if(key==="."){
-      if(!display.includes(".")){
-        setDisplay(function(p){return (p||"0")+".";});
-      }
-      return;
-    }
-    // number
+    if(key==="."){setDisplay(function(p){return p.includes(".")?p:(p||"0")+".";});return;}
     setDisplay(function(p){
       if(p==="-")return "-"+key;
       if(p==="0")return key;
@@ -4404,7 +4415,7 @@ function StockEditModal({item,db,user,branchId,showT,onClose}){
     });
   };
 
-  var save=async function(){
+  var saveStock=async function(){
     if(!display){showT("Enter amount","warn");return;}
     if(!reason){showT("Select reason","warn");return;}
     setSaving(true);
@@ -4423,7 +4434,68 @@ function StockEditModal({item,db,user,branchId,showT,onClose}){
       });
       showT("Stock updated: "+item.name+" → "+String(preview)+" "+(item.unit||"")+" ✓");
       onClose();
-    }catch(e){showT("Error saving","err");console.error(e);}
+    }catch(e){showT("Error saving","err");}
+    setSaving(false);
+  };
+
+  var saveDetails=async function(){
+    if(!details.name.trim()){showT("Enter item name","warn");return;}
+    setSaving(true);
+    try{
+      await updateDoc(doc(db,invCol,item.id),{
+        name:details.name,
+        unit:details.unit,
+        cat:details.cat,
+        price:parseFloat(details.price)||0,
+        cost:parseFloat(details.cost)||0,
+        minStock:parseFloat(details.minStock)||10,
+        margin:details.price>0?Math.round((details.price-details.cost)/details.price*100):0,
+        updatedAt:serverTimestamp(),
+        updatedBy:user.name
+      });
+      // If name changed, update all BOM references
+      if(details.name.trim()!==item.name&&isOwner){
+        try{
+          const bomSnap=await getDocs(collection(db,"bom"));
+          let updated=0;
+          for(const bomDoc of bomSnap.docs){
+            const data=bomDoc.data();
+            let changed=false;
+            const newData={};
+            for(const [key,rows] of Object.entries(data)){
+              if(!Array.isArray(rows)){newData[key]=rows;continue;}
+              const newRows=rows.map(function(r){
+                if(r.ingId===item.id||r.ingName===item.name){
+                  changed=true;
+                  return {...r,ingName:details.name};
+                }
+                return r;
+              });
+              newData[key]=newRows;
+            }
+            if(changed){
+              await setDoc(doc(db,"bom",bomDoc.id),newData);
+              updated++;
+            }
+          }
+          if(updated>0)showT("✅ Updated "+updated+" BOM recipe(s) with new name","ok");
+        }catch(e){console.warn("BOM sync:",e);}
+      }
+      // Log details edit
+      await addDoc(collection(db,isOwner?"inventory_log":"inventory_log_"+branchId),{
+        itemId:item.id,itemName:details.name,unit:details.unit,
+        type:"edited",
+        changes:{
+          name:details.name!==item.name?{from:item.name,to:details.name}:null,
+          price:details.price!==item.price?{from:item.price,to:details.price}:null,
+          cost:details.cost!==item.cost?{from:item.cost,to:details.cost}:null,
+          minStock:details.minStock!==item.minStock?{from:item.minStock,to:details.minStock}:null,
+        },
+        reason:"Details edited",by:user.name,at:serverTimestamp()
+      });
+      showT(details.name+" details updated ✓");
+      onClose();
+    }catch(e){showT("Error","err");}
     setSaving(false);
   };
 
@@ -4431,132 +4503,177 @@ function StockEditModal({item,db,user,branchId,showT,onClose}){
     ["7","8","9"],
     ["4","5","6"],
     ["1","2","3"],
-    [mode==="adjust"?"-":".",  "0","⌫"],
+    [mode==="adjust"?"-":".", "0","⌫"],
   ];
 
-  return h("div",{style:{background:"#fff",width:380,borderRadius:16,
+  return h("div",{style:{background:"#fff",width:400,borderRadius:16,
     overflow:"hidden",boxShadow:"0 20px 50px rgba(0,0,0,.4)"}},
 
     // Header
     h("div",{style:{background:"linear-gradient(135deg,#1565C0,#0D47A1)",
-      padding:"14px 18px",display:"flex",justifyContent:"space-between",
-      alignItems:"center"}},
+      padding:"14px 18px",display:"flex",justifyContent:"space-between",alignItems:"center"}},
       h("div",null,
-        h("div",{style:{color:"rgba(255,255,255,.6)",fontSize:9,
-          letterSpacing:2,fontWeight:700}},"STOCK ADJUSTMENT"),
+        h("div",{style:{color:"rgba(255,255,255,.6)",fontSize:9,letterSpacing:2,fontWeight:700}},"INVENTORY ITEM"),
         h("div",{style:{color:"#fff",fontWeight:900,fontSize:15}},item.name),
         h("div",{style:{color:"rgba(255,255,255,.5)",fontSize:10}},
-          "Current: "+String(current)+" "+(item.unit||""))
+          "Stock: "+String(current)+" "+(item.unit||"")+" · ₱"+(item.price||0).toFixed(2))
       ),
       h("button",{onClick:onClose,
         style:{background:"rgba(255,255,255,.15)",border:"none",color:"#fff",
           width:28,height:28,borderRadius:8,fontSize:16,cursor:"pointer"}},"×")
     ),
 
+    // Tabs
+    h("div",{style:{display:"flex",borderBottom:"2px solid #f0f0f0"}},
+      h("button",{onClick:()=>setTab("stock"),
+        style:{flex:1,padding:"10px",border:"none",cursor:"pointer",fontSize:12,
+          fontWeight:tab==="stock"?800:400,
+          background:"#fff",
+          color:tab==="stock"?"#1565C0":"#888",
+          borderBottom:"3px solid "+(tab==="stock"?"#1565C0":"transparent")}},
+        "📊 Adjust Stock"),
+      h("button",{onClick:()=>setTab("details"),
+        style:{flex:1,padding:"10px",border:"none",cursor:"pointer",fontSize:12,
+          fontWeight:tab==="details"?800:400,
+          background:"#fff",
+          color:tab==="details"?"#1565C0":"#888",
+          borderBottom:"3px solid "+(tab==="details"?"#1565C0":"transparent")}},
+        "✏️ Edit Details")
+    ),
+
     h("div",{style:{padding:"14px 16px"}},
 
-      // Mode toggle
-      h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",
-        gap:6,marginBottom:12}},
-        h("button",{onClick:function(){setMode("adjust");setDisplay("");},
-          style:{padding:"9px",borderRadius:9,border:"none",cursor:"pointer",
-            fontWeight:700,fontSize:12,
-            background:mode==="adjust"?"#1565C0":"#f0f0f0",
-            color:mode==="adjust"?"#fff":"#333"}},
-          "➕/➖ Adjust"),
-        h("button",{onClick:function(){setMode("set");setDisplay("");},
-          style:{padding:"9px",borderRadius:9,border:"none",cursor:"pointer",
-            fontWeight:700,fontSize:12,
-            background:mode==="set"?"#1565C0":"#f0f0f0",
-            color:mode==="set"?"#fff":"#333"}},
-          "= Set Exact")
+      // ── STOCK TAB ──
+      tab==="stock"&&h("div",null,
+        // Mode toggle
+        h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:12}},
+          h("button",{onClick:function(){setMode("adjust");setDisplay("");},
+            style:{padding:"9px",borderRadius:9,border:"none",cursor:"pointer",
+              fontWeight:700,fontSize:12,
+              background:mode==="adjust"?"#1565C0":"#f0f0f0",
+              color:mode==="adjust"?"#fff":"#333"}},
+            "➕/➖ Adjust"),
+          h("button",{onClick:function(){setMode("set");setDisplay("");},
+            style:{padding:"9px",borderRadius:9,border:"none",cursor:"pointer",
+              fontWeight:700,fontSize:12,
+              background:mode==="set"?"#1565C0":"#f0f0f0",
+              color:mode==="set"?"#fff":"#333"}},
+            "= Set Exact")
+        ),
+        // Display
+        h("div",{style:{background:"#f0f4ff",borderRadius:12,
+          padding:"12px 16px",marginBottom:12,textAlign:"right",
+          border:"2px solid #1565C0"}},
+          h("div",{style:{fontSize:9,color:"#888",marginBottom:2,textAlign:"left"}},
+            mode==="adjust"?(isNeg?"DEDUCT":"ADD")+" AMOUNT":"SET STOCK TO"),
+          h("div",{style:{fontSize:30,fontWeight:900,color:"#1565C0",minHeight:40,letterSpacing:2}},
+            display||"0"),
+          display&&h("div",{style:{fontSize:11,color:"#666",marginTop:4,
+            borderTop:"1px solid #ddd",paddingTop:4,textAlign:"left"}},
+            "New stock → ",
+            h("span",{style:{fontWeight:800,
+              color:preview<(item.minStock||0)?"#C62828":"#1B5E20",fontSize:14}},
+              String(preview)+" "+(item.unit||"")))
+        ),
+        // Numpad
+        h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:12}},
+          KEYS.flat().map(function(key){
+            return h("button",{key:key,onClick:function(){press(key);},
+              style:{padding:"16px 8px",fontSize:key==="⌫"?20:18,fontWeight:700,
+                borderRadius:10,border:"none",cursor:"pointer",
+                background:key==="⌫"?"#FFF3E0":key==="C"?"#FFEBEE":"#fff",
+                color:key==="⌫"?"#E65100":key==="C"?"#C62828":"#222",
+                boxShadow:"0 2px 4px rgba(0,0,0,.1)"}},
+              key);
+          }),
+          h("button",{onClick:function(){press("C");},
+            style:{gridColumn:"1/-1",padding:"12px",fontSize:13,fontWeight:700,
+              borderRadius:10,border:"none",cursor:"pointer",
+              background:"#FFEBEE",color:"#C62828"}},
+            "CLEAR")
+        ),
+        // Reason
+        h("div",{style:{marginBottom:12}},
+          h("div",{style:{fontSize:9,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:6}},"REASON *"),
+          h("div",{style:{display:"flex",gap:5,flexWrap:"wrap"}},
+            ["Physical Count","Spoilage","Wastage","Transfer","Correction","Received","Other"].map(function(r){
+              return h("button",{key:r,onClick:function(){setReason(r);},
+                style:{padding:"6px 12px",borderRadius:20,fontSize:10,cursor:"pointer",
+                  border:"none",
+                  background:reason===r?"#1565C0":"#eee",
+                  color:reason===r?"#fff":"#333",
+                  fontWeight:reason===r?700:400}},r);
+            })
+          )
+        ),
+        h("button",{onClick:saveStock,
+          disabled:saving||!display||!reason,
+          style:{width:"100%",padding:"13px",
+            background:saving||!display||!reason?"#ccc":"linear-gradient(135deg,#1565C0,#0D47A1)",
+            border:"none",borderRadius:10,color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer"}},
+          saving?"Saving...":"💾 SAVE STOCK")
       ),
 
-      // Display screen
-      h("div",{style:{background:"#f0f4ff",borderRadius:12,
-        padding:"14px 18px",marginBottom:12,textAlign:"right",
-        border:"2px solid #1565C0"}},
-        h("div",{style:{fontSize:10,color:"#888",marginBottom:2,textAlign:"left"}},
-          mode==="adjust"
-            ?(isNeg?"DEDUCT":"ADD")+" AMOUNT"
-            :"SET STOCK TO"),
-        h("div",{style:{fontSize:32,fontWeight:900,color:"#1565C0",
-          minHeight:44,letterSpacing:2}},
-          display||"0"),
-        // Preview
-        display&&h("div",{style:{fontSize:11,color:"#666",marginTop:4,
-          borderTop:"1px solid #ddd",paddingTop:6,textAlign:"left"}},
-          "New stock → ",
-          h("span",{style:{fontWeight:800,
-            color:preview<(item.minStock||0)?"#C62828":"#1B5E20",
-            fontSize:14}},
-            String(preview)+" "+(item.unit||""))
-        )
-      ),
-
-      // Numpad
-      h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",
-        gap:8,marginBottom:12}},
-        KEYS.flat().map(function(key){
-          var isAction=key==="⌫"||key==="C"||key==="-";
-          return h("button",{key:key,
-            onClick:function(){numPress(key);},
-            style:{
-              padding:"16px 8px",
-              fontSize:key==="⌫"?20:18,
-              fontWeight:700,
-              borderRadius:10,
-              border:"none",
-              cursor:"pointer",
-              background:key==="C"?"#FFEBEE":
-                key==="⌫"?"#FFF3E0":
-                key==="-"&&isNeg?"#1565C0":
-                isAction?"#e8eaf6":"#fff",
-              color:key==="C"?"#C62828":
-                key==="-"&&isNeg?"#fff":
-                isAction?"#1565C0":"#222",
-              boxShadow:"0 2px 4px rgba(0,0,0,.1)",
-              transition:"all .1s",
-            }},
-            key);
-        }),
-        // Clear button (full width)
-        h("button",{
-          onClick:function(){numPress("C");},
-          style:{gridColumn:"1/-1",padding:"14px",fontSize:14,
-            fontWeight:700,borderRadius:10,border:"none",
-            cursor:"pointer",background:"#FFEBEE",color:"#C62828",
-            boxShadow:"0 2px 4px rgba(0,0,0,.1)"}},
-          "CLEAR")
-      ),
-
-      // Reason
-      h("div",{style:{marginBottom:12}},
-        h("div",{style:{fontSize:9,fontWeight:700,color:"#888",
-          letterSpacing:1,marginBottom:6}},"REASON *"),
-        h("div",{style:{display:"flex",gap:5,flexWrap:"wrap"}},
-          ["Physical Count","Spoilage","Wastage",
-           "Transfer","Correction","Received","Other"].map(function(r){
-            return h("button",{key:r,onClick:function(){setReason(r);},
-              style:{padding:"6px 12px",borderRadius:20,fontSize:10,
-                cursor:"pointer",border:"none",
-                background:reason===r?"#1565C0":"#eee",
-                color:reason===r?"#fff":"#333",
-                fontWeight:reason===r?700:400}},r);
-          })
-        )
-      ),
-
-      // Save button
-      h("button",{onClick:save,
-        disabled:saving||!display||!reason,
-        style:{width:"100%",padding:"14px",
-          background:saving||!display||!reason?"#ccc":
-            "linear-gradient(135deg,#1565C0,#0D47A1)",
-          border:"none",borderRadius:10,color:"#fff",
-          fontWeight:800,fontSize:14,cursor:"pointer",
-          letterSpacing:1}},
-        saving?"Saving...":"💾 SAVE")
+      // ── DETAILS TAB ──
+      tab==="details"&&h("div",null,
+        h("div",{style:{marginBottom:10}},
+          h("div",{style:{fontSize:9,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},"ITEM NAME"),
+          h("input",{value:details.name,
+            onChange:e=>setDetails(p=>({...p,name:e.target.value})),
+            style:{width:"100%",padding:"9px",border:"2px solid #1565C0",
+              borderRadius:8,fontSize:13,fontWeight:700,outline:"none",boxSizing:"border-box"}})
+        ),
+        h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}},
+          h("div",null,
+            h("div",{style:{fontSize:9,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},"UNIT"),
+            h("select",{value:details.unit,onChange:e=>setDetails(p=>({...p,unit:e.target.value})),
+              style:{width:"100%",padding:"8px",border:"1px solid #ddd",borderRadius:7,fontSize:12,outline:"none"}},
+              UNITS.map(u=>h("option",{key:u,value:u},u)))
+          ),
+          h("div",null,
+            h("div",{style:{fontSize:9,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},"CATEGORY"),
+            h("select",{value:details.cat,onChange:e=>setDetails(p=>({...p,cat:e.target.value})),
+              style:{width:"100%",padding:"8px",border:"1px solid #ddd",borderRadius:7,fontSize:12,outline:"none"}},
+              DEFAULT_CATS.map(c=>h("option",{key:c,value:c},c)))
+          )
+        ),
+        h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}},
+          h("div",null,
+            h("div",{style:{fontSize:9,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},"SELL PRICE (₱)"),
+            h("input",{type:"number",value:details.price,
+              onChange:e=>setDetails(p=>({...p,price:e.target.value})),
+              style:{width:"100%",padding:"8px",border:"1px solid #ddd",borderRadius:7,fontSize:13,fontWeight:700,outline:"none",boxSizing:"border-box",color:"#1565C0"}})
+          ),
+          h("div",null,
+            h("div",{style:{fontSize:9,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},"COST PRICE (₱)"),
+            h("input",{type:"number",value:details.cost,
+              onChange:e=>setDetails(p=>({...p,cost:e.target.value})),
+              style:{width:"100%",padding:"8px",border:"1px solid #ddd",borderRadius:7,fontSize:13,fontWeight:700,outline:"none",boxSizing:"border-box",color:"#C62828"}})
+          )
+        ),
+        h("div",{style:{marginBottom:12}},
+          h("div",{style:{fontSize:9,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},"MIN STOCK (Alert Threshold)"),
+          h("input",{type:"number",value:details.minStock,
+            onChange:e=>setDetails(p=>({...p,minStock:e.target.value})),
+            style:{width:"100%",padding:"8px",border:"1px solid #ddd",borderRadius:7,fontSize:12,outline:"none",boxSizing:"border-box"}})
+        ),
+        // Margin preview
+        details.price>0&&h("div",{style:{background:"#E8F5E9",borderRadius:8,
+          padding:"8px 12px",marginBottom:12,display:"flex",justifyContent:"space-between"}},
+          h("span",{style:{fontSize:11,color:"#555"}},"Margin:"),
+          h("span",{style:{fontSize:14,fontWeight:900,color:"#1B5E20"}},
+            details.price>0?Math.round((details.price-details.cost)/details.price*100)+"%":"—")
+        ),
+        // BOM warning
+        usedInBOM&&h("div",{style:{background:"#FFF3E0",borderRadius:8,
+          padding:"8px 12px",marginBottom:12,fontSize:11,color:"#E65100",fontWeight:600}},
+          "⚠️ This item is used in BOM — name change will need BOM update"),
+        h("button",{onClick:saveDetails,disabled:saving,
+          style:{width:"100%",padding:"13px",
+            background:saving?"#ccc":"linear-gradient(135deg,#1565C0,#0D47A1)",
+            border:"none",borderRadius:10,color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer"}},
+          saving?"Saving...":"💾 SAVE DETAILS")
+      )
     )
   );
 }
@@ -5667,6 +5784,163 @@ function PrinterPage({db,user,showT,companySettings,setCompanySettings}){
 }
 
 
+
+// ─── INVENTORY LOG PAGE ───────────────────────────────────
+function InvLogPage({db,user,branchId,branches,showT}){
+  const [logs,setLogs]     = useState([]);
+  const [loading,setLoading] = useState(true);
+  const [filter,setFilter]   = useState("all"); // all,deduct,add,created,edited,deleted
+  const [selBranch,setSelBranch] = useState(branchId);
+  const [srch,setSrch]     = useState("");
+
+  const isOwner = user.role==="owner"||user.role==="commissary";
+
+  useEffect(()=>{
+    setLoading(true);
+    const col = selBranch==="main"||isOwner&&selBranch==="main"
+      ? "inventory_log"
+      : "inventory_log_"+selBranch;
+    try{
+      const q = query(
+        collection(db,col),
+        orderBy("at","desc"),
+        limit(200)
+      );
+      const unsub = onSnapshot(q, snap=>{
+        setLogs(snap.docs.map(d=>({...d.data(),_id:d.id})));
+        setLoading(false);
+      },()=>setLoading(false));
+      return()=>unsub();
+    }catch(e){setLoading(false);}
+  },[selBranch]);
+
+  const TYPE_CONFIG = {
+    deduct:  {label:"Deducted",    color:"#C62828", bg:"#FFEBEE", icon:"➖"},
+    add:     {label:"Added",       color:"#1B5E20", bg:"#E8F5E9", icon:"➕"},
+    set:     {label:"Set",         color:"#1565C0", bg:"#E3F2FD", icon:"="},
+    adjust:  {label:"Adjusted",    color:"#E65100", bg:"#FFF3E0", icon:"✏️"},
+    created: {label:"New Item",    color:"#6A1B9A", bg:"#F3E5F5", icon:"🆕"},
+    edited:  {label:"Edited",      color:"#1565C0", bg:"#E3F2FD", icon:"✏️"},
+    deleted: {label:"Deleted",     color:"#C62828", bg:"#FFEBEE", icon:"🗑️"},
+  };
+
+  const filtered = logs.filter(l=>{
+    if(filter!=="all"&&l.type!==filter)return false;
+    if(srch&&!(
+      (l.itemName||"").toLowerCase().includes(srch.toLowerCase())||
+      (l.orderId||"").toLowerCase().includes(srch.toLowerCase())||
+      (l.reason||"").toLowerCase().includes(srch.toLowerCase())
+    ))return false;
+    return true;
+  });
+
+  const totalDeducted = filtered.filter(l=>l.type==="deduct").reduce((s,l)=>s+Math.abs(l.amount||0),0);
+  const totalAdded = filtered.filter(l=>l.type==="add"||l.type==="set").reduce((s,l)=>s+(l.amount||0),0);
+
+  return h("div",null,
+    h(SectionHeader,{title:"📋 Inventory Log"}),
+
+    // Branch selector (owner)
+    isOwner&&h("div",{style:{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}},
+      h("button",{onClick:()=>setSelBranch("main"),
+        style:{padding:"6px 14px",borderRadius:20,border:"none",cursor:"pointer",
+          fontSize:11,fontWeight:700,
+          background:selBranch==="main"?C.primary:"#eee",
+          color:selBranch==="main"?"#fff":C.text}},"Main"),
+      branches.filter(b=>b.id!=="ct-main").map(b=>
+        h("button",{key:b.id,onClick:()=>setSelBranch(b.id),
+          style:{padding:"6px 14px",borderRadius:20,border:"none",cursor:"pointer",
+            fontSize:11,fontWeight:700,
+            background:selBranch===b.id?C.primary:"#eee",
+            color:selBranch===b.id?"#fff":C.text}},b.name||b.id))
+    ),
+
+    // Stats
+    h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:12}},
+      h(Stat,{label:"Total Entries",value:filtered.length,icon:"📋",color:C.primary}),
+      h(Stat,{label:"Total Deducted",value:totalDeducted.toFixed(1),icon:"➖",color:C.danger}),
+      h(Stat,{label:"Total Added",value:totalAdded.toFixed(1),icon:"➕",color:C.success})
+    ),
+
+    // Search + filter
+    h("div",{style:{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap",alignItems:"center"}},
+      h("div",{style:{position:"relative",flex:1}},
+        h("input",{value:srch,onChange:e=>setSrch(e.target.value),
+          placeholder:"🔍 Search item, order ID...",
+          style:{width:"100%",padding:"8px 14px",border:"1px solid "+C.border,
+            borderRadius:20,fontSize:12,outline:"none",boxSizing:"border-box"}})
+      ),
+      ["all","deduct","add","created","edited","deleted"].map(f=>
+        h("button",{key:f,onClick:()=>setFilter(f),
+          style:{padding:"5px 12px",borderRadius:20,fontSize:10,border:"none",
+            cursor:"pointer",fontWeight:filter===f?700:400,
+            background:filter===f?C.primary:"#eee",
+            color:filter===f?"#fff":C.muted}},
+          f==="all"?"All":TYPE_CONFIG[f]?.label||f))
+    ),
+
+    // Log table
+    loading?h("div",{style:{textAlign:"center",padding:40,color:C.muted}},"Loading..."):
+    h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
+      // Header
+      h("div",{style:{display:"grid",
+        gridTemplateColumns:"140px 1fr 80px 80px 120px 100px",
+        padding:"8px 14px",background:"#f5f5f5",
+        fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1}},
+        "DATE/TIME","ITEM","TYPE","AMOUNT","TRANSACTION","BY"
+      ),
+      filtered.length===0&&h("div",{style:{padding:"30px",textAlign:"center",color:C.muted}},
+        "No log entries found"),
+      filtered.map((log,i)=>{
+        const tc=TYPE_CONFIG[log.type]||{label:log.type,color:C.muted,bg:"#f5f5f5",icon:"•"};
+        const dt=log.at?.toDate?log.at.toDate():new Date();
+        const dateStr=dt.toLocaleDateString("en-PH",{month:"short",day:"numeric"});
+        const timeStr=dt.toLocaleTimeString("en-PH",{hour:"2-digit",minute:"2-digit"});
+        return h("div",{key:log._id||i,
+          style:{display:"grid",
+            gridTemplateColumns:"140px 1fr 80px 80px 120px 100px",
+            padding:"10px 14px",
+            borderBottom:i<filtered.length-1?"1px solid #f5f5f5":"none",
+            alignItems:"center",
+            background:i%2===0?"#fff":"#fafafa"}},
+          // Date/Time
+          h("div",null,
+            h("div",{style:{fontSize:11,fontWeight:600}},dateStr),
+            h("div",{style:{fontSize:9,color:C.muted}},timeStr)
+          ),
+          // Item + reason
+          h("div",null,
+            h("div",{style:{fontWeight:700,fontSize:12}},log.itemName||"—"),
+            h("div",{style:{fontSize:9,color:C.muted}},log.reason||"")
+          ),
+          // Type badge
+          h("div",null,
+            h("span",{style:{background:tc.bg,color:tc.color,
+              padding:"2px 7px",borderRadius:10,
+              fontSize:9,fontWeight:700}},
+              tc.icon+" "+tc.label)
+          ),
+          // Amount
+          h("div",{style:{fontWeight:700,
+            color:log.type==="deduct"||log.type==="deleted"?C.danger:C.success,
+            fontSize:12}},
+            (log.amount>0?"+":"")+parseFloat(log.amount||0).toFixed(1)+" "+(log.unit||"")
+          ),
+          // Transaction ID (order ref)
+          log.orderId
+            ?h("div",null,
+                h("span",{style:{background:"#E3F2FD",color:"#1565C0",
+                  padding:"2px 8px",borderRadius:8,fontSize:9,fontWeight:700}},
+                  "🛒 "+log.orderId))
+            :h("div",{style:{fontSize:9,color:C.muted}},log.transactionId||"—"),
+          // By
+          h("div",{style:{fontSize:10,color:C.muted}},log.by||"—")
+        );
+      })
+    )
+  );
+}
+
 // ─── PAYROLL PAGE ─────────────────────────────────────────
 function PayrollPage({db,hrisDB,user,showT,branches,branchId,staff,advances}){
   const [cutoff,setCutoff]   = useState(()=>{
@@ -5992,6 +6266,14 @@ function NewInventoryItemForm({db,user,branchId,showT,onClose,invBranch,inventor
         margin:form.price>0?Math.round((form.price-form.cost)/form.price*100):0,
         createdAt:serverTimestamp(),createdBy:user.name
       });
+      // Log new item creation
+      const logC=isOwner?(invBranch==="main"?"inventory_log":"inventory_log_"+invBranch):"inventory_log_"+branchId;
+      await addDoc(collection(db,logC),{
+        itemId:id,itemName:form.name,unit:form.unit,
+        type:"created",amount:parseFloat(form.stock)||0,
+        prevStock:0,newStock:parseFloat(form.stock)||0,
+        reason:"New item",by:user.name,at:serverTimestamp()
+      });
       showT(form.name+" added ✓");
       onClose();
     }catch(e){showT("Error saving","err");}
@@ -6081,6 +6363,19 @@ function App(){
   const [inventory,setInventory]=useState(INIT_INVENTORY);
   const [invBranch,setInvBranch]=useState("main"); // which branch inventory to view
   const [invCustomCats,setInvCustomCats]=useState([]); // custom inventory categories
+  const [appBoms,setAppBoms]=useState({}); // boms loaded at app level for delete protection
+
+  // Load BOMs for delete protection
+  useEffect(()=>{
+    try{
+      const unsub=onSnapshot(collection(db,"bom"),snap=>{
+        const b={};
+        snap.docs.forEach(d=>{b[d.id]=d.data();});
+        setAppBoms(b);
+      },()=>{});
+      return()=>unsub();
+    }catch(e){}
+  },[]);
 
   // Load custom inventory categories
   useEffect(()=>{
@@ -6557,7 +6852,13 @@ function App(){
                 amount:-deductAmt,
                 prevStock:null,
                 newStock:null,
-                reason:"Order: "+ord.id+" ("+cartItem.name+(variant!=="default"?" - "+variant:"")+") x"+cartItem.qty,
+                transactionId:ord.id,
+                orderId:ord.id,
+                menuItem:cartItem.name,
+                menuVariant:variant!=="default"?variant:null,
+                qty:cartItem.qty,
+                branch:branchId,
+                reason:"Order: "+ord.id+" — "+cartItem.name+(variant!=="default"?" ("+variant+")":"")+" x"+cartItem.qty,
                 by:user.name,
                 at:serverTimestamp()
               });
@@ -6608,7 +6909,12 @@ function App(){
                     await addDoc(collection(db,logCol),{
                       itemId:row.ingId,itemName:row.ingName||row.ingId,
                       unit:row.unit||"",type:"deduct",amount:-deductAmt,
-                      reason:"Option: "+optLabel+" ("+cartItem.name+") Order:"+ord.id,
+                      transactionId:ord.id,
+                      orderId:ord.id,
+                      menuItem:cartItem.name,
+                      optionLabel:optLabel,
+                      branch:branchId,
+                      reason:"Order: "+ord.id+" — "+cartItem.name+" ["+optLabel+"]",
                       by:user.name,at:serverTimestamp()
                     });
                   }catch(e2){console.warn("Option BOM deduct failed",e2);}
@@ -7845,10 +8151,41 @@ function App(){
                   "✏️ Edit"),
                 h("button",{
                   onClick:async function(){
+                    // Check if used in BOM - query Firebase
+                    let usedInBOM=false;
+                    try{
+                      const bomSnap=await getDocs(collection(db,"bom"));
+                      usedInBOM=bomSnap.docs.some(function(d){
+                        const data=d.data();
+                        return Object.values(data).some(function(rows){
+                          return Array.isArray(rows)&&rows.some(function(r){
+                            return r.ingId===item.id||r.ingName===item.name;
+                          });
+                        });
+                      });
+                    }catch(e){}
+                    if(usedInBOM){
+                      showT("❌ Cannot delete — "+item.name+" is used in BOM!","err");
+                      return;
+                    }
                     if(!confirm("Delete "+item.name+"?"))return;
                     const isOwner=user.role==="owner"||user.role==="commissary";
                     const col=isOwner?"inventory":"inventory_"+branchId;
                     try{
+                      // Log the deletion first
+                      const logCol2=isOwner?"inventory_log":"inventory_log_"+branchId;
+                      await addDoc(collection(db,logCol2),{
+                        itemId:item.id,
+                        itemName:item.name,
+                        unit:item.unit||"",
+                        type:"deleted",
+                        amount:item.stock||0,
+                        prevStock:item.stock||0,
+                        newStock:0,
+                        reason:"Item deleted",
+                        by:user.name,
+                        at:serverTimestamp()
+                      });
                       await deleteDoc(doc(db,col,item.id));
                       showT(item.name+" deleted ✓");
                     }catch(e){showT("Error deleting","err");}
@@ -7871,6 +8208,12 @@ function App(){
                       await updateDoc(doc(db,invCol,item.id),{
                         stock:newQ,lastAdjusted:serverTimestamp(),
                         adjustedBy:user.name,lastAdjAmt:adj
+                      });
+                      await addDoc(collection(db,logCol),{
+                        itemId:item.id,itemName:item.name,unit:item.unit||"",
+                        type:adj>0?"add":"deduct",
+                        amount:adj,prevStock:item.stock||0,newStock:newQ,
+                        reason:"Quick adjust",by:user.name,at:serverTimestamp()
                       });
                       await addDoc(collection(db,logCol),{
                         itemId:item.id,itemName:item.name,unit:item.unit||"",
@@ -8872,6 +9215,10 @@ function App(){
         // ══ COMMISSARY ══
 
         // ══ STOCK ORDER (Branch → Commissary PO) ══
+        page==="inv_log"&&h(InvLogPage,{
+          db,user,branchId,branches,showT
+        }),
+
         page==="stock_order"&&h("div",null,
           h(SectionHeader,{title:"📦 Order Stocks from Commissary",
             action:()=>setModal("new_po"),actionLabel:"+ New Order"}),
@@ -9357,6 +9704,7 @@ function App(){
         display:"flex",alignItems:"center",justifyContent:"center",zIndex:900}},
       h(StockEditModal,{
         item:inventory.find(function(i){return (i.id||i.name)===modal.replace("stock_edit_","");}),
+        boms:Object.values(appBoms||{}),
         db,user,branchId,showT,
         onClose:function(){setModal(null);}
       })
