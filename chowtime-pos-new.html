@@ -3713,7 +3713,24 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
                               },
                               style:{flex:1,padding:"5px 8px",border:"2px solid "+C.primary,
                                 borderRadius:6,fontSize:12,outline:"none"}}),
-                            h("button",{onClick:()=>setEditingGrp(null),
+                            h("button",{
+                              onClick:async e=>{
+                                e.stopPropagation();
+                                const inp=e.target.closest("div").querySelector("input");
+                                const newName=inp?inp.value.trim():"";
+                                if(newName&&newName!==grp.name){
+                                  try{
+                                    await updateDoc(doc(db,"option_groups",grp.id),{name:newName});
+                                    showT("Renamed ✓");
+                                  }catch(err){showT("Error","err");}
+                                }
+                                setEditingGrp(null);
+                              },
+                              style:{background:C.primary,border:"none",borderRadius:5,
+                                color:"#fff",fontSize:10,fontWeight:700,cursor:"pointer",
+                                padding:"3px 8px"}},
+                              "Save"),
+                            h("button",{onClick:e=>{e.stopPropagation();setEditingGrp(null);},
                               style:{background:"none",border:"none",color:C.muted,
                                 fontSize:14,cursor:"pointer",padding:"0 4px"}},
                               "✕")
@@ -3827,8 +3844,27 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
                                 },
                                 style:{flex:1,padding:"3px 7px",border:"2px solid "+C.primary,
                                   borderRadius:5,fontSize:11,outline:"none"}}),
-                              h("button",{onClick:()=>setEditingChoice(null),
-                                style:{background:"none",border:"none",color:C.muted,fontSize:12,cursor:"pointer"}},
+                              h("button",{
+                                onClick:async e=>{
+                                  e.stopPropagation();
+                                  const inp=e.target.closest("div").querySelector("input");
+                                  const newLabel=inp?inp.value.trim():"";
+                                  if(newLabel&&newLabel!==ch.label){
+                                    const newChoices=(selGroup.choices||[]).map(c=>c.id===ch.id?{...c,label:newLabel}:c);
+                                    try{
+                                      await updateDoc(doc(db,"option_groups",selGroup.id),{choices:newChoices});
+                                      showT("Saved ✓");
+                                    }catch(err){showT("Error","err");}
+                                  }
+                                  setEditingChoice(null);
+                                },
+                                style:{background:C.primary,border:"none",borderRadius:5,
+                                  color:"#fff",fontSize:10,fontWeight:700,cursor:"pointer",
+                                  padding:"3px 8px"}},
+                                "Save"),
+                              h("button",{onClick:e=>{e.stopPropagation();setEditingChoice(null);},
+                                style:{background:"none",border:"none",color:C.muted,
+                                  fontSize:14,cursor:"pointer",padding:"0 4px"}},
                                 "✕")
                             )
                           : h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center"}},
