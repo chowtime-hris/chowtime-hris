@@ -53,7 +53,8 @@ window.addEventListener("unhandledrejection", function(e) {
 </script>
 <script type="module">
 // React loaded as UMD global
-const { createElement: h, useState, useEffect, useRef } = window.React;
+const React = window.React;
+const { createElement: h, useState, useEffect, useRef, useCallback } = window.React;
 const { createRoot } = window.ReactDOM;
 import { initializeApp } from "firebase/app";
 import {
