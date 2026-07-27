@@ -3168,22 +3168,29 @@ const UNITS = ["pc","pack","box","sack","kg","g","L","mL","cup","gal","tray","do
 
 function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
   const [mainTab,setMainTab] = useState("products");
-  const [selItem,setSelItem] = useState(null);
-  const [selVariant,setSelVar] = useState("default");
+  // Products tab state
+  const [selItem,setSelItem]     = useState(null);
+  const [selVariant,setSelVar]   = useState("default");
   const [itemBomTab,setItemBomTab] = useState("variants");
-  const [boms,setBoms] = useState({});
-  const [editBom,setEditBom] = useState([]);
-  const [saving,setSaving] = useState(false);
-  const [costTab,setCostTab] = useState("bom");
-  // Options tab state
-  const [selGroup,setSelGroup] = useState(null);
+  const [boms,setBoms]           = useState({});
+  const [editBom,setEditBom]     = useState([]);
+  const [saving,setSaving]       = useState(false);
+  const [costTab,setCostTab]     = useState("bom");
+  // Item Options sub-tab state
+  const [selItemOpt,setSelItemOpt]       = useState(null);
+  const [editItemOptBom,setEditItemOptBom] = useState([]);
+  const [savingItemOpt,setSavingItemOpt] = useState(false);
+  // Option Groups tab state
+  const [groups,setGroups]       = useState([]);  // [{id,name,choices:[{id,label}]}]
+  const [selGroup,setSelGroup]   = useState(null);
   const [selChoice,setSelChoice] = useState(null);
   const [editOptBom,setEditOptBom] = useState([]);
   const [savingOpt,setSavingOpt] = useState(false);
-  // Item Options sub-tab state
-  const [selItemOpt,setSelItemOpt] = useState(null);
-  const [editItemOptBom,setEditItemOptBom] = useState([]);
-  const [savingItemOpt,setSavingItemOpt] = useState(false);
+  // New group/choice form
+  const [newGrpName,setNewGrpName]   = useState("");
+  const [newChoiceLbl,setNewChoiceLbl] = useState("");
+  const [showAddGrp,setShowAddGrp]   = useState(false);
+  const [showAddChoice,setShowAddChoice] = useState(false);
 
   const ingredients = inventory;
 
@@ -3197,19 +3204,24 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
     return()=>unsub();
   },[]);
 
+  // Load Option Groups from Firebase option_groups collection
+  useEffect(()=>{
+    const unsub=onSnapshot(collection(db,"option_groups"),snap=>{
+      setGroups(snap.docs.map(d=>({...d.data(),id:d.id})));
+    },()=>{});
+    return()=>unsub();
+  },[]);
+
   const variantList=(item)=>{
     const v=["default"];
     (item.variants||[]).forEach(vv=>{if(vv.label)v.push(vv.label);});
     return v;
   };
-
   const getVKey=(item,v)=>(!v||v==="default")?item.id:item.id+"__"+v.replace(/\s+/g,"_");
-
   const hasBOM=(item,v="default")=>{
     const key=getVKey(item,v);
-    return (boms[item.id]&&(boms[item.id][key]||[]).length>0);
+    return !!(boms[item.id]&&(boms[item.id][key]||[]).length>0);
   };
-
   const getCost=(rows)=>rows.reduce((s,r)=>{
     const ing=ingredients.find(x=>x.id===r.ingId)||{};
     const factor=r.convFactor||1;
@@ -3237,11 +3249,77 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
     setSaving(false);
   };
 
+  // Create new option group
+  const createGroup=async()=>{
+    const name=newGrpName.trim();
+    if(!name){showT("Enter group name","warn");return;}
+    if(groups.find(g=>g.name===name)){showT("Group already exists","warn");return;}
+    try{
+      const id="grp_"+Date.now();
+      await setDoc(doc(db,"option_groups",id),{id,name,choices:[],createdBy:user.name,createdAt:serverTimestamp()});
+      setNewGrpName(""); setShowAddGrp(false);
+      showT(name+" created ✓");
+    }catch(e){showT("Error","err");}
+  };
+
+  // Add choice to group
+  const addChoice=async()=>{
+    const label=newChoiceLbl.trim();
+    if(!label||!selGroup){showT("Enter choice name","warn");return;}
+    if((selGroup.choices||[]).find(c=>c.label===label)){showT("Choice already exists","warn");return;}
+    const newChoices=[...(selGroup.choices||[]),{id:"ch_"+Date.now(),label}];
+    try{
+      await updateDoc(doc(db,"option_groups",selGroup.id),{choices:newChoices});
+      setNewChoiceLbl(""); setShowAddChoice(false);
+      showT(label+" added ✓");
+    }catch(e){showT("Error","err");}
+  };
+
+  // Delete choice
+  const deleteChoice=async(ch)=>{
+    if(!confirm("Delete choice \""+ch.label+"\"?"))return;
+    const newChoices=(selGroup.choices||[]).filter(c=>c.id!==ch.id);
+    try{
+      await updateDoc(doc(db,"option_groups",selGroup.id),{choices:newChoices});
+      if(selChoice&&selChoice.id===ch.id){setSelChoice(null);setEditOptBom([]);}
+      showT(ch.label+" deleted");
+    }catch(e){showT("Error","err");}
+  };
+
+  // Delete group
+  const deleteGroup=async(grp)=>{
+    if(!confirm("Delete group \""+grp.name+"\" and all its BOMs?"))return;
+    try{
+      await deleteDoc(doc(db,"option_groups",grp.id));
+      // Also delete BOM for this group
+      const bomRef=doc(db,"bom","optgrp_"+grp.id);
+      await deleteDoc(bomRef).catch(()=>{});
+      if(selGroup&&selGroup.id===grp.id){setSelGroup(null);setSelChoice(null);setEditOptBom([]);}
+      showT(grp.name+" deleted");
+    }catch(e){showT("Error","err");}
+  };
+
+  // Save option group BOM
+  const saveOptBOM=async()=>{
+    if(!selChoice||!selGroup)return;
+    setSavingOpt(true);
+    try{
+      const key="optgrp_"+selGroup.id+"__"+selChoice.id;
+      const rows=editOptBom.filter(r=>r.ingId||r.ingName);
+      const docId="optgrp_"+selGroup.id;
+      await setDoc(doc(db,"bom",docId),
+        Object.assign({},boms[docId]||{},{[key]:rows}),{merge:true});
+      showT(selChoice.label+" BOM saved ✓");
+    }catch(e){showT("Error","err");}
+    setSavingOpt(false);
+  };
+
   // BOMEditor sub-component
   const BOMEditor=({rows,setRows,onSave,saving:sv})=>h("div",null,
-    h("div",{style:{display:"grid",gridTemplateColumns:"1fr 80px 70px 120px 60px 80px 36px",
-      gap:6,marginBottom:6,padding:"0 4px"}},
-      ["INGREDIENT","QTY/SERVING","UNIT USED","CONV (1 STOCK=X)","MARKUP%","DEDUCTS",""].map(h2=>
+    h("div",{style:{display:"grid",
+      gridTemplateColumns:"1fr 80px 70px 110px 60px 80px 36px",
+      gap:6,marginBottom:6,padding:"0 2px"}},
+      ["INGREDIENT","QTY/SERVING","UNIT USED","CONV (1 STK=X)","MARKUP%","DEDUCTS",""].map(h2=>
         h("div",{key:h2,style:{fontSize:8,fontWeight:700,color:C.muted,letterSpacing:1}},h2))
     ),
     rows.map((row,i)=>{
@@ -3250,80 +3328,51 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
       const actualDeduct=(row.qty||0)/factor;
       const cost=(ing.cost||0)*actualDeduct*(1+(row.markup||0)/100);
       return h("div",{key:i,style:{display:"grid",
-        gridTemplateColumns:"1fr 80px 70px 120px 60px 80px 36px",
+        gridTemplateColumns:"1fr 80px 70px 110px 60px 80px 36px",
         gap:6,marginBottom:6,alignItems:"center"}},
-        // Ingredient select
         h("select",{value:row.ingId||"",
           onChange:e=>{
             const g=ingredients.find(x=>x.id===e.target.value)||{};
-            const updated=[...rows];
-            updated[i]={...updated[i],ingId:e.target.value,ingName:g.name||"",unit:g.unit||""};
-            setRows(updated);
+            const u=[...rows]; u[i]={...u[i],ingId:e.target.value,ingName:g.name||"",unit:g.unit||""}; setRows(u);
           },
           style:{padding:"5px",border:"1px solid "+C.border,borderRadius:6,fontSize:10,outline:"none"}},
           h("option",{value:""},"— Select —"),
-          ingredients.map(ing2=>h("option",{key:ing2.id,value:ing2.id},ing2.name+(ing2.unit?" ("+ing2.unit+")":"")))
+          ingredients.map(x=>h("option",{key:x.id,value:x.id},x.name+(x.unit?" ("+x.unit+")":"")))
         ),
-        // QTY per serving
         h("input",{type:"number",min:0,step:"0.01",
-          defaultValue:row.qty||"",
-          key:"qty-"+i+"-"+row.ingId,
-          onBlur:e=>{ const v=parseFloat(e.target.value)||0; const u=[...rows]; u[i]={...u[i],qty:v}; setRows(u); },
-          style:{padding:"5px",border:"1px solid "+C.border,borderRadius:6,
-            fontSize:10,outline:"none",textAlign:"center",width:"100%"}}),
-        // Unit used
+          defaultValue:row.qty||"",key:"qty-"+i+"-"+row.ingId,
+          onBlur:e=>{const u=[...rows];u[i]={...u[i],qty:parseFloat(e.target.value)||0};setRows(u);},
+          style:{padding:"5px",border:"1px solid "+C.border,borderRadius:6,fontSize:10,outline:"none",textAlign:"center",width:"100%"}}),
         h("input",{
-          defaultValue:row.deductUnit||row.unit||"",
-          key:"unit-"+i+"-"+row.ingId,
-          placeholder:"pcs",
-          onBlur:e=>{ const u=[...rows]; u[i]={...u[i],deductUnit:e.target.value}; setRows(u); },
-          style:{padding:"5px",border:"1px solid "+C.border,borderRadius:6,
-            fontSize:10,outline:"none",textAlign:"center",width:"100%"}}),
-        // Conversion
-        h("div",{style:{display:"flex",alignItems:"center",gap:2,
-          background:"#f0f4ff",borderRadius:6,padding:"3px 5px"}},
+          defaultValue:row.deductUnit||row.unit||"",key:"unit-"+i+"-"+row.ingId,placeholder:"pcs",
+          onBlur:e=>{const u=[...rows];u[i]={...u[i],deductUnit:e.target.value};setRows(u);},
+          style:{padding:"5px",border:"1px solid "+C.border,borderRadius:6,fontSize:10,outline:"none",textAlign:"center",width:"100%"}}),
+        h("div",{style:{display:"flex",alignItems:"center",gap:2,background:"#f0f4ff",borderRadius:6,padding:"3px 4px"}},
           h("span",{style:{fontSize:8,color:C.muted}},"1"),
-          h("input",{
-            defaultValue:row.convUnit||ing.unit||"",
-            key:"cvu-"+i+"-"+row.ingId,
-            placeholder:ing.unit||"stk",
-            onBlur:e=>{ const u=[...rows]; u[i]={...u[i],convUnit:e.target.value}; setRows(u); },
-            style:{width:28,padding:"2px 3px",border:"1px solid "+C.border,
-              borderRadius:4,fontSize:9,outline:"none",textAlign:"center"}}),
+          h("input",{defaultValue:row.convUnit||ing.unit||"",key:"cvu-"+i+"-"+row.ingId,placeholder:ing.unit||"stk",
+            onBlur:e=>{const u=[...rows];u[i]={...u[i],convUnit:e.target.value};setRows(u);},
+            style:{width:26,padding:"2px",border:"1px solid "+C.border,borderRadius:4,fontSize:9,outline:"none",textAlign:"center"}}),
           h("span",{style:{fontSize:8,color:C.muted}},"="),
-          h("input",{type:"number",min:1,
-            defaultValue:row.convFactor||"",
-            key:"cvf-"+i+"-"+row.ingId,
-            placeholder:"1",
-            onBlur:e=>{ const u=[...rows]; u[i]={...u[i],convFactor:parseFloat(e.target.value)||1}; setRows(u); },
-            style:{width:24,padding:"2px 3px",border:"1px solid "+C.border,
-              borderRadius:4,fontSize:9,outline:"none",textAlign:"center"}})
+          h("input",{type:"number",min:1,defaultValue:row.convFactor||"",key:"cvf-"+i+"-"+row.ingId,placeholder:"1",
+            onBlur:e=>{const u=[...rows];u[i]={...u[i],convFactor:parseFloat(e.target.value)||1};setRows(u);},
+            style:{width:22,padding:"2px",border:"1px solid "+C.border,borderRadius:4,fontSize:9,outline:"none",textAlign:"center"}})
         ),
-        // Markup %
         h("div",{style:{display:"flex",alignItems:"center",gap:2}},
-          h("input",{type:"number",min:0,max:999,
-            defaultValue:row.markup||"",
-            key:"mkp-"+i+"-"+row.ingId,
-            placeholder:"0",
-            onBlur:e=>{ const u=[...rows]; u[i]={...u[i],markup:parseFloat(e.target.value)||0}; setRows(u); },
-            style:{width:32,padding:"3px 4px",border:"1px solid "+C.border,
-              borderRadius:5,fontSize:10,outline:"none",textAlign:"center"}}),
+          h("input",{type:"number",min:0,max:999,defaultValue:row.markup||"",key:"mkp-"+i+"-"+row.ingId,placeholder:"0",
+            onBlur:e=>{const u=[...rows];u[i]={...u[i],markup:parseFloat(e.target.value)||0};setRows(u);},
+            style:{width:32,padding:"3px",border:"1px solid "+C.border,borderRadius:5,fontSize:10,outline:"none",textAlign:"center"}}),
           h("span",{style:{fontSize:9,color:C.muted}},"%")
         ),
-        // Deducts (calculated)
-        h("div",{style:{fontSize:9,fontWeight:700}},
-          h("div",{style:{color:C.primary}},cost>0?"₱"+cost.toFixed(2):"—"),
+        h("div",{style:{fontSize:9}},
+          h("div",{style:{color:C.primary,fontWeight:700}},cost>0?"₱"+cost.toFixed(2):"—"),
           h("div",{style:{color:C.muted,fontSize:8}},
             actualDeduct>0?(actualDeduct.toFixed(3).replace(/\.?0+$/,"")+" "+(row.convUnit||ing.unit||"")):"—")
         ),
-        // Delete row
         h("button",{onClick:()=>setRows(rows.filter((_,j)=>j!==i)),
-          style:{background:"none",border:"none",color:C.danger,fontSize:14,cursor:"pointer",
-            display:"flex",alignItems:"center",justifyContent:"center"}},
+          style:{background:"none",border:"none",color:C.danger,fontSize:16,cursor:"pointer",lineHeight:1}},
           "×")
       );
     }),
-    // Add row + Save
     h("div",{style:{display:"flex",gap:8,marginTop:10}},
       h("button",{
         onClick:()=>setRows([...rows,{ingId:"",ingName:"",unit:"",qty:1,convFactor:1,markup:0}]),
@@ -3337,28 +3386,27 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
         sv?"Saving...":"💾 Save BOM")
     ),
     rows.length>0&&h("div",{style:{marginTop:8,padding:"6px 10px",background:"#f5f5f5",
-      borderRadius:8,fontSize:10,fontWeight:700,color:C.text}},
-      "Total Cost: ₱"+getCost(rows).toFixed(2)
-    )
+      borderRadius:8,fontSize:10,fontWeight:700}},
+      "Total Cost: ₱"+getCost(rows).toFixed(2))
   );
 
   return h("div",null,
-    // Main tabs
+    // Main tab buttons
     h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}},
       h("div",{style:{fontSize:17,fontWeight:900}},"🧪 Bill of Materials"),
       h("div",{style:{display:"flex",gap:0,border:"1px solid "+C.border,borderRadius:9,overflow:"hidden"}},
         [["products","📦 Products"],["options","⚙️ Option Groups"]].map(([id,lbl])=>
-          h("button",{key:id,onClick:()=>{setMainTab(id);setSelItem(null);setSelGroup(null);setSelChoice(null);},
-            style:{padding:"7px 16px",border:"none",cursor:"pointer",
-              fontSize:11,fontWeight:mainTab===id?800:400,
+          h("button",{key:id,
+            onClick:()=>{setMainTab(id);setSelItem(null);setSelGroup(null);setSelChoice(null);},
+            style:{padding:"7px 16px",border:"none",cursor:"pointer",fontSize:11,
+              fontWeight:mainTab===id?800:400,
               background:mainTab===id?C.primary:"#fff",
               color:mainTab===id?"#fff":C.text}},lbl))
       )
     ),
 
-    // ── PRODUCTS TAB ──────────────────────────────────────
+    // ══ PRODUCTS TAB ══════════════════════════════════════
     mainTab==="products"&&h("div",null,
-      // Sub-tabs: BOM Editor | Costing Report
       h("div",{style:{display:"flex",gap:8,marginBottom:10}},
         [["bom","BOM Editor"],["costing","Costing Report"]].map(([id,lbl])=>
           h("button",{key:id,onClick:()=>setCostTab(id),
@@ -3367,32 +3415,30 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
               background:costTab===id?"#333":"#eee",
               color:costTab===id?"#fff":C.text}},lbl))
       ),
-
-      // BOM Editor view
       costTab==="bom"&&h("div",{style:{display:"grid",gridTemplateColumns:"260px 1fr",gap:12}},
-        // Left: Menu Items list
+        // Left: menu items
         h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
           h("div",{style:{padding:"10px 14px",borderBottom:"1px solid "+C.border,fontSize:11,fontWeight:800}},"Menu Items"),
           h("div",{style:{overflowY:"auto",maxHeight:"70vh"}},
             menuItems.map(item=>{
-              const isSelected=(selItem&&selItem.id===item.id);
+              const isSel=selItem&&selItem.id===item.id;
               const vList=variantList(item);
               return h("div",{key:item.id},
                 h("div",{style:{padding:"8px 14px",cursor:"pointer",
-                  background:isSelected&&selVariant==="default"?"#FFF0F0":"#fff",
+                  background:isSel&&selVariant==="default"?"#FFF0F0":"#fff",
                   borderBottom:"1px solid #f5f5f5",
                   display:"flex",justifyContent:"space-between",alignItems:"center"},
                   onClick:()=>openBOM(item,"default")},
-                  h("div",{style:{fontSize:11,fontWeight:isSelected?700:400}},
+                  h("div",{style:{fontSize:11,fontWeight:isSel?700:400}},
                     (item.emoji||"")+" "+item.name),
                   h("span",{style:{fontSize:9,fontWeight:700,
-                    color:hasBOM(item)?"#2E7D32":C.muted}},
+                    color:hasBOM(item)?C.success:C.muted}},
                     hasBOM(item)?"✓":"—")
                 ),
                 vList.length>1&&vList.slice(1).map(v=>
                   h("div",{key:v,onClick:()=>openBOM(item,v),
                     style:{padding:"5px 14px 5px 26px",cursor:"pointer",
-                      background:isSelected&&selVariant===v?"#FFF8F0":"#fafafa",
+                      background:isSel&&selVariant===v?"#FFF8F0":"#fafafa",
                       borderBottom:"1px solid #f5f5f5",
                       display:"flex",justifyContent:"space-between"}},
                     h("div",{style:{fontSize:10,color:C.muted}},"↳ "+v),
@@ -3403,28 +3449,26 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
             })
           )
         ),
-
-        // Right: BOM editor panel
+        // Right: BOM editor
         !selItem
           ? h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,
               padding:"40px",textAlign:"center",color:C.muted}},
               h("div",{style:{fontSize:32,marginBottom:8}},"🧪"),
-              h("div",{style:{fontWeight:700,fontSize:13}},"Select a menu item to edit its BOM"))
+              h("div",{style:{fontWeight:700,fontSize:13}},"Select a menu item"))
           : h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
-              // Header with tabs
               h("div",{style:{padding:"10px 16px",borderBottom:"1px solid "+C.border,
                 background:"#fafafa",display:"flex",justifyContent:"space-between",alignItems:"center"}},
                 h("div",{style:{fontSize:13,fontWeight:900}},selItem.name),
                 h("div",{style:{display:"flex",gap:4}},
                   [["variants","Variants/Base"],["options","Item Options"]].map(([id,lbl])=>
-                    h("button",{key:id,onClick:()=>{setItemBomTab(id);setSelItemOpt(null);},
+                    h("button",{key:id,
+                      onClick:()=>{setItemBomTab(id);setSelItemOpt(null);},
                       style:{padding:"4px 12px",borderRadius:6,border:"none",cursor:"pointer",
                         fontSize:10,fontWeight:700,
                         background:itemBomTab===id?"#333":"#eee",
                         color:itemBomTab===id?"#fff":C.text}},lbl))
                 )
               ),
-
               // Variants sub-tab
               itemBomTab==="variants"&&h("div",null,
                 variantList(selItem).length>1&&h("div",{style:{display:"flex",gap:4,
@@ -3440,10 +3484,8 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
                 h("div",{style:{padding:"14px 16px"}},
                   h(BOMEditor,{rows:editBom,setRows:setEditBom,onSave:saveBOM,saving:saving}))
               ),
-
               // Item Options sub-tab
               itemBomTab==="options"&&h("div",{style:{display:"grid",gridTemplateColumns:"200px 1fr",minHeight:300}},
-                // Left: choices
                 h("div",{style:{borderRight:"1px solid "+C.border,overflowY:"auto"}},
                   (selItem.options||[]).length===0
                     ? h("div",{style:{padding:"20px",textAlign:"center",color:C.muted,fontSize:11}},
@@ -3455,7 +3497,7 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
                         (opt.choices||[]).map(ch=>{
                           const key=selItem.id+"__opt_"+opt.id+"__"+ch.id;
                           const isSel=selItemOpt&&selItemOpt.key===key;
-                          const has=(boms[selItem.id]&&(boms[selItem.id][key]||[]).length>0);
+                          const has=!!(boms[selItem.id]&&(boms[selItem.id][key]||[]).length>0);
                           return h("div",{key:ch.id,
                             onClick:()=>{
                               const rows=(boms[selItem.id]&&boms[selItem.id][key])||[];
@@ -3468,19 +3510,17 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
                               display:"flex",justifyContent:"space-between",alignItems:"center"}},
                             h("span",{style:{fontSize:11,fontWeight:isSel?700:400}},
                               ch.label+(ch.priceAdd>0?" +₱"+ch.priceAdd:"")),
-                            h("span",{style:{fontSize:9,fontWeight:700,
-                              color:has?C.success:C.muted}},has?"✓":"—")
+                            h("span",{style:{fontSize:9,fontWeight:700,color:has?C.success:C.muted}},
+                              has?"✓":"—")
                           );
                         })
                       ))
                 ),
-                // Right: BOM editor for selected choice
                 h("div",{style:{overflowY:"auto"}},
                   !selItemOpt
                     ? h("div",{style:{padding:"30px",textAlign:"center",color:C.muted}},
                         h("div",{style:{fontSize:24,marginBottom:6}},"⚙️"),
-                        h("div",{style:{fontSize:12,fontWeight:700}},"Select a choice"),
-                        h("div",{style:{fontSize:10,marginTop:4}},"to set ingredient deduction"))
+                        h("div",{style:{fontSize:12,fontWeight:700}},"Select a choice"))
                     : h("div",null,
                         h("div",{style:{padding:"8px 12px",background:"#FFF0F0",fontSize:11,
                           fontWeight:700,color:C.primary,borderBottom:"1px solid "+C.border}},
@@ -3493,8 +3533,7 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
                               try{
                                 const rows=editItemOptBom.filter(r=>r.ingId||r.ingName);
                                 await setDoc(doc(db,"bom",selItem.id),
-                                  Object.assign({},boms[selItem.id]||{},{[selItemOpt.key]:rows}),
-                                  {merge:true});
+                                  Object.assign({},boms[selItem.id]||{},{[selItemOpt.key]:rows}),{merge:true});
                                 showT("Option BOM saved ✓");
                               }catch(e){showT("Error","err");}
                               setSavingItemOpt(false);
@@ -3506,8 +3545,7 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
               )
             )
       ),
-
-      // Costing Report view
+      // Costing Report
       costTab==="costing"&&h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
         h("div",{style:{padding:"11px 16px",borderBottom:"1px solid "+C.border,fontSize:12,fontWeight:800}},"💰 Costing Report"),
         h("div",{style:{display:"grid",gridTemplateColumns:"1.5fr 90px 90px 90px 70px",
@@ -3520,7 +3558,7 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
             const vObj=item.variants&&item.variants.find(vv=>(vv.label||vv.name)===v);
             const sell=vi===0?(item.basePrice||0):(item.basePrice||0)+((vObj&&vObj.priceAdd)||0);
             const key=getVKey(item,v);
-            const rows=(boms[item.id]&&boms[item.id][key])||boms[key]||[];
+            const rows=(boms[item.id]&&boms[item.id][key])||[];
             const cost=getCost(rows);
             const margin=sell-cost;
             const pct=sell>0?margin/sell*100:0;
@@ -3542,95 +3580,169 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
       )
     ),
 
-    // ── OPTION GROUPS TAB ─────────────────────────────────
-    mainTab==="options"&&h("div",{style:{display:"grid",gridTemplateColumns:"220px 200px 1fr",gap:12,minHeight:500}},
-      // Left: Option Groups list
-      h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
-        h("div",{style:{padding:"10px 14px",borderBottom:"1px solid "+C.border,fontSize:11,fontWeight:800}},
-          "Option Groups ("+optGroups.length+")"),
-        h("div",{style:{overflowY:"auto",maxHeight:"70vh"}},
-          optGroups.length===0
-            ? h("div",{style:{padding:20,textAlign:"center",color:C.muted,fontSize:11}},
-                "No option groups yet.",h("br",null),"Create in Menu Editor.")
-            : optGroups.map(grp=>
-                h("div",{key:grp.id,
-                  onClick:()=>{setSelGroup(grp);setSelChoice(null);setEditOptBom([]);},
-                  style:{padding:"9px 14px",cursor:"pointer",
-                    borderBottom:"1px solid #f5f5f5",
-                    background:selGroup?.id===grp.id?"#FFF0F0":"#fff",
-                    display:"flex",justifyContent:"space-between",alignItems:"center"}},
-                  h("div",null,
-                    h("div",{style:{fontSize:12,fontWeight:selGroup?.id===grp.id?700:400}},
-                      grp.name||grp.label||grp.id),
-                    h("div",{style:{fontSize:9,color:C.muted}},
-                      (grp.options||grp.choices||[]).length+" choices")
-                  )
+    // ══ OPTION GROUPS TAB ════════════════════════════════
+    mainTab==="options"&&h("div",null,
+      // Header with + Add Group button
+      h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}},
+        h("div",{style:{fontSize:13,fontWeight:800,color:C.text}},
+          "Option Groups ("+groups.length+")"),
+        h("button",{onClick:()=>setShowAddGrp(!showAddGrp),
+          style:{padding:"7px 16px",background:C.primary,border:"none",borderRadius:8,
+            color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}},
+          showAddGrp?"✕ Cancel":"+ New Group")
+      ),
+
+      // New group form
+      showAddGrp&&h("div",{style:{background:"#E8F5E9",border:"1px solid #A5D6A7",
+        borderRadius:10,padding:"12px 14px",marginBottom:12,
+        display:"flex",gap:8,alignItems:"center"}},
+        h("input",{value:newGrpName,onChange:e=>setNewGrpName(e.target.value),
+          onKeyDown:e=>e.key==="Enter"&&createGroup(),
+          placeholder:"e.g. Choice of Flavor, Cooking Style, Serving Size...",
+          style:{flex:1,padding:"9px 12px",border:"2px solid "+C.primary,
+            borderRadius:8,fontSize:12,outline:"none"}}),
+        h("button",{onClick:createGroup,
+          style:{padding:"9px 20px",background:C.primary,border:"none",
+            borderRadius:8,color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}},
+          "Create")
+      ),
+
+      // 3-col layout
+      h("div",{style:{display:"grid",gridTemplateColumns:"220px 200px 1fr",gap:12,minHeight:500}},
+
+        // LEFT: Groups list
+        h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
+          h("div",{style:{padding:"10px 14px",borderBottom:"1px solid "+C.border,
+            fontSize:11,fontWeight:800,color:C.text}},"Option Groups"),
+          h("div",{style:{overflowY:"auto",maxHeight:"65vh"}},
+            groups.length===0
+              ? h("div",{style:{padding:"30px",textAlign:"center",color:C.muted,fontSize:11}},
+                  "No groups yet.",h("br",null),
+                  h("span",{style:{color:C.primary,cursor:"pointer",fontWeight:700},
+                    onClick:()=>setShowAddGrp(true)},"+ Create one"))
+              : groups.map(grp=>{
+                  const isSel=selGroup&&selGroup.id===grp.id;
+                  const bomDocId="optgrp_"+grp.id;
+                  const hasAnyBOM=boms[bomDocId]&&Object.keys(boms[bomDocId]).length>0;
+                  return h("div",{key:grp.id,
+                    style:{borderBottom:"1px solid #f5f5f5"}},
+                    h("div",{
+                      onClick:()=>{setSelGroup(grp);setSelChoice(null);setEditOptBom([]);},
+                      style:{padding:"10px 14px",cursor:"pointer",
+                        background:isSel?"#FFF0F0":"#fff",
+                        display:"flex",justifyContent:"space-between",alignItems:"center"}},
+                      h("div",null,
+                        h("div",{style:{fontSize:12,fontWeight:isSel?800:500,color:isSel?C.primary:C.text}},
+                          grp.name),
+                        h("div",{style:{fontSize:9,color:C.muted}},
+                          (grp.choices||[]).length+" choices"+(hasAnyBOM?" · has BOM":""))
+                      ),
+                      h("button",{
+                        onClick:e=>{e.stopPropagation();deleteGroup(grp);},
+                        style:{background:"none",border:"none",color:C.danger,
+                          fontSize:12,cursor:"pointer",opacity:0.6,padding:"2px 6px"}},
+                        "🗑️")
+                    )
+                  );
+                })
+          )
+        ),
+
+        // MIDDLE: Choices of selected group
+        h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
+          h("div",{style:{padding:"10px 14px",borderBottom:"1px solid "+C.border,
+            display:"flex",justifyContent:"space-between",alignItems:"center"}},
+            h("div",{style:{fontSize:11,fontWeight:800}},
+              selGroup?selGroup.name:"← Select group"),
+            selGroup&&h("button",{onClick:()=>setShowAddChoice(!showAddChoice),
+              style:{fontSize:10,color:C.primary,background:"none",border:"none",
+                cursor:"pointer",fontWeight:700}},
+              showAddChoice?"✕":"+ Add")
+          ),
+          // Add choice form
+          selGroup&&showAddChoice&&h("div",{style:{padding:"8px 14px",
+            borderBottom:"1px solid "+C.border,background:"#f0f8ff",
+            display:"flex",gap:6}},
+            h("input",{value:newChoiceLbl,onChange:e=>setNewChoiceLbl(e.target.value),
+              onKeyDown:e=>e.key==="Enter"&&addChoice(),
+              placeholder:"Choice name (e.g. Buffalo)",
+              style:{flex:1,padding:"6px 10px",border:"1px solid "+C.primary,
+                borderRadius:7,fontSize:11,outline:"none"}}),
+            h("button",{onClick:addChoice,
+              style:{padding:"6px 14px",background:C.primary,border:"none",
+                borderRadius:7,color:"#fff",fontWeight:700,fontSize:11,cursor:"pointer"}},
+              "Add")
+          ),
+          !selGroup
+            ? h("div",{style:{padding:"30px",textAlign:"center",color:C.muted,fontSize:11}},
+                "← Select an option group")
+            : (selGroup.choices||[]).length===0
+              ? h("div",{style:{padding:"20px",textAlign:"center",color:C.muted,fontSize:11}},
+                  "No choices yet.",h("br",null),
+                  h("span",{style:{color:C.primary,cursor:"pointer",fontWeight:700},
+                    onClick:()=>setShowAddChoice(true)},"+ Add choice"))
+              : h("div",{style:{overflowY:"auto",maxHeight:"60vh"}},
+                  (selGroup.choices||[]).map(ch=>{
+                    const bomDocId="optgrp_"+selGroup.id;
+                    const key="optgrp_"+selGroup.id+"__"+ch.id;
+                    const isSel=selChoice&&selChoice.id===ch.id;
+                    const has=!!(boms[bomDocId]&&(boms[bomDocId][key]||[]).length>0);
+                    return h("div",{key:ch.id,
+                      style:{borderBottom:"1px solid #f5f5f5",
+                        display:"flex",justifyContent:"space-between",alignItems:"center",
+                        background:isSel?"#FFF0F0":"#fff"}},
+                      h("div",{
+                        onClick:()=>{
+                          const bomDocId2="optgrp_"+selGroup.id;
+                          const k="optgrp_"+selGroup.id+"__"+ch.id;
+                          const rows=(boms[bomDocId2]&&boms[bomDocId2][k])||[];
+                          setSelChoice({...ch,key:k,groupName:selGroup.name});
+                          setEditOptBom(rows.length?[...rows]:[{ingId:"",ingName:"",unit:"",qty:1,convFactor:1,markup:0}]);
+                        },
+                        style:{flex:1,padding:"9px 14px",cursor:"pointer"}},
+                        h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center"}},
+                          h("span",{style:{fontSize:12,fontWeight:isSel?700:400}},ch.label),
+                          h("span",{style:{fontSize:9,fontWeight:700,
+                            color:has?C.success:C.muted}},has?"✓ BOM":"—")
+                        )
+                      ),
+                      h("button",{onClick:()=>deleteChoice(ch),
+                        style:{background:"none",border:"none",color:C.danger,
+                          fontSize:11,cursor:"pointer",padding:"0 10px",opacity:0.7}},
+                        "×")
+                    );
+                  })
+                )
+        ),
+
+        // RIGHT: BOM editor for selected choice
+        h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
+          !selChoice
+            ? h("div",{style:{padding:"40px",textAlign:"center",color:C.muted}},
+                h("div",{style:{fontSize:32,marginBottom:8}},"⚙️"),
+                h("div",{style:{fontWeight:700,fontSize:13}},"Select a choice"),
+                h("div",{style:{fontSize:11,marginTop:4,color:C.muted}},
+                  "Set ingredients deducted when this option is ordered"))
+            : h("div",null,
+                h("div",{style:{padding:"10px 16px",borderBottom:"1px solid "+C.border,background:"#fafafa"}},
+                  h("div",{style:{fontSize:12,fontWeight:800,color:C.text}},
+                    (selChoice.groupName||"")+" → "+selChoice.label),
+                  h("div",{style:{fontSize:9,color:C.muted,marginTop:2}},
+                    "Deducted from inventory whenever this option is ordered")
+                ),
+                h("div",{style:{padding:"12px 16px"}},
+                  h(BOMEditor,{
+                    rows:editOptBom,setRows:setEditOptBom,saving:savingOpt,
+                    onSave:saveOptBOM
+                  })
                 )
               )
         )
-      ),
-
-      // Middle: Choices of selected group
-      h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
-        h("div",{style:{padding:"10px 14px",borderBottom:"1px solid "+C.border,fontSize:11,fontWeight:800}},
-          selGroup?(selGroup.name||selGroup.label):"← Select group"),
-        !selGroup
-          ? h("div",{style:{padding:20,textAlign:"center",color:C.muted,fontSize:11}},"← Select an option group")
-          : h("div",{style:{overflowY:"auto",maxHeight:"70vh"}},
-              (selGroup.options||selGroup.choices||[]).map(ch=>{
-                const key=(selGroup.id||"")+"__"+(ch.id||ch.label||"");
-                const isSel=selChoice&&selChoice.key===key;
-                const has=(boms[selGroup.id]&&(boms[selGroup.id][key]||[]).length>0);
-                return h("div",{key:ch.id||ch.label,
-                  onClick:()=>{
-                    const rows=(boms[selGroup.id]&&boms[selGroup.id][key])||[];
-                    setSelChoice({key,label:ch.label||ch.name||ch.id,groupLabel:selGroup.name||selGroup.label});
-                    setEditOptBom(rows.length?[...rows]:[{ingId:"",ingName:"",unit:"",qty:1,convFactor:1,markup:0}]);
-                  },
-                  style:{padding:"8px 14px",cursor:"pointer",
-                    borderBottom:"1px solid #f5f5f5",
-                    background:isSel?"#FFF0F0":"#fff",
-                    display:"flex",justifyContent:"space-between",alignItems:"center"}},
-                  h("span",{style:{fontSize:11,fontWeight:isSel?700:400}},ch.label||ch.name||ch.id),
-                  h("span",{style:{fontSize:9,fontWeight:700,color:has?C.success:C.muted}},has?"✓ BOM":"—")
-                );
-              })
-            )
-      ),
-
-      // Right: BOM editor for selected choice
-      h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
-        !selChoice
-          ? h("div",{style:{padding:40,textAlign:"center",color:C.muted}},
-              h("div",{style:{fontSize:32,marginBottom:8}},"⚙️"),
-              h("div",{style:{fontWeight:700,fontSize:13}},"Select a choice"),
-              h("div",{style:{fontSize:11,marginTop:4}},"Set ingredients deducted when this option is ordered"))
-          : h("div",null,
-              h("div",{style:{padding:"10px 16px",borderBottom:"1px solid "+C.border,background:"#fafafa"}},
-                h("div",{style:{fontSize:12,fontWeight:800}},
-                  (selChoice.groupLabel||"")+" → "+(selChoice.label||"")),
-                h("div",{style:{fontSize:9,color:C.muted}},"Ingredients deducted per order of this option")
-              ),
-              h("div",{style:{padding:"10px 16px"}},
-                h(BOMEditor,{
-                  rows:editOptBom,setRows:setEditOptBom,saving:savingOpt,
-                  onSave:async()=>{
-                    setSavingOpt(true);
-                    try{
-                      const rows=editOptBom.filter(r=>r.ingId||r.ingName);
-                      await setDoc(doc(db,"bom",selGroup.id),
-                        Object.assign({},boms[selGroup.id]||{},{[selChoice.key]:rows}),{merge:true});
-                      showT((selChoice.label||"Option")+" BOM saved ✓");
-                    }catch(e){showT("Error: "+e.message,"err");}
-                    setSavingOpt(false);
-                  }
-                })
-              )
-            )
       )
     )
   );
 }
+
 
 
 // ─── FEATURE DEFINITIONS PER ROLE ────────────────────────
