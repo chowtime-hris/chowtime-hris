@@ -3761,8 +3761,6 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
         const bomSnap = await getDocs(collection(db,"bom"));
         const bomData = {};
         bomSnap.docs.forEach(d=>{ bomData[d.id]={...d.data()}; });
-        console.log("BOM docs:",bomSnap.docs.length,"Cart items:",cart.map(c=>c.id+":"+c.name));
-        showT("BOM check: "+bomSnap.docs.length+" recipes, "+cart.length+" items","info");
 
         for(const item of (req.voidedItems||req.orderItems||[])){
           const itemId = item.id;
@@ -6991,9 +6989,8 @@ function App(){
         const bomSnap = await getDocs(collection(db,"bom"));
         const bomData = {};
         bomSnap.docs.forEach(d=>{ bomData[d.id]={...d.data()}; });
-        console.log("BOM docs:",bomSnap.docs.length,"Cart items:",cart.map(c=>c.id+":"+c.name));
-        showT("BOM check: "+bomSnap.docs.length+" recipes, "+cart.length+" items","info");
-        const logCol = "inventory_log_"+branchId;
+        const isOwnerRole = user.role==="owner"||user.role==="commissary";
+        const logCol = isOwnerRole ? "inventory_log" : "inventory_log_"+branchId;
         let totalDeductions = 0;
 
         for(const cartItem of cart){
@@ -7006,27 +7003,26 @@ function App(){
           const itemBOM = bomData[itemId]||{};
           const rows = itemBOM[vKey]||itemBOM[itemId]||[];
 
-          console.log("Item",itemId,"BOM rows:",rows.length,"bomData keys:",Object.keys(bomData));
           for(const row of rows){
             if(!row.ingId||!row.qty)continue;
-            console.log("Deducting:",row.ingId,row.qty,"from cart qty:",cartItem.qty);
             const convFactor = row.convFactor||1;
             const deductAmt = ((row.qty||0)*(cartItem.qty||1))/convFactor;
             
-            // Try branch inventory first, then main inventory
+            // Determine correct inventory collection
             const branchInvCol = "inventory_"+branchId;
             const mainInvCol = "inventory";
-            let deductCol = branchInvCol;
+            let deductCol = isOwnerRole ? mainInvCol : branchInvCol;
             
-            // Check if item exists in branch inventory
-            try{
-              const branchInvDoc = await getDoc(doc(db,branchInvCol,row.ingId));
-              if(!branchInvDoc.exists()){
-                // Fall back to main inventory
-                const mainInvDoc = await getDoc(doc(db,mainInvCol,row.ingId));
-                if(mainInvDoc.exists()) deductCol = mainInvCol;
-              }
-            }catch(e){ deductCol = branchInvCol; }
+            // If branch staff, check if item is in branch inv, else try main
+            if(!isOwnerRole){
+              try{
+                const branchInvDoc = await getDoc(doc(db,branchInvCol,row.ingId));
+                if(!branchInvDoc.exists()){
+                  const mainInvDoc = await getDoc(doc(db,mainInvCol,row.ingId));
+                  if(mainInvDoc.exists()) deductCol = mainInvCol;
+                }
+              }catch(e){ deductCol = branchInvCol; }
+            }
             
             try{
               await updateDoc(doc(db,deductCol,row.ingId),{
