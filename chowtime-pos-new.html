@@ -3249,13 +3249,13 @@ function BOMPage({menuItems,db,user,showT,inventory=[]}){
 
   // BOMEditor sub-component
   const BOMEditor=({rows,setRows,onSave,saving:sv})=>h("div",null,
-    h("div",{style:{display:"grid",gridTemplateColumns:"1fr 90px 70px 80px 80px 36px",gap:6,marginBottom:6}},
-      ["INGREDIENT","UNIT","QTY","MARKUP %","COST",""].map(h2=>
+    h("div",{style:{display:"grid",gridTemplateColumns:"1fr 80px 80px 90px 70px 80px 36px",gap:6,marginBottom:6}},
+      ["INGREDIENT","STOCK UNIT","DEDUCT QTY","CONV","MARKUP %","COST",""].map(h2=>
         h("div",{key:h2,style:{fontSize:8,fontWeight:700,color:C.muted,letterSpacing:1}},h2))
     ),
     rows.map((row,i)=>{
       const ing=ingredients.find(x=>x.id===row.ingId)||{};
-      return h("div",{key:i,style:{display:"grid",gridTemplateColumns:"1fr 90px 70px 80px 80px 36px",gap:6,marginBottom:5,alignItems:"center"}},
+      return h("div",{key:i,style:{display:"grid",gridTemplateColumns:"1fr 80px 80px 90px 70px 80px 36px",gap:6,marginBottom:5,alignItems:"center"}},
         h("select",{value:row.ingId||"",
           onChange:e=>{
             const g=ingredients.find(x=>x.id===e.target.value)||{};
@@ -3281,6 +3281,36 @@ function BOMPage({menuItems,db,user,showT,inventory=[]}){
           },
           style:{padding:"5px",border:"1px solid "+C.border,borderRadius:6,
             fontSize:10,outline:"none",textAlign:"center",width:"100%"}}),
+        // Conversion
+        h("div",{style:{display:"flex",flexDirection:"column",gap:2}},
+          h("div",{style:{display:"flex",alignItems:"center",gap:2}},
+            h("span",{style:{fontSize:8,color:C.muted}},"1"),
+            h("input",{
+              defaultValue:row.convUnit||"",
+              key:"cvu-"+i+"-"+row.ingId,
+              placeholder:ing.unit||"pack",
+              onBlur:e=>updRow(setRows,i,"convUnit",e.target.value),
+              style:{width:36,padding:"2px 3px",border:"1px solid "+C.border,
+                borderRadius:4,fontSize:9,outline:"none",textAlign:"center"}})
+          ),
+          h("div",{style:{display:"flex",alignItems:"center",gap:2}},
+            h("span",{style:{fontSize:8,color:C.muted}},"="),
+            h("input",{type:"number",min:1,
+              defaultValue:row.convFactor||"",
+              key:"cvf-"+i+"-"+row.ingId,
+              placeholder:"100",
+              onBlur:e=>updRow(setRows,i,"convFactor",parseFloat(e.target.value)||1),
+              style:{width:30,padding:"2px 3px",border:"1px solid "+C.border,
+                borderRadius:4,fontSize:9,outline:"none",textAlign:"center"}}),
+            h("input",{
+              defaultValue:row.deductUnit||"",
+              key:"ddu-"+i+"-"+row.ingId,
+              placeholder:"pcs",
+              onBlur:e=>updRow(setRows,i,"deductUnit",e.target.value),
+              style:{width:28,padding:"2px 3px",border:"1px solid "+C.border,
+                borderRadius:4,fontSize:9,outline:"none",textAlign:"center"}})
+          )
+        ),
         // Markup %
         h("div",{style:{display:"flex",alignItems:"center",gap:2}},
           h("input",{type:"number",min:0,max:999,step:1,
@@ -3294,7 +3324,13 @@ function BOMPage({menuItems,db,user,showT,inventory=[]}){
           h("span",{style:{fontSize:9,color:C.muted}},"%")
         ),
         h("div",{style:{fontSize:10,color:C.primary,fontWeight:700}},
-          (ing.cost||0)*(row.qty||0)>0?"₱"+((ing.cost||0)*(row.qty||0)*(1+(row.markup||0)/100)).toFixed(2):"—"),
+          (()=>{
+            const factor=row.convFactor||1;
+            const actualQty=(row.qty||0)/factor; // convert to stock unit
+            const cost=(ing.cost||0)*actualQty*(1+(row.markup||0)/100);
+            return cost>0?"₱"+cost.toFixed(2):"—";
+          })()
+        ),
         h("button",{onClick:()=>delRow(setRows,i),
           style:{background:"none",border:"none",color:C.danger,cursor:"pointer",fontSize:14}},"×")
       );
@@ -5536,101 +5572,109 @@ function PermissionsTab({db,showT,companySettings,setCompanySettings}){
 // ─── INV CATEGORIES TAB ───────────────────────────────────
 function InvCatsTab({db,showT}){
   const DEFAULT_CATS=["Frozen","Produce","Protein","Sauce","Dry Goods","Packaging","Beverage","Other"];
-  const [cats,setCats]=useState(DEFAULT_CATS);
+  const [cats,setCats]=useState([]);
   const [newCat,setNewCat]=useState("");
   const [saving,setSaving]=useState(false);
+  const [loaded,setLoaded]=useState(false);
 
   useEffect(()=>{
     try{
       const unsub=onSnapshot(doc(db,"settings","inv_cats"),snap=>{
         if(snap.exists()&&snap.data().cats){
-          const custom=snap.data().cats.filter(c=>typeof c==="string");
-          setCats([...DEFAULT_CATS,...custom.filter(c=>!DEFAULT_CATS.includes(c))]);
+          const custom=snap.data().cats.filter(c=>typeof c==="string"&&c.trim());
+          const merged=[...DEFAULT_CATS,...custom.filter(c=>!DEFAULT_CATS.includes(c))];
+          setCats(merged);
+        } else {
+          setCats([...DEFAULT_CATS]);
         }
-      },()=>{});
+        setLoaded(true);
+      },()=>{setCats([...DEFAULT_CATS]);setLoaded(true);});
       return()=>unsub();
-    }catch(e){}
+    }catch(e){setCats([...DEFAULT_CATS]);setLoaded(true);}
   },[]);
 
-  const save=async(newList)=>{
-    setSaving(true);
+  const saveToFirebase=async(newList)=>{
+    const custom=newList.filter(c=>!DEFAULT_CATS.includes(c));
     try{
-      const custom=newList.filter(c=>!DEFAULT_CATS.includes(c));
       await setDoc(doc(db,"settings","inv_cats"),{cats:custom},{merge:true});
-      showT("Categories saved ✓");
-    }catch(e){showT("Error saving","err");}
-    setSaving(false);
+    }catch(e){showT("Save failed","err");}
   };
 
   const addCat=async()=>{
     const t=newCat.trim();
-    if(!t){showT("Enter category name","warn");return;}
-    if(cats.includes(t)){showT("Already exists","warn");return;}
+    if(!t){showT("Enter a category name","warn");return;}
+    if(cats.some(c=>c.toLowerCase()===t.toLowerCase())){showT("Category already exists","warn");return;}
     const newList=[...cats,t];
     setCats(newList);
     setNewCat("");
-    await save(newList);
+    await saveToFirebase(newList);
+    showT(t+" added ✓");
   };
 
   const deleteCat=async(cat)=>{
-    if(DEFAULT_CATS.includes(cat)){showT("Cannot delete default category","warn");return;}
-    if(!confirm("Delete \""+cat+"\" category?"))return;
+    if(DEFAULT_CATS.includes(cat)){showT("Cannot delete default categories","warn");return;}
     const newList=cats.filter(c=>c!==cat);
     setCats(newList);
-    await save(newList);
+    await saveToFirebase(newList);
+    showT(cat+" deleted ✓");
   };
 
-  return h("div",null,
-    h("div",{style:{fontSize:11,fontWeight:800,marginBottom:12}},"📦 Inventory Item Categories"),
+  if(!loaded) return h("div",{style:{padding:20,color:C.muted}},"Loading...");
+  const customCats=cats.filter(c=>!DEFAULT_CATS.includes(c));
 
-    // Add new category
+  return h("div",null,
+    h("div",{style:{fontSize:12,fontWeight:800,marginBottom:12,color:C.text}},"📦 Inventory Categories"),
+
+    // Add new
     h("div",{style:{display:"flex",gap:8,marginBottom:16}},
       h("input",{value:newCat,
         onChange:e=>setNewCat(e.target.value),
         onKeyDown:e=>e.key==="Enter"&&addCat(),
-        placeholder:"New category name (e.g. Sauces, Frozen Meat)...",
+        placeholder:"New category name...",
         style:{flex:1,padding:"9px 12px",border:"2px solid "+C.primary,
           borderRadius:8,fontSize:12,outline:"none"}}),
-      h("button",{onClick:addCat,disabled:saving,
+      h("button",{onClick:addCat,
         style:{padding:"9px 18px",background:C.primary,border:"none",
           borderRadius:8,color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}},
-        saving?"...":"+ Add")
+        "+ Add")
     ),
 
-    // Categories list
-    h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
-      h("div",{style:{padding:"8px 14px",background:"#f5f5f5",
-        fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1}},
-        "CATEGORIES ("+cats.length+" total)"),
-      cats.map((cat,i)=>{
-        const isDefault=DEFAULT_CATS.includes(cat);
-        return h("div",{key:cat,
-          style:{display:"flex",justifyContent:"space-between",alignItems:"center",
-            padding:"10px 14px",
-            borderBottom:i<cats.length-1?"1px solid #f5f5f5":"none",
-            background:isDefault?"#fafafa":"#fff"}},
-          h("div",{style:{display:"flex",alignItems:"center",gap:8}},
-            h("span",{style:{fontSize:16}},isDefault?"📦":"🏷️"),
-            h("div",null,
-              h("div",{style:{fontSize:12,fontWeight:600}},cat),
-              h("div",{style:{fontSize:9,color:C.muted}},
-                isDefault?"Default (cannot delete)":"Custom category")
-            )
-          ),
-          !isDefault&&h("button",{onClick:()=>deleteCat(cat),
-            style:{padding:"4px 10px",background:"#FFEBEE",border:"1px solid #FFCDD2",
-              borderRadius:6,color:C.danger,fontSize:11,fontWeight:700,cursor:"pointer"}},
-            "🗑️ Delete")
-        );
-      })
+    // Default categories
+    h("div",{style:{marginBottom:14}},
+      h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:6}},"DEFAULT CATEGORIES (cannot delete)"),
+      h("div",{style:{display:"flex",flexWrap:"wrap",gap:6}},
+        DEFAULT_CATS.map(c=>h("span",{key:c,
+          style:{padding:"5px 12px",background:"#f0f0f0",borderRadius:20,
+            fontSize:11,color:C.muted,fontWeight:600}},c))
+      )
     ),
 
-    h("div",{style:{marginTop:10,fontSize:10,color:C.muted}},
-      "💡 Categories are shared across all branches and appear in Add Item form and inventory filters.")
+    // Custom categories
+    h("div",null,
+      h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:6}},
+        "CUSTOM CATEGORIES ("+customCats.length+")"),
+      customCats.length===0
+        ? h("div",{style:{color:C.muted,fontSize:11,fontStyle:"italic"}},"No custom categories yet")
+        : h("div",{style:{display:"flex",flexDirection:"column",gap:6}},
+          customCats.map(c=>h("div",{key:c,
+            style:{display:"flex",justifyContent:"space-between",alignItems:"center",
+              padding:"8px 12px",background:"#E3F2FD",borderRadius:8,
+              border:"1px solid #90CAF9"}},
+            h("span",{style:{fontSize:12,fontWeight:600,color:"#1565C0"}},c),
+            h("button",{onClick:()=>deleteCat(c),
+              style:{padding:"4px 12px",background:C.danger,border:"none",
+                borderRadius:6,color:"#fff",fontSize:11,fontWeight:700,cursor:"pointer"}},
+              "Delete")
+          ))
+        )
+    ),
+
+    h("div",{style:{marginTop:12,fontSize:10,color:C.muted}},
+      "💡 Custom categories appear in Add Item form and inventory filters.")
   );
 }
 
-// ─── SETTINGS PAGE ────────────────────────────────────────
+
 function SettingsPage({db,user,showT,branches,companySettings,setCompanySettings}){
   const [tab,setTab]=useState("print");
   const T=(id,lbl)=>h("button",{key:id,onClick:()=>setTab(id),
@@ -7025,14 +7069,16 @@ function App(){
                 for(const row of opt.bom){
                   if(!row.ingId||!row.qty)continue;
                   const deductAmt=(row.qty||0)*(cartItem.qty||1);
+                  const convFactor=row.convFactor||1;
+                  const actualDeduct=deductAmt/convFactor;
                   try{
                     await updateDoc(doc(db,invCol,row.ingId),{
-                      stock:increment(-deductAmt),
+                      stock:increment(-actualDeduct),
                       lastDeducted:serverTimestamp()
                     });
                     await addDoc(collection(db,logCol),{
                       itemId:row.ingId,itemName:row.ingName||row.ingId,
-                      unit:row.unit||"",type:"deduct",amount:-deductAmt,
+                      unit:row.unit||"",type:"deduct",amount:-actualDeduct,
                       transactionId:ord.id,
                       orderId:ord.id,
                       menuItem:cartItem.name,
