@@ -3191,6 +3191,8 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
   const [newChoiceLbl,setNewChoiceLbl] = useState("");
   const [showAddGrp,setShowAddGrp]   = useState(false);
   const [showAddChoice,setShowAddChoice] = useState(false);
+  const [editingGrp,setEditingGrp]   = useState(null); // group id being renamed
+  const [editingChoice,setEditingChoice] = useState(null); // choice id being renamed
 
   const ingredients = inventory;
 
@@ -3627,21 +3629,58 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
                   return h("div",{key:grp.id,
                     style:{borderBottom:"1px solid #f5f5f5"}},
                     h("div",{
-                      onClick:()=>{setSelGroup(grp);setSelChoice(null);setEditOptBom([]);},
+                      onClick:()=>{setSelGroup(grp);setSelChoice(null);setEditOptBom([]);setEditingGrp(null);},
                       style:{padding:"10px 14px",cursor:"pointer",
                         background:isSel?"#FFF0F0":"#fff",
                         display:"flex",justifyContent:"space-between",alignItems:"center"}},
-                      h("div",null,
-                        h("div",{style:{fontSize:12,fontWeight:isSel?800:500,color:isSel?C.primary:C.text}},
-                          grp.name),
-                        h("div",{style:{fontSize:9,color:C.muted}},
-                          (grp.choices||[]).length+" choices"+(hasAnyBOM?" · has BOM":""))
-                      ),
-                      h("button",{
-                        onClick:e=>{e.stopPropagation();deleteGroup(grp);},
-                        style:{background:"none",border:"none",color:C.danger,
-                          fontSize:12,cursor:"pointer",opacity:0.6,padding:"2px 6px"}},
-                        "🗑️")
+                      editingGrp===grp.id
+                        ? h("div",{style:{display:"flex",gap:6,flex:1},
+                            onClick:e=>e.stopPropagation()},
+                            h("input",{
+                              defaultValue:grp.name,
+                              key:"edit-grp-"+grp.id,
+                              autoFocus:true,
+                              onKeyDown:async e=>{
+                                if(e.key==="Enter"){
+                                  const newName=e.target.value.trim();
+                                  if(newName&&newName!==grp.name){
+                                    try{
+                                      await updateDoc(doc(db,"option_groups",grp.id),{name:newName});
+                                      showT("Renamed to "+newName+" ✓");
+                                    }catch(err){showT("Error","err");}
+                                  }
+                                  setEditingGrp(null);
+                                }
+                                if(e.key==="Escape")setEditingGrp(null);
+                              },
+                              style:{flex:1,padding:"5px 8px",border:"2px solid "+C.primary,
+                                borderRadius:6,fontSize:12,outline:"none"}}),
+                            h("button",{onClick:()=>setEditingGrp(null),
+                              style:{background:"none",border:"none",color:C.muted,
+                                fontSize:14,cursor:"pointer",padding:"0 4px"}},
+                              "✕")
+                          )
+                        : h("div",null,
+                            h("div",{style:{fontSize:12,fontWeight:isSel?800:500,color:isSel?C.primary:C.text}},
+                              grp.name),
+                            h("div",{style:{fontSize:9,color:C.muted}},
+                              (grp.choices||[]).length+" choices"+(hasAnyBOM?" · has BOM":""))
+                          ),
+                      !editingGrp&&h("div",{style:{display:"flex",gap:4},
+                        onClick:e=>e.stopPropagation()},
+                        h("button",{
+                          onClick:e=>{e.stopPropagation();setEditingGrp(grp.id);setSelGroup(grp);},
+                          style:{background:"none",border:"none",color:C.primary,
+                            fontSize:12,cursor:"pointer",padding:"2px 6px",opacity:0.8},
+                          title:"Rename group"},
+                          "✏️"),
+                        h("button",{
+                          onClick:e=>{e.stopPropagation();deleteGroup(grp);},
+                          style:{background:"none",border:"none",color:C.danger,
+                            fontSize:12,cursor:"pointer",padding:"2px 6px",opacity:0.6},
+                          title:"Delete group"},
+                          "🗑️")
+                      )
                     )
                   );
                 })
@@ -3698,18 +3737,52 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
                           const rows=(boms[bomDocId2]&&boms[bomDocId2][k])||[];
                           setSelChoice({...ch,key:k,groupName:selGroup.name});
                           setEditOptBom(rows.length?[...rows]:[{ingId:"",ingName:"",unit:"",qty:1,convFactor:1,markup:0}]);
+                          setEditingChoice(null);
                         },
                         style:{flex:1,padding:"9px 14px",cursor:"pointer"}},
-                        h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center"}},
-                          h("span",{style:{fontSize:12,fontWeight:isSel?700:400}},ch.label),
-                          h("span",{style:{fontSize:9,fontWeight:700,
-                            color:has?C.success:C.muted}},has?"✓ BOM":"—")
-                        )
+                        editingChoice===ch.id
+                          ? h("div",{style:{display:"flex",gap:5},onClick:e=>e.stopPropagation()},
+                              h("input",{
+                                defaultValue:ch.label,key:"edit-ch-"+ch.id,autoFocus:true,
+                                onKeyDown:async e=>{
+                                  if(e.key==="Enter"){
+                                    const newLabel=e.target.value.trim();
+                                    if(newLabel&&newLabel!==ch.label){
+                                      const newChoices=(selGroup.choices||[]).map(c=>c.id===ch.id?{...c,label:newLabel}:c);
+                                      try{
+                                        await updateDoc(doc(db,"option_groups",selGroup.id),{choices:newChoices});
+                                        showT("Renamed ✓");
+                                      }catch(err){showT("Error","err");}
+                                    }
+                                    setEditingChoice(null);
+                                  }
+                                  if(e.key==="Escape")setEditingChoice(null);
+                                },
+                                style:{flex:1,padding:"3px 7px",border:"2px solid "+C.primary,
+                                  borderRadius:5,fontSize:11,outline:"none"}}),
+                              h("button",{onClick:()=>setEditingChoice(null),
+                                style:{background:"none",border:"none",color:C.muted,fontSize:12,cursor:"pointer"}},
+                                "✕")
+                            )
+                          : h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center"}},
+                              h("span",{style:{fontSize:12,fontWeight:isSel?700:400}},ch.label),
+                              h("span",{style:{fontSize:9,fontWeight:700,
+                                color:has?C.success:C.muted}},has?"✓ BOM":"—")
+                            )
                       ),
-                      h("button",{onClick:()=>deleteChoice(ch),
-                        style:{background:"none",border:"none",color:C.danger,
-                          fontSize:11,cursor:"pointer",padding:"0 10px",opacity:0.7}},
-                        "×")
+                      !editingChoice&&h("div",{style:{display:"flex",gap:2,alignItems:"center"},
+                        onClick:e=>e.stopPropagation()},
+                        h("button",{onClick:e=>{e.stopPropagation();setEditingChoice(ch.id);},
+                          style:{background:"none",border:"none",color:C.primary,
+                            fontSize:11,cursor:"pointer",padding:"0 6px",opacity:0.8},
+                          title:"Rename"},
+                          "✏️"),
+                        h("button",{onClick:()=>deleteChoice(ch),
+                          style:{background:"none",border:"none",color:C.danger,
+                            fontSize:11,cursor:"pointer",padding:"0 6px",opacity:0.7},
+                          title:"Delete"},
+                          "×")
+                      )
                     );
                   })
                 )
