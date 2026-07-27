@@ -3270,8 +3270,14 @@ function BOMPage({menuItems,db,user,showT,inventory=[]}){
         ),
         h("div",{style:{fontSize:10,color:C.muted}},row.unit||ing.unit||"—"),
         h("input",{type:"number",min:0,step:"0.01",
-          value:row.qty||"",
-          onChange:e=>updRow(setRows,i,"qty",parseFloat(e.target.value)||0),
+          value:row.qty===0?"":row.qty,
+          onChange:e=>{
+            const v=e.target.value;
+            updRow(setRows,i,"qty",v===""?0:parseFloat(v)||0);
+          },
+          onBlur:e=>{
+            if(!e.target.value)updRow(setRows,i,"qty",0);
+          },
           style:{padding:"5px",border:"1px solid "+C.border,borderRadius:6,
             fontSize:10,outline:"none",textAlign:"center",width:"100%"}}),
         h("div",{style:{fontSize:10,color:C.primary,fontWeight:700}},
@@ -6189,9 +6195,40 @@ function PayrollPage({db,hrisDB,user,showT,branches,branchId,staff,advances}){
 // ─── NEW INVENTORY ITEM FORM ──────────────────────────────
 function NewInventoryItemForm({db,user,branchId,showT,onClose,invBranch}){
   const UNITS=["pc","kg","g","L","ml","pack","box","tray","sachet","EA","roll"];
-  const CATS=["Frozen","Produce","Protein","Sauce","Dry Goods","Packaging","Beverage","Other"];
+  const DEFAULT_CATS=["Frozen","Produce","Protein","Sauce","Dry Goods","Packaging","Beverage","Other"];
+  const [cats,setCats]=useState(DEFAULT_CATS);
+  const [newCat,setNewCat]=useState("");
+  const [showAddCat,setShowAddCat]=useState(false);
   const [form,setForm]=useState({name:"",unit:"pc",cat:"Other",stock:"0",minStock:"10",price:"0",cost:"0"});
   const [saving,setSaving]=useState(false);
+
+  // Load custom categories
+  useEffect(()=>{
+    try{
+      const unsub=onSnapshot(doc(db,"settings","inv_cats"),snap=>{
+        if(snap.exists()&&snap.data().cats){
+          const custom=snap.data().cats.filter(c=>typeof c==="string");
+          setCats([...DEFAULT_CATS,...custom.filter(c=>!DEFAULT_CATS.includes(c))]);
+        }
+      },()=>{});
+      return()=>unsub();
+    }catch(e){}
+  },[]);
+
+  const addCat=async()=>{
+    const t=newCat.trim();
+    if(!t)return;
+    if(cats.includes(t)){showT("Already exists","warn");return;}
+    const newList=[...cats,t];
+    setCats(newList);
+    setForm(p=>({...p,cat:t}));
+    setNewCat("");
+    setShowAddCat(false);
+    try{
+      const custom=newList.filter(c=>!DEFAULT_CATS.includes(c));
+      await setDoc(doc(db,"settings","inv_cats"),{cats:custom},{merge:true});
+    }catch(e){}
+  };
 
   const save=async()=>{
     if(!form.name.trim()){showT("Enter item name","warn");return;}
@@ -6222,7 +6259,7 @@ function NewInventoryItemForm({db,user,branchId,showT,onClose,invBranch}){
     setSaving(false);
   };
 
-  const field=(label,key,type)=>h("div",{style:{marginBottom:10}},
+  const fld=(label,key,type)=>h("div",{style:{marginBottom:10}},
     h("div",{style:{fontSize:9,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},label),
     h("input",{type:type||"text",value:form[key],
       onChange:e=>setForm(p=>({...p,[key]:e.target.value})),
@@ -6232,7 +6269,7 @@ function NewInventoryItemForm({db,user,branchId,showT,onClose,invBranch}){
   );
 
   return h("div",null,
-    field("Item Name *","name"),
+    fld("Item Name *","name"),
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
       h("div",{style:{marginBottom:10}},
         h("div",{style:{fontSize:9,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},"UNIT"),
@@ -6241,19 +6278,36 @@ function NewInventoryItemForm({db,user,branchId,showT,onClose,invBranch}){
           UNITS.map(u=>h("option",{key:u,value:u},u)))
       ),
       h("div",{style:{marginBottom:10}},
-        h("div",{style:{fontSize:9,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},"CATEGORY"),
+        h("div",{style:{fontSize:9,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4,
+          display:"flex",justifyContent:"space-between",alignItems:"center"}},
+          h("span",null,"CATEGORY"),
+          h("button",{onClick:()=>setShowAddCat(!showAddCat),
+            style:{fontSize:9,color:C.primary,background:"none",border:"none",cursor:"pointer",fontWeight:700}},
+            showAddCat?"✕":"+ New")
+        ),
+        showAddCat&&h("div",{style:{display:"flex",gap:4,marginBottom:6}},
+          h("input",{value:newCat,onChange:e=>setNewCat(e.target.value),
+            placeholder:"Category name",
+            onKeyDown:e=>e.key==="Enter"&&addCat(),
+            style:{flex:1,padding:"6px",border:"1px solid #ddd",
+              borderRadius:6,fontSize:11,outline:"none"}}),
+          h("button",{onClick:addCat,
+            style:{padding:"6px 10px",background:C.primary,border:"none",
+              borderRadius:6,color:"#fff",fontSize:11,cursor:"pointer",fontWeight:700}},
+            "Add")
+        ),
         h("select",{value:form.cat,onChange:e=>setForm(p=>({...p,cat:e.target.value})),
           style:{width:"100%",padding:"8px",border:"1px solid #ddd",borderRadius:7,fontSize:12,outline:"none"}},
-          CATS.map(c=>h("option",{key:c,value:c},c)))
+          cats.map(c=>h("option",{key:c,value:c},c)))
       )
     ),
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
-      field("Current Stock","stock","number"),
-      field("Min Stock (Alert)","minStock","number")
+      fld("Current Stock","stock","number"),
+      fld("Min Stock (Alert)","minStock","number")
     ),
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
-      field("Selling Price (₱)","price","number"),
-      field("Cost Price (₱)","cost","number")
+      fld("Selling Price (₱)","price","number"),
+      fld("Cost Price (₱)","cost","number")
     ),
     h("div",{style:{display:"flex",gap:8,marginTop:14}},
       h("button",{onClick:onClose,
@@ -6269,7 +6323,6 @@ function NewInventoryItemForm({db,user,branchId,showT,onClose,invBranch}){
 }
 
 
-// ─── MAIN APP ─────────────────────────────────────────────
 function App(){
   // Auth
   const [user,setUser]=useState(null);
@@ -6463,6 +6516,15 @@ function App(){
     }catch(e){}
 
     // Branch permissions + menu overrides handled above
+
+    // Menu items from Firebase
+    try{
+      unsubs.push(onSnapshot(collection(db,"menu"),snap=>{
+        if(snap.docs.length>0){
+          setMenuItems(snap.docs.map(d=>({...d.data(),id:d.id})));
+        }
+      },()=>{}));
+    }catch(e){}
 
     // Inventory — per branch freezer stock
     // Owner/Commissary → sees master commissary inventory
