@@ -3487,27 +3487,94 @@ function BOMPage({menuItems,db,user,showT,inventory=[]}){
       )
     ),
 
-    // OPTIONS TAB
-    mainTab==="options"&&h("div",{style:{display:"grid",gridTemplateColumns:"260px 220px 1fr",gap:12}},
+    // OPTIONS TAB — show menu items that have options, let user set BOM per choice
+    mainTab==="options"&&h("div",{style:{display:"grid",gridTemplateColumns:"220px 200px 1fr",gap:12}},
+      // Left: Menu Items with options
       h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
-        h("div",{style:{padding:"10px 14px",borderBottom:"1px solid "+C.border,
-          fontSize:11,fontWeight:800,display:"flex",justifyContent:"space-between",alignItems:"center"}},
-          "Option Groups",
-          h("button",{onClick:()=>{
-            if(!newOptGrpName.trim())return;
-            // Add option group to first selected menu item
-            showT("Select a menu item first, then add option groups in Menu Editor","info");
-          },style:{fontSize:10,background:"none",border:"none",cursor:"pointer",color:C.primary}},"+ Add")
-        ),
-        h("div",{style:{padding:"8px"}},
-          h("div",{style:{textAlign:"center",padding:"20px",color:C.muted,fontSize:11}},
-            "Option groups are managed in the",h("br",null),"Menu Editor → item → Options tab"))
+        h("div",{style:{padding:"10px 14px",borderBottom:"1px solid "+C.border,fontSize:11,fontWeight:800}},"Menu Items"),
+        h("div",{style:{overflowY:"auto",maxHeight:"70vh"}},
+          menuItems.filter(item=>(item.options||[]).length>0).map(item=>
+            h("div",{key:item.id,
+              onClick:()=>{setSelGroup(item);setSelOpt(null);setEditOCBom([]);},
+              style:{padding:"8px 14px",cursor:"pointer",borderBottom:"1px solid #f5f5f5",
+                background:selGroup?.id===item.id?"#FFF0F0":"#fff",
+                fontSize:11,fontWeight:selGroup?.id===item.id?700:400}},
+              h("div",null,(item.emoji||"")+" "+item.name),
+              h("div",{style:{fontSize:9,color:C.muted}},(item.options||[]).length+" option groups")
+            )
+          ),
+          menuItems.filter(item=>(item.options||[]).length>0).length===0&&
+            h("div",{style:{padding:"20px",textAlign:"center",color:C.muted,fontSize:11}},
+              "No items with options.",h("br",null),"Add options in Menu Editor first.")
+        )
       ),
-      h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,
-        padding:"20px",textAlign:"center",color:C.muted,gridColumn:"2/-1"}},
-        h("div",{style:{fontSize:28,marginBottom:8}},"⚙️"),
-        h("div",{style:{fontWeight:700,fontSize:13}},"Option BOM Editor"),
-        h("div",{style:{fontSize:11,marginTop:4}},"Manage option ingredient costs in Menu Editor → BOM tab")
+
+      // Middle: Choices
+      h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
+        h("div",{style:{padding:"10px 14px",borderBottom:"1px solid "+C.border,fontSize:11,fontWeight:800}},
+          selGroup?selGroup.name+" Options":"← Select item"),
+        selGroup
+          ? h("div",{style:{overflowY:"auto",maxHeight:"70vh"}},
+              (selGroup.options||[]).map(opt=>h("div",{key:opt.id},
+                h("div",{style:{padding:"5px 12px",background:"#f5f5f5",
+                  fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1}},
+                  (opt.label||"").toUpperCase()),
+                (opt.choices||[]).map(ch=>{
+                  const isSelected=selOpt&&selOpt.optId===opt.id&&selOpt.choiceId===ch.id;
+                  const key=selGroup.id+"__opt_"+opt.id+"__"+ch.id;
+                  const hasBOM=(boms[selGroup.id]&&boms[selGroup.id][key]||[]).length>0;
+                  return h("div",{key:ch.id,
+                    onClick:()=>{
+                      setSelOpt({optId:opt.id,choiceId:ch.id,optLabel:opt.label,choiceLabel:ch.label});
+                      const rows=(boms[selGroup.id]&&boms[selGroup.id][key])||[];
+                      setEditOCBom(rows.length?[...rows]:[{ingId:"",ingName:"",unit:"",qty:1}]);
+                    },
+                    style:{padding:"7px 12px",cursor:"pointer",
+                      background:isSelected?"#FFF0F0":"#fff",
+                      borderBottom:"1px solid #f5f5f5",
+                      display:"flex",justifyContent:"space-between",alignItems:"center"}},
+                    h("span",{style:{fontSize:11,fontWeight:isSelected?700:400}},
+                      ch.label+(ch.priceAdd>0?" +₱"+ch.priceAdd:"")),
+                    h("span",{style:{fontSize:9,fontWeight:700,
+                      color:hasBOM?C.success:C.muted}},hasBOM?"✓":"—")
+                  );
+                })
+              ))
+            )
+          : h("div",{style:{padding:"20px",textAlign:"center",color:C.muted,fontSize:11}},"← Select an item")
+      ),
+
+      // Right: BOM Editor
+      h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
+        !selOpt
+          ? h("div",{style:{padding:"40px",textAlign:"center",color:C.muted}},
+              h("div",{style:{fontSize:28,marginBottom:8}},"⚙️"),
+              h("div",{style:{fontWeight:700,fontSize:13}},"Select an option choice"),
+              h("div",{style:{fontSize:11,marginTop:4,color:C.muted}},"to set its ingredient deduction"))
+          : h("div",null,
+              h("div",{style:{padding:"10px 16px",borderBottom:"1px solid "+C.border,background:"#fafafa"}},
+                h("div",{style:{fontSize:12,fontWeight:800}},
+                  selGroup.name+" → "+selOpt.optLabel+" → "+selOpt.choiceLabel)
+              ),
+              h("div",{style:{padding:"14px 16px"}},
+                h(BOMEditor,{
+                  rows:editOptChoiceBom,
+                  setRows:setEditOCBom,
+                  saving:savingOC,
+                  onSave:async function(){
+                    setSavingOC(true);
+                    try{
+                      const key=selGroup.id+"__opt_"+selOpt.optId+"__"+selOpt.choiceId;
+                      const rows=editOptChoiceBom.filter(r=>r.ingId||r.ingName);
+                      await setDoc(doc(db,"bom",selGroup.id),
+                        Object.assign({},boms[selGroup.id]||{},{[key]:rows}),{merge:true});
+                      showT("Option BOM saved ✓");
+                    }catch(e){showT("Error","err");}
+                    setSavingOC(false);
+                  }
+                })
+              )
+            )
       )
     )
   );
