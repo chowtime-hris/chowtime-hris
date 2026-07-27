@@ -3779,6 +3779,36 @@ function BOMPage({menuItems,db,user,showT,inventory=[]}){
 }
 
 
+
+// ─── FEATURE DEFINITIONS PER ROLE ────────────────────────
+const FEATURE_DEFS = {
+  cashier: [
+    {key:"pos",        label:"POS",            icon:"🛒", always:true},
+    {key:"orders",     label:"Orders",         icon:"📋", always:false},
+    {key:"x_reading",  label:"X-Reading",      icon:"📊", always:false},
+    {key:"z_reading",  label:"Z-Reading",      icon:"📊", always:false},
+    {key:"cash_count", label:"Cash Count",     icon:"💵", always:false},
+    {key:"expenses",   label:"Expenses",       icon:"💸", always:false},
+    {key:"inventory",  label:"Inventory",      icon:"📦", always:false},
+    {key:"ca_request", label:"Cash Advance",   icon:"💵", always:false},
+    {key:"loan_request",label:"Loan Request",  icon:"🏦", always:false},
+    {key:"void_request",label:"Void Request",  icon:"🚫", always:false},
+  ],
+  crew: [
+    {key:"kitchen",    label:"Kitchen Queue",  icon:"🍳", always:true},
+    {key:"ca_request", label:"Cash Advance",   icon:"💵", always:false},
+    {key:"loan_request",label:"Loan Request",  icon:"🏦", always:false},
+    {key:"kiosk",      label:"Kiosk",          icon:"📺", always:false},
+  ],
+  stockclerk: [
+    {key:"inventory",  label:"Inventory",      icon:"📦", always:true},
+    {key:"stock_order",label:"Stock Order",    icon:"🚚", always:false},
+    {key:"stock_receive",label:"Receive Stock",icon:"📥", always:false},
+    {key:"ca_request", label:"Cash Advance",   icon:"💵", always:false},
+    {key:"loan_request",label:"Loan Request",  icon:"🏦", always:false},
+  ]
+};
+
 function BranchSettingsPage({branchId,curBranch,user,db,showT}){
   const [perms,setPerms]   = useState({});
   const [saving,setSaving] = useState(false);
