@@ -3761,6 +3761,8 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
         const bomSnap = await getDocs(collection(db,"bom"));
         const bomData = {};
         bomSnap.docs.forEach(d=>{ bomData[d.id]={...d.data()}; });
+        console.log("BOM docs:",bomSnap.docs.length,"Cart items:",cart.map(c=>c.id+":"+c.name));
+        showT("BOM check: "+bomSnap.docs.length+" recipes, "+cart.length+" items","info");
 
         for(const item of (req.voidedItems||req.orderItems||[])){
           const itemId = item.id;
@@ -6989,6 +6991,8 @@ function App(){
         const bomSnap = await getDocs(collection(db,"bom"));
         const bomData = {};
         bomSnap.docs.forEach(d=>{ bomData[d.id]={...d.data()}; });
+        console.log("BOM docs:",bomSnap.docs.length,"Cart items:",cart.map(c=>c.id+":"+c.name));
+        showT("BOM check: "+bomSnap.docs.length+" recipes, "+cart.length+" items","info");
         const logCol = "inventory_log_"+branchId;
         let totalDeductions = 0;
 
@@ -7002,8 +7006,10 @@ function App(){
           const itemBOM = bomData[itemId]||{};
           const rows = itemBOM[vKey]||itemBOM[itemId]||[];
 
+          console.log("Item",itemId,"BOM rows:",rows.length,"bomData keys:",Object.keys(bomData));
           for(const row of rows){
             if(!row.ingId||!row.qty)continue;
+            console.log("Deducting:",row.ingId,row.qty,"from cart qty:",cartItem.qty);
             const convFactor = row.convFactor||1;
             const deductAmt = ((row.qty||0)*(cartItem.qty||1))/convFactor;
             
