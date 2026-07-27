@@ -6452,10 +6452,23 @@ function App(){
           setPage(ROLES[found.role]?.nav[0]||"dashboard");
           setLoginErr("");
         }else{
-          // Fallback 2: first Firebase Auth user = owner
-          setUser({id:fbUser.uid,uid:fbUser.uid,name:"Norman",role:"owner",branch:"all",email:fbUser.email});
-          setPage("dashboard");
-          setLoginErr("");
+          // No staff_accounts record found - check by uid
+          try{
+            const uidQ = query(collection(db,"staff_accounts"),where("uid","==",fbUser.uid));
+            const uidSnap = await getDocs(uidQ);
+            if(!uidSnap.empty){
+              const profile = uidSnap.docs[0].data();
+              setUser({...profile,uid:fbUser.uid,email:fbUser.email});
+              setPage(ROLES[profile.role]?.nav[0]||"dashboard");
+              setAuthLoading(false);
+              return;
+            }
+          }catch(e){}
+          // Still not found - sign out and show error
+          await signOut(auth);
+          setUser(null);
+          setPage(null);
+          setLoginErr("Account not found in system. Contact your admin to add your email to your staff account.");
         }
       }else{
         setUser(null);
@@ -8481,9 +8494,19 @@ function App(){
                     h("div",{style:{marginBottom:10}},
                       h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:4}},"NAME"),
                       h("input",{value:editingStaff.name||"",
-                        onChange:e=>setEditingStaff(p=>({...p,name:e.target.value})),
+                        readOnly:true,
+                        onClick:()=>window._openTextKB&&window._openTextKB({value:editingStaff.name||"",label:"FULL NAME",onChange:v=>setEditingStaff(p=>({...p,name:v}))}),
                         style:{width:"100%",padding:"8px",border:"1px solid "+C.border,
-                          borderRadius:7,fontSize:12,outline:"none",boxSizing:"border-box"}})
+                          borderRadius:7,fontSize:12,outline:"none",boxSizing:"border-box",cursor:"pointer"}})
+                    ),
+                    h("div",{style:{marginBottom:10}},
+                      h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:4}},"LOGIN EMAIL (Firebase Auth)"),
+                      h("input",{value:editingStaff.email||"",
+                        readOnly:true,
+                        onClick:()=>window._openTextKB&&window._openTextKB({value:editingStaff.email||"",label:"LOGIN EMAIL",onChange:v=>setEditingStaff(p=>({...p,email:v}))}),
+                        placeholder:"e.g. cffc.wsfp.cashier@gmail.com",
+                        style:{width:"100%",padding:"8px",border:"1px solid "+C.border,
+                          borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box",cursor:"pointer"}})
                     ),
                     // Role selector
                     h("div",{style:{marginBottom:10}},
@@ -8554,6 +8577,7 @@ function App(){
                               name:editingStaff.name,
                               role:editingStaff.role,
                               branch:editingStaff.branch,
+                              email:editingStaff.email||"",
                               updatedAt:serverTimestamp(),
                               updatedBy:user.name
                             });
@@ -8849,10 +8873,20 @@ function App(){
                     h("div",{style:{marginBottom:10}},
                       h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:4}},"FULL NAME"),
                       h("input",{value:editingStaff.name||"",
-                        onChange:e=>setEditingStaff(p=>({...p,name:e.target.value})),
+                        readOnly:true,
+                        onClick:()=>window._openTextKB&&window._openTextKB({value:editingStaff.name||"",label:"FULL NAME",onChange:v=>setEditingStaff(p=>({...p,name:v}))}),
                         placeholder:"Enter full name",
                         style:{width:"100%",padding:"9px",border:"1px solid "+C.border,
-                          borderRadius:7,fontSize:12,outline:"none",boxSizing:"border-box"}})
+                          borderRadius:7,fontSize:12,outline:"none",boxSizing:"border-box",cursor:"pointer"}})
+                    ),
+                    h("div",{style:{marginBottom:10}},
+                      h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:4}},"LOGIN EMAIL"),
+                      h("input",{value:editingStaff.email||"",
+                        readOnly:true,
+                        onClick:()=>window._openTextKB&&window._openTextKB({value:editingStaff.email||"",label:"LOGIN EMAIL",onChange:v=>setEditingStaff(p=>({...p,email:v}))}),
+                        placeholder:"cffc.wsfp.cashier@gmail.com",
+                        style:{width:"100%",padding:"9px",border:"1px solid "+C.border,
+                          borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box",cursor:"pointer"}})
                     ),
                     h("div",{style:{marginBottom:10}},
                       h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:6}},"ROLE"),
