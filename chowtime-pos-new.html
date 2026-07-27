@@ -452,16 +452,23 @@ function buildEscPos(ord,bName,cs,paperSize){
 
   (ord.items||[]).forEach(function(i){
     a([ESC,0x45,0x01]);
-    a(ln(i.name));
+    a(ln(i.name+(ord.discScope==="items"&&i.discounted?" *":"")));
     a([ESC,0x45,0x00]);
     if(i.variant)a(ln("  ["+i.variant+"]"));
+    (i.freebies||[]).forEach(function(f){a(ln("  > "+f.label+" x"+f.qty));});
     if(i.options&&i.options.length)a(ln("  "+i.options.join(", ")));
     var p=i.lineTotal&&i.qty?(i.lineTotal/i.qty):(i.unitPrice||i.price||0);
     a(row("  x"+i.qty+" @ P"+p.toFixed(2),"P"+(i.lineTotal||(p*i.qty)).toFixed(2)));
   });
 
   a(dash());
-  if(da>0){a(row("Subtotal","P"+sub.toFixed(2)));a(row("Discount","- P"+da.toFixed(2)));}
+  if(da>0){
+    a(row("Subtotal","P"+sub.toFixed(2)));
+    a(row("Discount"+(ord.discRate?" "+Math.round(ord.discRate*100)+"%":"")
+      +(ord.discScope==="items"?" ("+((ord.discItems||[]).length)+" item/s)":""),
+      "- P"+da.toFixed(2)));
+    if(ord.discScope==="items")a(ln("* discounted item"));
+  }
   if(isVAT&&!zerovat){a(row("VATable","P"+vatable.toFixed(2)));a(row("VAT 12%","P"+vatAmt.toFixed(2)));}
   if(!isVAT&&!zerovat)a(ln("Non-VAT"));
   if(zerovat)a(ln("Zero-Rated"));
@@ -493,9 +500,86 @@ function buildEscPos(ord,bName,cs,paperSize){
   return out;
 }
 
+// Kitchen ticket in ESC/POS. No prices — the cook only needs what to make.
+function buildEscPosKOT(ord,bName,cs,paperSize){
+  cs=cs||{};
+  var W=paperSize==="58mm"?32:48;
+  var NL=0x0A, ESC=0x1B, GS=0x1D;
+  var enc=new TextEncoder();
+  var T=function(x){return enc.encode(x);};
+  var B=function(arr){return new Uint8Array(arr);};
+  function ln(t){return T(t+"\n");}
+  function dash(){return T("-".repeat(W)+"\n");}
+
+  var parts=[], a=function(v){parts.push(v instanceof Uint8Array?v:B(v));};
+
+  a([ESC,0x40]);          // INIT
+  a([ESC,0x61,0x01]);     // CENTER
+  a([ESC,0x21,0x30]);     // DOUBLE W+H
+  a(ln("KOT"));
+  a([ESC,0x21,0x00]);     // NORMAL
+  a(ln("KITCHEN ORDER TICKET"));
+  a(dash());
+  a([ESC,0x61,0x00]);     // LEFT
+  a([ESC,0x45,0x01]);
+  a(ln("Order: "+(ord.id||"-")+"   "+(ord.time||"")));
+  a([ESC,0x45,0x00]);
+  a(ln(bName+"   "+(ord.date||"")));
+  if(ord.orderType)a(ln("Type: "+String(ord.orderType).toUpperCase()));
+  if(ord.tableNo)a(ln("Table: "+ord.tableNo));
+  if(ord.custName)a(ln("Customer: "+ord.custName));
+  a(dash());
+
+  (ord.items||[]).forEach(function(i){
+    var pTot=(i.freebies||[]).reduce(function(x,f){return x+(f.qty||0);},0);
+    a([ESC,0x21,0x10]);   // DOUBLE HEIGHT
+    a([ESC,0x45,0x01]);
+    a(ln(i.qty+"x "+i.name+(pTot?"  ("+pTot+" pcs)":"")));
+    a([ESC,0x21,0x00]);
+    a([ESC,0x45,0x00]);
+    if(i.variant)a(ln("   ["+i.variant+"]"));
+    (i.freebies||[]).forEach(function(f){
+      a([ESC,0x45,0x01]);
+      a(ln("   > "+f.qty+"x "+f.label));
+      a([ESC,0x45,0x00]);
+    });
+    if(i.options&&i.options.length)a(ln("   "+i.options.join(", ")));
+    if(i.note){a([ESC,0x45,0x01]);a(ln("   ** "+i.note+" **"));a([ESC,0x45,0x00]);}
+    a(T("\n"));
+  });
+
+  a(dash());
+  if(ord.note){a([ESC,0x45,0x01]);a(ln("NOTE: "+ord.note));a([ESC,0x45,0x00]);a(dash());}
+  a([ESC,0x61,0x01]);
+  a(ln("Printed: "+new Date().toLocaleTimeString("en-PH")));
+  a(B([NL,NL,NL]));
+  a([GS,0x56,0x41,0x10]); // PARTIAL CUT
+
+  var total=0; parts.forEach(function(p){total+=p.length;});
+  var out=new Uint8Array(total), off=0;
+  parts.forEach(function(p){out.set(p,off);off+=p.length;});
+  return out;
+}
+
 async function printEscPos(ord,bName,cs,paperSize){
   var data=buildEscPos(ord,bName,cs,paperSize);
   return await btPrint(data);
+}
+
+async function printEscPosKOT(ord,bName,cs,paperSize){
+  var data=buildEscPosKOT(ord,bName,cs,paperSize);
+  return await btPrint(data);
+}
+
+// Customer receipt + kitchen ticket in ONE Bluetooth session.
+// Sent as a single byte stream so the connection is not dropped between
+// documents; the partial cut at the end of the receipt separates them.
+async function printEscPosBoth(ord,bName,cs,paperSize){
+  var r=buildEscPos(ord,bName,cs,paperSize);
+  var k=buildEscPosKOT(ord,bName,cs,paperSize);
+  var out=new Uint8Array(r.length+k.length);
+  out.set(r,0); out.set(k,r.length);
+  return await btPrint(out);
 }
 
 
@@ -3526,7 +3610,10 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
     setSavingOpt(false);
   };
 
-  // BOMEditor sub-component
+  // BOMEditor sub-component.
+  // NOTE: call this as BOMEditor({...}), NOT h(BOMEditor,{...}).
+  // It is defined inside the parent, so h() would give React a new element type
+  // on every render and remount the inputs (focus loss after each keystroke).
   const BOMEditor=({rows,setRows,onSave,saving:sv})=>h("div",null,
     h("div",{style:{display:"grid",
       gridTemplateColumns:"1fr 80px 70px 110px 60px 80px 36px",
@@ -3694,7 +3781,7 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
                       v==="default"?"Base":v))
                 ),
                 h("div",{style:{padding:"14px 16px"}},
-                  h(BOMEditor,{rows:editBom,setRows:setEditBom,onSave:saveBOM,saving:saving}))
+                  BOMEditor({rows:editBom,setRows:setEditBom,onSave:saveBOM,saving:saving}))
               ),
               // Item Options sub-tab
               itemBomTab==="options"&&h("div",{style:{display:"grid",gridTemplateColumns:"200px 1fr",minHeight:300}},
@@ -3738,7 +3825,7 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
                           fontWeight:700,color:C.primary,borderBottom:"1px solid "+C.border}},
                           selItemOpt.optLabel+" → "+selItemOpt.choiceLabel),
                         h("div",{style:{padding:"10px 12px"}},
-                          h(BOMEditor,{
+                          BOMEditor({
                             rows:editItemOptBom,setRows:setEditItemOptBom,saving:savingItemOpt,
                             onSave:async()=>{
                               setSavingItemOpt(true);
@@ -4045,7 +4132,7 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
                     "Deducted from inventory whenever this option is ordered")
                 ),
                 h("div",{style:{padding:"12px 16px"}},
-                  h(BOMEditor,{
+                  BOMEditor({
                     rows:editOptBom,setRows:setEditOptBom,saving:savingOpt,
                     onSave:saveOptBOM
                   })
@@ -8155,31 +8242,52 @@ function App(){
           ),
           h("div",{style:{textAlign:"center",fontSize:9,color:C.muted,margin:"8px 0"}},"Salamat! Kain na! 😊 · VAT REG: 000-123-456-000"),
           h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginTop:4}},
-            h("button",{onClick:()=>printReceipt(ord,curBranch.full,companySettings),
-              style:{padding:"10px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,
-                border:"none",borderRadius:8,color:"#fff",fontWeight:700,fontSize:11,cursor:"pointer"}},
-              "🖨️ Receipt"),
+            // PRIMARY: both docs over one Bluetooth session
+            h("button",{
+              onClick:async function(){
+                var ps=(companySettings&&companySettings.paperSize)||"80mm";
+                showT("Sending 2 docs to printer...","ok");
+                var ok=await printEscPosBoth(ord,curBranch.full,companySettings,ps);
+                if(ok)showT("Receipt + KOT printed ✓");
+                else{
+                  showT("BT failed — printing via browser","warn");
+                  printReceipt(ord,curBranch.full,companySettings);
+                  printKOT(ord,curBranch.full,companySettings);
+                }
+              },
+              style:{gridColumn:"1/-1",padding:"12px",background:"#1565C0",
+                border:"none",borderRadius:8,color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}},
+              "📡 BT Print — Receipt + KOT"),
             h("button",{
               onClick:async function(){
                 var ok=await printEscPos(ord,curBranch.full,companySettings,
                   (companySettings&&companySettings.paperSize)||"80mm");
-                if(!ok)showT("BT print failed — use 🖨️ Receipt instead","warn");
-                else showT("Printed via Bluetooth ✓");
+                showT(ok?"Receipt printed ✓":"BT print failed",ok?"ok":"warn");
               },
-              style:{padding:"10px",background:"#1565C0",
+              style:{padding:"10px",background:"#1976D2",
                 border:"none",borderRadius:8,color:"#fff",
                 fontWeight:700,fontSize:11,cursor:"pointer"}},
-              "📡 BT Print"),
+              "📡 BT Receipt"),
+            h("button",{
+              onClick:async function(){
+                var ok=await printEscPosKOT(ord,curBranch.full,companySettings,
+                  (companySettings&&companySettings.paperSize)||"80mm");
+                showT(ok?"KOT printed ✓":"BT print failed",ok?"ok":"warn");
+              },
+              style:{padding:"10px",background:"#E65100",
+                border:"none",borderRadius:8,color:"#fff",
+                fontWeight:700,fontSize:11,cursor:"pointer"}},
+              "📡 BT KOT"),
+            h("button",{onClick:()=>printReceipt(ord,curBranch.full,companySettings),
+              style:{padding:"9px",background:"#fff",border:"1px solid "+C.border,
+                borderRadius:8,color:C.text,fontWeight:600,fontSize:10,cursor:"pointer"}},
+              "🖨️ Receipt (browser)"),
             h("button",{onClick:()=>printKOT(ord,curBranch.full,companySettings),
-              style:{padding:"10px",background:"linear-gradient(135deg,#E65100,#BF360C)",
-                border:"none",borderRadius:8,color:"#fff",fontWeight:700,fontSize:11,cursor:"pointer"}},
-              "🍳 KOT"),
-            h("button",{onClick:()=>{printReceipt(ord,curBranch.full,companySettings);printKOT(ord,curBranch.full,companySettings);},
-              style:{padding:"9px",background:C.success,
-                border:"none",borderRadius:8,color:"#fff",fontWeight:700,fontSize:10,cursor:"pointer"}},
-              "🖨️ Both"),
+              style:{padding:"9px",background:"#fff",border:"1px solid "+C.border,
+                borderRadius:8,color:C.text,fontWeight:600,fontSize:10,cursor:"pointer"}},
+              "🍳 KOT (browser)"),
             h("button",{onClick:()=>setCurOrd(null),
-              style:{padding:"9px",background:C.bg,border:"1px solid "+C.border,
+              style:{gridColumn:"1/-1",padding:"9px",background:C.bg,border:"1px solid "+C.border,
                 borderRadius:8,color:C.text,fontWeight:700,fontSize:11,cursor:"pointer"}},
               "Close"),
             h("div",{style:{gridColumn:"1/-1",display:"flex",gap:6}},
@@ -10622,10 +10730,10 @@ function App(){
 
     // MODALS + TOAST - always rendered, display:none when inactive
     h("div",{style:{display:modal==="checkout"?"block":"none"}},
-      h(CheckoutModal,null)
+      CheckoutModal()
     ),
     h("div",{style:{display:modal==="receipt"&&curOrd?"block":"none"}},
-      curOrd&&h(ReceiptModal,{ord:curOrd})
+      curOrd&&ReceiptModal({ord:curOrd})
     ),
     h("div",{style:{display:toast?"block":"none"}},
       toast&&h(Toast,{msg:toast.msg,type:toast.type,onDone:()=>setToast(null)})
