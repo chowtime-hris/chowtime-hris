@@ -7504,21 +7504,8 @@ function App(){
               h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:14}},h("b",null,"Add Expense"),h("button",{onClick:()=>setModal(null),style:{background:"none",border:"none",fontSize:17,cursor:"pointer"}},"×")),
               h("div",{style:{display:"grid",gap:8}},
                 h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"CATEGORY"),h("select",{value:newExp.cat,onChange:e=>setNewExp(p=>({...p,cat:e.target.value})),style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none"}},EXPENSE_CATS.map(c=>h("option",{key:c},c)))),
-                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"DESCRIPTION"),h("input",{value:newExp.desc,readOnly:true,
-  onClick:function(){setTextKB({value:newExp.desc,label:"DESCRIPTION",
-    onChange:function(v){setNewExp(function(p){return {...p,desc:v};});}});},
-  placeholder:"Tap to enter description",
-  style:{width:"100%",padding:"8px",border:"1px solid "+C.border,
-    borderRadius:7,fontSize:11,outline:"none",
-    boxSizing:"border-box",cursor:"pointer",background:"#f9f9f9"}})),
-                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"AMOUNT (₱)"),h("input",{type:"number",value:newExp.amount,readOnly:true,
-  onClick:function(){setNumKB({value:newExp.amount,label:"AMOUNT (₱)",
-    allowDecimal:true,
-    onChange:function(v){setNewExp(function(p){return {...p,amount:v};});}});},
-  placeholder:"Tap to enter amount",
-  style:{width:"100%",padding:"8px",border:"1px solid "+C.border,
-    borderRadius:7,fontSize:14,fontWeight:700,outline:"none",
-    boxSizing:"border-box",cursor:"pointer",background:"#f9f9f9"}})),
+                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"DESCRIPTION"),h("input",{value:newExp.desc,readOnly:true,onClick:()=>setTextKB({value:newExp.desc,label:"DESCRIPTION",onChange:v=>setNewExp(p=>({...p,desc:v}))}),placeholder:"Tap to enter description",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box",cursor:"pointer",background:"#f9f9f9"}})),
+                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"AMOUNT (₱)"),h("input",{type:"number",value:newExp.amount,readOnly:true,onClick:()=>setNumKB({value:String(newExp.amount||""),label:"AMOUNT (₱)",allowDecimal:true,onChange:v=>setNewExp(p=>({...p,amount:v}))}),placeholder:"Tap to enter amount",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:14,fontWeight:700,outline:"none",boxSizing:"border-box",cursor:"pointer",background:"#f9f9f9"}})),
                 h("button",{onClick:async()=>{
                   if(!newExp.desc||!newExp.amount){showT("Fill all fields","warn");return;}
                   await addDoc(collection(db,"expenses"),{branch:branchId,cat:newExp.cat,desc:newExp.desc,amount:parseFloat(newExp.amount),date:new Date().toISOString().slice(0,10),by:user.name,status:user.role==="owner"?"approved":"pending",timestamp:serverTimestamp()});
@@ -7552,7 +7539,7 @@ function App(){
               ),
               h("div",{style:{display:"grid",gap:8}},
                 h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"DESCRIPTION"),h("input",{value:newCash.desc,onChange:e=>setNewCash(p=>({...p,desc:e.target.value})),placeholder:"e.g. Ice delivery",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box"}})),
-                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"AMOUNT (₱)"),h("input",{type:"number",value:newCash.amount,onChange:e=>setNewCash(p=>({...p,amount:e.target.value})),style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:14,fontWeight:700,outline:"none",boxSizing:"border-box"}})),
+                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"AMOUNT (₱)"),h("input",{type:"number",value:newCash.amount,readOnly:true,onClick:()=>setNumKB({value:newCash.amount,label:"AMOUNT (₱)",allowDecimal:true,onChange:v=>setNewCash(p=>({...p,amount:v}))}),style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:14,cursor:"pointer",fontWeight:700,outline:"none",boxSizing:"border-box"}})),
                 h("button",{onClick:async()=>{
                   if(!newCash.desc||!newCash.amount){showT("Fill all fields","warn");return;}
                   const now=new Date();
@@ -7585,7 +7572,7 @@ function App(){
               h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:13}},h("b",null,"Cash Advance Request"),h("button",{onClick:()=>setModal(null),style:{background:"none",border:"none",fontSize:17,cursor:"pointer"}},"×")),
               h("div",{style:{display:"grid",gap:8}},
                 h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"STAFF NAME"),h("input",{value:newAdv.staff,onChange:e=>setNewAdv(p=>({...p,staff:e.target.value})),placeholder:"Name",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box"}})),
-                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"AMOUNT (₱)"),h("input",{type:"number",value:newAdv.amount,onChange:e=>setNewAdv(p=>({...p,amount:e.target.value})),style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:14,fontWeight:700,outline:"none",boxSizing:"border-box"}})),
+                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"AMOUNT (₱)"),h("input",{type:"number",value:newAdv.amount,readOnly:true,onClick:()=>setNumKB({value:String(newAdv.amount||""),label:"AMOUNT (₱)",allowDecimal:true,onChange:v=>setNewAdv(p=>({...p,amount:v}))}),style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:14,fontWeight:700,outline:"none",boxSizing:"border-box"}})),
                 h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"REASON"),h("input",{value:newAdv.reason,onChange:e=>setNewAdv(p=>({...p,reason:e.target.value})),placeholder:"e.g. Medical",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box"}})),
                 h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"DEDUCTION DATE"),h("input",{type:"date",value:newAdv.deductDate,onChange:e=>setNewAdv(p=>({...p,deductDate:e.target.value})),style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box"}})),
                 h("button",{onClick:async()=>{
@@ -7711,7 +7698,8 @@ function App(){
                   style:{padding:"4px 10px",background:"#1565C0",border:"none",
                     borderRadius:6,color:"#fff",fontSize:10,fontWeight:700,cursor:"pointer"}},
                   "✏️ Edit"),
-                h("input",{type:"number",placeholder:"+/-",
+                h("input",{type:"number",placeholder:"qty",readOnly:true,
+                  onClick:function(e){var item=e.target.closest?e.target:null; setNumKB({value:"",label:"ADJUST STOCK",allowDecimal:false,allowNegative:true,onChange:function(v){var el=e.target;el.value=v;el.dispatchEvent(new Event("change",{bubbles:true}));}});},
                   style:{width:44,padding:"4px",border:"1px solid "+C.border,
                     borderRadius:6,fontSize:10,textAlign:"center",outline:"none"},
                   onKeyDown:async function(e){
@@ -8077,87 +8065,218 @@ function App(){
 
         // ══ USER MGMT ══
         page==="user_mgmt"&&h("div",null,
-          h(SectionHeader,{title:"Users & Roles",action:()=>setModal("add_staff"),actionLabel:"Add Staff"}),
+          h(SectionHeader,{title:"👥 User Management",
+            action:()=>setModal("add_staff"),actionLabel:"+ Add User"}),
+
+          // Role legend
+          h("div",{style:{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}},
+            [
+              {role:"owner",label:"Owner/Admin",color:"#C8151B",emoji:"👑",
+               desc:"Full access, all branches"},
+              {role:"manager",label:"Branch Manager",color:"#007AFF",emoji:"🏪",
+               desc:"Manages own branch staff & operations"},
+              {role:"cashier",label:"Cashier",color:"#34C759",emoji:"💳",
+               desc:"POS only, own branch"},
+              {role:"crew",label:"Crew/Kitchen",color:"#FF9500",emoji:"🧑‍🍳",
+               desc:"Kitchen queue only"},
+              {role:"stockclerk",label:"Stock Clerk",color:"#AF52DE",emoji:"📦",
+               desc:"Inventory management"},
+              {role:"commissary",label:"Commissary",color:"#32ADE6",emoji:"🏭",
+               desc:"Main commissary operations"},
+            ].map(r=>h("div",{key:r.role,
+              style:{background:r.color+"15",border:"1px solid "+r.color+"40",
+                borderRadius:10,padding:"8px 12px",flex:"0 0 auto"}},
+              h("div",{style:{fontSize:11,fontWeight:700,color:r.color}},
+                r.emoji+" "+r.label),
+              h("div",{style:{fontSize:9,color:C.muted}},r.desc)
+            ))
+          ),
+
           h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1.4fr",gap:12}},
-            h("div",{style:{background:"#fff",borderRadius:12,padding:"13px 15px",border:"1px solid "+C.border,alignSelf:"start"}},
-              h("b",{style:{fontSize:12}},"Role Permissions"),
-              h("div",{style:{marginTop:9}},
-                Object.entries(ROLES).map(([k,r])=>h("div",{key:k,style:{display:"flex",gap:8,padding:"8px 0",borderBottom:"1px solid #f5f5f5"}},
-                  h("div",{style:{width:30,height:30,borderRadius:7,background:`${r.color}18`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}},r.emoji),
-                  h("div",null,h("div",{style:{fontSize:10,fontWeight:700,color:r.color}},r.label),h("div",{style:{fontSize:8,color:C.muted,marginTop:1}},r.nav.length+" pages"))
-                ))
-              )
-            ),
+            // Staff list with filters
             h("div",null,
-              h("div",{style:{background:"#fff",borderRadius:12,padding:"13px 15px",border:"1px solid "+C.border,marginBottom:10}},
-                h("b",{style:{fontSize:12}},"All Staff ("+staff.length+")"),
-                h("div",{style:{marginTop:9}},
-                  staff.map(s=>{const r=ROLES[s.role];return h("div",{key:s.id,style:{display:"flex",alignItems:"center",gap:8,padding:"7px 0",borderBottom:"1px solid #f9f9f9"}},
-                    h("div",{style:{width:28,height:28,borderRadius:7,background:`${r.color}18`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,flexShrink:0}},r.emoji),
-                    h("div",{style:{flex:1}},h("div",{style:{fontSize:10,fontWeight:700}},s.name),h("div",{style:{fontSize:8,color:r.color,fontWeight:600}},r.label+" · "+(s.branch==="all"?"All":s.branch==="comm"?"Commissary":branches.find(b=>b.id===s.branch)?.name||s.branch))),
-                    h("button",{
-                      onClick:()=>{setEditingStaff({...s});setModal("edit_staff");},
-                      style:{fontSize:8,color:"#6A1B9A",background:"#F3E5F5",padding:"3px 7px",borderRadius:5,border:"none",cursor:"pointer",fontWeight:700}
-                    },"✏️ Edit"),
-                    h("button",{
-                      onClick:()=>{setEditingStaff(s);setNewPin("");setNewPin2("");setModal("edit_pin");},
-                      style:{fontSize:8,color:C.info,fontFamily:"monospace",background:"#E3F2FD",padding:"3px 7px",borderRadius:5,border:"none",cursor:"pointer",fontWeight:700}
-                    },"🔑 PIN"),
-                    s.role!=="owner"&&h("button",{onClick:async()=>{if(!confirm("Remove "+s.name+"?"))return;try{await deleteDoc(doc(db,"staff_accounts",s.id||s.uid));}catch(e){}setStaff(p=>p.filter(x=>x.id!==s.id));showT(s.name+" removed","warn");},style:{width:19,height:19,background:"#FFEBEE",border:"none",borderRadius:4,color:C.danger,cursor:"pointer",fontSize:11}},"×")
-                  );}))
-              ),
-              modal==="add_staff"&&h("div",{style:{background:"#fff",borderRadius:12,padding:"13px 15px",border:"1px solid "+C.border}},
-                h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:11}},h("b",{style:{fontSize:12}},"➕ Add Staff"),h("button",{onClick:()=>setModal(null),style:{background:"none",border:"none",fontSize:16,cursor:"pointer"}},"×")),
-                h("div",{style:{display:"grid",gap:8}},
-                  h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:3,letterSpacing:1}},"FULL NAME"),h("input",{value:newStaff.name,onChange:e=>setNewStaff(p=>({...p,name:e.target.value})),placeholder:"Name",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box"}})),
-                  h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:3,letterSpacing:1}},"ROLE"),h("select",{value:newStaff.role,onChange:e=>setNewStaff(p=>({...p,role:e.target.value})),style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none"}},Object.entries(ROLES).map(([k,r])=>h("option",{key:k,value:k},r.emoji+" "+r.label)))),
-                  h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:3,letterSpacing:1}},"BRANCH"),h("select",{value:newStaff.branch,onChange:e=>setNewStaff(p=>({...p,branch:e.target.value})),style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none"}},h("option",{value:"all"},"All Branches"),...branches.map(b=>h("option",{key:b.id,value:b.id},b.full)),h("option",{value:"comm"},"Commissary"))),
-                  h("div",null,
-                    h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:3,letterSpacing:1}},"WORK EMAIL"),
-                    h("input",{type:"email",value:newStaff.email,onChange:e=>setNewStaff(p=>({...p,email:e.target.value})),
-                      placeholder:"juan@chowtime.com",
-                      style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:12,outline:"none",boxSizing:"border-box"}})
-                  ),
-                  h("div",null,
-                    h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:3,letterSpacing:1}},"INITIAL PASSWORD (min 6 chars)"),
-                    h("input",{type:"password",value:newStaff.password,onChange:e=>setNewStaff(p=>({...p,password:e.target.value})),
-                      placeholder:"e.g. chowtime2026",
-                      style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:13,outline:"none",boxSizing:"border-box"}})
-                  ),
-                  h("div",{style:{background:"#FFF8E1",borderRadius:7,padding:"7px 10px",fontSize:9,color:"#795548"}},
-                    "💡 Staff can change their password anytime via Forgot Password on the login screen."
-                  ),
-                  h("button",{onClick:async()=>{
-                    if(!newStaff.name||!newStaff.email||!newStaff.password){showT("Fill all fields","warn");return;}
-                    if(newStaff.password.length<6){showT("Password must be 6+ characters","warn");return;}
-                    try{
-                      // Create Firebase Auth account
-                      const cred = await createUserWithEmailAndPassword(auth,newStaff.email,newStaff.password);
-                      const profile = {
-                        id:cred.user.uid, uid:cred.user.uid,
-                        name:newStaff.name, role:newStaff.role,
-                        branch:newStaff.branch, email:newStaff.email,
-                      };
-                      // Save profile to Firestore
-                      await setDoc(doc(db,"staff_accounts",cred.user.uid), profile);
-                      setStaff(p=>[...p,profile]);
-                      setNewStaff({name:"",role:"cashier",branch:"ct-wsfp",email:"",password:""});
-                      setModal(null);
-                      showT(newStaff.name+" account created ✓");
-                    }catch(e){
-                      const msgs={
-                        "auth/email-already-in-use":"Email already registered",
-                        "auth/invalid-email":"Invalid email format",
-                        "auth/weak-password":"Password too weak (min 6 chars)",
-                      };
-                      showT(msgs[e.code]||"Error: "+e.message,"err");
-                    }
-                  },style:{padding:"10px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:8,color:"#fff",fontWeight:700,cursor:"pointer"}},"✓ Create Account")
+              h("div",{style:{background:"#fff",borderRadius:12,
+                border:"1px solid "+C.border,overflow:"hidden"}},
+                h("div",{style:{padding:"10px 14px",borderBottom:"1px solid "+C.border,
+                  display:"flex",gap:6,flexWrap:"wrap"}},
+                  h("div",{style:{fontSize:11,fontWeight:800,marginRight:4,
+                    alignSelf:"center"}},"Staff"),
+                  ["All","owner","manager","cashier","crew","stockclerk","commissary"].map(r=>
+                    h("button",{key:r,
+                      onClick:()=>setInvSrch(r==="All"?"":r),
+                      style:{padding:"3px 10px",borderRadius:12,fontSize:9,
+                        cursor:"pointer",border:"none",fontWeight:600,
+                        background:(invSrch||"All")===r?C.primary:"#eee",
+                        color:(invSrch||"All")===r?"#fff":C.muted}},
+                      r==="All"?"All":ROLES[r]?.label||r))
+                ),
+                h("div",{style:{overflowY:"auto",maxHeight:"65vh"}},
+                  staff.filter(s=>!invSrch||s.role===invSrch)
+                  .sort((a,b)=>{
+                    const order={owner:0,manager:1,commissary:2,cashier:3,stockclerk:4,crew:5};
+                    return (order[a.role]||9)-(order[b.role]||9);
+                  })
+                  .map(s=>{
+                    const roleInfo=ROLES[s.role]||{color:C.muted,emoji:"👤"};
+                    const isOwnerRole=s.role==="owner";
+                    return h("div",{key:s.id,
+                      onClick:()=>setEditingStaff(s),
+                      style:{padding:"10px 14px",cursor:isOwnerRole?"default":"pointer",
+                        borderBottom:"1px solid #f5f5f5",
+                        background:editingStaff?.id===s.id?"#FFF0F0":"#fff",
+                        display:"flex",gap:10,alignItems:"center"}},
+                      h("div",{style:{width:36,height:36,borderRadius:"50%",
+                        background:roleInfo.color+"20",
+                        display:"flex",alignItems:"center",
+                        justifyContent:"center",fontSize:18,flexShrink:0}},
+                        roleInfo.emoji||"👤"),
+                      h("div",{style:{flex:1}},
+                        h("div",{style:{fontWeight:700,fontSize:12}},s.name),
+                        h("div",{style:{fontSize:9,display:"flex",gap:6,marginTop:2}},
+                          h("span",{style:{background:roleInfo.color,color:"#fff",
+                            borderRadius:8,padding:"1px 6px",fontWeight:700}},
+                            roleInfo.label||s.role),
+                          h("span",{style:{color:C.muted}},
+                            s.branch==="all"?"All Branches":
+                            branches.find(b=>b.id===s.branch)?.name||s.branch)
+                        )
+                      ),
+                      !isOwnerRole&&h("button",{
+                        onClick:e=>{e.stopPropagation();
+                          if(confirm("Delete "+s.name+"?"))
+                            deleteDoc(doc(db,"staff_accounts",s.id))
+                              .then(()=>showT(s.name+" deleted"));},
+                        style:{background:"none",border:"none",
+                          color:C.danger,cursor:"pointer",fontSize:14,padding:"4px"}},"×")
+                    );
+                  })
                 )
               )
+            ),
+
+            // Edit staff panel
+            h("div",null,
+              !editingStaff
+              ? h("div",{style:{background:"#fff",borderRadius:12,
+                  border:"1px solid "+C.border,padding:"30px",
+                  textAlign:"center",color:C.muted}},
+                  h("div",{style:{fontSize:32,marginBottom:8}},"👥"),
+                  h("div",{style:{fontWeight:700,fontSize:13}},"Select a staff to edit"),
+                  h("div",{style:{fontSize:11,marginTop:4}},
+                    "Or click + Add User to create new"))
+              : h("div",{style:{background:"#fff",borderRadius:12,
+                  border:"1px solid "+C.border,overflow:"hidden"}},
+                  h("div",{style:{
+                    background:"linear-gradient(135deg,"+(ROLES[editingStaff.role]?.color||C.primary)+","+(ROLES[editingStaff.role]?.color||C.dark)+"aa)",
+                    padding:"14px 16px",display:"flex",justifyContent:"space-between",
+                    alignItems:"center"}},
+                    h("div",null,
+                      h("div",{style:{color:"rgba(255,255,255,.7)",fontSize:9,letterSpacing:2}},"EDITING STAFF"),
+                      h("div",{style:{color:"#fff",fontWeight:900,fontSize:14,marginTop:2}},
+                        editingStaff.name||"New Staff")
+                    ),
+                    h("button",{onClick:()=>setEditingStaff(null),
+                      style:{background:"rgba(255,255,255,.2)",border:"none",
+                        color:"#fff",width:28,height:28,borderRadius:8,
+                        fontSize:15,cursor:"pointer"}},"×")
+                  ),
+                  h("div",{style:{padding:"16px"}},
+                    // Name
+                    h("div",{style:{marginBottom:10}},
+                      h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:4}},"NAME"),
+                      h("input",{value:editingStaff.name||"",
+                        onChange:e=>setEditingStaff(p=>({...p,name:e.target.value})),
+                        style:{width:"100%",padding:"8px",border:"1px solid "+C.border,
+                          borderRadius:7,fontSize:12,outline:"none",boxSizing:"border-box"}})
+                    ),
+                    // Role selector
+                    h("div",{style:{marginBottom:10}},
+                      h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:6}},"ROLE"),
+                      editingStaff.role==="owner"
+                      ? h("div",{style:{padding:"8px",background:"#fff5f5",borderRadius:8,
+                          fontSize:11,color:C.danger,fontWeight:700}},
+                          "👑 Owner/Admin — Role cannot be changed")
+                      : h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}},
+                          ["manager","cashier","crew","stockclerk","commissary"].map(r=>{
+                            const ri=ROLES[r]||{};
+                            return h("button",{key:r,
+                              onClick:()=>setEditingStaff(p=>({...p,role:r})),
+                              style:{padding:"8px",borderRadius:8,border:"2px solid",
+                                cursor:"pointer",fontWeight:700,fontSize:10,
+                                textAlign:"left",
+                                borderColor:editingStaff.role===r?ri.color||C.primary:C.border,
+                                background:editingStaff.role===r?(ri.color||C.primary)+"15":"#fff",
+                                color:editingStaff.role===r?ri.color||C.primary:C.text}},
+                              (ri.emoji||"👤")+" "+r.charAt(0).toUpperCase()+r.slice(1))
+                          })
+                        )
+                    ),
+                    // Branch selector (not for owner)
+                    editingStaff.role!=="owner"&&h("div",{style:{marginBottom:10}},
+                      h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:6}},"BRANCH"),
+                      h("div",{style:{display:"flex",gap:5,flexWrap:"wrap"}},
+                        branches.map(b=>h("button",{key:b.id,
+                          onClick:()=>setEditingStaff(p=>({...p,branch:b.id})),
+                          style:{padding:"5px 10px",borderRadius:20,fontSize:10,
+                            cursor:"pointer",border:"none",fontWeight:600,
+                            background:editingStaff.branch===b.id?C.primary:"#eee",
+                            color:editingStaff.branch===b.id?"#fff":C.text}},
+                          b.name||b.id))
+                      )
+                    ),
+                    // Access summary
+                    h("div",{style:{background:"#f9f9f9",borderRadius:8,
+                      padding:"10px 12px",marginBottom:12,fontSize:10,color:C.muted}},
+                      h("div",{style:{fontWeight:700,marginBottom:4,color:C.text}},
+                        "📋 Access Summary:"),
+                      h("div",null,
+                        editingStaff.role==="owner"?"Full access to all branches and settings":
+                        editingStaff.role==="manager"?"Manage own branch staff · View analytics · Submit POs · Approve voids & CA":
+                        editingStaff.role==="cashier"?"POS access only · Own branch orders · Request void/CA/loan":
+                        editingStaff.role==="crew"?"Kitchen queue display · Own branch only":
+                        editingStaff.role==="commissary"?"Main commissary inventory · Issue DRs to branches":
+                        "Inventory management · Stock receiving"
+                      )
+                    ),
+                    // Save button
+                    h("button",{
+                      onClick:async()=>{
+                        if(!editingStaff.name){showT("Enter name","warn");return;}
+                        try{
+                          if(editingStaff._isNew){
+                            await addDoc(collection(db,"staff_accounts"),{
+                              name:editingStaff.name,
+                              role:editingStaff.role,
+                              branch:editingStaff.branch||branchId,
+                              email:editingStaff.email||"",
+                              pin:editingStaff.pin||"1234",
+                              createdAt:serverTimestamp(),
+                              createdBy:user.name
+                            });
+                          } else {
+                            await updateDoc(doc(db,"staff_accounts",editingStaff.id),{
+                              name:editingStaff.name,
+                              role:editingStaff.role,
+                              branch:editingStaff.branch,
+                              updatedAt:serverTimestamp(),
+                              updatedBy:user.name
+                            });
+                          }
+                          showT(editingStaff.name+" saved ✓");
+                          setEditingStaff(null);
+                        }catch(e){showT("Error saving","err");}
+                      },
+                      style:{width:"100%",padding:"11px",
+                        background:"linear-gradient(135deg,"+C.primary+","+C.dark+")",
+                        border:"none",borderRadius:9,color:"#fff",
+                        fontWeight:800,fontSize:13,cursor:"pointer"}},
+                      "💾 Save Changes")
+                  )
+                )
             )
           )
         ),
+
 
         // ══ EDIT PIN MODAL ══
         // Edit Staff Modal
@@ -8370,19 +8489,148 @@ function App(){
 
         // ══ CREW MGMT ══
         page==="crew_mgmt"&&h("div",null,
-          h(SectionHeader,{title:"My Crew"}),
-          h("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(185px,1fr))",gap:10}},
-            staff.filter(s=>s.branch===branchId||s.branch==="all").map(s=>{const r=ROLES[s.role];return h("div",{key:s.id,style:{background:"#fff",borderRadius:12,padding:"14px",border:"1px solid "+C.border,textAlign:"center"}},
-              h("div",{style:{width:44,height:44,borderRadius:12,background:`${r.color}18`,border:`2px solid ${r.color}44`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:21,margin:"0 auto 8px"}},r.emoji),
-              h("div",{style:{fontWeight:800,fontSize:12}},s.name),
-              h("div",{style:{fontSize:9,color:r.color,fontWeight:600,marginTop:2,marginBottom:9}},r.label),
-              h("div",{style:{display:"flex",gap:5}},
-                h("button",{onClick:()=>showT(s.name+" clocked in","info"),style:{flex:1,padding:"5px 0",background:"#E8F5E9",border:"none",borderRadius:6,color:C.success,fontSize:9,fontWeight:700,cursor:"pointer"}},"Clock In"),
-                h("button",{onClick:()=>showT(s.name+" clocked out","warn"),style:{flex:1,padding:"5px 0",background:"#FFEBEE",border:"none",borderRadius:6,color:C.danger,fontSize:9,fontWeight:700,cursor:"pointer"}},"Clock Out")
+          h(SectionHeader,{title:"👥 My Branch Staff — "+curBranch.name}),
+
+          // Stats row
+          h("div",{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:14}},
+            h(Stat,{label:"Total Staff",value:staff.filter(s=>s.branch===branchId).length,icon:"👥",color:C.primary}),
+            h(Stat,{label:"Cashiers",value:staff.filter(s=>s.branch===branchId&&s.role==="cashier").length,icon:"💳",color:C.success}),
+            h(Stat,{label:"Crew",value:staff.filter(s=>s.branch===branchId&&s.role==="crew").length,icon:"🧑‍🍳",color:"#FF9500"}),
+            h(Stat,{label:"Stock Clerks",value:staff.filter(s=>s.branch===branchId&&s.role==="stockclerk").length,icon:"📦",color:"#AF52DE"})
+          ),
+
+          h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1.4fr",gap:12}},
+            // Staff list - own branch only
+            h("div",null,
+              h("div",{style:{background:"#fff",borderRadius:12,
+                border:"1px solid "+C.border,overflow:"hidden"}},
+                h("div",{style:{padding:"10px 14px",borderBottom:"1px solid "+C.border,
+                  display:"flex",justifyContent:"space-between",alignItems:"center"}},
+                  h("div",{style:{fontWeight:700,fontSize:12}},"Branch Staff"),
+                  h("button",{
+                    onClick:()=>setEditingStaff({_isNew:true,name:"",
+                      role:"cashier",branch:branchId,pin:"1234"}),
+                    style:{padding:"5px 12px",background:C.primary,border:"none",
+                      borderRadius:7,color:"#fff",fontSize:10,fontWeight:700,cursor:"pointer"}},
+                    "+ Add Staff")
+                ),
+                h("div",{style:{overflowY:"auto",maxHeight:"60vh"}},
+                  staff.filter(s=>s.branch===branchId&&s.role!=="owner"&&s.role!=="manager")
+                  .map(s=>{
+                    const ri=ROLES[s.role]||{color:C.muted,emoji:"👤",label:s.role};
+                    return h("div",{key:s.id,
+                      onClick:()=>setEditingStaff({...s}),
+                      style:{padding:"10px 14px",cursor:"pointer",
+                        borderBottom:"1px solid #f5f5f5",
+                        background:editingStaff?.id===s.id?"#FFF0F0":"#fff",
+                        display:"flex",gap:10,alignItems:"center"}},
+                      h("div",{style:{width:36,height:36,borderRadius:"50%",
+                        background:ri.color+"20",display:"flex",
+                        alignItems:"center",justifyContent:"center",fontSize:18}},ri.emoji),
+                      h("div",{style:{flex:1}},
+                        h("div",{style:{fontWeight:700,fontSize:12}},s.name),
+                        h("div",{style:{fontSize:9,marginTop:2}},
+                          h("span",{style:{background:ri.color,color:"#fff",
+                            borderRadius:8,padding:"1px 6px",fontWeight:700}},ri.label))
+                      ),
+                      h("button",{onClick:e=>{e.stopPropagation();
+                        if(confirm("Remove "+s.name+" from branch?"))
+                          deleteDoc(doc(db,"staff_accounts",s.id))
+                            .then(()=>showT(s.name+" removed"));},
+                        style:{background:"none",border:"none",
+                          color:C.danger,cursor:"pointer",fontSize:14}},"×")
+                    );
+                  })
+                )
               )
-            );})
+            ),
+
+            // Edit/Add panel
+            h("div",null,
+              !editingStaff
+              ? h("div",{style:{background:"#fff",borderRadius:12,
+                  border:"1px solid "+C.border,padding:"30px",
+                  textAlign:"center",color:C.muted}},
+                  h("div",{style:{fontSize:32,marginBottom:8}},"👥"),
+                  h("div",{style:{fontWeight:700}},"Select staff to edit"),
+                  h("div",{style:{fontSize:11,marginTop:4}},"or click + Add Staff"))
+              : h("div",{style:{background:"#fff",borderRadius:12,
+                  border:"1px solid "+C.border,overflow:"hidden"}},
+                  h("div",{style:{background:ROLES[editingStaff.role]?.color||C.primary,
+                    padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}},
+                    h("div",{style:{color:"#fff",fontWeight:800,fontSize:13}},
+                      editingStaff._isNew?"New Staff":"Edit: "+editingStaff.name),
+                    h("button",{onClick:()=>setEditingStaff(null),
+                      style:{background:"rgba(255,255,255,.2)",border:"none",
+                        color:"#fff",borderRadius:7,width:26,height:26,cursor:"pointer"}},"×")
+                  ),
+                  h("div",{style:{padding:"14px"}},
+                    h("div",{style:{marginBottom:10}},
+                      h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:4}},"FULL NAME"),
+                      h("input",{value:editingStaff.name||"",
+                        onChange:e=>setEditingStaff(p=>({...p,name:e.target.value})),
+                        placeholder:"Enter full name",
+                        style:{width:"100%",padding:"9px",border:"1px solid "+C.border,
+                          borderRadius:7,fontSize:12,outline:"none",boxSizing:"border-box"}})
+                    ),
+                    h("div",{style:{marginBottom:10}},
+                      h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:6}},"ROLE"),
+                      h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}},
+                        ["cashier","crew","stockclerk"].map(r=>{
+                          const ri=ROLES[r]||{};
+                          return h("button",{key:r,
+                            onClick:()=>setEditingStaff(p=>({...p,role:r})),
+                            style:{padding:"9px 6px",borderRadius:8,border:"2px solid",
+                              cursor:"pointer",fontWeight:700,fontSize:11,
+                              borderColor:editingStaff.role===r?ri.color||C.primary:C.border,
+                              background:editingStaff.role===r?(ri.color||C.primary)+"15":"#fff",
+                              color:editingStaff.role===r?ri.color||C.primary:C.text}},
+                            (ri.emoji||"👤")+" "+ri.label||r);
+                        })
+                      )
+                    ),
+                    h("div",{style:{marginBottom:12}},
+                      h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:4}},"PIN (4 digits)"),
+                      h("input",{type:"password",maxLength:4,value:editingStaff.pin||"",
+                        onChange:e=>setEditingStaff(p=>({...p,pin:e.target.value})),
+                        placeholder:"1234",
+                        style:{width:"100%",padding:"9px",border:"1px solid "+C.border,
+                          borderRadius:7,fontSize:14,outline:"none",
+                          letterSpacing:4,boxSizing:"border-box"}})
+                    ),
+                    h("button",{
+                      onClick:async()=>{
+                        if(!editingStaff.name){showT("Enter name","warn");return;}
+                        try{
+                          if(editingStaff._isNew){
+                            await addDoc(collection(db,"staff_accounts"),{
+                              name:editingStaff.name,role:editingStaff.role,
+                              branch:branchId,pin:editingStaff.pin||"1234",
+                              createdAt:serverTimestamp(),createdBy:user.name
+                            });
+                            showT(editingStaff.name+" added ✓");
+                          } else {
+                            await updateDoc(doc(db,"staff_accounts",editingStaff.id),{
+                              name:editingStaff.name,role:editingStaff.role,
+                              pin:editingStaff.pin,updatedAt:serverTimestamp(),
+                              updatedBy:user.name
+                            });
+                            showT(editingStaff.name+" updated ✓");
+                          }
+                          setEditingStaff(null);
+                        }catch(e){showT("Error","err");}
+                      },
+                      style:{width:"100%",padding:"11px",
+                        background:"linear-gradient(135deg,"+C.primary+","+C.dark+")",
+                        border:"none",borderRadius:9,color:"#fff",
+                        fontWeight:800,fontSize:13,cursor:"pointer"}},
+                      "💾 Save")
+                  )
+                )
+            )
           )
         ),
+
 
         // ══ CA REQUEST ══
         page==="ca_request"&&h(CALoanPage,{
