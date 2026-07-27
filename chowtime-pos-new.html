@@ -844,7 +844,6 @@ function ItemCustomizer({item,onAdd,onClose,optionGroups=[]}){
 function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvances,branches=BRANCHES}){
   const [items,setItems]     = useState(INIT_INVENTORY.map(i=>({...i,orderQty:0,note:""})));
   const [deliveryReq,setDeliveryReq] = useState("");
-  const [PONumpad,setPONumpad] = useState(null);
   const [notes,setNotes]     = useState("");
   const [discount,setDiscount] = useState(0);
   const today = new Date().toISOString().slice(0,10);
@@ -1046,14 +1045,7 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
               fontWeight:700,fontSize:12,cursor:ordered.length?"pointer":"not-allowed"}},
             "📤 Submit SO / Purchase Order →")
         ),
-        // PO Numpad
-        PONumpad&&h(NumpadModal,{
-          value:PONumpad.value||"",
-          label:PONumpad.label||"",
-          allowDecimal:false,
-          onChange:function(v){PONumpad.onChange(v);setPONumpad(null);},
-          onClose:function(){setPONumpad(null);}
-        })
+
       )
     )
   );
@@ -1237,7 +1229,7 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
               h("button",{onClick:()=>setActualQtys(p=>({...p,[i.id]:Math.max(0,(p[i.id]??i.qty)-1)})),
                 style:{width:20,height:20,borderRadius:4,border:"1px solid "+C.border,
                   background:"#fff",cursor:"pointer",fontSize:12,fontWeight:700}},"−"),
-              h("input",{type:"number",min:0,value:actual,onClick:function(){var id=i.id;window._openNumpad&&window._openNumpad({value:String(actual||""),label:"ACTUAL QTY — "+i.name,allowDecimal:false,onChange:function(v){setActualQtys(function(p){var n={...p};n[id]=parseFloat(v)||0;return n;});}});},
+              h("input",{type:"number",min:0,value:actual,
                 onChange:e=>setActualQtys(p=>({...p,[i.id]:parseFloat(e.target.value)||0})),
                 style:{width:36,textAlign:"center",padding:"2px",border:"1px solid "+C.border,
                   borderRadius:5,fontSize:11,fontWeight:700,outline:"none",
@@ -1251,7 +1243,7 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
             // Price
             h("div",{style:{display:"flex",alignItems:"center",gap:3}},
               h("span",{style:{fontSize:10,color:C.muted}},"₱"),
-              h("input",{type:"number",min:0,step:"0.01",value:price||"",onClick:function(){var id=i.id;window._openNumpad&&window._openNumpad({value:String(price||""),label:"PRICE — "+i.name,allowDecimal:true,onChange:function(v){setPrices(function(p){var n={...p};n[id]=parseFloat(v)||0;return n;});}});},
+              h("input",{type:"number",min:0,step:"0.01",value:price||"",
                 onChange:e=>setPrices(p=>({...p,[i.id]:parseFloat(e.target.value)||0})),
                 placeholder:"0.00",
                 style:{width:65,padding:"5px",border:"1px solid "+C.border,borderRadius:6,
@@ -1433,7 +1425,7 @@ const DENOMS = [
   {label:"25¢",  value:0.25,type:"coin",color:"#78909C"},
 ];
 
-function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT,setNumKB,setTextKB}){
+function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
   const today = new Date().toISOString().slice(0,10);
   const [counts,setCounts]   = useState(DENOMS.reduce((a,d)=>({...a,[d.value]:0}),{}));
   const [remit,setRemit]     = useState("");
@@ -1662,12 +1654,6 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT,setNumKB
                 h("button",{onClick:()=>setCounts(p=>({...p,[d.value]:Math.max(0,(p[d.value]||0)-1)})),
                   style:{width:28,height:28,borderRadius:7,border:"1px solid "+C.border,background:"#fff",cursor:"pointer",fontSize:15,fontWeight:700}},"−"),
                 h("input",{type:"number",min:0,value:counts[d.value]||0,
-                  onClick:(()=>{var dv=d.value;return function(){
-                    setNumKB&&setNumKB({value:String(counts[dv]||""),
-                      label:"COUNT — ₱"+dv,allowDecimal:false,
-                      onChange:function(v){setCounts(function(p){
-                        var n={...p};n[dv]=parseInt(v)||0;return n;});}});
-                  };})(),
                   onChange:e=>setCounts(p=>({...p,[d.value]:parseInt(e.target.value)||0})),
                   style:{width:52,textAlign:"center",padding:"4px",border:"1px solid "+C.border,borderRadius:6,fontSize:13,fontWeight:700,outline:"none"}}),
                 h("button",{onClick:()=>setCounts(p=>({...p,[d.value]:(p[d.value]||0)+1})),
@@ -1695,12 +1681,6 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT,setNumKB
                 h("button",{onClick:()=>setCounts(p=>({...p,[d.value]:Math.max(0,(p[d.value]||0)-1)})),
                   style:{width:28,height:28,borderRadius:7,border:"1px solid "+C.border,background:"#fff",cursor:"pointer",fontSize:15,fontWeight:700}},"−"),
                 h("input",{type:"number",min:0,value:counts[d.value]||0,
-                  onClick:(()=>{var dv=d.value;return function(){
-                    setNumKB&&setNumKB({value:String(counts[dv]||""),
-                      label:"COUNT — ₱"+dv,allowDecimal:false,
-                      onChange:function(v){setCounts(function(p){
-                        var n={...p};n[dv]=parseInt(v)||0;return n;});}});
-                  };})(),
                   onChange:e=>setCounts(p=>({...p,[d.value]:parseInt(e.target.value)||0})),
                   style:{width:52,textAlign:"center",padding:"4px",border:"1px solid "+C.border,borderRadius:6,fontSize:13,fontWeight:700,outline:"none"}}),
                 h("button",{onClick:()=>setCounts(p=>({...p,[d.value]:(p[d.value]||0)+1})),
@@ -1762,7 +1742,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT,setNumKB
           h("div",{style:{fontSize:10,color:C.muted,marginTop:2,marginBottom:10}},"Enter amount to be remitted/deposited. The rest stays in the cash box as tomorrow's opening fund."),
           h("div",{style:{marginBottom:8}},
             h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"REMITTANCE AMOUNT (₱)"),
-            h("input",{type:"number",value:remit,onClick:function(){setNumKB&&setNumKB({value:String(remit||""),label:"REMITTANCE AMOUNT",allowDecimal:true,onChange:function(v){setRemit(v);}});},placeholder:"Tap to enter amount",
+            h("input",{type:"number",value:remit,onChange:e=>setRemit(e.target.value),placeholder:"0.00",
               style:{width:"100%",padding:"10px 12px",border:"2px solid "+C.warning,borderRadius:9,fontSize:16,fontWeight:700,outline:"none",boxSizing:"border-box",color:C.warning}})
           ),
           h("div",{style:{background:"#F3E5F5",borderRadius:9,padding:"10px 13px",display:"flex",justifyContent:"space-between",alignItems:"center"}},
@@ -1891,7 +1871,7 @@ function CALoanPage({user,branchId,curBranch,db,hrisDB,showT,mode,hrisEmps=[]}){
           // Amount
           h("div",{style:{marginBottom:11}},
             h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,marginBottom:5,letterSpacing:1}},"AMOUNT REQUESTED (₱)"),
-            h("input",{type:"number",value:amount,onClick:()=>window._openNumpad&&window._openNumpad({value:String(amount||""),label:"AMOUNT (₱)",allowDecimal:true,onChange:v=>setAmount(v)}),
+            h("input",{type:"number",value:amount,onChange:e=>setAmount(e.target.value),
               placeholder:"0.00",
               style:{width:"100%",padding:"12px",border:`2px solid ${isCA?C.primary:"#1565C0"}`,
                 borderRadius:9,fontSize:20,fontWeight:700,outline:"none",
@@ -2808,7 +2788,6 @@ function BranchMenuPage({menuItems,setMenuItems,branchId,curBranch,user,db,showT
           style:{padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:12,outline:"none"}}),
         h("input",{type:"number",value:newExItem.basePrice,
           onChange:e=>setNewExItem(p=>({...p,basePrice:e.target.value})),
-          onClick:()=>window._openNumpad&&window._openNumpad({value:newExItem.basePrice,label:"PRICE",allowDecimal:false,onChange:v=>setNewExItem(p=>({...p,basePrice:v}))}),
           placeholder:"Price",
           style:{padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:12,outline:"none"}}),
         h("input",{value:newExItem.cat,onChange:e=>setNewExItem(p=>({...p,cat:e.target.value})),
@@ -2905,12 +2884,6 @@ function BranchMenuPage({menuItems,setMenuItems,branchId,curBranch,user,db,showT
             h("input",{type:"number",
               value:price||"",
               onChange:e=>savePrice(item,e.target.value),
-              onClick:()=>window._openNumpad&&window._openNumpad({
-                value:String(price||""),
-                label:"PRICE — "+item.name,
-                allowDecimal:false,
-                onChange:v=>savePrice(item,v)
-              }),
               style:{width:70,padding:"5px 6px",
                 border:"1px solid "+(priceChanged?C.warning:C.border),
                 borderRadius:6,fontSize:12,fontWeight:priceChanged?700:400,
@@ -3140,7 +3113,7 @@ function IngredientsPage({db,user,showT}){
                 h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,
                   letterSpacing:1,marginBottom:4}},"COST PER UNIT (₱) *"),
                 h("input",{type:"number",min:0,step:"0.01",
-                  value:editing.cost||"",onClick:()=>window._openNumpad&&window._openNumpad({value:String(editing.cost||""),label:"COST PER UNIT (₱)",allowDecimal:true,onChange:v=>setEditing(p=>({...p,cost:parseFloat(v)||0}))}),
+                  value:editing.cost||"",
                   onChange:e=>setEditing(p=>({...p,cost:parseFloat(e.target.value)||0})),
                   placeholder:"0.00",
                   style:{width:"100%",padding:"9px",border:"1px solid "+C.border,
@@ -3199,7 +3172,6 @@ function BOMPage({menuItems,db,user,showT,inventory=[]}){
   const [selOptChoice,setSelOptChoice] = useState(null);
   const [editOptChoiceBom,setEditOCBom] = useState([]);
   const [savingOC,setSavingOC] = useState(false);
-  const [numpadTarget,setNumpadTarget] = useState(null);
   const [boms,setBoms]       = useState({});
   const [editBom,setEditBom] = useState([]);
   const [ingredients,setIngs]= useState([]);
@@ -3361,305 +3333,17 @@ function BOMPage({menuItems,db,user,showT,inventory=[]}){
         h("div",{style:{fontSize:10,color:C.muted}},row.unit||ing.unit||"—"),
         h("input",{type:"number",min:0,step:"0.01",
           value:row.qty||"",
-          readOnly:true,
-          onClick:function(){
-            var savedI=i;
-            if(window._openNumpad){window._openNumpad({
-              value:String(row.qty||""),label:"QTY — "+row.ingName,allowDecimal:true,
-              onChange:function(v){updRow(setRows,savedI,"qty",parseFloat(v)||0);}
-            });return;}
-            setNumpadTarget({
-              value:String(row.qty||""),
-              label:"QTY — "+row.ingName,
-              allowDecimal:true,
-              onChange:function(v){updRow(setRows,savedI,"qty",parseFloat(v)||0);}
-            });
-          },
+          onChange:e=>updRow(setRows,i,"qty",parseFloat(e.target.value)||0),
           style:{padding:"5px",border:"1px solid "+C.border,borderRadius:6,
-            fontSize:10,outline:"none",textAlign:"center",width:"100%",
-            cursor:"pointer",background:"#f9f9f9"}}),
+            fontSize:10,outline:"none",textAlign:"center",width:"100%"}}),
         h("div",{style:{fontSize:10,color:C.primary,fontWeight:700}},
           (ing.cost||0)*(row.qty||0)>0?"₱"+((ing.cost||0)*(row.qty||0)).toFixed(2):"—"),
         h("button",{onClick:()=>delRow(setRows,i),
           style:{background:"none",border:"none",color:C.danger,cursor:"pointer",fontSize:14}},"×")
       );
     }),
-    h("div",{style:{display:"flex",justifyContent:"space-between",
-      padding:"8px 0",borderTop:"1px solid "+C.border,marginTop:6}},
-      h("div",{style:{fontSize:11,fontWeight:700}},"Total Cost"),
-      h("div",{style:{fontSize:13,fontWeight:900,color:C.primary}},
-        "₱"+getCost(rows).toFixed(2))
-    ),
-    h("div",{style:{display:"flex",gap:7,marginTop:8}},
-      h("button",{onClick:()=>addRow(setRows),
-        style:{padding:"7px 12px",background:"#f5f5f5",border:"none",
-          borderRadius:7,fontSize:11,fontWeight:700,cursor:"pointer"}},
-        "+ Add Ingredient"),
-      h("button",{onClick:onSave,disabled:sv,
-        style:{flex:1,padding:"8px",background:sv?"#ccc":C.primary,
-          border:"none",borderRadius:7,color:"#fff",fontWeight:800,
-          fontSize:12,cursor:"pointer"}},
-        sv?"Saving...":"💾 Save BOM")
-    )
-  );
 
-  return h("div",null,
-    // Main tabs
-    h("div",{style:{display:"flex",justifyContent:"space-between",
-      alignItems:"center",marginBottom:14}},
-      h("div",{style:{fontSize:17,fontWeight:900}},"🧪 Bill of Materials"),
-      h("div",{style:{display:"flex",gap:0,border:"1px solid "+C.border,
-        borderRadius:9,overflow:"hidden"}},
-        [["products","📦 Products"],["options","⚙️ Option Groups"]].map(([id,lbl])=>
-          h("button",{key:id,onClick:()=>setMainTab(id),
-            style:{padding:"7px 16px",border:"none",cursor:"pointer",
-              fontSize:11,fontWeight:mainTab===id?800:400,
-              background:mainTab===id?C.primary:"#fff",
-              color:mainTab===id?"#fff":C.text}},lbl))
-      )
-    ),
 
-    // ══ PRODUCTS TAB ══
-    mainTab==="products"&&h("div",null,
-      h("div",{style:{display:"flex",gap:8,marginBottom:10}},
-        [["bom","BOM Editor"],["costing","Costing Report"]].map(([id,lbl])=>
-          h("button",{key:id,onClick:()=>setCostTab(id),
-            style:{padding:"5px 14px",borderRadius:7,border:"none",
-              cursor:"pointer",fontSize:11,fontWeight:costTab===id?700:400,
-              background:costTab===id?"#333":"#eee",
-              color:costTab===id?"#fff":C.text}},lbl))
-      ),
-
-      // BOM Editor
-      costTab==="bom"&&h("div",{style:{display:"grid",
-        gridTemplateColumns:"260px 1fr",gap:12}},
-
-        // Item list
-        h("div",{style:{background:"#fff",borderRadius:12,
-          border:"1px solid "+C.border,overflow:"hidden"}},
-          h("div",{style:{padding:"10px 14px",borderBottom:"1px solid "+C.border,
-            fontSize:11,fontWeight:800}},"Menu Items"),
-          h("div",{style:{overflowY:"auto",maxHeight:"70vh"}},
-            menuItems.map(item=>{
-              const isSelected=(selItem&&selItem.id===item.id);
-              const vList=variantList(item);
-              return h("div",{key:item.id},
-                h("div",{style:{padding:"8px 14px",cursor:"pointer",
-                  background:isSelected&&selVariant==="default"?"#FFF0F0":"#fff",
-                  borderBottom:"1px solid #f5f5f5"},
-                  onClick:()=>openBOM(item,"default")},
-                  h("div",{style:{display:"flex",justifyContent:"space-between"}},
-                    h("div",{style:{fontWeight:isSelected?700:500,fontSize:11}},item.name),
-                    h("span",{style:{fontSize:8,padding:"1px 6px",borderRadius:6,
-                      background:hasBOM(item)?"#E8F5E9":"#f5f5f5",
-                      color:hasBOM(item)?C.success:C.muted,fontWeight:700}},
-                      hasBOM(item)?"✓":"—")
-                  )
-                ),
-                vList.length>1&&vList.slice(1).map(v=>
-                  h("div",{key:v,onClick:()=>openBOM(item,v),
-                    style:{padding:"5px 14px 5px 26px",cursor:"pointer",
-                      background:isSelected&&selVariant===v?"#FFF8F0":"#fafafa",
-                      borderBottom:"1px solid #f5f5f5",
-                      display:"flex",justifyContent:"space-between"}},
-                    h("div",{style:{fontSize:10,color:C.muted}},"↳ "+v),
-                    h("span",{style:{fontSize:8,
-                      color:hasBOM(item,v)?C.success:C.muted}},
-                      hasBOM(item,v)?"✓":"—")
-                  ))
-              );
-            })
-          )
-        ),
-
-        // BOM editor panel
-        !selItem
-          ? h("div",{style:{background:"#fff",borderRadius:12,
-              border:"1px solid "+C.border,padding:"40px",
-              textAlign:"center",color:C.muted}},
-              h("div",{style:{fontSize:32,marginBottom:8}},"🧪"),
-              h("div",{style:{fontWeight:700,fontSize:13}},"Select a menu item"))
-          : h("div",{style:{background:"#fff",borderRadius:12,
-              border:"1px solid "+C.border,overflow:"hidden"}},
-              // Tab switcher: Variants | Options
-              h("div",{style:{padding:"10px 16px",borderBottom:"1px solid "+C.border,
-                background:"#fafafa",display:"flex",
-                justifyContent:"space-between",alignItems:"center"}},
-                h("div",{style:{fontSize:13,fontWeight:900}},selItem.name),
-                h("div",{style:{display:"flex",gap:4}},
-                  [["variants","Variants/Base"],["options","Item Options"]].map(([id,lbl])=>
-                    h("button",{key:id,onClick:()=>setItemBomTab(id),
-                      style:{padding:"4px 12px",borderRadius:6,border:"none",
-                        cursor:"pointer",fontSize:10,fontWeight:700,
-                        background:itemBomTab===id?"#333":"#eee",
-                        color:itemBomTab===id?"#fff":C.text}},lbl))
-                )
-              ),
-
-              // VARIANTS sub-tab
-              itemBomTab==="variants"&&h("div",null,
-                h("div",{style:{display:"flex",gap:4,padding:"8px 16px",
-                  borderBottom:"1px solid "+C.border,background:"#f9f9f9"}},
-                  variantList(selItem).map(v=>
-                    h("button",{key:v,onClick:()=>openBOM(selItem,v),
-                      style:{padding:"4px 10px",borderRadius:6,border:"none",
-                        cursor:"pointer",fontSize:10,fontWeight:700,
-                        background:selVariant===v?C.primary:"#eee",
-                        color:selVariant===v?"#fff":C.text}},
-                      v==="default"?"Base":v))
-                ),
-                h("div",{style:{padding:"14px 16px"}},
-                  h(BOMEditor,{rows:editBom,setRows:setEditBom,
-                    onSave:saveBOM,saving:saving}))
-              ),
-
-              // OPTIONS sub-tab
-              itemBomTab==="options"&&h("div",null,
-                (selItem.options||[]).length===0
-                  ? h("div",{style:{padding:"30px",textAlign:"center",color:C.muted,fontSize:11}},
-                      "This item has no options/add-ons defined yet.",
-                      h("div",{style:{marginTop:4,fontSize:10}},"Add options in Menu Editor first."))
-                  : h("div",{style:{display:"grid",gridTemplateColumns:"200px 1fr",height:"100%"}},
-
-                    // Left: option choices list
-                    h("div",{style:{borderRight:"1px solid "+C.border,overflowY:"auto",
-                      maxHeight:"55vh"}},
-                      (selItem.options||[]).map(opt=>
-                        h("div",{key:opt.id},
-                          h("div",{style:{padding:"7px 12px",background:"#f5f5f5",
-                            fontSize:10,fontWeight:700,color:C.muted,
-                            letterSpacing:1,borderBottom:"1px solid "+C.border}},
-                            (opt.label||"").toUpperCase()),
-                          (opt.choices||[]).map(ch=>{
-                            const isSelected=selOptChoice&&
-                              selOptChoice.optId===opt.id&&
-                              selOptChoice.choiceId===ch.id;
-                            // Get existing BOM for this choice
-                            const choiceKey=selItem.id+"__opt_"+opt.id+"__"+ch.id;
-                            const hasCBOM=(boms[selItem.id]&&boms[selItem.id][choiceKey]||[]).length>0;
-                            return h("div",{key:ch.id,
-                              onClick:()=>{
-                                setSelOptChoice({optId:opt.id,choiceId:ch.id});
-                                const key=selItem.id+"__opt_"+opt.id+"__"+ch.id;
-                                const rows=(boms[selItem.id]&&boms[selItem.id][key])||[];
-                                setEditOCBom(rows.length?[...rows]:[{ingId:"",ingName:"",unit:"",qty:1}]);
-                              },
-                              style:{padding:"7px 12px",cursor:"pointer",
-                                borderBottom:"1px solid #f5f5f5",
-                                background:isSelected?"#FFF0F0":"#fff",
-                                display:"flex",justifyContent:"space-between",
-                                alignItems:"center"}},
-                              h("div",{style:{fontSize:11,
-                                fontWeight:isSelected?700:400}},ch.label),
-                              h("div",{style:{display:"flex",gap:4,alignItems:"center"}},
-                                ch.priceAdd>0&&h("span",{style:{fontSize:8,color:C.primary}},
-                                  "+₱"+ch.priceAdd),
-                                h("span",{style:{fontSize:8,fontWeight:700,
-                                  color:hasCBOM?C.success:C.muted}},
-                                  hasCBOM?"✓":"—")
-                              )
-                            );
-                          })
-                        )
-                      )
-                    ),
-
-                    // Right: BOM editor for selected choice
-                    !selOptChoice
-                      ? h("div",{style:{padding:"30px",textAlign:"center",
-                          color:C.muted,fontSize:11}},
-                          "Select an option choice to set its BOM")
-                      : h("div",{style:{padding:"14px 16px"}},
-                          h("div",{style:{fontSize:11,fontWeight:700,
-                            marginBottom:10,color:C.text}},
-                            "BOM for: "+
-                            ((selItem.options||[]).find(o=>o.id===selOptChoice.optId)||{}).label||"")+
-                            " → "+
-                            ((selItem.options||[]).find(o=>o.id===selOptChoice.optId)||{}).choices||[])
-                              .find(c=>c.id===selOptChoice.choiceId)||{}).label
-                          ),
-                          h(BOMEditor,{
-                            rows:editOptChoiceBom,
-                            setRows:setEditOCBom,
-                            saving:savingOC,
-                            onSave:async function(){
-                              setSavingOC(true);
-                              try{
-                                const key=selItem.id+"__opt_"+selOptChoice.optId+"__"+selOptChoice.choiceId;
-                                const rows=editOptChoiceBom.filter(function(r){return r.ingId||r.ingName;});
-                                await setDoc(doc(db,"bom",selItem.id),
-                                  Object.assign({},boms[selItem.id]||{},{[key]:rows}),
-                                  {merge:true});
-                                showT("Option BOM saved ✓");
-                              }catch(e){showT("Error","err");}
-                              setSavingOC(false);
-                            }
-                          })
-                        )
-                  )
-      ),
-
-      // Costing Report
-      costTab==="costing"&&h("div",{style:{background:"#fff",borderRadius:12,
-        border:"1px solid "+C.border,overflow:"hidden"}},
-        h("div",{style:{padding:"11px 16px",borderBottom:"1px solid "+C.border,
-          fontSize:12,fontWeight:800}},"💰 Costing — Sell Price vs Ingredient Cost"),
-        h("div",{style:{display:"grid",
-          gridTemplateColumns:"1.5fr 90px 90px 90px 70px 70px",
-          padding:"7px 16px",background:"#fafafa",
-          borderBottom:"1px solid "+C.border}},
-          ["ITEM / VARIANT","SELL","COST","MARGIN","MARGIN %","BOM"].map(h2=>
-            h("div",{key:h2,style:{fontSize:8,fontWeight:700,
-              color:C.muted,letterSpacing:1}},h2))
-        ),
-        menuItems.flatMap(item=>
-          variantList(item).map((v,vi)=>{
-            const vObj=item.variants&&item.variants.find(vv=>(vv.label||vv.name)===v);
-            const sell=vi===0?(item.basePrice||0):(item.basePrice||0)+((vObj&&vObj.priceAdd)||0);
-            const key=getVKey(item,v);
-            const rows=(boms[item.id]&&boms[item.id][key])||boms[key]||[];
-            const cost=getCost(rows);
-            const margin=sell-cost;
-            const pct=sell>0?margin/sell*100:0;
-            const hasB=rows.length>0;
-            return h("div",{key:item.id+v,
-              style:{display:"grid",
-                gridTemplateColumns:"1.5fr 90px 90px 90px 70px 70px",
-                padding:"8px 16px",borderBottom:"1px solid #f5f5f5",
-                alignItems:"center",background:vi===0?"#fff":"#fafafa"}},
-              h("div",null,
-                h("div",{style:{fontWeight:vi===0?700:400,fontSize:11,
-                  paddingLeft:vi===0?0:14,
-                  color:vi===0?C.text:C.muted}},
-                  vi===0?item.name:"↳ "+v)
-              ),
-              h("div",{style:{fontSize:11,fontWeight:700}},"₱"+sell.toFixed(2)),
-              h("div",{style:{fontSize:11,color:cost>0?C.danger:C.muted}},
-                cost>0?"₱"+cost.toFixed(2):"—"),
-              h("div",{style:{fontSize:11,fontWeight:700,
-                color:margin>0?C.success:C.danger}},
-                cost>0?"₱"+margin.toFixed(2):"—"),
-              h("div",{style:{fontSize:11,fontWeight:700,
-                color:pct>50?C.success:pct>30?C.warning:C.danger}},
-                cost>0?pct.toFixed(1)+"%":"—"),
-              h("div",null,h("span",{style:{fontSize:9,padding:"2px 6px",
-                borderRadius:7,fontWeight:700,
-                background:hasB?"#E8F5E9":"#f5f5f5",
-                color:hasB?C.success:C.muted}},hasB?"✓":"—"))
-            );
-          })
-        )
-      )
-    ,
-
-    // Numpad for BOM qty
-    numpadTarget&&h(NumpadModal,{
-      value:numpadTarget.value||"",
-      label:numpadTarget.label||"",
-      allowDecimal:numpadTarget.allowDecimal!==false,
-      onChange:function(v){numpadTarget.onChange(v);setNumpadTarget(null);},
-      onClose:function(){setNumpadTarget(null);}
-    }),
 
     // ══ OPTIONS TAB ══
     mainTab==="options"&&h("div",{style:{display:"grid",
@@ -4671,232 +4355,6 @@ function VoidBadge({branchId,db,setPage,visible=true}){
 
 
 
-// ─── ON-SCREEN TEXT KEYBOARD ─────────────────────────────
-function TextKeyboard({value="",onChange,onClose,label="",multiline=false}){
-  const [text,setText] = useState(String(value||""));
-  const [caps,setCaps] = useState(false);
-  const [shift,setShift] = useState(false);
-
-  const rows=[
-    ["q","w","e","r","t","y","u","i","o","p"],
-    ["a","s","d","f","g","h","j","k","l"],
-    ["z","x","c","v","b","n","m"]
-  ];
-  const nums=["1","2","3","4","5","6","7","8","9","0"];
-  const specials=["-","_","@",".",",","!","?","(",")"," "];
-
-  const press=function(ch){
-    var c=caps||shift?ch.toUpperCase():ch;
-    setText(function(p){return p+c;});
-    if(shift){setShift(false);}
-  };
-  const pressSpecial=function(ch){setText(function(p){return p+ch;});};
-  const backspace=function(){setText(function(p){return p.slice(0,-1);});};
-  const clear=function(){setText("");};
-
-  const confirm=function(){onChange(text);onClose();};
-
-  const btnStyle=function(bg,color,size){
-    return {
-      padding:size==="sm"?"6px 4px":"8px 6px",
-      fontSize:size==="sm"?10:13,
-      fontWeight:700,borderRadius:7,border:"none",
-      cursor:"pointer",background:bg||"#fff",
-      color:color||"#222",
-      boxShadow:"0 1px 3px rgba(0,0,0,.1)",
-      minWidth:size==="sm"?28:32,
-      textAlign:"center"
-    };
-  };
-
-  return h("div",{
-    style:{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",
-      display:"flex",alignItems:"flex-end",justifyContent:"center",
-      zIndex:9999},
-    onClick:function(e){if(e.target===e.currentTarget)onClose();}},
-
-    h("div",{style:{background:"#f0f0f0",width:"100%",maxWidth:600,
-      borderRadius:"20px 20px 0 0",padding:"12px 10px",
-      boxShadow:"0 -8px 30px rgba(0,0,0,.2)"}},
-
-      // Label + text display
-      h("div",{style:{marginBottom:8}},
-        label&&h("div",{style:{fontSize:9,fontWeight:700,
-          color:"#666",letterSpacing:1,marginBottom:4}},label),
-        h("div",{style:{background:"#fff",borderRadius:8,
-          padding:"8px 12px",border:"2px solid #1565C0",
-          minHeight:40,fontSize:13,wordBreak:"break-all",
-          color:text?"#222":"#aaa"}},
-          text||"Tap keys to type...")
-      ),
-
-      // Number row
-      h("div",{style:{display:"flex",gap:4,marginBottom:6,justifyContent:"center"}},
-        nums.map(function(n){
-          return h("button",{key:n,onClick:function(){pressSpecial(n);},
-            style:btnStyle("#fff","#222","sm")},n);
-        }),
-        h("button",{onClick:backspace,
-          style:{...btnStyle("#FFF3E0","#E65100","sm"),minWidth:36}},"⌫")
-      ),
-
-      // Letter rows
-      rows.map(function(row,ri){
-        return h("div",{key:ri,style:{display:"flex",gap:4,
-          marginBottom:6,justifyContent:"center"}},
-          row.map(function(ch){
-            return h("button",{key:ch,
-              onClick:function(){press(ch);},
-              style:btnStyle("#fff","#222","md")},
-              caps||shift?ch.toUpperCase():ch);
-          })
-        );
-      }),
-
-      // Bottom row: Shift, special chars, Space, Confirm
-      h("div",{style:{display:"flex",gap:4,marginBottom:6,
-        justifyContent:"center",flexWrap:"wrap"}},
-        h("button",{onClick:function(){setShift(!shift);setCaps(false);},
-          style:btnStyle(shift?"#1565C0":"#ddd",shift?"#fff":"#333","sm")},
-          "⇧"),
-        h("button",{onClick:function(){setCaps(!caps);setShift(false);},
-          style:btnStyle(caps?"#E65100":"#ddd",caps?"#fff":"#333","sm")},
-          "CAPS"),
-        specials.map(function(s){
-          return h("button",{key:s,
-            onClick:function(){pressSpecial(s);},
-            style:btnStyle("#e8e8e8","#444","sm")},
-            s===" "?"SPACE":s);
-        }),
-        h("button",{onClick:clear,
-          style:btnStyle("#FFEBEE","#C62828","sm")},"CLR")
-      ),
-
-      // Action row
-      h("div",{style:{display:"flex",gap:8}},
-        h("button",{onClick:onClose,
-          style:{flex:1,padding:"12px",borderRadius:9,border:"none",
-            cursor:"pointer",background:"#ddd",color:"#333",
-            fontWeight:700,fontSize:13}},"Cancel"),
-        h("button",{onClick:confirm,
-          style:{flex:2,padding:"12px",borderRadius:9,border:"none",
-            cursor:"pointer",
-            background:"linear-gradient(135deg,#1565C0,#0D47A1)",
-            color:"#fff",fontWeight:800,fontSize:14}},
-          "✓ Done — "+text.slice(0,20)+(text.length>20?"...":""))
-      )
-    )
-  );
-}
-
-// ─── SHARED NUMPAD MODAL ─────────────────────────────────
-// Usage: h(NumpadModal, {value, onChange, onClose, label, allowDecimal, allowNegative})
-function NumpadModal({value="",onChange,onClose,label="",allowDecimal=true,allowNegative=false}){
-  const [display,setDisplay] = useState(String(value||""));
-
-  const press=function(key){
-    if(key==="C"){setDisplay("");return;}
-    if(key==="⌫"){setDisplay(function(p){return p.slice(0,-1)||"";});return;}
-    if(key==="-"){
-      if(!allowNegative)return;
-      setDisplay(function(p){return p.startsWith("-")?p.slice(1):"-"+p;});
-      return;
-    }
-    if(key==="."){
-      if(!allowDecimal)return;
-      setDisplay(function(p){return p.includes(".")?p:(p||"0")+".";});
-      return;
-    }
-    setDisplay(function(p){
-      if(p==="-")return "-"+key;
-      if(p==="0")return key;
-      return p+key;
-    });
-  };
-
-  const confirm=function(){
-    onChange(display);
-    onClose();
-  };
-
-  const rows=[
-    ["7","8","9"],
-    ["4","5","6"],
-    ["1","2","3"],
-    [allowNegative?"-":(allowDecimal?".":""), "0","⌫"],
-  ];
-
-  return h("div",{
-    style:{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",
-      display:"flex",alignItems:"flex-end",justifyContent:"center",
-      zIndex:9999},
-    onClick:function(e){if(e.target===e.currentTarget)onClose();}},
-    h("div",{style:{background:"#fff",width:"100%",maxWidth:360,
-      borderRadius:"20px 20px 0 0",padding:"16px",
-      boxShadow:"0 -8px 30px rgba(0,0,0,.2)"}},
-
-      // Label + display
-      h("div",{style:{marginBottom:12}},
-        label&&h("div",{style:{fontSize:10,fontWeight:700,color:C.muted,
-          letterSpacing:1,marginBottom:6}},label),
-        h("div",{style:{background:"#f0f4ff",borderRadius:10,
-          padding:"12px 16px",textAlign:"right",
-          border:"2px solid #1565C0",minHeight:52}},
-          h("div",{style:{fontSize:30,fontWeight:900,color:"#1565C0",
-            letterSpacing:2,minHeight:36}},
-            display||"0")
-        )
-      ),
-
-      // Number keys
-      h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}},
-        rows.flat().map(function(key){
-          var isSpecial=key==="⌫"||key==="-"||key===".";
-          return h("button",{key:key||"dot",
-            onClick:function(){press(key);},
-            style:{padding:"16px 8px",fontSize:key==="⌫"?20:20,
-              fontWeight:700,borderRadius:10,border:"none",
-              cursor:"pointer",
-              background:key==="⌫"?"#FFF3E0":
-                key==="-"&&display.startsWith("-")?"#1565C0":
-                isSpecial?"#e8eaf6":"#fff",
-              color:key==="-"&&display.startsWith("-")?"#fff":
-                isSpecial?"#1565C0":"#222",
-              boxShadow:"0 2px 4px rgba(0,0,0,.08)"}},
-            key||"");
-        }),
-        // Confirm button - full width
-        h("button",{
-          onClick:confirm,
-          style:{gridColumn:"1/-1",padding:"15px",fontSize:16,
-            fontWeight:800,borderRadius:10,border:"none",
-            cursor:"pointer",
-            background:"linear-gradient(135deg,#1565C0,#0D47A1)",
-            color:"#fff",boxShadow:"0 3px 8px rgba(21,101,192,.4)",
-            letterSpacing:1}},
-          "✓ OK — "+display)
-      )
-    )
-  );
-}
-
-// Hook to manage numpad state
-function useNumpad(){
-  var [numpadConfig,setNumpadConfig] = useState(null);
-  var openNumpad=function(config){setNumpadConfig(config);};
-  var closeNumpad=function(){setNumpadConfig(null);};
-  var NumpadEl = numpadConfig
-    ? h(NumpadModal,{
-        value:numpadConfig.value||"",
-        onChange:numpadConfig.onChange,
-        onClose:closeNumpad,
-        label:numpadConfig.label||"",
-        allowDecimal:numpadConfig.allowDecimal!==false,
-        allowNegative:numpadConfig.allowNegative===true
-      })
-    : null;
-  return {openNumpad,NumpadEl};
-}
 
 // ─── STOCK EDIT MODAL ────────────────────────────────────
 function StockEditModal({item,db,user,branchId,showT,onClose}){
@@ -5193,7 +4651,7 @@ function ReceiveItemsModal({po,db,user,showT,branchId,onClose}){
           h("div",{style:{display:"flex",alignItems:"center",gap:3}},
             h("button",{onClick:function(){setReceived(function(p){var r={};Object.assign(r,p);r[i.id]=Math.max(0,(p[i.id]!=null?p[i.id]:drQty)-1);return r;});},
               style:{width:20,height:20,borderRadius:4,border:"1px solid #ddd",background:"#fff",cursor:"pointer",fontSize:12}},"-"),
-            h("input",{type:"number",min:0,onClick:function(){var id=i.id,dq=drQty;window._openNumpad&&window._openNumpad({value:String(received[id]!=null?received[id]:dq),label:"RECEIVED QTY — "+i.name,allowDecimal:false,onChange:function(v){setReceived(function(p){var n={...p};n[id]=parseInt(v)||0;return n;});}});},
+            h("input",{type:"number",min:0,
               value:(received[i.id]!=null?received[i.id]:drQty),
               onChange:function(e){var v=parseFloat(e.target.value)||0;setReceived(function(p){var r={};Object.assign(r,p);r[i.id]=v;return r;});},
               style:{width:36,textAlign:"center",padding:"2px",
@@ -6366,30 +5824,13 @@ function PayrollPage({db,hrisDB,user,showT,branches,branchId,staff,advances}){
             ),
             // Daily rate input
             h("input",{type:"number",value:s.dailyRate||"",
-              onClick:()=>window._openNumpad&&window._openNumpad({
-                value:String(s.dailyRate||""),
-                label:"DAILY RATE — "+s.name,
-                allowDecimal:false,
-                onChange:async v=>{
-                  try{await updateDoc(doc(db,"staff_accounts",s.id),{dailyRate:parseInt(v)||0});}
-                  catch(e){}
-                }
-              }),
+              onChange:async e=>{try{await updateDoc(doc(db,"staff_accounts",s.id),{dailyRate:parseInt(e.target.value)||0});}catch(e){}},
               placeholder:"₱/day",
               style:{width:"100%",padding:"4px 6px",border:"1px solid "+C.border,
-                borderRadius:6,fontSize:11,textAlign:"center",
-                cursor:"pointer",background:"#f9f9f9"}}),
+                borderRadius:6,fontSize:11,textAlign:"center"}}),
             // Days worked input
             h("input",{type:"number",value:s.daysWorked||"",
-              onClick:()=>window._openNumpad&&window._openNumpad({
-                value:String(s.daysWorked||""),
-                label:"DAYS WORKED — "+s.name,
-                allowDecimal:false,
-                onChange:async v=>{
-                  try{await updateDoc(doc(db,"staff_accounts",s.id),{daysWorked:parseInt(v)||0});}
-                  catch(e){}
-                }
-              }),
+              onChange:async e=>{try{await updateDoc(doc(db,"staff_accounts",s.id),{daysWorked:parseInt(e.target.value)||0});}catch(e){}},
               placeholder:"days",
               style:{width:"100%",padding:"4px 6px",border:"1px solid "+C.border,
                 borderRadius:6,fontSize:11,textAlign:"center",
@@ -6480,6 +5921,79 @@ function PayrollPage({db,hrisDB,user,showT,branches,branchId,staff,advances}){
   );
 }
 
+
+// ─── NEW INVENTORY ITEM FORM ──────────────────────────────
+function NewInventoryItemForm({db,user,branchId,showT,onClose,invBranch,inventory}){
+  const UNITS=["pc","kg","g","L","ml","pack","box","tray","sachet","EA","roll"];
+  const CATS=["Frozen","Produce","Protein","Sauce","Dry Goods","Packaging","Beverage","Other"];
+  const [form,setForm]=useState({
+    name:"",unit:"pc",cat:"Other",
+    stock:0,minStock:10,price:0,cost:0
+  });
+  const [saving,setSaving]=useState(false);
+  const F=(k)=>(e)=>setForm(p=>({...p,[k]:e.target.value}));
+
+  const save=async()=>{
+    if(!form.name.trim()){showT("Enter item name","warn");return;}
+    setSaving(true);
+    const isOwner=user.role==="owner"||user.role==="commissary";
+    const col=isOwner?(invBranch==="main"?"inventory":"inventory_"+invBranch):"inventory_"+branchId;
+    try{
+      const id="inv_"+Date.now();
+      await setDoc(doc(db,col,id),{
+        id,name:form.name,unit:form.unit,cat:form.cat,
+        stock:parseFloat(form.stock)||0,
+        minStock:parseFloat(form.minStock)||10,
+        price:parseFloat(form.price)||0,
+        cost:parseFloat(form.cost)||0,
+        margin:form.price>0?Math.round((form.price-form.cost)/form.price*100):0,
+        createdAt:serverTimestamp(),createdBy:user.name
+      });
+      showT(form.name+" added ✓");
+      onClose();
+    }catch(e){showT("Error saving","err");}
+    setSaving(false);
+  };
+
+  const inp=(label,key,type,opts)=>h("div",{style:{marginBottom:10}},
+    h("div",{style:{fontSize:9,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},label),
+    opts
+      ? h("select",{value:form[key],onChange:F(key),
+          style:{width:"100%",padding:"8px",border:"1px solid #ddd",borderRadius:7,fontSize:12,outline:"none"}},
+          opts.map(o=>h("option",{key:o,value:o},o)))
+      : h("input",{type:type||"text",value:form[key],onChange:F(key),
+          placeholder:label,
+          style:{width:"100%",padding:"8px",border:"1px solid #ddd",
+            borderRadius:7,fontSize:12,outline:"none",boxSizing:"border-box"}})
+  );
+
+  return h("div",null,
+    inp("Item Name *","name"),
+    h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
+      inp("Unit","unit","text",UNITS),
+      inp("Category","cat","text",CATS)
+    ),
+    h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
+      inp("Current Stock","stock","number"),
+      inp("Min Stock (Alert)","minStock","number")
+    ),
+    h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
+      inp("Selling Price (₱)","price","number"),
+      inp("Cost Price (₱)","cost","number")
+    ),
+    h("div",{style:{display:"flex",gap:8,marginTop:14}},
+      h("button",{onClick:onClose,
+        style:{flex:1,padding:"10px",borderRadius:8,border:"1px solid #ddd",
+          background:"#fff",fontSize:12,cursor:"pointer"}},"Cancel"),
+      h("button",{onClick:save,disabled:saving,
+        style:{flex:2,padding:"10px",borderRadius:8,border:"none",
+          background:saving?"#ccc":"linear-gradient(135deg,#C8151B,#9B0F14)",
+          color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}},
+        saving?"Saving...":"💾 Add Item")
+    )
+  );
+}
+
 // ─── MAIN APP ─────────────────────────────────────────────
 function App(){
   // Auth
@@ -6532,15 +6046,7 @@ function App(){
   const [menuCat,setMenuCat]=useState("All");
   const [menuSrch,setMenuSrch]=useState("");
   const [cartOpen,setCartOpen]=useState(false);
-  const [showCashNumpad,setShowCashNumpad]=useState(false);
-  const [textKB,setTextKB]=useState(null); // {value,label,onChange}
-  const [numKB,setNumKB]=useState(null);   // {value,label,onChange}
-  // Expose globally so any sub-component can use without prop drilling
-  useEffect(()=>{
-    window._openNumpad=function(cfg){setNumKB(cfg);};
-    window._openTextKB=function(cfg){setTextKB(cfg);};
-    return()=>{window._openNumpad=null;window._openTextKB=null;};
-  },[]);
+
   // Checkout fields
   const [chkDisc,setChkDisc]=useState(DISCS[0]);
   const [chkDiscId,setChkDiscId]=useState("");
@@ -7341,9 +6847,8 @@ function App(){
           h("input",{type:"number",
             id:"cash-tendered-input",
             value:chkCash||"",
-            readOnly:true,
-            onClick:()=>setShowCashNumpad(true),
-            placeholder:"Tap to enter amount",
+            onChange:e=>setChkCash(e.target.value),
+            placeholder:"Enter amount",
             style:{width:"100%",padding:"10px 12px",border:"2px solid "+C.primary,
               borderRadius:9,fontSize:15,fontWeight:700,outline:"none",
               boxSizing:"border-box",color:C.primary}}),
@@ -7374,19 +6879,7 @@ function App(){
             border:"none",borderRadius:10,color:"#fff",
             fontSize:14,fontWeight:800,cursor:"pointer"}},
           "✓ Confirm & Print Receipt"),
-        // Cash numpad
-        showCashNumpad&&h(NumpadModal,{
-          value:chkCash||"",
-          label:"CASH TENDERED",
-          allowDecimal:false,
-          allowNegative:false,
-          onChange:function(v){
-            setChkCash(v);
-            var inp=document.getElementById("cash-tendered-input");
-            if(inp)inp.value=v;
-          },
-          onClose:function(){setShowCashNumpad(false);}
-        })
+
       )
     )
   );
@@ -8099,8 +7592,8 @@ function App(){
               h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:14}},h("b",null,"Add Expense"),h("button",{onClick:()=>setModal(null),style:{background:"none",border:"none",fontSize:17,cursor:"pointer"}},"×")),
               h("div",{style:{display:"grid",gap:8}},
                 h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"CATEGORY"),h("select",{value:newExp.cat,onChange:e=>setNewExp(p=>({...p,cat:e.target.value})),style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none"}},EXPENSE_CATS.map(c=>h("option",{key:c},c)))),
-                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"DESCRIPTION"),h("input",{value:newExp.desc,onClick:()=>setTextKB({value:newExp.desc,label:"DESCRIPTION",onChange:v=>setNewExp(p=>({...p,desc:v}))}),placeholder:"Tap to enter description",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box",cursor:"pointer",background:"#f9f9f9"}})),
-                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"AMOUNT (₱)"),h("input",{type:"number",value:newExp.amount,onClick:()=>setNumKB({value:String(newExp.amount||""),label:"AMOUNT (₱)",allowDecimal:true,onChange:v=>setNewExp(p=>({...p,amount:v}))}),placeholder:"Tap to enter amount",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:14,fontWeight:700,outline:"none",boxSizing:"border-box",cursor:"pointer",background:"#f9f9f9"}})),
+                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"DESCRIPTION"),h("input",{value:newExp.desc,onChange:e=>setNewExp(p=>({...p,desc:e.target.value})),placeholder:"Description",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box"}})),
+                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"AMOUNT (₱)"),h("input",{type:"number",value:newExp.amount,onChange:e=>setNewExp(p=>({...p,amount:e.target.value})),placeholder:"0.00",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:14,fontWeight:700,outline:"none",boxSizing:"border-box"}})),
                 h("button",{onClick:async()=>{
                   if(!newExp.desc||!newExp.amount){showT("Fill all fields","warn");return;}
                   await addDoc(collection(db,"expenses"),{branch:branchId,cat:newExp.cat,desc:newExp.desc,amount:parseFloat(newExp.amount),date:new Date().toISOString().slice(0,10),by:user.name,status:user.role==="owner"?"approved":"pending",timestamp:serverTimestamp()});
@@ -8133,8 +7626,8 @@ function App(){
                 [["in","💰 Cash In"],["out","💸 Cash Out"]].map(([t,l])=>h("button",{key:t,onClick:()=>setNewCash(p=>({...p,type:t})),style:{flex:1,padding:"9px",borderRadius:8,border:`2px solid ${newCash.type===t?(t==="in"?C.success:C.danger):C.border}`,background:newCash.type===t?(t==="in"?"#E8F5E9":"#FFEBEE"):"#fff",color:newCash.type===t?(t==="in"?C.success:C.danger):C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}},l))
               ),
               h("div",{style:{display:"grid",gap:8}},
-                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"DESCRIPTION"),h("input",{value:newCash.desc,onClick:()=>setTextKB&&setTextKB({value:newCash.desc||"",label:"DESCRIPTION",onChange:v=>setNewCash(p=>({...p,desc:v}))}),placeholder:"e.g. Ice delivery",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box"}})),
-                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"AMOUNT (₱)"),h("input",{type:"number",value:newCash.amount,onClick:()=>setNumKB({value:newCash.amount,label:"AMOUNT (₱)",allowDecimal:true,onChange:v=>setNewCash(p=>({...p,amount:v}))}),style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:14,cursor:"pointer",fontWeight:700,outline:"none",boxSizing:"border-box"}})),
+                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"DESCRIPTION"),h("input",{value:newCash.desc,onChange:e=>setNewCash(p=>({...p,desc:e.target.value})),placeholder:"e.g. Ice delivery",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box"}})),
+                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"AMOUNT (₱)"),h("input",{type:"number",value:newCash.amount,onChange:e=>setNewCash(p=>({...p,amount:e.target.value})),placeholder:"0.00",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:14,fontWeight:700,outline:"none",boxSizing:"border-box"}})),
                 h("button",{onClick:async()=>{
                   if(!newCash.desc||!newCash.amount){showT("Fill all fields","warn");return;}
                   const now=new Date();
@@ -8167,7 +7660,7 @@ function App(){
               h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:13}},h("b",null,"Cash Advance Request"),h("button",{onClick:()=>setModal(null),style:{background:"none",border:"none",fontSize:17,cursor:"pointer"}},"×")),
               h("div",{style:{display:"grid",gap:8}},
                 h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"STAFF NAME"),h("input",{value:newAdv.staff,onChange:e=>setNewAdv(p=>({...p,staff:e.target.value})),placeholder:"Name",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box"}})),
-                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"AMOUNT (₱)"),h("input",{type:"number",value:newAdv.amount,onClick:()=>setNumKB({value:String(newAdv.amount||""),label:"AMOUNT (₱)",allowDecimal:true,onChange:v=>setNewAdv(p=>({...p,amount:v}))}),style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:14,fontWeight:700,outline:"none",boxSizing:"border-box"}})),
+                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"AMOUNT (₱)"),h("input",{type:"number",value:newAdv.amount,onChange:e=>setNewAdv(p=>({...p,amount:e.target.value})),placeholder:"0.00",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:14,fontWeight:700,outline:"none",boxSizing:"border-box"}})),
                 h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"REASON"),h("input",{value:newAdv.reason,onChange:e=>setNewAdv(p=>({...p,reason:e.target.value})),placeholder:"e.g. Medical",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box"}})),
                 h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"DEDUCTION DATE"),h("input",{type:"date",value:newAdv.deductDate,onChange:e=>setNewAdv(p=>({...p,deductDate:e.target.value})),style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box"}})),
                 h("button",{onClick:async()=>{
@@ -8267,7 +7760,10 @@ function App(){
             h("div",{style:{display:"flex",gap:7}},
               h("div",{style:{position:"relative"}},h("span",{style:{position:"absolute",left:8,top:"50%",transform:"translateY(-50%)",fontSize:11,color:C.muted}},"🔍"),h("input",{value:invSrch,onChange:e=>setInvSrch(e.target.value),placeholder:"Search...",style:{padding:"7px 9px 7px 26px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none",width:150}})),
               h("button",{onClick:()=>showT("Import — coming soon","info"),style:{padding:"7px 12px",background:"#fff",border:"1px solid "+C.border,borderRadius:7,fontSize:11,cursor:"pointer"}},"⬆️ Import"),
-              h("button",{style:{padding:"7px 12px",background:C.primary,border:"none",borderRadius:7,color:"#fff",fontSize:11,fontWeight:700,cursor:"pointer"}},"+New")
+              h("button",{
+  onClick:()=>setModal("new_inv_item"),
+  style:{padding:"7px 12px",background:C.primary,border:"none",borderRadius:7,color:"#fff",fontSize:11,fontWeight:700,cursor:"pointer"}},
+"+ Add Item")
             )
           ),
           h("div",{style:{display:"flex",gap:9,marginBottom:12}},
@@ -8293,7 +7789,20 @@ function App(){
                   style:{padding:"4px 10px",background:"#1565C0",border:"none",
                     borderRadius:6,color:"#fff",fontSize:10,fontWeight:700,cursor:"pointer"}},
                   "✏️ Edit"),
-                h("input",{type:"number",placeholder:"qty",onClick:function(e){var item=e.target.closest?e.target:null; setNumKB({value:"",label:"ADJUST STOCK",allowDecimal:false,allowNegative:true,onChange:function(v){var el=e.target;el.value=v;el.dispatchEvent(new Event("change",{bubbles:true}));}});},
+                h("button",{
+                  onClick:async function(){
+                    if(!confirm("Delete "+item.name+"?"))return;
+                    const isOwner=user.role==="owner"||user.role==="commissary";
+                    const col=isOwner?"inventory":"inventory_"+branchId;
+                    try{
+                      await deleteDoc(doc(db,col,item.id));
+                      showT(item.name+" deleted ✓");
+                    }catch(e){showT("Error deleting","err");}
+                  },
+                  style:{padding:"4px 10px",background:"#FFEBEE",border:"1px solid #FFCDD2",
+                    borderRadius:6,color:C.danger,fontSize:10,fontWeight:700,cursor:"pointer"}},
+                  "🗑️"),
+                h("input",{type:"number",placeholder:"+/-",
                   style:{width:44,padding:"4px",border:"1px solid "+C.border,
                     borderRadius:6,fontSize:10,textAlign:"center",outline:"none"},
                   onKeyDown:async function(e){
@@ -9771,23 +9280,22 @@ function App(){
       })
     ),
 
-    // ON-SCREEN TEXT KEYBOARD (global)
-    textKB&&h(TextKeyboard,{
-      value:textKB.value||"",
-      label:textKB.label||"",
-      onChange:function(v){textKB.onChange(v);setTextKB(null);},
-      onClose:function(){setTextKB(null);}
-    }),
 
-    // ON-SCREEN NUMBER KEYBOARD (global)
-    numKB&&h(NumpadModal,{
-      value:numKB.value||"",
-      label:numKB.label||"",
-      allowDecimal:numKB.allowDecimal!==false,
-      allowNegative:numKB.allowNegative===true,
-      onChange:function(v){numKB.onChange(v);setNumKB(null);},
-      onClose:function(){setNumKB(null);}
-    }),
+
+    // NEW INVENTORY ITEM MODAL
+    modal==="new_inv_item"&&h("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",
+      display:"flex",alignItems:"center",justifyContent:"center",zIndex:900}},
+      h("div",{style:{background:"#fff",borderRadius:16,padding:"20px",width:380,
+        maxHeight:"80vh",overflowY:"auto"}},
+        h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}},
+          h("div",{style:{fontSize:14,fontWeight:800}},"📦 Add Inventory Item"),
+          h("button",{onClick:()=>setModal(null),
+            style:{background:"none",border:"none",fontSize:20,cursor:"pointer"}},"×")
+        ),
+        h(NewInventoryItemForm,{db,user,branchId,showT,onClose:()=>setModal(null),
+          invBranch,inventory})
+      )
+    ),
 
     // STOCK EDIT MODAL
     modal&&modal.startsWith("stock_edit_")&&h("div",{
