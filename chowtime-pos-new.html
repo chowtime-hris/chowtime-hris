@@ -3249,13 +3249,13 @@ function BOMPage({menuItems,db,user,showT,inventory=[]}){
 
   // BOMEditor sub-component
   const BOMEditor=({rows,setRows,onSave,saving:sv})=>h("div",null,
-    h("div",{style:{display:"grid",gridTemplateColumns:"1fr 100px 70px 80px 36px",gap:6,marginBottom:6}},
-      ["INGREDIENT","UNIT","QTY","COST",""].map(h2=>
+    h("div",{style:{display:"grid",gridTemplateColumns:"1fr 90px 70px 80px 80px 36px",gap:6,marginBottom:6}},
+      ["INGREDIENT","UNIT","QTY","MARKUP %","COST",""].map(h2=>
         h("div",{key:h2,style:{fontSize:8,fontWeight:700,color:C.muted,letterSpacing:1}},h2))
     ),
     rows.map((row,i)=>{
       const ing=ingredients.find(x=>x.id===row.ingId)||{};
-      return h("div",{key:i,style:{display:"grid",gridTemplateColumns:"1fr 100px 70px 80px 36px",gap:6,marginBottom:5,alignItems:"center"}},
+      return h("div",{key:i,style:{display:"grid",gridTemplateColumns:"1fr 90px 70px 80px 80px 36px",gap:6,marginBottom:5,alignItems:"center"}},
         h("select",{value:row.ingId||"",
           onChange:e=>{
             const g=ingredients.find(x=>x.id===e.target.value)||{};
@@ -3270,18 +3270,31 @@ function BOMPage({menuItems,db,user,showT,inventory=[]}){
         ),
         h("div",{style:{fontSize:10,color:C.muted}},row.unit||ing.unit||"—"),
         h("input",{type:"number",min:0,step:"0.01",
-          value:row.qty===0?"":row.qty,
-          onChange:e=>{
-            const v=e.target.value;
-            updRow(setRows,i,"qty",v===""?0:parseFloat(v)||0);
-          },
+          defaultValue:row.qty||"",
+          key:"qty-"+i+"-"+row.ingId,
           onBlur:e=>{
-            if(!e.target.value)updRow(setRows,i,"qty",0);
+            updRow(setRows,i,"qty",parseFloat(e.target.value)||0);
+          },
+          onChange:e=>{
+            const v=parseFloat(e.target.value);
+            if(!isNaN(v))updRow(setRows,i,"qty",v);
           },
           style:{padding:"5px",border:"1px solid "+C.border,borderRadius:6,
             fontSize:10,outline:"none",textAlign:"center",width:"100%"}}),
+        // Markup %
+        h("div",{style:{display:"flex",alignItems:"center",gap:2}},
+          h("input",{type:"number",min:0,max:999,step:1,
+            defaultValue:row.markup||"",
+            key:"mkup-"+i+"-"+row.ingId,
+            onBlur:e=>updRow(setRows,i,"markup",parseFloat(e.target.value)||0),
+            onChange:e=>{const v=parseFloat(e.target.value);if(!isNaN(v))updRow(setRows,i,"markup",v);},
+            placeholder:"0",
+            style:{width:40,padding:"3px 4px",border:"1px solid "+C.border,
+              borderRadius:5,fontSize:10,outline:"none",textAlign:"center"}}),
+          h("span",{style:{fontSize:9,color:C.muted}},"%")
+        ),
         h("div",{style:{fontSize:10,color:C.primary,fontWeight:700}},
-          (ing.cost||0)*(row.qty||0)>0?"₱"+((ing.cost||0)*(row.qty||0)).toFixed(2):"—"),
+          (ing.cost||0)*(row.qty||0)>0?"₱"+((ing.cost||0)*(row.qty||0)*(1+(row.markup||0)/100)).toFixed(2):"—"),
         h("button",{onClick:()=>delRow(setRows,i),
           style:{background:"none",border:"none",color:C.danger,cursor:"pointer",fontSize:14}},"×")
       );
@@ -5519,6 +5532,104 @@ function PermissionsTab({db,showT,companySettings,setCompanySettings}){
   );
 }
 
+
+// ─── INV CATEGORIES TAB ───────────────────────────────────
+function InvCatsTab({db,showT}){
+  const DEFAULT_CATS=["Frozen","Produce","Protein","Sauce","Dry Goods","Packaging","Beverage","Other"];
+  const [cats,setCats]=useState(DEFAULT_CATS);
+  const [newCat,setNewCat]=useState("");
+  const [saving,setSaving]=useState(false);
+
+  useEffect(()=>{
+    try{
+      const unsub=onSnapshot(doc(db,"settings","inv_cats"),snap=>{
+        if(snap.exists()&&snap.data().cats){
+          const custom=snap.data().cats.filter(c=>typeof c==="string");
+          setCats([...DEFAULT_CATS,...custom.filter(c=>!DEFAULT_CATS.includes(c))]);
+        }
+      },()=>{});
+      return()=>unsub();
+    }catch(e){}
+  },[]);
+
+  const save=async(newList)=>{
+    setSaving(true);
+    try{
+      const custom=newList.filter(c=>!DEFAULT_CATS.includes(c));
+      await setDoc(doc(db,"settings","inv_cats"),{cats:custom},{merge:true});
+      showT("Categories saved ✓");
+    }catch(e){showT("Error saving","err");}
+    setSaving(false);
+  };
+
+  const addCat=async()=>{
+    const t=newCat.trim();
+    if(!t){showT("Enter category name","warn");return;}
+    if(cats.includes(t)){showT("Already exists","warn");return;}
+    const newList=[...cats,t];
+    setCats(newList);
+    setNewCat("");
+    await save(newList);
+  };
+
+  const deleteCat=async(cat)=>{
+    if(DEFAULT_CATS.includes(cat)){showT("Cannot delete default category","warn");return;}
+    if(!confirm("Delete \""+cat+"\" category?"))return;
+    const newList=cats.filter(c=>c!==cat);
+    setCats(newList);
+    await save(newList);
+  };
+
+  return h("div",null,
+    h("div",{style:{fontSize:11,fontWeight:800,marginBottom:12}},"📦 Inventory Item Categories"),
+
+    // Add new category
+    h("div",{style:{display:"flex",gap:8,marginBottom:16}},
+      h("input",{value:newCat,
+        onChange:e=>setNewCat(e.target.value),
+        onKeyDown:e=>e.key==="Enter"&&addCat(),
+        placeholder:"New category name (e.g. Sauces, Frozen Meat)...",
+        style:{flex:1,padding:"9px 12px",border:"2px solid "+C.primary,
+          borderRadius:8,fontSize:12,outline:"none"}}),
+      h("button",{onClick:addCat,disabled:saving,
+        style:{padding:"9px 18px",background:C.primary,border:"none",
+          borderRadius:8,color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}},
+        saving?"...":"+ Add")
+    ),
+
+    // Categories list
+    h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
+      h("div",{style:{padding:"8px 14px",background:"#f5f5f5",
+        fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1}},
+        "CATEGORIES ("+cats.length+" total)"),
+      cats.map((cat,i)=>{
+        const isDefault=DEFAULT_CATS.includes(cat);
+        return h("div",{key:cat,
+          style:{display:"flex",justifyContent:"space-between",alignItems:"center",
+            padding:"10px 14px",
+            borderBottom:i<cats.length-1?"1px solid #f5f5f5":"none",
+            background:isDefault?"#fafafa":"#fff"}},
+          h("div",{style:{display:"flex",alignItems:"center",gap:8}},
+            h("span",{style:{fontSize:16}},isDefault?"📦":"🏷️"),
+            h("div",null,
+              h("div",{style:{fontSize:12,fontWeight:600}},cat),
+              h("div",{style:{fontSize:9,color:C.muted}},
+                isDefault?"Default (cannot delete)":"Custom category")
+            )
+          ),
+          !isDefault&&h("button",{onClick:()=>deleteCat(cat),
+            style:{padding:"4px 10px",background:"#FFEBEE",border:"1px solid #FFCDD2",
+              borderRadius:6,color:C.danger,fontSize:11,fontWeight:700,cursor:"pointer"}},
+            "🗑️ Delete")
+        );
+      })
+    ),
+
+    h("div",{style:{marginTop:10,fontSize:10,color:C.muted}},
+      "💡 Categories are shared across all branches and appear in Add Item form and inventory filters.")
+  );
+}
+
 // ─── SETTINGS PAGE ────────────────────────────────────────
 function SettingsPage({db,user,showT,branches,companySettings,setCompanySettings}){
   const [tab,setTab]=useState("print");
@@ -5542,7 +5653,7 @@ function SettingsPage({db,user,showT,branches,companySettings,setCompanySettings
   return h("div",{style:{maxWidth:660}},
     h(SectionHeader,{title:"Settings"}),
     h("div",{style:{display:"flex",gap:0,marginBottom:14,borderBottom:"2px solid "+C.border}},
-      T("print","🖨️ Print & Printer"),T("company","🏢 Company"),T("branches","🏪 Branches"),T("perms","🔐 Permissions")),
+      T("print","🖨️ Print & Printer"),T("company","🏢 Company"),T("branches","🏪 Branches"),T("cats","📦 Inv. Categories"),T("perms","🔐 Permissions")),
     tab==="company"&&h("div",{style:{display:"flex",flexDirection:"column",gap:12}},
       h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,padding:"16px"}},
         h("div",{style:{fontSize:12,fontWeight:800,marginBottom:10}},"🏢 Company Info"),
@@ -5639,6 +5750,7 @@ function SettingsPage({db,user,showT,branches,companySettings,setCompanySettings
       )
     ),
 
+    tab==="cats"&&h(InvCatsTab,{db,showT}),
     tab==="perms"&&h(PermissionsTab,{db,showT,companySettings,setCompanySettings})
   );
 }
