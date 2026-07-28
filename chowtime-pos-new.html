@@ -10291,13 +10291,29 @@ function App(){
         ),
 
         // ══ ORDERS ══
-        (page==="orders"||page==="all_orders")&&h("div",null,
-          h(SectionHeader,{title:page==="all_orders"?"All Orders (Firebase)":"Today's Orders"}),
+        (page==="orders"||page==="all_orders")&&(()=>{
+          const _today=new Date().toISOString().slice(0,10);
+          const _isToday=(o)=>{
+            if(o.date)return o.date===_today;
+            const t=o.timestamp&&o.timestamp.toDate?o.timestamp.toDate():null;
+            return t?t.toISOString().slice(0,10)===_today:false;
+          };
+          // Orders     = today, the branch you are transacting as (service view)
+          // All Orders = every branch, every date (management view)
+          const shown = page==="all_orders"
+            ? orders
+            : orders.filter(o=>o.branch===branchId&&_isToday(o));
+          return h("div",null,
+          h(SectionHeader,{title:page==="all_orders"
+            ?"All Orders — "+orders.length+" total, all branches"
+            :"Today's Orders — "+curBranch.name+" · "+_today}),
           h("div",{style:{display:"flex",gap:8,marginBottom:12}},
-            ["pending","preparing","served"].map(s=>h(Stat,{key:s,label:s,value:(page==="all_orders"?orders:myOrders).filter(o=>o.status===s).length,color:{pending:C.warning,preparing:C.info,served:C.success}[s],icon:{pending:"⏳",preparing:"🔥",served:"✅"}[s]}))
+            ["pending","preparing","served"].map(s=>h(Stat,{key:s,label:s,value:shown.filter(o=>o.status===s).length,color:{pending:C.warning,preparing:C.info,served:C.success}[s],icon:{pending:"⏳",preparing:"🔥",served:"✅"}[s]}))
           ),
           h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
-            (page==="all_orders"?orders:myOrders).map(o=>h("div",{key:o._docId||o.id,style:{display:"flex",alignItems:"flex-start",gap:9,padding:"9px 14px",borderBottom:"1px solid #f5f5f5"}},
+            shown.length===0&&h("div",{style:{textAlign:"center",padding:"32px",color:C.muted,fontSize:12}},
+              page==="all_orders"?"Walang order sa Firebase":"Wala pang order ngayong araw sa "+curBranch.name),
+            shown.map(o=>h("div",{key:o._docId||o.id,style:{display:"flex",alignItems:"flex-start",gap:9,padding:"9px 14px",borderBottom:"1px solid #f5f5f5"}},
               h("div",{style:{width:33,height:33,background:"#FFF0F0",border:"2px solid #FFD0D0",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,color:C.primary,fontSize:8,flexShrink:0}},(o.id||"—").slice(-3)),
               h("div",{style:{flex:1}},
                 h("div",{style:{fontSize:10,fontWeight:700,display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}},
@@ -10342,7 +10358,8 @@ function App(){
             )),
             orders.length===0&&h("div",{style:{textAlign:"center",padding:"30px",color:C.muted,fontSize:12}},"Loading from Firebase...")
           )
-        ),
+          );
+        })(),
 
         // ══ Z/X READING ══
         (page==="z_reading"||page==="x_reading")&&(()=>{
