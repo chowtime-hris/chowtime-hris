@@ -182,6 +182,27 @@ const ROLES = {
     nav:["comm_dash","comm_inv","comm_orders","comm_dr"]},
 };
 
+// Sidebar grouping. Any page not listed here stays top-level, so adding a new
+// page never hides it — worst case it sits ungrouped.
+const NAV_GROUPS = [
+  {id:"sales", icon:"\u{1F6D2}", label:"POS & Sales",
+   pages:["pos","orders","all_orders","kitchen","void_request","void_requests",
+          "cash_count","cash_monitor","cash_in_out","z_reading","x_reading",
+          "sales_report","analytics"]},
+  {id:"stock", icon:"\u{1F4E6}", label:"Inventory",
+   pages:["inventory","inv_log","stock_order","stock_receive","po_monitor",
+          "bom_mgmt","commissary","comm_inv","comm_orders","comm_dr"]},
+  {id:"menu",  icon:"\u{1F37D}", label:"Menu",
+   pages:["menu_mgmt","branch_menu"]},
+  {id:"people",icon:"\u{1F465}", label:"People & HR",
+   pages:["user_mgmt","crew_mgmt","payroll","kiosk","hris_dash","hris_branch",
+          "ca_request","loan_request","cash_advance"]},
+  {id:"money", icon:"\u{1F4B8}", label:"Expenses",
+   pages:["expenses"]},
+  {id:"setup", icon:"\u2699\uFE0F", label:"Settings",
+   pages:["branches","settings","branch_settings","printer"]},
+];
+
 const NAV_META = {
   dashboard:   {icon:"📊",label:"Dashboard"},
   branches:    {icon:"🏪",label:"Branches"},
@@ -7955,6 +7976,7 @@ function App(){
   const [chkToMode,setChkToMode]=useState("all");        // "all" follows ORDER TYPE
   const [chkToPicks,setChkToPicks]=useState({});         // {cartId:{pickIdx:toQty}}
   const [posBoms,setPosBoms]=useState({});               // bom docs for stock checks
+  const [openNav,setOpenNav]=useState({});               // which sidebar groups are expanded
   const [heldOrders,setHeldOrders]=useState([]);         // parked / on-hold carts
   const [showHeld,setShowHeld]=useState(false);
   const [chkCust,setChkCust]=useState("");
@@ -9508,54 +9530,91 @@ function App(){
         )
       ),
       h("nav",{style:{flex:1,padding:"3px 6px",overflowY:"auto",minHeight:0}},
-        (role?.nav||[]).filter(p=>{
-          // Owner/commissary/manager = always full access
-          if(user?.role==="owner"||user?.role==="commissary"||user?.role==="manager")return true;
-          // Check saved permissions
-          const rolePerms=(companySettings?.rolePerms||{})[user?.role];
-          if(!rolePerms){
-            // No perms saved yet - ALL ON by default
-            return true;
-          }
-          return rolePerms[p]!==false;
-        }).map(p=>{const m=NAV_META[p];if(!m)return null;return h("button",{key:p,onClick:()=>setPage(p),
-          style:{width:"100%",display:"flex",alignItems:"center",gap:6,padding:"5px 9px",borderRadius:7,border:"none",
-            background:page===p?"rgba(200,21,27,.22)":"transparent",
-            color:page===p?C.primary:"rgba(255,255,255,.38)",
-            cursor:"pointer",fontSize:10,fontWeight:page===p?700:500,marginBottom:0,textAlign:"left"}},
-          h("span",{style:{fontSize:11}},m.icon),
-          h("span",{style:{flex:1}},m.label),
-          (function(){
+        (function(){
+          // permitted pages for this role, in the role's own order
+          const allowed=(role?.nav||[]).filter(p=>{
+            if(user?.role==="owner"||user?.role==="commissary"||user?.role==="manager")return true;
+            const rolePerms=(companySettings?.rolePerms||{})[user?.role];
+            if(!rolePerms)return true;
+            return rolePerms[p]!==false;
+          });
+
+          const badgeFor=(p)=>{
             var cnt=0;
             if(p==="stock_order"){
               cnt=advances.filter(function(a){
                 return a._type==="po"&&a.branch===branchId&&
-                  (a.status==="paid"||a.status==="discrepancy");
-              }).length;
+                  (a.status==="paid"||a.status==="discrepancy");}).length;
             }
             if(p==="inventory"){
               cnt=inventory.filter(function(i){
-                return (i.stock||0)<=(i.minStock||10)&&(i.stock||0)>=0;
-              }).length;
+                return (i.stock||0)<=(i.minStock||10)&&(i.stock||0)>=0;}).length;
             }
             if(p==="po_monitor"){
               cnt=advances.filter(function(a){
                 return a._type==="po"&&
-                  (a.status==="received_by_main"||a.status==="discrepancy");
-              }).length;
+                  (a.status==="received_by_main"||a.status==="discrepancy");}).length;
             }
             if(p==="void_requests"){
               cnt=advances.filter(function(a){
-                return a._type==="void"&&a.status==="pending";
-              }).length;
+                return a._type==="void"&&a.status==="pending";}).length;
             }
-            return cnt>0?h("span",{style:{
-              background:C.primary,color:"#fff",borderRadius:10,
-              fontSize:8,fontWeight:900,padding:"1px 5px",
-              minWidth:16,textAlign:"center",flexShrink:0}},
-              cnt>9?"9+":String(cnt)):null;
-          })()
-        );})
+            return cnt;
+          };
+
+          const pill=(cnt)=>cnt>0?h("span",{style:{
+            background:C.primary,color:"#fff",borderRadius:10,fontSize:8,fontWeight:900,
+            padding:"1px 5px",minWidth:16,textAlign:"center",flexShrink:0}},
+            cnt>9?"9+":String(cnt)):null;
+
+          const item=(p,indent)=>{
+            const m=NAV_META[p]; if(!m)return null;
+            return h("button",{key:p,onClick:()=>setPage(p),
+              style:{width:"100%",display:"flex",alignItems:"center",gap:6,
+                padding:"5px 9px 5px "+(indent?22:9)+"px",borderRadius:7,border:"none",
+                background:page===p?"rgba(200,21,27,.22)":"transparent",
+                color:page===p?C.primary:"rgba(255,255,255,.38)",
+                cursor:"pointer",fontSize:10,fontWeight:page===p?700:500,textAlign:"left"}},
+              h("span",{style:{fontSize:11}},m.icon),
+              h("span",{style:{flex:1}},m.label),
+              pill(badgeFor(p)));
+          };
+
+          const grouped=new Set();
+          NAV_GROUPS.forEach(g=>g.pages.forEach(p=>grouped.add(p)));
+          const loose=allowed.filter(p=>!grouped.has(p));
+
+          const out=[];
+          // ungrouped pages first (dashboards etc.)
+          loose.forEach(p=>out.push(item(p,false)));
+
+          NAV_GROUPS.forEach(g=>{
+            const kids=g.pages.filter(p=>allowed.includes(p));
+            if(!kids.length)return;
+            // a group wrapping a single page just adds a click for nothing
+            if(kids.length===1){ out.push(item(kids[0],false)); return; }
+            const hasActive=kids.includes(page);
+            // the group holding the current page is always open, so you can
+            // never navigate into a section and then lose sight of it
+            const open=hasActive||!!openNav[g.id];
+            const total=kids.reduce((s2,p)=>s2+badgeFor(p),0);
+            out.push(h("button",{key:"g-"+g.id,
+              onClick:()=>setOpenNav(prev=>Object.assign({},prev,{[g.id]:!open})),
+              style:{width:"100%",display:"flex",alignItems:"center",gap:6,
+                padding:"6px 9px",marginTop:4,borderRadius:7,border:"none",
+                background:hasActive?"rgba(255,255,255,.05)":"transparent",
+                color:hasActive?"rgba(255,255,255,.8)":"rgba(255,255,255,.5)",
+                cursor:"pointer",fontSize:10,fontWeight:700,textAlign:"left"}},
+              h("span",{style:{fontSize:11}},g.icon),
+              h("span",{style:{flex:1}},g.label),
+              !open&&pill(total),
+              h("span",{style:{fontSize:8,opacity:.6,transform:open?"rotate(90deg)":"none",
+                transition:"transform .12s"}},"\u25B6")
+            ));
+            if(open)kids.forEach(p=>out.push(item(p,true)));
+          });
+          return out;
+        })()
       ),
       h("div",{style:{padding:"6px 8px",flexShrink:0,
           borderTop:"1px solid rgba(255,255,255,.08)"}},
