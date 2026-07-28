@@ -1436,8 +1436,15 @@ function ItemCustomizer({item,onAdd,onClose,optionGroups=[],priceType="retail",u
 
 
 // ─── PO FORM (Branch creates Purchase Order) ─────────────
-function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvances,branches=BRANCHES}){
-  const [items,setItems]     = useState(INIT_INVENTORY.map(i=>({...i,orderQty:0,note:""})));
+function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvances,branches=BRANCHES,editPO=null}){
+  // When editing, seed the catalogue with the quantities already ordered.
+  const [items,setItems]     = useState(()=>{
+    const prev={};
+    ((editPO&&editPO.items)||[]).forEach(i=>{prev[i.id]={qty:i.qty||0,note:i.note||""};});
+    return INIT_INVENTORY.map(i=>({...i,
+      orderQty:(prev[i.id]&&prev[i.id].qty)||0,
+      note:(prev[i.id]&&prev[i.id].note)||""}));
+  });
   const [deliveryReq,setDeliveryReq] = useState("");
   const [notes,setNotes]     = useState("");
   const [discount,setDiscount] = useState(0);
@@ -1473,6 +1480,28 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
       timestamp:serverTimestamp()
     };
     try{
+      if(editPO&&editPO._docId){
+        // Re-read before writing: the DR may have been issued while this form
+        // was open, and a closed PO must never be rewritten behind Main's back.
+        let live=null;
+        try{const snap=await getDoc(doc(db,"advances",editPO._docId));
+            if(snap.exists())live=snap.data();}catch(e){}
+        if(live&&live.status!=="received_by_main"){
+          showT("Hindi na ma-edit — na-process na ng Main","err");
+          onClose();return;
+        }
+        await updateDoc(doc(db,"advances",editPO._docId),{
+          items:po.items,notes:po.notes,deliveryRequested:po.deliveryRequested,
+          discount:po.discount,vatType:po.vatType,
+          editedBy:user.name,editedAt:serverTimestamp()
+        });
+        await notify(db,{to:"ct-main",type:"po_new",
+          title:"Na-edit na order — "+(po.branchName||branchId),
+          message:ordered.length+" item/s (binago)",
+          page:"po_monitor",ref:editPO.poNum||po.poNum,by:user.name});
+        showT((editPO.poNum||po.poNum)+" na-update ✓");
+        onClose();return;
+      }
       await addDoc(collection(db,"advances"),po);
       await notify(db,{to:"ct-main",type:"po_new",
         title:"Bagong order — "+(po.branchName||branchId),
@@ -8294,6 +8323,7 @@ function App(){
   const [chkToMode,setChkToMode]=useState("all");        // "all" follows ORDER TYPE
   const [chkToPicks,setChkToPicks]=useState({});         // {cartId:{pickIdx:toQty}}
   const [posBoms,setPosBoms]=useState({});               // bom docs for stock checks
+  const [editingPO,setEditingPO]=useState(null);         // branch editing its own PO
   const [notifs,setNotifs]=useState([]);                 // addressed to this branch
   const [showNotifs,setShowNotifs]=useState(false);
   const [openNav,setOpenNav]=useState({});               // which sidebar groups are expanded
@@ -12008,12 +12038,45 @@ function App(){
                       po.date+(po.deliveryDate?" · DR Date: "+po.deliveryDate:"")+
                       (po.vatType?" · "+po.vatType.toUpperCase():""))
                   ),
-                  h("div",{style:{textAlign:"right"}},
-                    h("div",{style:{fontSize:14,fontWeight:900,color:stColor}},
-                      "₱"+total.toFixed(2)),
-                    h("div",{style:{fontSize:9,color:paid>=total&&total>0?C.success:C.warning}},
-                      paid>0?"Paid: ₱"+paid.toFixed(2)+" / ₱"+total.toFixed(2):
-                      po.paymentStatus||"Unpaid")
+                  h("div",{style:{display:"flex",alignItems:"center",gap:10}},
+                    // Editable only while Main has not issued the DR. After
+                    // that the request is the audit baseline for discrepancy.
+                    (po.status==="received_by_main")&&h("div",{style:{display:"flex",gap:5}},
+                      h("button",{onClick:()=>{setEditingPO(po);setModal("new_po");},
+                        style:{padding:"4px 10px",borderRadius:7,fontSize:9,fontWeight:700,
+                          border:"1px solid "+C.border,background:"#fff",
+                          color:C.text,cursor:"pointer"}},"✏️ Edit"),
+                      h("button",{onClick:async()=>{
+                          const why=prompt("Bakit kinakansela ang "+po.poNum+"?","");
+                          if(why===null)return;
+                          try{
+                            const snap=await getDoc(doc(db,"advances",po._docId));
+                            if(snap.exists()&&snap.data().status!=="received_by_main"){
+                              showT("Hindi na makakansela — na-process na","err");return;
+                            }
+                            await updateDoc(doc(db,"advances",po._docId),{
+                              status:"cancelled",cancelReason:why.trim(),
+                              cancelledBy:user.name,cancelledAt:serverTimestamp()});
+                            await notify(db,{to:"ct-main",type:"info",
+                              title:"Kinansela ang "+po.poNum,
+                              message:why.trim()||"Walang dahilan",
+                              page:"po_monitor",ref:po.poNum,by:user.name});
+                            showT(po.poNum+" cancelled","warn");
+                          }catch(e){showT("Cancel failed","err");}
+                        },
+                        style:{padding:"4px 10px",borderRadius:7,fontSize:9,fontWeight:700,
+                          border:"1px solid #FFCDD2",background:"#FFEBEE",
+                          color:C.danger,cursor:"pointer"}},"Cancel")
+                    ),
+                    (po.status!=="received_by_main"&&po.status!=="cancelled")&&
+                      h("span",{style:{fontSize:8,color:C.muted}},"🔒 locked"),
+                    h("div",{style:{textAlign:"right"}},
+                      h("div",{style:{fontSize:14,fontWeight:900,color:stColor}},
+                        "₱"+total.toFixed(2)),
+                      h("div",{style:{fontSize:9,color:paid>=total&&total>0?C.success:C.warning}},
+                        paid>0?"Paid: ₱"+paid.toFixed(2)+" / ₱"+total.toFixed(2):
+                        po.paymentStatus||"Unpaid")
+                    )
                   )
                 ),
 
@@ -12473,10 +12536,18 @@ function App(){
       display:"flex",alignItems:"center",justifyContent:"center",zIndex:900,padding:16}},
       h("div",{style:{background:"#fff",borderRadius:16,width:"100%",maxWidth:860,
         maxHeight:"88vh",overflowY:"auto"}},
-        POForm({branchId,user,db,
+        // MUST be h(POForm,...) not POForm(...): it owns 6 useState + 1 useEffect.
+        // Calling it inline would splice those hooks into App's own hook list,
+        // and since this branch only renders while the modal is open the count
+        // changes between renders -> "Rendered more hooks than during the
+        // previous render". Direct calls are only safe for hook-free helpers.
+        h(POForm,{branchId,user,db,
           // the live catalogue, not the hardcoded seed list
           INIT_INVENTORY:(inventory&&inventory.length?inventory:INIT_INVENTORY),
-          onClose:()=>setModal(null),showT,advances,setAdvances,branches})
+          editPO:editingPO,
+          key:editingPO?("edit-"+editingPO._docId):"new",
+          onClose:()=>{setModal(null);setEditingPO(null);},
+          showT,advances,setAdvances,branches})
       )
     ),
 
