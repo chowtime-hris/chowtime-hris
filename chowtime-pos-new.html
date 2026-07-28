@@ -875,7 +875,13 @@ function printZ(zd,branchName,cashier){
 }
 
 // ─── ITEM CUSTOMIZER ─────────────────────────────────────
-function ItemCustomizer({item,onAdd,onClose,optionGroups=[],priceType="retail",userRole="cashier"}){
+function ItemCustomizer({item,onAdd,onClose,optionGroups=[],priceType="retail",userRole="cashier",bomCheck=null}){
+  // bomCheck is optional — without it the customizer behaves exactly as before
+  const oosChoice=(gid,cid)=>{
+    if(!bomCheck)return null;
+    const sh=bomCheck.bomShort(bomCheck.choiceBomRows(gid,cid),1);
+    return sh.length?sh:null;
+  };
   const [selV,setSelV]=useState(item.variants[0]);
   // Item-level groups: always shown for all variants (Flavor, Sauce, etc.)
   const itemGroupIds=(item.optionGroups)||[];
@@ -1147,13 +1153,17 @@ function ItemCustomizer({item,onAdd,onClose,optionGroups=[],priceType="retail",u
                 const lbl=opt.label||opt.name;
                 if(free){
                   const n=freeQty(group.id,opt.id);
-                  const canAdd=got<cap;
+                  const oos=oosChoice(group.id,opt.id);
+                  const canAdd=got<cap&&!oos;
                   return h("div",{key:opt.id,
                     style:{padding:"7px 8px",borderRadius:9,textAlign:"center",
-                      border:"2px solid "+(n>0?C.primary:C.border),
-                      background:n>0?C.primary+"12":"#fff"}},
+                      border:"2px solid "+(oos?"#eee":(n>0?C.primary:C.border)),
+                      background:oos?"#FAFAFA":(n>0?C.primary+"12":"#fff"),
+                      opacity:oos?.55:1}},
                     h("div",{style:{fontSize:11,fontWeight:n>0?700:400,
-                      color:n>0?C.primary:C.text,marginBottom:5}},lbl),
+                      color:oos?C.muted:(n>0?C.primary:C.text),marginBottom:5}},lbl),
+                    oos&&h("div",{style:{fontSize:8,color:C.danger,fontWeight:800,marginBottom:3}},
+                      "UBOS: "+oos[0].ingName),
                     (opt.priceAdd||0)>0&&h("div",{style:{fontSize:9,color:C.primary,
                       fontWeight:700,marginBottom:3}},"+₱"+(opt.priceAdd||0)+" ea"),
                     h("div",{style:{display:"flex",alignItems:"center",
@@ -1171,8 +1181,10 @@ function ItemCustomizer({item,onAdd,onClose,optionGroups=[],priceType="retail",u
                   );
                 }
                 const on=selected.some(function(x){return x.id===opt.id;});
-                return h("button",{key:opt.id,
+                const oos2=on?null:oosChoice(group.id,opt.id);
+                return h("button",{key:opt.id,disabled:!!oos2,
                   onClick:function(){
+                    if(oos2)return;
                     setSelO(function(p){
                       var cur=p[groupKey]||[];
                       var next=on
@@ -1181,12 +1193,15 @@ function ItemCustomizer({item,onAdd,onClose,optionGroups=[],priceType="retail",u
                       var r={};Object.assign(r,p);r[groupKey]=next;return r;
                     });
                   },
-                  style:{padding:"8px 10px",borderRadius:9,cursor:"pointer",
-                    textAlign:"center",border:"2px solid "+(on?C.primary:C.border),
-                    background:on?C.primary+"12":"#fff"}},
+                  style:{padding:"8px 10px",borderRadius:9,
+                    cursor:oos2?"not-allowed":"pointer",opacity:oos2?.55:1,
+                    textAlign:"center",border:"2px solid "+(oos2?"#eee":(on?C.primary:C.border)),
+                    background:oos2?"#FAFAFA":(on?C.primary+"12":"#fff")}},
                   h("div",{style:{fontSize:11,fontWeight:on?700:400,
-                    color:on?C.primary:C.text}},lbl),
-                  (opt.priceAdd||0)>0&&h("div",{style:{fontSize:9,color:C.primary,fontWeight:700}},
+                    color:oos2?C.muted:(on?C.primary:C.text)}},lbl),
+                  oos2&&h("div",{style:{fontSize:8,color:C.danger,fontWeight:800}},
+                    "UBOS: "+oos2[0].ingName),
+                  !oos2&&(opt.priceAdd||0)>0&&h("div",{style:{fontSize:9,color:C.primary,fontWeight:700}},
                     "+₱"+(opt.priceAdd||0))
                 );
               })
@@ -7389,6 +7404,7 @@ function App(){
   const [chkToTargets,setChkToTargets]=useState([]);     // cartIds that are take-out
   const [chkToMode,setChkToMode]=useState("all");        // "all" follows ORDER TYPE
   const [chkToPicks,setChkToPicks]=useState({});         // {cartId:{pickIdx:toQty}}
+  const [posBoms,setPosBoms]=useState({});               // bom docs for stock checks
   const [heldOrders,setHeldOrders]=useState([]);         // parked / on-hold carts
   const [showHeld,setShowHeld]=useState(false);
   const [chkCust,setChkCust]=useState("");
@@ -7496,6 +7512,14 @@ function App(){
         ?query(collection(db,"cash_log"),orderBy("timestamp","desc"),limit(100))
         :query(collection(db,"cash_log"),where("branch","==",bId),orderBy("timestamp","desc"),limit(50));
       unsubs.push(onSnapshot(cq,snap=>setCashLog(snap.docs.map(d=>({...d.data(),_docId:d.id}))),()=>{}));
+    }catch(e){}
+
+    // BOM docs — needed to tell whether an item can still be made
+    try{
+      unsubs.push(onSnapshot(collection(db,"bom"),snap=>{
+        const b={};snap.docs.forEach(d=>{b[d.id]={...d.data()};});
+        setPosBoms(b);
+      },()=>{}));
     }catch(e){}
 
     // Held (parked) orders for this branch
@@ -7871,6 +7895,65 @@ function App(){
       return o;
     }
     return v;
+  };
+
+  // ── BOM STOCK CHECKS ─────────────────────────────────────
+  // An ingredient with no inventory record is treated as untracked and never
+  // blocks a sale — only things you actually count can stop an order.
+  const stockOf=(ingId)=>{
+    const it=inventory.find(x=>x.id===ingId);
+    return it?(Number(it.stock)||0):null;
+  };
+  const vKeyOf=(itemId,vLabel)=>(!vLabel||vLabel==="default")
+    ? itemId : itemId+"__"+String(vLabel).replace(/\s+/g,"_");
+  const itemBomRows=(itemId,vLabel)=>{
+    const d=posBoms[itemId]||{};
+    return d[vKeyOf(itemId,vLabel)]||d[itemId]||[];
+  };
+  const choiceBomRows=(gid,cid)=>{
+    const d=posBoms["optgrp_"+gid]||{};
+    return d["optgrp_"+gid+"__"+cid]||[];
+  };
+  // rows x multiplier -> [{ingName,need,have,unit}] for anything that falls short
+  const bomShort=(rows,mult)=>{
+    const out=[];
+    (rows||[]).forEach(r=>{
+      if(!r.ingId||!r.qty)return;
+      const need=((r.qty||0)*(mult||1))/(r.convFactor||1);
+      const have=stockOf(r.ingId);
+      if(have===null)return;
+      if(have<need)out.push({ingName:r.ingName||r.ingId,need:need,have:have,unit:r.unit||""});
+    });
+    return out;
+  };
+  // Aggregate across the WHOLE cart. One BOGO may pass on its own while four of
+  // them do not, so per-tap checks are not enough — this is the real guard.
+  const cartShort=()=>{
+    const need={};
+    const bump=(rows,mult,label)=>{
+      (rows||[]).forEach(r=>{
+        if(!r.ingId||!r.qty)return;
+        const amt=((r.qty||0)*(mult||1))/(r.convFactor||1);
+        if(!need[r.ingId])need[r.ingId]={name:r.ingName||r.ingId,unit:r.unit||"",amt:0,from:[]};
+        need[r.ingId].amt+=amt;
+        if(label&&need[r.ingId].from.indexOf(label)<0)need[r.ingId].from.push(label);
+      });
+    };
+    cart.forEach(i=>{
+      bump(itemBomRows(i.id,i.variant),i.qty||1,i.name);
+      (i.optionRefs||[]).forEach(ref=>{
+        if(!ref.groupId||!ref.choiceId)return;
+        const mult=ref.free?(ref.qty||1):((ref.qty||1)*(i.qty||1));
+        bump(choiceBomRows(ref.groupId,ref.choiceId),mult,ref.label);
+      });
+    });
+    const short=[];
+    Object.keys(need).forEach(id=>{
+      const have=stockOf(id);
+      if(have===null)return;
+      if(have<need[id].amt)short.push(Object.assign({},need[id],{have:have,id:id}));
+    });
+    return short;
   };
 
   // ── HOLD / PARK A TRANSACTION ────────────────────────────
@@ -8262,6 +8345,23 @@ function App(){
       h("div",{style:{flex:1,overflowY:"auto",padding:"12px 18px"}},
         // Summary
         h("div",{style:{marginBottom:11}},
+          (function(){
+            const short=cartShort();
+            if(!short.length)return null;
+            return h("div",{style:{background:"#FFEBEE",border:"2px solid "+C.danger,
+              borderRadius:10,padding:"9px 11px",marginBottom:11}},
+              h("div",{style:{fontSize:11,fontWeight:900,color:C.danger,marginBottom:5}},
+                "🚫 OUT OF STOCK — hindi matutuloy"),
+              short.map(x=>h("div",{key:x.id,style:{fontSize:10,marginBottom:2}},
+                h("b",null,x.name),
+                h("span",{style:{color:C.muted}},
+                  "  kailangan "+(Math.round(x.amt*1000)/1000)+" "+x.unit
+                  +" · meron "+(Math.round(x.have*1000)/1000)+" "+x.unit)
+              )),
+              h("div",{style:{fontSize:9,color:C.muted,marginTop:5}},
+                "Bawasan ang qty, alisin ang item, o mag-receive muna ng stock.")
+            );
+          })(),
           h("div",{style:{fontSize:9,fontWeight:800,color:C.muted,letterSpacing:1,marginBottom:6}},"ORDER SUMMARY"),
           cart.map((i,idx)=>h("div",{key:idx,style:{display:"flex",gap:8,padding:"6px 0",borderBottom:"1px solid #f9f9f9",alignItems:"flex-start"}},
             h("span",{style:{fontSize:15,flexShrink:0}},i.emoji),
@@ -8595,6 +8695,12 @@ function App(){
         // Confirm button - with payment validation
         h("button",{
           onClick:()=>{
+            // Out of stock beats everything — never sell what cannot be made.
+            const short=cartShort();
+            if(short.length){
+              showT("Kulang ang stock: "+short.map(x=>x.name).join(", "),"err");
+              return;
+            }
             const cash=parseFloat(chkCash)||0;
             const isCredit=chkPay==="credit"||chkPay==="gcash"||chkPay==="maya"||chkPay==="bank";
             if(!isCredit&&cash<chkTotal){
@@ -8603,7 +8709,7 @@ function App(){
             }
             setTimeout(placeOrder,50);
           },
-          style:{width:"100%",padding:"13px",
+          style:{width:"100%",padding:"13px",opacity:cartShort().length?.5:1,
             background:`linear-gradient(135deg,${C.primary},${C.dark})`,
             border:"none",borderRadius:10,color:"#fff",
             fontSize:14,fontWeight:800,cursor:"pointer"}},
@@ -11034,7 +11140,8 @@ function App(){
 
     // ITEM CUSTOMIZER MODAL - always rendered
     h("div",{style:{display:customizing?"block":"none"}},
-      customizing&&h(ItemCustomizer,{item:customizing,onAdd:addToCart,onClose:()=>setCustomizing(null),optionGroups:optGroups,priceType,userRole:user.role})
+      customizing&&h(ItemCustomizer,{item:customizing,onAdd:addToCart,onClose:()=>setCustomizing(null),optionGroups:optGroups,priceType,userRole:user.role,
+        bomCheck:{bomShort,choiceBomRows,itemBomRows}})
     ),
 
     // HELD ORDERS - always rendered, hidden when closed
