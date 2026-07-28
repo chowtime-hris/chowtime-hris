@@ -3595,6 +3595,45 @@ function IngredientsPage({db,user,showT}){
 // ─── BOM MANAGER COMPONENT ───────────────────────────────
 const UNITS = ["pc","pack","box","sack","kg","g","L","mL","cup","gal","tray","dozen","set","sheet","bottle","can","bag"];
 
+// ── PACK MODEL ─────────────────────────────────────────────────────
+// `stock` is ALWAYS carried in the item's base unit (item.unit) — deduction
+// never has to convert, so the hot path stays as it is today.
+// packSize/packUnit describe how the item is BOUGHT and COUNTED, and are used
+// only at the edges: receiving, physical count, PO, and display.
+// Items without packSize behave exactly as before.
+function packSizeOf(it){ const n=Number(it&&it.packSize)||0; return n>1?n:0; }
+function packUnitOf(it){ return (it&&it.packUnit)||"pack"; }
+function baseUnitOf(it){ return (it&&it.unit)||""; }
+// packs + loose base units -> base units
+function packsToBase(it,packs,loose){
+  const sz=packSizeOf(it)||1;
+  return (Number(packs)||0)*sz+(Number(loose)||0);
+}
+// base units -> {packs, loose}
+function baseToPacks(it,base){
+  const sz=packSizeOf(it);
+  const b=Number(base)||0;
+  if(!sz)return {packs:0,loose:b,hasPacks:false};
+  return {packs:Math.floor(b/sz),loose:Math.round((b%sz)*1000)/1000,hasPacks:true};
+}
+const _n=(v)=>{const x=Math.round((Number(v)||0)*1000)/1000;return x.toLocaleString("en-PH");};
+// "4,484 pc" or "4,484 pc = 149 box + 14 pc"
+function fmtStock(it,base){
+  const b=(base!==undefined&&base!==null)?base:(it&&it.stock);
+  const sz=packSizeOf(it);
+  const txt=_n(b)+" "+baseUnitOf(it);
+  if(!sz)return txt;
+  const s=baseToPacks(it,b);
+  return txt+" = "+_n(s.packs)+" "+packUnitOf(it)+(s.loose?" + "+_n(s.loose)+" "+baseUnitOf(it):"");
+}
+// short form for tight rows: "149 box + 14 pc"
+function fmtPacks(it,base){
+  const sz=packSizeOf(it);
+  if(!sz)return "";
+  const s=baseToPacks(it,(base!==undefined&&base!==null)?base:(it&&it.stock));
+  return _n(s.packs)+" "+packUnitOf(it)+(s.loose?" + "+_n(s.loose)+" "+baseUnitOf(it):"");
+}
+
 function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
   const [mainTab,setMainTab] = useState("products");
   // Products tab state
@@ -5308,8 +5347,16 @@ function StockEditModal({item,db,user,branchId,showT,onClose,boms=[]}){
   });
 
   var current=item.stock||0;
-  var numVal=parseFloat(display)||0;
+  var packSz=packSizeOf(item);
+  // When an item has a pack size, physical counting is far easier in packs:
+  // enter "149" packs + "14" loose instead of computing 4,484 by hand.
+  var [byPack,setByPack]=useState(false);
+  var [looseVal,setLooseVal]=useState("");
+  var rawVal=parseFloat(display)||0;
   var isNeg=display.startsWith("-");
+  var numVal=(packSz&&byPack)
+    ? packsToBase(item,Math.abs(rawVal),parseFloat(looseVal)||0)
+    : Math.abs(rawVal);
   var preview=mode==="adjust"
     ? Math.max(0,current+(isNeg?-numVal:numVal))
     : Math.max(0,numVal);
@@ -5489,6 +5536,33 @@ function StockEditModal({item,db,user,branchId,showT,onClose,boms=[]}){
           border:"2px solid #1565C0"}},
           h("div",{style:{fontSize:9,color:"#888",marginBottom:2,textAlign:"left"}},
             mode==="adjust"?(isNeg?"DEDUCT":"ADD")+" AMOUNT":"SET STOCK TO"),
+          packSz>0&&h("div",{style:{marginBottom:8}},
+            h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5,marginBottom:6}},
+              h("button",{onClick:function(){setByPack(false);setLooseVal("");},
+                style:{padding:"6px",borderRadius:7,fontSize:10,fontWeight:700,cursor:"pointer",
+                  border:"2px solid "+(!byPack?"#1565C0":"#ddd"),
+                  background:!byPack?"#E3F2FD":"#fff",color:!byPack?"#1565C0":"#666"}},
+                "Bilang sa "+baseUnitOf(item)),
+              h("button",{onClick:function(){setByPack(true);},
+                style:{padding:"6px",borderRadius:7,fontSize:10,fontWeight:700,cursor:"pointer",
+                  border:"2px solid "+(byPack?"#1565C0":"#ddd"),
+                  background:byPack?"#E3F2FD":"#fff",color:byPack?"#1565C0":"#666"}},
+                "Bilang sa "+packUnitOf(item))
+            ),
+            byPack&&h("div",{style:{display:"flex",gap:6,alignItems:"center"}},
+              h("div",{style:{fontSize:10,color:"#666",flex:1}},
+                "Tirang "+baseUnitOf(item)+" (hindi buong "+packUnitOf(item)+")"),
+              h("input",{type:"number",min:0,value:looseVal,
+                onChange:function(e){setLooseVal(e.target.value);},
+                placeholder:"0",
+                style:{width:74,padding:"6px 8px",border:"1px solid #ddd",
+                  borderRadius:7,fontSize:12,textAlign:"right",outline:"none"}})
+            ),
+            byPack&&h("div",{style:{fontSize:10,color:"#1565C0",fontWeight:700,marginTop:5}},
+              (Math.abs(rawVal)||0)+" "+packUnitOf(item)+
+              ((parseFloat(looseVal)||0)?" + "+looseVal+" "+baseUnitOf(item):"")+
+              " = "+numVal.toLocaleString("en-PH")+" "+baseUnitOf(item))
+          ),
           h("div",{style:{fontSize:30,fontWeight:900,color:"#1565C0",minHeight:40,letterSpacing:2}},
             display||"0"),
           display&&h("div",{style:{fontSize:11,color:"#666",marginTop:4,
@@ -7233,7 +7307,7 @@ function NewInventoryItemForm({db,user,branchId,showT,onClose,invBranch}){
   const [cats,setCats]=useState(DEFAULT_CATS);
   const [newCat,setNewCat]=useState("");
   const [showAddCat,setShowAddCat]=useState(false);
-  const [form,setForm]=useState({name:"",unit:"pc",cat:"Other",stock:"0",minStock:"10",price:"0",cost:"0"});
+  const [form,setForm]=useState({name:"",unit:"pc",cat:"Other",stock:"0",minStock:"10",price:"0",cost:"0",packUnit:"",packSize:""});
   const [saving,setSaving]=useState(false);
 
   // Load custom categories
@@ -7273,6 +7347,8 @@ function NewInventoryItemForm({db,user,branchId,showT,onClose,invBranch}){
       const id="inv_"+Date.now();
       await setDoc(doc(db,col,id),{
         id,name:form.name,unit:form.unit,cat:form.cat,
+        packUnit:form.packUnit||"",
+        packSize:parseFloat(form.packSize)||0,
         stock:parseFloat(form.stock)||0,
         minStock:parseFloat(form.minStock)||10,
         price:parseFloat(form.price)||0,
@@ -7334,6 +7410,36 @@ function NewInventoryItemForm({db,user,branchId,showT,onClose,invBranch}){
           style:{width:"100%",padding:"8px",border:"1px solid #ddd",borderRadius:7,fontSize:12,outline:"none"}},
           cats.map(c=>h("option",{key:c,value:c},c)))
       )
+    ),
+    // Pack detail — how it is bought/counted vs how it is consumed
+    h("div",{style:{background:"#FFFDE7",border:"1px solid #FFE082",borderRadius:8,
+      padding:"9px 10px",marginBottom:10}},
+      h("div",{style:{fontSize:9,fontWeight:800,color:"#E65100",letterSpacing:1,marginBottom:6}},
+        "PACK DETAIL (optional)"),
+      h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
+        h("div",null,
+          h("div",{style:{fontSize:9,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},"PACK UNIT"),
+          h("select",{value:form.packUnit||"",
+            onChange:e=>setForm(p=>({...p,packUnit:e.target.value})),
+            style:{width:"100%",padding:"8px",border:"1px solid #ddd",borderRadius:7,fontSize:12,outline:"none"}},
+            h("option",{value:""},"— wala —"),
+            UNITS.map(u=>h("option",{key:u,value:u},u)))
+        ),
+        h("div",null,
+          h("div",{style:{fontSize:9,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},
+            "ILAN KADA PACK"),
+          h("input",{type:"number",min:0,value:form.packSize||"",
+            onChange:e=>setForm(p=>({...p,packSize:e.target.value})),
+            placeholder:"hal. 30",
+            style:{width:"100%",padding:"8px",border:"1px solid #ddd",
+              borderRadius:7,fontSize:12,outline:"none",boxSizing:"border-box"}})
+        )
+      ),
+      h("div",{style:{fontSize:9,color:"#888",marginTop:5}},
+        (Number(form.packSize)>1&&form.packUnit)
+          ? ("1 "+form.packUnit+" = "+form.packSize+" "+(form.unit||"pc")
+             +". Ang stock ay laging naka-"+(form.unit||"pc")+"; pack ang gamit sa receiving at bilangan.")
+          : "Iwanang blangko kung iisa lang ang unit. Hindi nito binabago ang BOM deduction.")
     ),
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
       fld("Current Stock","stock","number"),
@@ -9713,7 +9819,10 @@ function App(){
               const low=(item.stock||0)<(item.minStock||0);
               return h("div",{key:item.id,style:{display:"grid",gridTemplateColumns:"2fr 90px 80px 80px 80px 70px 110px",padding:"9px 14px",borderBottom:"1px solid #f9f9f9",alignItems:"center",background:low?"#FFF8F8":"#fff"}},
                 h("div",{style:{fontWeight:600,fontSize:11,display:"flex",alignItems:"center",gap:5}},low&&h("span",null,"⚠️"),item.name),
-                h("div",null,h("span",{style:{background:C.info,color:"#fff",fontSize:8,padding:"2px 7px",borderRadius:20,fontWeight:700}},(item.stock||0).toLocaleString()+" "+(item.unit||""))),
+                h("div",null,
+                  h("span",{style:{background:C.info,color:"#fff",fontSize:8,padding:"2px 7px",borderRadius:20,fontWeight:700}},(item.stock||0).toLocaleString()+" "+(item.unit||"")),
+                  packSizeOf(item)>0&&h("div",{style:{fontSize:8,color:C.muted,marginTop:2}},fmtPacks(item))
+                ),
                 h("div",{style:{fontSize:10}},"₱"+(item.price||0).toFixed(2)),
                 h("div",{style:{fontSize:10}},"₱"+(item.cost||0).toFixed(2)),
                 h("div",{style:{fontSize:10,color:C.success,fontWeight:700}},(item.margin||0)+"%"),
