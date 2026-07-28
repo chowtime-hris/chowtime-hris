@@ -1437,6 +1437,22 @@ function ItemCustomizer({item,onAdd,onClose,optionGroups=[],priceType="retail",u
 
 // ─── PO FORM (Branch creates Purchase Order) ─────────────
 function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvances,branches=BRANCHES,editPO=null}){
+  // Main's catalogue, loaded live. The branch is ordering FROM the commissary,
+  // so the list must be Main's items at Main's transfer price — not the
+  // branch's own stock and not the hardcoded seed.
+  const [mainCat,setMainCat] = useState(null);
+  useEffect(()=>{
+    let alive=true;
+    (async()=>{
+      try{
+        const snap=await getDocs(collection(db,"inventory"));
+        const rows=snap.docs.map(d=>({...d.data(),id:d.id}));
+        if(alive)setMainCat(rows);
+      }catch(e){ if(alive)setMainCat([]); }
+    })();
+    return()=>{alive=false;};
+  },[]);
+
   // When editing, seed the catalogue with the quantities already ordered.
   const [items,setItems]     = useState(()=>{
     const prev={};
@@ -1458,8 +1474,47 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
     const branchCode = branchId.toUpperCase().replace("CT-","");
     setSoNum(branchCode+"-PO-"+String(nextNum).padStart(4,"0"));
   },[branchId,advances.length]);
+
+  // Rebuild the rows once Main's catalogue arrives, preserving any quantities
+  // already typed (and any quantities from the PO being edited).
+  useEffect(()=>{
+    if(!mainCat)return;
+    const src=mainCat.length?mainCat:INIT_INVENTORY;
+    setItems(prevRows=>{
+      const keep={};
+      (prevRows||[]).forEach(r=>{ if(r.orderQty||r.note)keep[r.id]={qty:r.orderQty,note:r.note}; });
+      ((editPO&&editPO.items)||[]).forEach(i=>{ if(!keep[i.id])keep[i.id]={qty:i.qty||0,note:i.note||""}; });
+      return src.map(i=>({...i,
+        orderQty:(keep[i.id]&&keep[i.id].qty)||0,
+        note:(keep[i.id]&&keep[i.id].note)||""}));
+    });
+  },[mainCat]);
+
   const ordered = items.filter(i=>i.orderQty>0);
   const [vatType,setVatType] = useState("vat"); // vat | nonvat | zerovat
+  const [srch,setSrch]       = useState("");
+  const [catFilter,setCat]   = useState("");
+  const [onlyPicked,setOnlyPicked] = useState(false);
+
+  // Category counts come from the WHOLE catalogue, not the filtered view —
+  // the number next to a category has to say how many are in it, not how
+  // many survive the current search.
+  const catCounts=items.reduce((m,i)=>{
+    const c=i.cat||"Uncategorized";
+    m[c]=(m[c]||0)+1; return m;
+  },{});
+  const catList=Object.keys(catCounts).sort();
+
+  const visible=items.filter(i=>{
+    if(onlyPicked&&!(i.orderQty>0))return false;
+    if(catFilter&&(i.cat||"Uncategorized")!==catFilter)return false;
+    if(srch){
+      const q=srch.toLowerCase();
+      if(!String(i.name||"").toLowerCase().includes(q)
+        &&!String(i.cat||"").toLowerCase().includes(q))return false;
+    }
+    return true;
+  });
 
   const submit = async()=>{
     if(!ordered.length){showT("Add at least 1 item","warn");return;}
@@ -1467,7 +1522,9 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
       _type:"po", poNum:soNum,
       branch:branchId,
       branchName:branches.find(b=>b.id===branchId)?.full||branchId,
-      items:ordered.map(i=>({id:i.id,name:i.name,unit:i.unit,qty:i.orderQty,note:i.note||"",price:0})),
+      items:ordered.map(i=>({id:i.id,name:i.name,unit:i.unit,qty:i.orderQty,
+        note:i.note||"",price:Number(i.price)||0,
+        packUnit:i.packUnit||"",packSize:Number(i.packSize)||0})),
       date:today,
       deliveryRequested:deliveryReq,
       notes,
@@ -1548,6 +1605,37 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
       ),
 
       // Items table
+      // Search / category / picked-only
+      h("div",{style:{padding:"9px 20px",borderBottom:"1px solid #eee",
+        display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}},
+        h("input",{value:srch,onChange:e=>setSrch(e.target.value),
+          placeholder:"🔍 Hanapin ang item...",
+          style:{flex:1,minWidth:160,padding:"7px 10px",border:"1px solid "+C.border,
+            borderRadius:8,fontSize:11,outline:"none"}}),
+        h("select",{value:catFilter,onChange:e=>setCat(e.target.value),
+          style:{padding:"7px 10px",border:"1px solid "+(catFilter?C.primary:C.border),
+            borderRadius:8,fontSize:11,outline:"none",cursor:"pointer",
+            background:catFilter?"#FFF0F0":"#fff",
+            color:catFilter?C.primary:C.text,fontWeight:catFilter?700:400}},
+          h("option",{value:""},"Lahat ng kategorya ("+items.length+")"),
+          catList.map(c=>h("option",{key:c,value:c},"("+catCounts[c]+") "+c))
+        ),
+        h("button",{onClick:()=>setOnlyPicked(v=>!v),
+          style:{padding:"7px 11px",borderRadius:8,fontSize:11,cursor:"pointer",
+            fontWeight:onlyPicked?800:500,
+            border:"1px solid "+(onlyPicked?C.primary:C.border),
+            background:onlyPicked?"#FFF0F0":"#fff",
+            color:onlyPicked?C.primary:C.text}},
+          "🛒 Napili ("+ordered.length+")"),
+        (srch||catFilter||onlyPicked)&&h("button",{
+          onClick:()=>{setSrch("");setCat("");setOnlyPicked(false);},
+          style:{padding:"7px 10px",borderRadius:8,fontSize:11,cursor:"pointer",
+            border:"none",background:"none",color:C.muted,textDecoration:"underline"}},
+          "Clear"),
+        h("div",{style:{width:"100%",fontSize:9,color:C.muted}},
+          "Showing "+visible.length+" of "+items.length+" item/s")
+      ),
+
       h("div",{style:{flex:1,overflowY:"auto",padding:"0"}},
         // Table header
         h("div",{style:{display:"grid",gridTemplateColumns:"1fr 80px 80px 1fr",
@@ -1556,7 +1644,12 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
           ["ITEM","CATEGORY","QTY","LAST PRICE","NOTE"].map(h2=>h("div",{key:h2,
             style:{fontSize:8,fontWeight:700,color:C.muted,letterSpacing:1}},h2))
         ),
-        items.map((item,idx)=>h("div",{key:item.id,
+        visible.length===0&&h("div",{style:{padding:"34px 20px",textAlign:"center",
+          color:C.muted,fontSize:11}},
+          h("div",{style:{fontSize:26,marginBottom:7}},"🔍"),
+          onlyPicked?"Wala ka pang napiling item":"Walang item na tumugma"),
+        visible.map((item)=>{const idx=items.findIndex(x=>x.id===item.id);
+          return h("div",{key:item.id,
           style:{display:"grid",gridTemplateColumns:"1fr 80px 80px 70px 1fr",
             padding:"8px 20px",borderBottom:"1px solid #f5f5f5",alignItems:"center",
             background:(item.orderQty||0)>0?"#FFF8F0":"#fff"}},
@@ -1598,14 +1691,14 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
           })(),
           // Last price (from item data)
           h("div",{style:{fontSize:10,color:C.muted,textAlign:"center"}},
-            item.cost>0?"₱"+item.cost.toFixed(2):"—"),
+            (item.price||0)>0?"₱"+(item.price||0).toFixed(2):"—"),
           // Note
           h("input",{value:item.note||"",
             onChange:e=>setItems(p=>p.map((x,i)=>i===idx?{...x,note:e.target.value}:x)),
             placeholder:"Special instruction...",
             style:{padding:"5px 8px",border:"1px solid "+C.border,borderRadius:6,
               fontSize:10,outline:"none",width:"100%",boxSizing:"border-box"}})
-        ))
+        );})
       ),
 
       // Footer summary
@@ -1648,7 +1741,7 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
             ),
             // Computed totals
             (()=>{
-              const estSubtotal=ordered.reduce((s,i)=>s+(i.cost||0)*(i.orderQty||0),0);
+              const estSubtotal=ordered.reduce((s,i)=>s+(i.price||0)*(i.orderQty||0),0);
               const vatAmt=vatType==="vat"?estSubtotal*0.12:0;
               const grandTotal=estSubtotal+vatAmt;
               return h("div",{style:{background:"#fff",borderRadius:8,padding:"10px",
