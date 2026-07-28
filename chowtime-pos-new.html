@@ -1474,6 +1474,10 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
     };
     try{
       await addDoc(collection(db,"advances"),po);
+      await notify(db,{to:"ct-main",type:"po_new",
+        title:"Bagong order — "+(po.branchName||branchId),
+        message:ordered.length+" item/s hiniling"+(deliveryReq?" · gusto "+deliveryReq:""),
+        page:"po_monitor",ref:soNum,by:user.name});
       showT(soNum+" submitted to Commissary ✓");
     }catch(e){showT("Saved offline","warn");}
     onClose();
@@ -1737,6 +1741,11 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
         }
         try{ await updateDoc(doc(db,"advances",po._docId),{stockIssued:true}); }catch(e3){}
       }
+      await notify(db,{to:po.branch,type:"dr_issued",
+        title:drNum+" — padala na",
+        message:delivered.length+" item/s · P"+(Number(totalAmt)||0).toFixed(2)
+          +(deliveryDate?" · dating "+deliveryDate:""),
+        page:"stock_order",ref:po.poNum||drNum,by:user.name});
       showT(drNum+" issued ✓ · "+moved+" item/s deducted from main");
     }catch(e){showT("Error issuing DR","err");console.error(e);}
   };
@@ -1985,6 +1994,21 @@ function DRCheckForm({po,db,branchId,user,showT,INIT_INVENTORY,setAdvances,advan
             stock:item.receivedQty||0,lastRestocked:serverTimestamp()
           });
         }
+      }
+      const shortLines=received.filter(i=>(i.discrepancy||0)!==0);
+      await notify(db,{to:"ct-main",
+        type:hasDisc?"discrepancy":"po_received",
+        title:hasDisc?"May discrepancy — "+(po.branchName||branchId)
+                     :"Natanggap na — "+(po.branchName||branchId),
+        message:hasDisc
+          ?shortLines.map(i=>i.name+" "+(i.discrepancy>0?"+":"")+i.discrepancy).join(", ")
+          :received.length+" item/s tama ang dami",
+        page:"po_monitor",ref:po.drNum||po.poNum||"",by:user.name});
+      if(hasDisc){
+        await notify(db,{to:branchId,type:"discrepancy",
+          title:"Naitala ang discrepancy",
+          message:shortLines.length+" item/s hindi tugma sa DR",
+          page:"stock_order",ref:po.drNum||po.poNum||"",by:user.name});
       }
       showT(hasDisc?"Receipt confirmed with discrepancy ⚠️":"Receipt confirmed ✓ Inventory updated!",hasDisc?"warn":"ok");
     }catch(e){showT("Error confirming receipt","err");}
@@ -5024,6 +5048,36 @@ function BranchSettingsPage({branchId,curBranch,user,db,showT}){
     )
   );
 }
+
+// ─── NOTIFICATIONS ────────────────────────────────────────
+// One row per event, addressed to a single branch id via `to`. Everything is
+// best-effort: a failed notify must never block the action that caused it.
+async function notify(db,n){
+  try{
+    await addDoc(collection(db,"notifications"),{
+      to:(n&&n.to)||"",
+      type:(n&&n.type)||"info",
+      title:(n&&n.title)||"",
+      message:(n&&n.message)||"",
+      page:(n&&n.page)||"",
+      ref:(n&&n.ref)||"",
+      by:(n&&n.by)||"",
+      read:false,
+      date:new Date().toISOString().slice(0,10),
+      at:serverTimestamp()
+    });
+  }catch(e){console.warn("notify failed:",e);}
+}
+
+const NOTIF_META={
+  po_new:      {icon:"\uD83D\uDCE5", color:"#1565C0"},
+  dr_issued:   {icon:"\uD83D\uDE9A", color:"#E65100"},
+  po_received: {icon:"\u2705",        color:"#2E7D32"},
+  discrepancy: {icon:"\u26A0\uFE0F", color:"#C62828"},
+  low_stock:   {icon:"\uD83D\uDCE6", color:"#E65100"},
+  void:        {icon:"\uD83D\uDEAB", color:"#C62828"},
+  info:        {icon:"\u2139\uFE0F", color:"#666"}
+};
 
 // ─── SHARED VOID ROUTINE ──────────────────────────────────
 // There were two void paths: the Orders list "Void" button (owner/manager) and
@@ -8240,6 +8294,8 @@ function App(){
   const [chkToMode,setChkToMode]=useState("all");        // "all" follows ORDER TYPE
   const [chkToPicks,setChkToPicks]=useState({});         // {cartId:{pickIdx:toQty}}
   const [posBoms,setPosBoms]=useState({});               // bom docs for stock checks
+  const [notifs,setNotifs]=useState([]);                 // addressed to this branch
+  const [showNotifs,setShowNotifs]=useState(false);
   const [openNav,setOpenNav]=useState({});               // which sidebar groups are expanded
   const [heldOrders,setHeldOrders]=useState([]);         // parked / on-hold carts
   const [showHeld,setShowHeld]=useState(false);
@@ -8349,6 +8405,18 @@ function App(){
         ?query(collection(db,"cash_log"),orderBy("timestamp","desc"),limit(100))
         :query(collection(db,"cash_log"),where("branch","==",bId),orderBy("timestamp","desc"),limit(50));
       unsubs.push(onSnapshot(cq,snap=>setCashLog(snap.docs.map(d=>({...d.data(),_docId:d.id}))),()=>{}));
+    }catch(e){}
+
+    // Notifications addressed to this branch. Sorted client-side so the query
+    // stays a single equality filter and needs no composite index.
+    try{
+      unsubs.push(onSnapshot(
+        query(collection(db,"notifications"),where("to","==",bId),limit(60)),
+        snap=>{
+          const list=snap.docs.map(d=>({...d.data(),_docId:d.id}));
+          list.sort((a,b)=>((b.at&&b.at.seconds)||0)-((a.at&&a.at.seconds)||0));
+          setNotifs(list);
+        },()=>{}));
     }catch(e){}
 
     // BOM docs — needed to tell whether an item can still be made
@@ -9939,10 +10007,80 @@ function App(){
                 new Date().toLocaleDateString("en-PH",{weekday:"short",month:"short",day:"numeric"})+" · "+curBranch.name)
             )
           ),
-          h("button",{onClick:handleSignOut,
-            style:{padding:"5px 12px",background:C.primary,border:"none",
-              borderRadius:7,color:"#fff",fontWeight:700,fontSize:10,cursor:"pointer"}},
-            "🚪 Sign Out")
+          h("div",{style:{display:"flex",alignItems:"center",gap:8,position:"relative"}},
+            // Notification bell
+            (function(){
+              const unread=notifs.filter(x=>!x.read).length;
+              return h("div",{style:{position:"relative"}},
+                h("button",{onClick:()=>setShowNotifs(v=>!v),
+                  style:{width:32,height:32,borderRadius:9,cursor:"pointer",
+                    border:"1px solid "+(unread?C.primary:C.border),
+                    background:unread?"#FFF0F0":"#fff",fontSize:15,lineHeight:1,
+                    position:"relative"}},
+                  "\uD83D\uDD14",
+                  unread>0&&h("span",{style:{position:"absolute",top:-5,right:-5,
+                    background:C.primary,color:"#fff",borderRadius:10,fontSize:8,
+                    fontWeight:900,padding:"1px 5px",minWidth:15}},
+                    unread>9?"9+":String(unread))
+                ),
+                showNotifs&&h("div",{style:{position:"absolute",right:0,top:38,width:320,
+                  maxHeight:400,overflowY:"auto",background:"#fff",zIndex:950,
+                  border:"1px solid "+C.border,borderRadius:12,
+                  boxShadow:"0 12px 32px rgba(0,0,0,.16)"}},
+                  h("div",{style:{padding:"10px 13px",borderBottom:"1px solid "+C.border,
+                    display:"flex",justifyContent:"space-between",alignItems:"center"}},
+                    h("b",{style:{fontSize:12}},"Notifications"),
+                    unread>0&&h("button",{
+                      onClick:async()=>{
+                        for(const x of notifs.filter(y=>!y.read)){
+                          try{await updateDoc(doc(db,"notifications",x._docId),{read:true});}catch(e){}
+                        }
+                      },
+                      style:{background:"none",border:"none",color:C.primary,
+                        fontSize:9,fontWeight:700,cursor:"pointer"}},"Basahin lahat")
+                  ),
+                  notifs.length===0
+                    ? h("div",{style:{padding:"28px 14px",textAlign:"center",
+                        color:C.muted,fontSize:11}},
+                        h("div",{style:{fontSize:26,marginBottom:6}},"\uD83D\uDD14"),
+                        "Wala pang notification")
+                    : notifs.slice(0,20).map(nf=>{
+                        const m=NOTIF_META[nf.type]||NOTIF_META.info;
+                        const t=nf.at&&nf.at.toDate?nf.at.toDate():null;
+                        return h("button",{key:nf._docId,
+                          onClick:async()=>{
+                            if(nf.page)setPage(nf.page);
+                            setShowNotifs(false);
+                            if(!nf.read){
+                              try{await updateDoc(doc(db,"notifications",nf._docId),{read:true});}catch(e){}
+                            }
+                          },
+                          style:{display:"flex",gap:9,width:"100%",textAlign:"left",
+                            padding:"10px 13px",border:"none",cursor:"pointer",
+                            borderBottom:"1px solid #f5f5f5",
+                            background:nf.read?"#fff":"#FFFBF5"}},
+                          h("span",{style:{fontSize:15,flexShrink:0}},m.icon),
+                          h("div",{style:{flex:1,minWidth:0}},
+                            h("div",{style:{fontSize:11,fontWeight:nf.read?600:800,
+                              color:m.color,marginBottom:1}},nf.title||""),
+                            h("div",{style:{fontSize:10,color:C.muted,lineHeight:1.4}},nf.message||""),
+                            h("div",{style:{fontSize:8,color:"#bbb",marginTop:2}},
+                              (nf.ref?nf.ref+" · ":"")+
+                              (t?t.toLocaleString("en-PH",{month:"short",day:"numeric",
+                                hour:"2-digit",minute:"2-digit"}):(nf.date||"")))
+                          ),
+                          !nf.read&&h("span",{style:{width:7,height:7,borderRadius:"50%",
+                            background:C.primary,flexShrink:0,marginTop:4}})
+                        );
+                      })
+                )
+              );
+            })(),
+            h("button",{onClick:handleSignOut,
+              style:{padding:"5px 12px",background:C.primary,border:"none",
+                borderRadius:7,color:"#fff",fontWeight:700,fontSize:10,cursor:"pointer"}},
+              "🚪 Sign Out")
+          )
         ),
 
         h("div",{key:page,style:{flex:1,display:"flex",flexDirection:"column"}},
@@ -12331,6 +12469,17 @@ function App(){
 
 
     // NEW INVENTORY ITEM MODAL
+    modal==="new_po"&&h("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",
+      display:"flex",alignItems:"center",justifyContent:"center",zIndex:900,padding:16}},
+      h("div",{style:{background:"#fff",borderRadius:16,width:"100%",maxWidth:860,
+        maxHeight:"88vh",overflowY:"auto"}},
+        POForm({branchId,user,db,
+          // the live catalogue, not the hardcoded seed list
+          INIT_INVENTORY:(inventory&&inventory.length?inventory:INIT_INVENTORY),
+          onClose:()=>setModal(null),showT,advances,setAdvances,branches})
+      )
+    ),
+
     modal==="new_inv_item"&&h("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",
       display:"flex",alignItems:"center",justifyContent:"center",zIndex:900}},
       h("div",{style:{background:"#fff",borderRadius:16,padding:"20px",width:380,
