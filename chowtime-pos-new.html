@@ -2290,12 +2290,36 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
     showHistory&&h("div",null,
       h("div",{style:{display:"flex",gap:8,marginBottom:13,alignItems:"center"}},
         h("div",{style:{fontSize:10,color:C.muted}},"Select date:"),
-        h("select",{value:selDate,onChange:e=>setSelDate(e.target.value),
-          style:{padding:"6px 10px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none"}},
-          history.map(c=>h("option",{key:c.date,value:c.date},c.date+(c.isClosing?" (Closing)":"")))
-        )
+        h("select",{value:history.some(c=>c.date===selDate)?selDate:"",
+          disabled:history.length===0,
+          onChange:e=>setSelDate(e.target.value),
+          style:{padding:"6px 10px",border:"1px solid "+C.border,borderRadius:7,
+            fontSize:11,outline:"none",
+            background:history.length===0?"#f5f5f5":"#fff",
+            color:history.length===0?C.muted:C.text}},
+          history.length===0
+            ? h("option",{value:""},"\u2014 walang record \u2014")
+            : [h("option",{key:"_",value:"",disabled:true},"\u2014 pumili ng petsa \u2014")]
+                .concat(history.map(c=>h("option",{key:c.date,value:c.date},
+                  c.date+(c.isClosing?" (Closing)":""))))
+        ),
+        history.length>0&&h("span",{style:{fontSize:9,color:C.muted}},
+          history.length+" saved count"+(history.length>1?"s":""))
       ),
-      selHistory?h("div",null,
+      history.length===0
+        ?h("div",{style:{background:"#fff",border:"1px dashed "+C.border,borderRadius:12,
+          padding:"34px 20px",textAlign:"center"}},
+          h("div",{style:{fontSize:34,marginBottom:9}},"\uD83D\uDCED"),
+          h("div",{style:{fontSize:13,fontWeight:800,marginBottom:5}},"Wala pang naka-save na cash count"),
+          h("div",{style:{fontSize:11,color:C.muted,marginBottom:14,lineHeight:1.6}},
+            "Lumilitaw dito ang record kapag nag-save ka ng bilangan.",h("br"),
+            "Pindutin ang \u2190 Current Count, ilagay ang denominations, tapos \uD83D\uDCBE Save."),
+          h("button",{onClick:()=>setShowHistory(false),
+            style:{padding:"9px 18px",background:C.primary,border:"none",borderRadius:8,
+              color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}},
+            "\u2190 Pumunta sa Current Count")
+        )
+      :selHistory?h("div",null,
         // Summary cards
         h("div",{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:13}},
           h(Stat,{label:"Total Cash",value:"₱"+selHistory.totalCash?.toFixed(2),icon:"💵",color:C.primary}),
