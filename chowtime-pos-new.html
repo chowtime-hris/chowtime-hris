@@ -914,6 +914,7 @@ function printZ(zd,branchName,cashier){
   <div class="row"><span>Opening Fund:</span><span>P${(zd.opening||0).toFixed(2)}</span></div>
   <div class="row"><span>Gross Sales:</span><span>P${(zd.gross||0).toFixed(2)}</span></div>
   <div class="row"><span>Discounts:</span><span>-P${(zd.discounts||0).toFixed(2)}</span></div>
+  <div class="row"><span>Voids (${zd.voidCount||0}):</span><span>-P${(zd.voidAmt||0).toFixed(2)}</span></div>
   <div class="row"><span>Net Sales:</span><span>P${(zd.net||0).toFixed(2)}</span></div>
   <div class="row"><span>Cash In:</span><span>P${(zd.cashIn||0).toFixed(2)}</span></div>
   <div class="row"><span>Cash Out:</span><span>-P${(zd.cashOut||0).toFixed(2)}</span></div>
@@ -8792,13 +8793,20 @@ function App(){
   const buildZ=(bid)=>{
     const bo=orders.filter(o=>o.branch===bid);
     const bc=cashLog.filter(c=>c.branch===bid);
-    const gross=bo.reduce((s,o)=>s+(o.subtotal||0),0);
-    const discounts=bo.reduce((s,o)=>s+(o.discAmt||0),0);
+    const voided=bo.filter(o=>o.status==="void"||o.status==="partial-void");
+    const live=bo.filter(o=>o.status!=="void");
+    const gross=live.reduce((s,o)=>s+(o.subtotal||0),0);
+    const discounts=live.reduce((s,o)=>s+(o.discAmt||0),0);
     const net=bo.reduce((s,o)=>s+(o.total||0),0);
+    // a void leaves subtotal intact and total at 0, so the drop has to be
+    // stated or the reading simply does not add up
+    const voidAmt=voided.reduce((s,o)=>
+      s+((Number(o.originalTotal)||Number(o.subtotal)||0)-(Number(o.total)||0)),0);
+    const voidCount=voided.length;
     const opening=bc.filter(c=>c.type==="in"&&(c.desc||"").includes("Opening")).reduce((s,c)=>s+(c.amount||0),0);
     const cashIn=bc.filter(c=>c.type==="in"&&!(c.desc||"").includes("Opening")).reduce((s,c)=>s+(c.amount||0),0);
     const cashOut=bc.filter(c=>c.type==="out").reduce((s,c)=>s+(c.amount||0),0);
-    return{gross,discounts,net,opening,cashIn,cashOut,
+    return{gross,discounts,net,voidAmt,voidCount,opening,cashIn,cashOut,
       totalCash:opening+net+cashIn-cashOut,
       dineIn:bo.filter(o=>o.orderType==="dine-in").length,
       takeout:bo.filter(o=>o.orderType==="takeout").length,
@@ -9564,7 +9572,8 @@ function App(){
           h("div",{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}},
             h(Stat,{label:"All Branch Sales Today",
               value:"₱"+orders.filter(o=>o.date===new Date().toISOString().slice(0,10))
-                .reduce((s,o)=>s+(o.subtotal||0),0).toLocaleString(),
+                .filter(o=>o.status!=="void"&&o.status!=="cancelled")
+                .reduce((s,o)=>s+(o.total||0),0).toLocaleString(),
               sub:"From Firebase orders",icon:"📈",color:C.primary}),
             h(Stat,{label:"Live Orders",
               value:orders.filter(o=>o.status==="pending"||o.status==="cooking").length,
@@ -9589,8 +9598,9 @@ function App(){
                 h("div",{style:{fontSize:9,opacity:.7,marginBottom:4}},"🛒 WALK-IN POS SALES"),
                 h("div",{style:{fontSize:22,fontWeight:900}},
                   "₱"+orders.filter(o=>o.branch==="ct-main"&&
+                    o.status!=="void"&&o.status!=="cancelled"&&
                     o.date===new Date().toISOString().slice(0,10))
-                    .reduce((s,o)=>s+(o.subtotal||0),0).toLocaleString()),
+                    .reduce((s,o)=>s+(o.total||0),0).toLocaleString()),
                 h("div",{style:{fontSize:9,opacity:.6}},
                   orders.filter(o=>o.branch==="ct-main"&&
                     o.date===new Date().toISOString().slice(0,10)).length+" transactions today")
@@ -9633,11 +9643,14 @@ function App(){
                 const bOrders=orders.filter(function(o){
                   return o.branch===b.id&&o.date===new Date().toISOString().slice(0,10);
                 });
-                const bSales=bOrders.reduce(function(s,o){return s+(o.subtotal||0);},0);
+                const bSales=bOrders
+                  .filter(function(o){return o.status!=="void"&&o.status!=="cancelled";})
+                  .reduce(function(s,o){return s+(o.total||0);},0);
                 const bPending=bOrders.filter(function(o){return o.status==="pending";}).length;
                 const allBranchSales=orders.filter(function(o){
                   return o.date===new Date().toISOString().slice(0,10);
-                }).reduce(function(s,o){return s+(o.subtotal||0);},0);
+                }).filter(function(o){return o.status!=="void"&&o.status!=="cancelled";})
+                  .reduce(function(s,o){return s+(o.total||0);},0);
                 const pct=allBranchSales>0?Math.round(bSales/allBranchSales*100):0;
                 return h("div",{key:b.id,
                   style:{display:"flex",alignItems:"center",padding:"10px 16px",
@@ -10484,7 +10497,7 @@ function App(){
         page==="sales_report"&&h("div",null,
           h(SectionHeader,{title:"Sales Report (Firebase)"}),
           h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:12}},
-            h(Stat,{label:"Gross Sales",value:"₱"+orders.reduce((s,o)=>s+(o.subtotal||0),0).toFixed(2),icon:"💰",color:C.primary}),
+            h(Stat,{label:"Gross Sales",value:"₱"+orders.filter(o=>o.status!=="void").reduce((s,o)=>s+(o.subtotal||0),0).toFixed(2),icon:"💰",color:C.primary}),
             h(Stat,{label:"Total Discounts",value:"₱"+orders.reduce((s,o)=>s+(o.discAmt||0),0).toFixed(2),icon:"🏷️",color:C.danger}),
             h(Stat,{label:"Net Sales",value:"₱"+orders.filter(o=>o.status!=="void"&&o.status!=="cancelled").reduce((s,o)=>s+(o.total||0),0).toFixed(2),icon:"📈",color:C.success})
           ),
@@ -10555,7 +10568,8 @@ function App(){
               h("div",{style:{color:"#fff",fontSize:22,fontWeight:900}},
                 "₱"+myOrders.filter(function(o){
                   return o.date===new Date().toISOString().slice(0,10);
-                }).reduce(function(s,o){return s+(o.subtotal||0);},0).toLocaleString()),
+                }).filter(function(o){return o.status!=="void"&&o.status!=="cancelled";})
+                  .reduce(function(s,o){return s+(o.total||0);},0).toLocaleString()),
               h("div",{style:{color:"rgba(255,255,255,.5)",fontSize:9}},
                 myOrders.filter(function(o){
                   return o.date===new Date().toISOString().slice(0,10);
