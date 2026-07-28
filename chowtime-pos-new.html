@@ -1930,7 +1930,11 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
         setSaved(true);
       }
       setLoading(false);
-    },()=>setLoading(false));
+    },err=>{
+      console.error("cash_counts query failed:",err);
+      showT("Cash count: "+String(err&&err.message||"query failed").slice(0,90),"err");
+      setLoading(false);
+    });
     return()=>unsub();
   },[branchId,today]);
 
@@ -8253,8 +8257,21 @@ function App(){
 
   // ── COMPUTED FROM USER ────────────────────────────────────
   const role=user?ROLES[user.role]:null;
-  const branchId=(user?.branch==="all"||user?.branch==="comm")?"ct-wsfp":(user?.branch||"ct-wsfp");
+  // Every account except the owner is bound to a branch:
+  //   manager / cashier / crew -> user.branch is their own branch
+  //   commissary               -> is Main, so it is fixed, not chosen
+  //   owner (branch:"all")     -> has no home branch, so it must be stated
+  const isOwnerAll=(user?.branch==="all");
+  const isCommAcct=(user?.branch==="comm");
+  const [actingBranch,setActingBranch]=useState("ct-main");
+  const branchId=isOwnerAll?actingBranch
+    :(isCommAcct?"ct-main":(user?.branch||"ct-wsfp"));
   const curBranch=branches.find(b=>b.id===branchId)||BRANCHES[0];
+  // One rule for every stock collection, driven by the SAME branch the order
+  // is filed under. Previously this keyed off role, so an owner's sale was
+  // tagged WSFP but deducted from Main.
+  const invColFor=(bid)=>(bid==="ct-main"||bid==="main")?"inventory":"inventory_"+bid;
+  const logColFor=(bid)=>(bid==="ct-main"||bid==="main")?"inventory_log":"inventory_log_"+bid;
   // Get price based on type
   const getPriceByType=(item)=>{
     if(priceType==="franchisee"&&item.franchiseePrice) return item.franchiseePrice;
@@ -8535,7 +8552,7 @@ function App(){
         const bomData = {};
         bomSnap.docs.forEach(d=>{ bomData[d.id]={...d.data()}; });
         const isOwnerRole = user.role==="owner"||user.role==="commissary";
-        const logCol = isOwnerRole ? "inventory_log" : "inventory_log_"+branchId;
+        const logCol = logColFor(branchId);
         let totalDeductions = 0;
 
         for(const cartItem of cart){
@@ -8554,12 +8571,12 @@ function App(){
             const deductAmt = ((row.qty||0)*(cartItem.qty||1))/convFactor;
             
             // Determine correct inventory collection
-            const branchInvCol = "inventory_"+branchId;
+            const branchInvCol = invColFor(branchId);
             const mainInvCol = "inventory";
-            let deductCol = isOwnerRole ? mainInvCol : branchInvCol;
-            
-            // If branch staff, check if item is in branch inv, else try main
-            if(!isOwnerRole){
+            let deductCol = branchInvCol;
+
+            // Fall back to main only when the branch does not carry the item
+            if(branchInvCol!==mainInvCol){
               try{
                 const branchInvDoc = await getDoc(doc(db,branchInvCol,row.ingId));
                 if(!branchInvDoc.exists()){
@@ -8656,10 +8673,10 @@ function App(){
               try{
                 // invCol was never declared in this scope -> ReferenceError,
                 // swallowed by the catch below, so picks were never deducted.
-                let pCol = isOwnerRole ? "inventory" : "inventory_"+branchId;
-                if(!isOwnerRole){
+                let pCol = invColFor(branchId);
+                if(pCol!=="inventory"){
                   try{
-                    const bd=await getDoc(doc(db,"inventory_"+branchId,row.ingId));
+                    const bd=await getDoc(doc(db,pCol,row.ingId));
                     if(!bd.exists()){
                       const md=await getDoc(doc(db,"inventory",row.ingId));
                       if(md.exists())pCol="inventory";
@@ -9460,6 +9477,27 @@ function App(){
       ),
       h("div",{style:{padding:"6px 8px",flexShrink:0,
           borderTop:"1px solid rgba(255,255,255,.08)"}},
+        // Owner / commissary cover every branch, so the one they are
+        // transacting AS has to be explicit — orders, cash and stock all
+        // get filed against it.
+        isOwnerAll&&h("div",{style:{marginBottom:7}},
+          h("div",{style:{fontSize:7,letterSpacing:1,fontWeight:800,
+            color:"rgba(255,255,255,.35)",marginBottom:3,paddingLeft:4}},
+            "TRANSACTING AS"),
+          h("select",{value:actingBranch,
+            onChange:e=>setActingBranch(e.target.value),
+            style:{width:"100%",padding:"6px 7px",borderRadius:7,fontSize:10,
+              fontWeight:800,outline:"none",cursor:"pointer",
+              border:"1px solid rgba(255,255,255,.25)",
+              background:"rgba(255,255,255,.10)",color:"#fff"}},
+            h("option",{value:"ct-main",style:{color:"#000"}},"Main / Commissary"),
+            (branches||[]).filter(b=>b.id!=="ct-main").map(b=>
+              h("option",{key:b.id,value:b.id,style:{color:"#000"}},b.full||b.name))
+          ),
+          h("div",{style:{fontSize:7,color:"rgba(255,255,255,.3)",
+            marginTop:3,paddingLeft:4,lineHeight:1.4}},
+            "Dito mapupunta ang orders, cash at stock")
+        ),
         h("div",{style:{fontSize:8,color:"rgba(255,255,255,.2)",paddingLeft:4}},
           user.name+" · "+(role?.label||user.role))
       )
@@ -9938,6 +9976,7 @@ function App(){
                   [["Opening Fund","₱"+zd.opening.toFixed(2),C.success],
                    ["Gross Sales","₱"+zd.gross.toFixed(2),C.primary],
                    ["Discounts","-₱"+zd.discounts.toFixed(2),C.danger],
+                   ["Voids ("+(zd.voidCount||0)+")","-₱"+(zd.voidAmt||0).toFixed(2),C.danger],
                    ["Net Sales","₱"+zd.net.toFixed(2),C.success],
                    ["Cash In","₱"+zd.cashIn.toFixed(2),C.info],
                    ["Cash Out","-₱"+zd.cashOut.toFixed(2),C.warning],
