@@ -33,22 +33,64 @@ select,input,textarea,button{font-family:inherit;}
 // Pre-load React to ensure single instance
 window.__REACT_DEVTOOLS_GLOBAL_HOOK__ = { isDisabled: true };
 // Catch any uncaught errors and show them visibly  
-window.onerror = function(msg, src, line, col, err) {
-  document.getElementById("err-overlay").style.display="flex"; document.getElementById("err-overlay").innerHTML =
-    '<div style="padding:20px;font-family:monospace;background:#1a1a2e;min-height:100vh;color:#fff">' +
-    '<div style="font-size:30px;margin-bottom:12px">⚠️ Error</div>' +
-    '<div style="color:#ff6b6b;font-size:14px;margin-bottom:8px">' + msg + '</div>' +
-    '<div style="color:#ffd93d;font-size:11px">Line: ' + line + ' · Col: ' + col + '</div>' +
-    '<div style="color:#aaa;font-size:10px;margin-top:8px">Source: ' + src + '</div>' +
+// The old overlay put the message at the very top, so a phone screenshot of a
+// scrolled page showed only "Line: N" and no reason. Message first, full stack
+// below it, and a one-tap copy so the whole thing can be pasted somewhere.
+window.__showErr = function(title, msg, meta, stack){
+  var esc = function(t){ return String(t==null?"":t)
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); };
+  var payload = title+"\n"+msg+"\n"+meta+"\n\n"+(stack||"(no stack)");
+  var el = document.getElementById("err-overlay");
+  if(!el) { console.error(payload); return; }
+  el.style.display="flex";
+  el.innerHTML =
+    '<div style="padding:16px;font-family:monospace;background:#1a1a2e;min-height:100vh;'+
+      'width:100%;color:#fff;overflow:auto;box-sizing:border-box">' +
+    '<div style="font-size:22px;margin-bottom:10px">\u26A0\uFE0F '+esc(title)+'</div>' +
+    '<div style="background:#2b1620;border:1px solid #ff6b6b;border-radius:8px;'+
+      'padding:10px;margin-bottom:10px">' +
+      '<div style="color:#ff6b6b;font-size:13px;line-height:1.5;word-break:break-word">' +
+      esc(msg) + '</div></div>' +
+    '<div style="color:#ffd93d;font-size:11px;margin-bottom:10px;word-break:break-all">' +
+      esc(meta) + '</div>' +
+    '<button id="err-copy" style="padding:9px 14px;border:none;border-radius:7px;'+
+      'background:#ffd93d;color:#1a1a2e;font-weight:800;font-size:12px;cursor:pointer;'+
+      'margin-bottom:6px">\uD83D\uDCCB Copy error</button> ' +
+    '<button id="err-reload" style="padding:9px 14px;border:1px solid #666;border-radius:7px;'+
+      'background:transparent;color:#fff;font-size:12px;cursor:pointer;margin-bottom:6px">'+
+      '\u21BB Reload</button>' +
+    '<div style="color:#888;font-size:9px;margin:10px 0 4px">STACK</div>' +
+    '<pre style="color:#aaa;font-size:10px;white-space:pre-wrap;word-break:break-word;'+
+      'margin:0;line-height:1.5">' + esc(stack||"(no stack available)") + '</pre>' +
     '</div>';
+  var cp=document.getElementById("err-copy");
+  if(cp) cp.onclick=function(){
+    try{
+      navigator.clipboard.writeText(payload);
+      cp.textContent="\u2713 Copied";
+    }catch(e){
+      var ta=document.createElement("textarea");
+      ta.value=payload; document.body.appendChild(ta); ta.select();
+      try{document.execCommand("copy");cp.textContent="\u2713 Copied";}catch(e2){}
+      document.body.removeChild(ta);
+    }
+  };
+  var rl=document.getElementById("err-reload");
+  if(rl) rl.onclick=function(){ location.reload(); };
+};
+
+window.onerror = function(msg, src, line, col, err) {
+  window.__showErr("Error", msg,
+    "Line "+line+" · Col "+col+"  \u2022  "+src,
+    err && err.stack);
   return false;
 };
 window.addEventListener("unhandledrejection", function(e) {
-  document.getElementById("err-overlay").style.display="flex"; document.getElementById("err-overlay").innerHTML =
-    '<div style="padding:20px;font-family:monospace;background:#1a1a2e;min-height:100vh;color:#fff">' +
-    '<div style="font-size:30px;margin-bottom:12px">⚠️ Promise Error</div>' +
-    '<div style="color:#ff6b6b;font-size:14px">' + (e.reason?.message||e.reason||"Unknown error") + '</div>' +
-    '</div>';
+  var r = e.reason;
+  window.__showErr("Promise Error",
+    (r && r.message) || r || "Unknown error",
+    (r && r.code) ? ("code: "+r.code) : "",
+    r && r.stack);
 });
 </script>
 <script type="module">
@@ -8257,15 +8299,16 @@ function App(){
 
   // ── COMPUTED FROM USER ────────────────────────────────────
   const role=user?ROLES[user.role]:null;
-  // Every account except the owner is bound to a branch:
-  //   manager / cashier / crew -> user.branch is their own branch
-  //   commissary               -> is Main, so it is fixed, not chosen
-  //   owner (branch:"all")     -> has no home branch, so it must be stated
+  // Which branch a transaction is filed against. Every account resolves to
+  // exactly one, so there is nothing to choose at runtime:
+  //   manager / cashier / crew -> user.branch (their own branch)
+  //   commissary               -> Main
+  //   owner (branch:"all")     -> Main, where the owner actually sells
+  // Reporting is unaffected: buildZ(bid) takes a branch and the dashboard
+  // loops every branch, so an owner still sees the whole chain.
   const isOwnerAll=(user?.branch==="all");
   const isCommAcct=(user?.branch==="comm");
-  const [actingBranch,setActingBranch]=useState("ct-main");
-  const branchId=isOwnerAll?actingBranch
-    :(isCommAcct?"ct-main":(user?.branch||"ct-wsfp"));
+  const branchId=(isOwnerAll||isCommAcct)?"ct-main":(user?.branch||"ct-wsfp");
   const curBranch=branches.find(b=>b.id===branchId)||BRANCHES[0];
   // One rule for every stock collection, driven by the SAME branch the order
   // is filed under. Previously this keyed off role, so an owner's sale was
@@ -9477,29 +9520,10 @@ function App(){
       ),
       h("div",{style:{padding:"6px 8px",flexShrink:0,
           borderTop:"1px solid rgba(255,255,255,.08)"}},
-        // Owner / commissary cover every branch, so the one they are
-        // transacting AS has to be explicit — orders, cash and stock all
-        // get filed against it.
-        isOwnerAll&&h("div",{style:{marginBottom:7}},
-          h("div",{style:{fontSize:7,letterSpacing:1,fontWeight:800,
-            color:"rgba(255,255,255,.35)",marginBottom:3,paddingLeft:4}},
-            "TRANSACTING AS"),
-          h("select",{value:actingBranch,
-            onChange:e=>setActingBranch(e.target.value),
-            style:{width:"100%",padding:"6px 7px",borderRadius:7,fontSize:10,
-              fontWeight:800,outline:"none",cursor:"pointer",
-              border:"1px solid rgba(255,255,255,.25)",
-              background:"rgba(255,255,255,.10)",color:"#fff"}},
-            h("option",{value:"ct-main",style:{color:"#000"}},"Main / Commissary"),
-            (branches||[]).filter(b=>b.id!=="ct-main").map(b=>
-              h("option",{key:b.id,value:b.id,style:{color:"#000"}},b.full||b.name))
-          ),
-          h("div",{style:{fontSize:7,color:"rgba(255,255,255,.3)",
-            marginTop:3,paddingLeft:4,lineHeight:1.4}},
-            "Dito mapupunta ang orders, cash at stock")
-        ),
         h("div",{style:{fontSize:8,color:"rgba(255,255,255,.2)",paddingLeft:4}},
-          user.name+" · "+(role?.label||user.role))
+          user.name+" · "+(role?.label||user.role)),
+        h("div",{style:{fontSize:8,color:"rgba(255,255,255,.35)",paddingLeft:4,marginTop:1}},
+          curBranch.full)
       )
     ),
 
