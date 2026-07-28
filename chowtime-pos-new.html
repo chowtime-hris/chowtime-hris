@@ -886,21 +886,33 @@ function ItemCustomizer({item,onAdd,onClose,optionGroups=[],priceType="retail",u
   const linkedGroups=(optionGroups||[]).filter(function(g){return allLinkedIds.includes(g.id);});
   // FIX: Firebase writes choices[] (see BOMPage). Old code read options[] -> always empty.
   const grpChoices=function(g){return (g&&(g.choices||g.options))||[];};
-  // MODEL: 1 BOGO = customer picks 2 items (both chosen, can be the same one twice).
-  // A picker group declares how many picks per unit ordered:
-  //   explicit  -> getPerUnit: 2  on the option_groups doc  (wins over the name)
-  //   by name   -> "Get 2", "[R] Choose 2", "Pili 2", "Select 2"
-  //   fallback  -> BOGO item/variant with a "Get 1"-style name counts as 2
+  // MODEL: a picker group needs N picks PER ITEM, and a variant says how many
+  // items one ordered unit contains. Solo = 1 item, BOGO = 2 items.
+  // So "1 flavor per item" resolves to 1 pick on Solo and 2 picks on BOGO,
+  // and scales again with order qty — no per-variant config needed.
   const bogoCat=/bogo|buy\s*1\s*get/i.test(String((item&&item.category)||""));
   const bogoVar=/bogo|buy\s*1\s*get/i.test(String((selV&&selV.label)||""));
   const isBogoSel=bogoCat||bogoVar;
+  const unitsPerOrder=(selV&&typeof selV.itemsPerUnit==="number")
+    ? selV.itemsPerUnit
+    : (isBogoSel?2:1);
+  // picks required per ITEM:
+  //   perItem: 1        -> explicit field on the option_groups doc (best)
+  //   "Get 2"/"Pili 2"  -> from the name
+  //   "[R] ..." prefix  -> required, 1 per item
+  //   otherwise         -> 0, stays a plain optional group
+  const perItem=function(g){
+    if(typeof g.perItem==="number")return g.perItem;
+    var nm=String((g&&g.name)||"");
+    var m=/(?:get|choose|pick|select|pili|kuha)\s*(\d+)/i.exec(nm);
+    if(m)return parseInt(m[1],10)||0;
+    if(/^\s*\[R\]/i.test(nm))return 1;
+    return 0;
+  };
   const getPerUnit=function(g){
+    // legacy absolute field stays absolute so existing docs don't double up
     if(typeof g.getPerUnit==="number")return g.getPerUnit;
-    var m=/(?:get|choose|pick|select|pili|kuha)\s*(\d+)/i.exec((g&&g.name)||"");
-    if(!m)return 0;
-    var n=parseInt(m[1],10)||0;
-    // legacy "Get 1" groups on a BOGO deal really mean 2 picks per order
-    return (isBogoSel&&n===1)?2:n;
+    return perItem(g)*unitsPerOrder;
   };
   const isFreeGrp=function(g){return getPerUnit(g)>0;};
 
@@ -1109,15 +1121,23 @@ function ItemCustomizer({item,onAdd,onClose,optionGroups=[],priceType="retail",u
             style:{padding:"13px 0",borderBottom:"1px solid "+C.border}},
             h("div",{style:{fontSize:11,fontWeight:800,marginBottom:6,
               display:"flex",gap:7,alignItems:"center",flexWrap:"wrap"}},
-              free?String(group.name||"").replace(/(get|choose|pick|select|pili|kuha)\s*\d+/i,"Pumili ng "+cap):group.name,
+              (function(){
+                var nm=String(group.name||"").replace(/^\s*\[R\]\s*/i,"");
+                if(!free)return nm;
+                return /(get|choose|pick|select|pili|kuha)\s*\d+/i.test(nm)
+                  ?nm.replace(/(get|choose|pick|select|pili|kuha)\s*\d+/i,"Pumili ng "+cap)
+                  :nm;
+              })(),
               free
                 ?h("span",{style:{background:short?C.danger:"#2E7D32",color:"#fff",fontSize:9,
                     padding:"1px 7px",borderRadius:20}},got+"/"+cap+(short?" • Required":" ✓"))
                 :h("span",{style:{fontSize:9,color:C.muted,fontWeight:400}},"• Optional")
             ),
             free&&h("div",{style:{fontSize:9,color:C.muted,marginBottom:7}},
-              "Pumili ng "+cap+" item"+(qty>1?" ("+per+" kada BOGO × "+qty+")":"")+
-              " — pwedeng ulitin ang parehong item."),
+              cap===1
+                ?"Pumili ng 1 — required."
+                :"Pumili ng "+cap+" ("+(unitsPerOrder*qty)+" item × "
+                  +perItem(group)+") — pwedeng ulitin ang parehong pili."),
             choices.length===0&&h("div",{style:{fontSize:10,color:C.danger,background:"#FFEBEE",
               padding:"8px 10px",borderRadius:8}},
               "⚠️ Walang choices ang group na ito. Idagdag sa Menu & BOM → Option Groups."),
@@ -3588,6 +3608,8 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
   const [showAddChoice,setShowAddChoice] = useState(false);
   const [editingGrp,setEditingGrp]   = useState(null); // group id being renamed
   const [editingChoice,setEditingChoice] = useState(null); // choice id being renamed
+  const [editChVal,setEditChVal]         = useState("");   // controlled label
+  const [editChPrice,setEditChPrice]     = useState("");   // controlled priceAdd
 
   const ingredients = inventory;
 
@@ -3646,6 +3668,33 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
     setSaving(false);
   };
 
+  // selGroup is a snapshot captured on click — it never refreshes when the
+  // onSnapshot listener updates `groups`. Reading choices from it means edits
+  // are computed against stale data and can silently clobber newer ones.
+  // Always resolve against the live list.
+  const liveGroup = selGroup ? (groups.find(g=>g.id===selGroup.id)||selGroup) : null;
+  const liveChoices = (liveGroup&&liveGroup.choices)||[];
+
+  // Save a renamed / repriced choice
+  const saveChoiceEdit=async(ch)=>{
+    const label=(editChVal||"").trim();
+    if(!label){showT("Enter choice name","warn");return;}
+    if(liveChoices.find(c=>c.id!==ch.id&&c.label===label)){
+      showT("May ganitong choice na","warn");return;
+    }
+    const price=parseFloat(editChPrice)||0;
+    if(label===ch.label&&price===(ch.priceAdd||0)){setEditingChoice(null);return;}
+    const newChoices=liveChoices.map(c=>c.id===ch.id?Object.assign({},c,{label:label,priceAdd:price}):c);
+    try{
+      await updateDoc(doc(db,"option_groups",liveGroup.id),{choices:newChoices});
+      setEditingChoice(null);
+      showT("Saved ✓");
+    }catch(err){
+      console.error("Save choice failed:",err);
+      showT("Save failed: "+((err&&err.message)||err).toString().slice(0,70),"err");
+    }
+  };
+
   // Create new option group
   const createGroup=async()=>{
     const name=newGrpName.trim();
@@ -3663,9 +3712,9 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
   const addChoice=async()=>{
     const label=newChoiceLbl.trim();
     if(!label||!selGroup){showT("Enter choice name","warn");return;}
-    if((selGroup.choices||[]).find(c=>c.label===label)){showT("Choice already exists","warn");return;}
+    if(liveChoices.find(c=>c.label===label)){showT("Choice already exists","warn");return;}
     const price=parseFloat(newChoicePrice)||0;
-    const newChoices=[...(selGroup.choices||[]),{id:"ch_"+Date.now(),label,priceAdd:price}];
+    const newChoices=[...liveChoices,{id:"ch_"+Date.now(),label,priceAdd:price}];
     try{
       await updateDoc(doc(db,"option_groups",selGroup.id),{choices:newChoices});
       setNewChoiceLbl(""); setNewChoicePrice(""); setShowAddChoice(false);
@@ -3676,7 +3725,7 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
   // Delete choice
   const deleteChoice=async(ch)=>{
     if(!confirm("Delete choice \""+ch.label+"\"?"))return;
-    const newChoices=(selGroup.choices||[]).filter(c=>c.id!==ch.id);
+    const newChoices=liveChoices.filter(c=>c.id!==ch.id);
     try{
       await updateDoc(doc(db,"option_groups",selGroup.id),{choices:newChoices});
       if(selChoice&&selChoice.id===ch.id){setSelChoice(null);setEditOptBom([]);}
@@ -4114,6 +4163,30 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
                 cursor:"pointer",fontWeight:700}},
               showAddChoice?"✕":"+ Add")
           ),
+          // Required picks per item — drives the customizer's N/N counter
+          selGroup&&h("div",{style:{padding:"8px 14px",borderBottom:"1px solid "+C.border,
+            background:"#FFFDE7",display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}},
+            h("span",{style:{fontSize:10,fontWeight:700,flex:1,minWidth:150}},
+              "Required picks kada item"),
+            h("input",{type:"number",min:0,max:10,
+              value:(typeof (liveGroup||{}).perItem==="number"?liveGroup.perItem:0),
+              onChange:async e=>{
+                const v=Math.max(0,Math.min(10,parseInt(e.target.value,10)||0));
+                try{
+                  await updateDoc(doc(db,"option_groups",selGroup.id),{perItem:v});
+                }catch(err){
+                  console.error("perItem save failed:",err);
+                  showT("Save failed: "+((err&&err.message)||err).toString().slice(0,70),"err");
+                }
+              },
+              style:{width:64,padding:"6px 8px",border:"1px solid "+C.border,
+                borderRadius:7,fontSize:11,textAlign:"center",outline:"none"}}),
+            h("div",{style:{fontSize:9,color:C.muted,width:"100%"}},
+              (typeof (liveGroup||{}).perItem==="number"&&liveGroup.perItem>0)
+                ? "Solo = "+liveGroup.perItem+" pick, BOGO = "+(liveGroup.perItem*2)
+                  +" picks. Naka-required, hindi ma-checkout hangga't kulang."
+                : "0 = optional, walang required na bilang.")
+          ),
           // Add choice form
           selGroup&&showAddChoice&&h("div",{style:{padding:"8px 14px",
             borderBottom:"1px solid "+C.border,background:"#f0f8ff",
@@ -4140,13 +4213,13 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
           !selGroup
             ? h("div",{style:{padding:"30px",textAlign:"center",color:C.muted,fontSize:11}},
                 "← Select an option group")
-            : (selGroup.choices||[]).length===0
+            : liveChoices.length===0
               ? h("div",{style:{padding:"20px",textAlign:"center",color:C.muted,fontSize:11}},
                   "No choices yet.",h("br",null),
                   h("span",{style:{color:C.primary,cursor:"pointer",fontWeight:700},
                     onClick:()=>setShowAddChoice(true)},"+ Add choice"))
               : h("div",{style:{overflowY:"auto",maxHeight:"60vh"}},
-                  (selGroup.choices||[]).map(ch=>{
+                  liveChoices.map(ch=>{
                     const bomDocId="optgrp_"+selGroup.id;
                     const key="optgrp_"+selGroup.id+"__"+ch.id;
                     const isSel=selChoice&&selChoice.id===ch.id;
@@ -4156,24 +4229,31 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
                       background:editingChoice===ch.id?"#FFF8E1":isSel?"#FFF0F0":"#fff"}},
                     editingChoice===ch.id
                       // EDIT MODE - full row replacement
-                      ? h("div",{style:{display:"flex",gap:6,alignItems:"center",padding:"8px 14px"}},
-                          h("input",{id:"edit-ch-input",
-                            defaultValue:ch.label,key:"inp-"+ch.id,autoFocus:true,
-                            style:{flex:1,padding:"6px 10px",border:"2px solid "+C.primary,
-                              borderRadius:7,fontSize:12,outline:"none"}}),
-                          h("button",{
-                            onClick:async()=>{
-                              const inp=document.getElementById("edit-ch-input");
-                              const newLabel=inp?inp.value.trim():"";
-                              if(newLabel&&newLabel!==ch.label){
-                                const newChoices=(selGroup.choices||[]).map(c=>c.id===ch.id?{...c,label:newLabel}:c);
-                                try{
-                                  await updateDoc(doc(db,"option_groups",selGroup.id),{choices:newChoices});
-                                  showT("Saved ✓");
-                                }catch(err){showT("Error","err");}
-                              }
-                              setEditingChoice(null);
+                      ? h("div",{style:{display:"flex",gap:6,alignItems:"center",
+                            padding:"8px 14px",flexWrap:"wrap"}},
+                          h("input",{value:editChVal,autoFocus:true,
+                            onChange:e=>setEditChVal(e.target.value),
+                            onKeyDown:e=>{
+                              if(e.key==="Enter"){e.preventDefault();saveChoiceEdit(ch);}
+                              if(e.key==="Escape"){e.preventDefault();setEditingChoice(null);}
                             },
+                            style:{flex:1,minWidth:120,padding:"6px 10px",
+                              border:"2px solid "+C.primary,
+                              borderRadius:7,fontSize:12,outline:"none"}}),
+                          h("div",{style:{display:"flex",alignItems:"center",gap:3}},
+                            h("span",{style:{fontSize:11,color:C.muted}},"+₱"),
+                            h("input",{type:"number",value:editChPrice,
+                              onChange:e=>setEditChPrice(e.target.value),
+                              onKeyDown:e=>{
+                                if(e.key==="Enter"){e.preventDefault();saveChoiceEdit(ch);}
+                                if(e.key==="Escape"){e.preventDefault();setEditingChoice(null);}
+                              },
+                              placeholder:"0",
+                              style:{width:62,padding:"6px 8px",border:"1px solid "+C.border,
+                                borderRadius:7,fontSize:12,outline:"none",textAlign:"right"}})
+                          ),
+                          h("button",{
+                            onClick:()=>saveChoiceEdit(ch),
                             style:{padding:"6px 14px",background:C.primary,border:"none",
                               borderRadius:7,color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}},
                             "💾 Save"),
@@ -4181,7 +4261,9 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
                             onClick:()=>setEditingChoice(null),
                             style:{padding:"6px 10px",background:"#eee",border:"none",
                               borderRadius:7,color:C.text,fontSize:12,cursor:"pointer"}},
-                            "Cancel")
+                            "Cancel"),
+                          h("div",{style:{fontSize:9,color:C.muted,width:"100%"}},
+                            "Enter = save · Esc = cancel")
                         )
                       // NORMAL MODE
                       : h("div",{style:{display:"flex",justifyContent:"space-between",
@@ -4202,7 +4284,12 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
                             h("span",{style:{fontSize:9,fontWeight:700,
                               color:has?C.success:C.muted}},has?"✓ BOM":"—"),
                             h("button",{
-                              onClick:e=>{e.stopPropagation();setEditingChoice(ch.id);},
+                              onClick:e=>{
+                                e.stopPropagation();
+                                setEditChVal(ch.label||"");
+                                setEditChPrice(String(ch.priceAdd||0));
+                                setEditingChoice(ch.id);
+                              },
                               style:{background:"none",border:"none",color:C.primary,
                                 fontSize:12,cursor:"pointer",padding:"2px 5px"},title:"Rename"},
                               "✏️"),
