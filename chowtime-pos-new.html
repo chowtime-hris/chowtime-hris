@@ -953,6 +953,80 @@ function printZ(zd,branchName,cashier){
   setTimeout(()=>w.print(),500);
 }
 
+// Z-Reading over ESC/POS. Mirrors printZ exactly so the thermal copy and the
+// browser copy can never disagree — a reading that differs by medium is worse
+// than no reading at all.
+function buildEscPosZ(zd,branchName,cashier,cs,paperSize,isZ){
+  cs=cs||{};
+  var W=paperSize==="58mm"?32:48;
+  var NL=0x0A, ESC=0x1B, GS=0x1D;
+  var enc=new TextEncoder();
+  var T=function(x){return enc.encode(x);};
+  var B=function(a){return new Uint8Array(a);};
+  function ln(t){return T(t+"\n");}
+  function dash(){return T("-".repeat(W)+"\n");}
+  function row(l,r){
+    var pad=W-l.length-r.length;
+    if(pad<1)pad=1;
+    return T(l+" ".repeat(pad)+r+"\n");
+  }
+  var parts=[], a=function(v){parts.push(v instanceof Uint8Array?v:B(v));};
+  var n=function(v){return (Number(v)||0).toFixed(2);};
+
+  a([ESC,0x40]);
+  a([ESC,0x61,0x01]);
+  a([ESC,0x21,0x10]);
+  a(ln(isZ?"Z-READING":"X-READING"));
+  a([ESC,0x21,0x00]);
+  a([ESC,0x45,0x01]);
+  a(ln((cs.name||"CHOWTIME")+" - "+branchName));
+  a([ESC,0x45,0x00]);
+  if(cs.address)a(ln(cs.address));
+  if(cs.tin)a(ln("TIN: "+cs.tin));
+  a(ln(new Date().toLocaleDateString("en-PH",{year:"numeric",month:"long",day:"numeric"})));
+  a(ln("Cashier: "+cashier));
+  a([ESC,0x61,0x00]);
+  a(dash());
+
+  a(row("Opening Fund","P"+n(zd.opening)));
+  a(row("Gross Sales","P"+n(zd.gross)));
+  a(row("Discounts","- P"+n(zd.discounts)));
+  a(row("Voids ("+(zd.voidCount||0)+")","- P"+n(zd.voidAmt)));
+  a([ESC,0x45,0x01]);
+  a(row("Net Sales","P"+n(zd.net)));
+  a([ESC,0x45,0x00]);
+  a(row("Cash In","P"+n(zd.cashIn)));
+  a(row("Cash Out","- P"+n(zd.cashOut)));
+  a(dash());
+  a([ESC,0x21,0x10]);
+  a(row("CASH ON HAND","P"+n(zd.totalCash)));
+  a([ESC,0x21,0x00]);
+  a(dash());
+
+  a(row("Transactions",String(zd.txns||0)));
+  a(row("Dine-in",String(zd.dineIn||0)));
+  a(row("Takeout",String(zd.takeout||0)));
+  a(row("SC/PWD",String(zd.scPwd||0)));
+  a(dash());
+
+  a([ESC,0x61,0x01]);
+  a(ln("Generated: "+new Date().toLocaleString("en-PH")));
+  a([ESC,0x45,0x01]);
+  a(ln(isZ?"FINAL Z-READING FOR THE DAY":"X-READING (NOT FINAL)"));
+  a([ESC,0x45,0x00]);
+  a(B([NL,NL,NL]));
+  a([GS,0x56,0x41,0x10]);
+
+  var total=0; parts.forEach(function(p){total+=p.length;});
+  var out=new Uint8Array(total), off=0;
+  parts.forEach(function(p){out.set(p,off);off+=p.length;});
+  return out;
+}
+
+async function printEscPosZ(zd,branchName,cashier,cs,paperSize,isZ){
+  return await btPrint(buildEscPosZ(zd,branchName,cashier,cs,paperSize,isZ));
+}
+
 // ─── ITEM CUSTOMIZER ─────────────────────────────────────
 function ItemCustomizer({item,onAdd,onClose,optionGroups=[],priceType="retail",userRole="cashier",bomCheck=null}){
   // bomCheck is optional — without it the customizer behaves exactly as before
@@ -10229,7 +10303,22 @@ function App(){
               )
             ),
             h("div",{style:{display:"flex",gap:8}},
-              h("button",{onClick:()=>printZ(zd,curBranch.full,user.name),style:{padding:"10px 22px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:9,color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}},"🖨️ Print "+(isZ?"Z":"X")+"-Reading"),
+              // Bluetooth first — the browser copy stays as a fallback
+              h("button",{
+                onClick:async()=>{
+                  const ps=(companySettings&&companySettings.paperSize)||"80mm";
+                  showT("Sending to printer...","ok");
+                  const ok=await printEscPosZ(zd,curBranch.full,user.name,companySettings,ps,isZ);
+                  if(ok)showT((isZ?"Z":"X")+"-Reading printed ✓");
+                  else{
+                    showT("BT failed — printing via browser","warn");
+                    printZ(zd,curBranch.full,user.name);
+                  }
+                },
+                style:{padding:"10px 22px",background:"#1565C0",border:"none",borderRadius:9,
+                  color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}},
+                "📡 BT Print "+(isZ?"Z":"X")+"-Reading"),
+              h("button",{onClick:()=>printZ(zd,curBranch.full,user.name),style:{padding:"10px 22px",background:"#fff",border:"1px solid "+C.border,borderRadius:9,color:C.text,fontWeight:600,fontSize:12,cursor:"pointer"}},"🖨️ Browser"),
               isZ&&h("button",{onClick:()=>showT("Day closed. Z-Reading submitted.","info"),style:{padding:"10px 22px",background:"#E3F2FD",border:"none",borderRadius:9,color:C.info,fontWeight:700,fontSize:12,cursor:"pointer"}},"✓ Close Day")
             )
           );
