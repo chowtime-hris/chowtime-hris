@@ -496,7 +496,7 @@ function buildEscPos(ord,bName,cs,paperSize){
 
   (ord.items||[]).forEach(function(i){
     a([ESC,0x45,0x01]);
-    a(ln(i.name+(i.takeout&&ord.mixedType?" [TO-GO]":"")
+    a(ln(i.name+(i.takeout&&ord.mixedType?(i.partialTO?" [T/O split]":" [T/O]"):"")
       +(ord.discScope==="items"&&i.discounted?" *":"")));
     a([ESC,0x45,0x00]);
     if(i.variant)a(ln("  ["+i.variant+"]"));
@@ -575,7 +575,7 @@ function buildEscPosKOT(ord,bName,cs,paperSize){
     a(ln("Type: MIXED — check each item"));
     a([ESC,0x45,0x00]);
   }else if(ord.orderType)a(ln("Type: "+String(ord.orderType).toUpperCase()));
-  if(ord.takeoutCount)a(ln("To pack: "+ord.takeoutCount+" pcs"));
+  if(ord.takeoutCount)a(ln("T/O: "+ord.takeoutCount+" pcs"));
   if(ord.tableNo)a(ln("Table: "+ord.tableNo));
   if(ord.custName)a(ln("Customer: "+ord.custName));
   a(dash());
@@ -590,13 +590,15 @@ function buildEscPosKOT(ord,bName,cs,paperSize){
     // packing instruction has to be impossible to miss
     if(i.takeout){
       a([ESC,0x61,0x01]);a([ESC,0x45,0x01]);a([ESC,0x21,0x10]);
-      a(ln(">>> PACK / TAKE-OUT <<<"));
+      a(ln(i.partialTO?">>> SPLIT - CHECK EACH <<<":">>> T/O <<<"));
       a([ESC,0x21,0x00]);a([ESC,0x45,0x00]);a([ESC,0x61,0x00]);
     }
     if(i.variant)a(ln("   ["+i.variant+"]"));
     (i.freebies||[]).forEach(function(f){
+      var to=f.toQty||0, q=f.qty||0;
+      var tag=to<=0?"  (dine-in)":(to>=q?"  [T/O]":"  ["+to+" T/O / "+(q-to)+" dine-in]");
       a([ESC,0x45,0x01]);
-      a(ln("   > "+f.qty+"x "+f.label));
+      a(ln("   > "+q+"x "+f.label+tag));
       a([ESC,0x45,0x00]);
     });
     if(i.options&&i.options.length)a(ln("   "+i.options.join(", ")));
@@ -729,7 +731,7 @@ function printReceipt(ord, branchName, companySettings, paperSize){
   (ord.items||[]).map(function(i){
     var price=i.lineTotal&&i.qty?(i.lineTotal/i.qty):(i.unitPrice||i.price||0);
     var total=i.lineTotal||(price*(i.qty||1));
-    var mark=(i.takeout&&ord.mixedType?" [TO-GO]":"")
+    var mark=(i.takeout&&ord.mixedType?(i.partialTO?" [T/O split]":" [T/O]"):"")
       +((ord.discScope==="items"&&i.discounted)?" *":"");
     var name=i.name+(i.variant?" ["+i.variant+"]":"")+(i.options&&i.options.length?" ("+i.options.join(", ")+")":"")+mark;
     var picks=(i.freebies&&i.freebies.length)
@@ -807,7 +809,7 @@ function printKOT(ord, branchName, companySettings, paperSize){
   (ord.custName?"<div class='row b'><span>Customer: "+ord.custName+"</span></div>":"")+
   (ord.mixedType?"<div class='row b'><span>Type: MIXED &mdash; check each item</span></div>"
     :(ord.orderType?"<div class='row'><span>Type: "+String(ord.orderType).toUpperCase()+"</span></div>":""))+
-  (ord.takeoutCount?"<div class='row'><span>To pack: "+ord.takeoutCount+" pcs</span></div>":"")+
+  (ord.takeoutCount?"<div class='row'><span>T/O: "+ord.takeoutCount+" pcs</span></div>":"")+
   "<div class='hr'></div>"+
   // ITEMS - big and bold for kitchen
   (ord.items||[]).map(function(i,ix){
@@ -815,13 +817,17 @@ function printKOT(ord, branchName, companySettings, paperSize){
     var oLine = (i.options&&i.options.length)?"  ("+i.options.join(", ")+")":"";
     var noteL = i.note?"  **"+i.note+"**":"";
     var pLine = (i.freebies&&i.freebies.length)
-      ?i.freebies.map(function(f){return "&#9656; "+f.qty+"x "+f.label;}).join("<br>")
+      ?i.freebies.map(function(f){
+         var to=f.toQty||0,q=f.qty||0;
+         var tag=to<=0?" (dine-in)":(to>=q?" [T/O]":" ["+to+" T/O / "+(q-to)+" dine-in]");
+         return "&#9656; "+q+"x "+f.label+tag;
+       }).join("<br>")
       :"";
     var pTot  = (i.freebies||[]).reduce(function(a,f){return a+(f.qty||0);},0);
     return "<div style='margin-bottom:8px;border-bottom:1px dotted #000;padding-bottom:4px'>"+
       "<div class='row'><span class='item'>"+i.qty+"x "+i.name+
         (pTot?" <span style=\'font-size:11px;font-weight:700\'>("+pTot+" pcs)</span>":"")+"</span></div>"+
-      (i.takeout?"<div style='text-align:center;font-size:15px;font-weight:900;border:2px solid #000;margin:3px 0;padding:2px'>&gt;&gt;&gt; PACK / TAKE-OUT &lt;&lt;&lt;</div>":"")+
+      (i.takeout?"<div style='text-align:center;font-size:15px;font-weight:900;border:2px solid #000;margin:3px 0;padding:2px'>&gt;&gt;&gt; "+(i.partialTO?"SPLIT - CHECK EACH":"T/O")+" &lt;&lt;&lt;</div>":"")+
       (vLine?"<div style='font-size:12px;font-weight:700;padding-left:12px'>"+vLine+"</div>":"")+
       (pLine?"<div style='font-size:14px;font-weight:900;padding-left:12px;margin:3px 0'>"+pLine+"</div>":"")+
       (oLine?"<div style='font-size:11px;padding-left:12px'>"+oLine+"</div>":"")+
@@ -7294,6 +7300,8 @@ function App(){
   const [chkDiscPct,setChkDiscPct]=useState("");      // for Custom %
   const [chkDiscTargets,setChkDiscTargets]=useState([]); // cartIds; empty = whole order
   const [chkToTargets,setChkToTargets]=useState([]);     // cartIds that are take-out
+  const [chkToMode,setChkToMode]=useState("all");        // "all" follows ORDER TYPE
+  const [chkToPicks,setChkToPicks]=useState({});         // {cartId:{pickIdx:toQty}}
   const [heldOrders,setHeldOrders]=useState([]);         // parked / on-hold carts
   const [showHeld,setShowHeld]=useState(false);
   const [chkCust,setChkCust]=useState("");
@@ -7688,10 +7696,31 @@ function App(){
   const chkTotal=chkSub-chkDiscAmt;
   // Take-out can apply to the whole order (follows ORDER TYPE) or to chosen lines.
   const toTargets=(chkToTargets||[]).filter(cid=>cart.some(i=>i.cartId===cid));
-  const toAll=toTargets.length===0;
-  const isTO=(i)=>toAll?(chkType!=="dine-in"):toTargets.includes(i.cartId);
+  const toAll=chkToMode==="all";
+  const orderIsTO=chkType!=="dine-in";
+  // A BOGO line holds 2+ picks and they can split — one T/O, one dine-in.
+  const hasPicks=(i)=>((i.freebies||[]).length>0);
+  const pickTot=(i)=>(i.freebies||[]).reduce((a,f)=>a+(f.qty||0),0);
+  const pickTO=(i,fi)=>((chkToPicks[i.cartId]||{})[fi])||0;
+  const linePickTO=(i)=>(i.freebies||[]).reduce((a,f,fi)=>a+pickTO(i,fi),0);
+  // how many PIECES of this line go out the door
+  const lineTOQty=(i)=>{
+    if(toAll)return orderIsTO?(hasPicks(i)?pickTot(i):(i.qty||1)):0;
+    if(hasPicks(i))return linePickTO(i);
+    return toTargets.includes(i.cartId)?(i.qty||1):0;
+  };
+  const isTO=(i)=>lineTOQty(i)>0;
+  const isPartial=(i)=>{
+    const t=lineTOQty(i), full=hasPicks(i)?pickTot(i):(i.qty||1);
+    return t>0&&t<full;
+  };
+  const toCount=cart.reduce((a,i)=>a+lineTOQty(i),0);
   const mixedType=!toAll&&cart.length>0
-    &&!cart.every(isTO)&&!cart.every(i=>!isTO(i));
+    &&(cart.some(isPartial)||(!cart.every(isTO)&&!cart.every(i=>!isTO(i))));
+  // label a cart line so two lines of the same item are tellable apart
+  const lineLabel=(i)=>(i.qty+"x "+i.name);
+  const lineSub=(i)=>[i.variant||"",
+    (i.freebies||[]).map(f=>f.label+" ×"+f.qty).join(", ")].filter(Boolean).join(" · ");
   const myOrders=user?.role==="owner"?orders:orders.filter(o=>o.branch===branchId);
   const menuWithOverrides=[
     // Main menu items with branch overrides
@@ -7737,28 +7766,52 @@ function App(){
     return Object.assign({},i,{qty:q,freebies:fr,lineTotal:(i.unitPrice||0)*q+freeAdd});
   }));
 
+  // Firestore rejects the WHOLE document if any field is `undefined`.
+  // Cart items carry variant/promo/emoji straight from the customizer, and those
+  // are undefined whenever nothing was selected — placeOrder normalised them with
+  // ||"" but a raw cart write does not, which is what broke Hold.
+  // Recurses only into plain objects/arrays so FieldValue sentinels
+  // (serverTimestamp) and Dates pass through untouched.
+  const stripUndef=(v)=>{
+    if(Array.isArray(v))return v.map(stripUndef).filter(x=>x!==undefined);
+    if(v&&typeof v==="object"
+       &&(v.constructor===Object||v.constructor===undefined)){
+      const o={};
+      Object.keys(v).forEach(k=>{
+        const c=stripUndef(v[k]);
+        if(c!==undefined)o[k]=c;
+      });
+      return o;
+    }
+    return v;
+  };
+
   // ── HOLD / PARK A TRANSACTION ────────────────────────────
   // Keeps the whole checkout context, not just the cart, so resuming lands the
   // cashier exactly where they left off (discount scope, take-out picks, etc).
   const holdOrder=async(label)=>{
     if(!cart.length){showT("Walang laman ang cart","warn");return;}
     try{
-      await addDoc(collection(db,"held_orders"),{
-        branch:branchId,
+      await addDoc(collection(db,"held_orders"),stripUndef({
+        branch:branchId||"",
         label:(label||chkCust||chkTable||"").trim(),
         cart:cart,
-        ctx:{type:chkType,cust:chkCust,table:chkTable,pay:chkPay,
-             discId:chkDisc.id,discPct:chkDiscPct,discIdNo:chkDiscId,
-             discTargets:chkDiscTargets,toTargets:chkToTargets},
-        count:cartCount,total:chkTotal,
-        heldBy:user.name,heldAt:serverTimestamp(),
+        ctx:{type:chkType||"dine-in",cust:chkCust||"",table:chkTable||"",pay:chkPay||"cash",
+             discId:(chkDisc&&chkDisc.id)||"none",discPct:chkDiscPct||"",discIdNo:chkDiscId||"",
+             discTargets:chkDiscTargets||[],toTargets:chkToTargets||[],
+             toMode:chkToMode||"all",toPicks:chkToPicks||{}},
+        count:cartCount||0,total:Number(chkTotal)||0,
+        heldBy:(user&&user.name)||"",heldAt:serverTimestamp(),
         heldAtLocal:new Date().toLocaleTimeString("en-PH",{hour:"2-digit",minute:"2-digit"})
-      });
+      }));
       setCart([]);setChkCash("");setChkCust("");setChkTable("");
       setChkDiscTargets([]);setChkToTargets([]);setChkDiscPct("");
       setModal(null);setCartOpen(false);
       showT("Naka-hold ✓ — nasa ⏸ Held");
-    }catch(e){showT("Hold failed","err");}
+    }catch(e){
+      console.error("Hold failed:",e);
+      showT("Hold failed: "+((e&&e.message)||e||"unknown").toString().slice(0,80),"err");
+    }
   };
 
   const resumeHeld=async(hd)=>{
@@ -7772,10 +7825,14 @@ function App(){
       setChkDisc(DISCS.find(d=>d.id===c.discId)||DISCS[0]);
       setChkDiscPct(c.discPct||"");setChkDiscId(c.discIdNo||"");
       setChkDiscTargets(c.discTargets||[]);setChkToTargets(c.toTargets||[]);
+      setChkToMode(c.toMode||"all");setChkToPicks(c.toPicks||{});
       await deleteDoc(doc(db,"held_orders",hd._docId));
       setShowHeld(false);setCartOpen(true);
       showT("Resumed ✓");
-    }catch(e){showT("Resume failed","err");}
+    }catch(e){
+      console.error("Resume failed:",e);
+      showT("Resume failed: "+((e&&e.message)||e||"unknown").toString().slice(0,80),"err");
+    }
   };
 
   const discardHeld=async(hd)=>{
@@ -7783,7 +7840,10 @@ function App(){
     try{
       await deleteDoc(doc(db,"held_orders",hd._docId));
       showT("Held order deleted","warn");
-    }catch(e){showT("Delete failed","err");}
+    }catch(e){
+      console.error("Delete held failed:",e);
+      showT("Delete failed: "+((e&&e.message)||e||"unknown").toString().slice(0,80),"err");
+    }
   };
 
   // ── PLACE ORDER (Firebase) ───────────────────────────────
@@ -7802,9 +7862,11 @@ function App(){
       id,branch:branchId,
       items:cart.map(i=>({qty:i.qty,name:i.name,emoji:i.emoji,
         variant:i.variant||"",options:i.options||[],
-        freebies:i.freebies||[],optionRefs:i.optionRefs||[],freePerUnit:i.freePerUnit||0,
+        freebies:(i.freebies||[]).map((f,fi)=>Object.assign({},f,{
+          toQty:toAll?(orderIsTO?(f.qty||0):0):pickTO(i,fi)})),
+        optionRefs:i.optionRefs||[],freePerUnit:i.freePerUnit||0,
         discounted:discAll?discRate>0:discTargets.includes(i.cartId),
-        takeout:isTO(i),
+        takeout:isTO(i),partialTO:isPartial(i),toQty:lineTOQty(i),
         unitPrice:getPriceByType(i),
         lineTotal:getPriceByType(i)*(i.qty||1)
           +(i.freebies||[]).reduce((a,f)=>a+((f.priceAdd||0)*(f.qty||0)),0),
@@ -7816,7 +7878,7 @@ function App(){
       discId:chkDiscId,custName:chkCust,tableNo:chkTable,
       cash:chkCash,total:chkTotal,time:now,date:new Date().toISOString().slice(0,10),
       status:"pending",orderType:chkType,mixedType:mixedType,
-      takeoutCount:cart.filter(isTO).reduce((a,i)=>a+(i.qty||1),0),
+      takeoutCount:toCount,
       payMethod:chkPay,priceType,cashier:user.name,
       bomDeducted:false,
       timestamp:serverTimestamp()
@@ -8143,37 +8205,108 @@ function App(){
             )
           ),
           // Which lines are take-out
-          cart.length>1&&h("div",{style:{marginTop:7}},
+          cart.length>0&&h("div",{style:{marginTop:7}},
             h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5}},
-              h("button",{onClick:()=>setChkToTargets([]),
+              h("button",{onClick:()=>{setChkToMode("all");setChkToTargets([]);setChkToPicks({});},
                 style:{padding:"7px 9px",borderRadius:8,fontSize:10,fontWeight:600,cursor:"pointer",
                   border:"2px solid "+(toAll?C.primary:C.border),
                   background:toAll?"#FFF0F0":"#fff",color:toAll?C.primary:C.text}},
-                "Lahat: "+(chkType==="dine-in"?"dine-in":"take-out")),
-              h("button",{onClick:()=>{if(toAll&&cart.length)setChkToTargets([cart[0].cartId]);},
+                "Lahat: "+(chkType==="dine-in"?"dine-in":"T/O")),
+              h("button",{onClick:()=>setChkToMode("some"),
                 style:{padding:"7px 9px",borderRadius:8,fontSize:10,fontWeight:600,cursor:"pointer",
                   border:"2px solid "+(!toAll?C.primary:C.border),
                   background:!toAll?"#FFF0F0":"#fff",color:!toAll?C.primary:C.text}},
                 "📦 Piling item lang")
             ),
-            !toAll&&h("div",{style:{background:C.bg,borderRadius:8,padding:"7px 9px",marginTop:5}},
-              h("div",{style:{fontSize:9,color:C.muted,marginBottom:4}},
-                "Naka-check = i-pack. Hindi naka-check = dine-in."),
+            !toAll&&h("div",{style:{background:C.bg,borderRadius:8,padding:"8px 9px",marginTop:5}},
+              h("div",{style:{fontSize:9,color:C.muted,marginBottom:6}},
+                "Naka-check = T/O. Hindi naka-check = dine-in."),
               cart.map(function(i){
+                const picks=i.freebies||[];
+                // ── BOGO / multi-pick line: each pick decided separately ──
+                if(picks.length){
+                  const tot=pickTot(i), got=linePickTO(i);
+                  const setP=(fi,v)=>setChkToPicks(function(p){
+                    const cur=Object.assign({},p[i.cartId]||{});
+                    if(v<=0)delete cur[fi]; else cur[fi]=v;
+                    const r=Object.assign({},p);
+                    if(Object.keys(cur).length)r[i.cartId]=cur; else delete r[i.cartId];
+                    return r;
+                  });
+                  return h("div",{key:i.cartId,
+                    style:{marginBottom:7,paddingBottom:6,borderBottom:"1px dashed "+C.border}},
+                    h("div",{style:{display:"flex",justifyContent:"space-between",gap:8}},
+                      h("div",{style:{flex:1}},
+                        h("div",{style:{fontSize:10,fontWeight:700}},lineLabel(i)),
+                        i.variant&&h("div",{style:{fontSize:9,color:C.muted}},i.variant)
+                      ),
+                      h("span",{style:{fontSize:9,fontWeight:800,flexShrink:0,
+                        color:got===0?C.muted:(got===tot?"#E65100":"#1565C0")}},
+                        got===0?"🪑 dine-in":(got===tot?"📦 T/O":"⚡ "+got+"/"+tot+" T/O"))
+                    ),
+                    h("div",{style:{marginTop:5}},
+                      picks.map(function(f,fi){
+                        const n=pickTO(i,fi);
+                        // qty 1 -> plain checkbox; qty >1 -> split counter
+                        if((f.qty||0)<=1){
+                          const on=n>0;
+                          return h("button",{key:fi,onClick:()=>setP(fi,on?0:1),
+                            style:{display:"flex",width:"100%",gap:8,alignItems:"center",
+                              padding:"4px 2px 4px 10px",background:"none",border:"none",
+                              cursor:"pointer",textAlign:"left"}},
+                            h("div",{style:{width:15,height:15,borderRadius:4,flexShrink:0,
+                              border:"2px solid "+(on?"#E65100":C.border),
+                              background:on?"#E65100":"#fff",display:"flex",
+                              alignItems:"center",justifyContent:"center"}},
+                              on&&h("span",{style:{color:"#fff",fontSize:9,fontWeight:900}},"✓")),
+                            h("span",{style:{flex:1,fontSize:10,fontWeight:on?700:400}},"▸ "+f.label),
+                            h("span",{style:{fontSize:9,fontWeight:700,
+                              color:on?"#E65100":C.muted}},on?"T/O":"dine-in")
+                          );
+                        }
+                        return h("div",{key:fi,
+                          style:{display:"flex",gap:8,alignItems:"center",padding:"4px 2px 4px 10px"}},
+                          h("span",{style:{flex:1,fontSize:10}},"▸ "+f.label+" ×"+f.qty),
+                          h("div",{style:{display:"flex",alignItems:"center",gap:6}},
+                            h("button",{onClick:()=>setP(fi,Math.max(0,n-1)),
+                              style:{width:20,height:20,borderRadius:5,border:"none",
+                                background:n>0?"#E65100":"#eee",color:n>0?"#fff":"#bbb",
+                                fontSize:12,fontWeight:900,cursor:"pointer"}},"−"),
+                            h("span",{style:{minWidth:26,textAlign:"center",fontSize:9,
+                              fontWeight:800,color:n>0?"#E65100":C.muted}},n+"/"+f.qty),
+                            h("button",{onClick:()=>setP(fi,Math.min(f.qty,n+1)),
+                              style:{width:20,height:20,borderRadius:5,border:"none",
+                                background:n<f.qty?"#E65100":"#eee",color:n<f.qty?"#fff":"#bbb",
+                                fontSize:12,fontWeight:900,cursor:"pointer"}},"+")
+                          )
+                        );
+                      })
+                    )
+                  );
+                }
+                // ── plain line ──
                 const on=toTargets.includes(i.cartId);
                 return h("button",{key:i.cartId,
                   onClick:()=>setChkToTargets(p=>on?p.filter(x=>x!==i.cartId):[...p,i.cartId]),
-                  style:{display:"flex",width:"100%",gap:8,alignItems:"center",padding:"5px 2px",
-                    background:"none",border:"none",cursor:"pointer",textAlign:"left"}},
+                  style:{display:"flex",width:"100%",gap:8,alignItems:"center",
+                    padding:"6px 2px",background:"none",border:"none",
+                    cursor:"pointer",textAlign:"left",
+                    borderBottom:"1px dashed "+C.border}},
                   h("div",{style:{width:16,height:16,borderRadius:4,flexShrink:0,
                     border:"2px solid "+(on?"#E65100":C.border),background:on?"#E65100":"#fff",
                     display:"flex",alignItems:"center",justifyContent:"center"}},
                     on&&h("span",{style:{color:"#fff",fontSize:9,fontWeight:900}},"✓")),
-                  h("span",{style:{flex:1,fontSize:10,fontWeight:on?700:400}},i.qty+"x "+i.name),
+                  h("div",{style:{flex:1}},
+                    h("div",{style:{fontSize:10,fontWeight:on?700:400}},lineLabel(i)),
+                    lineSub(i)&&h("div",{style:{fontSize:9,color:C.muted}},lineSub(i))
+                  ),
                   h("span",{style:{fontSize:9,fontWeight:700,color:on?"#E65100":C.muted}},
-                    on?"📦 PACK":"🪑 dine-in")
+                    on?"📦 T/O":"🪑 dine-in")
                 );
-              })
+              }),
+              h("div",{style:{fontSize:9,color:C.muted,marginTop:5,paddingTop:5,
+                borderTop:"1px dashed "+C.border,fontWeight:700}},
+                "T/O total: "+toCount+" pcs")
             )
           )
         ),
@@ -8422,7 +8555,8 @@ function App(){
                 h("span",null,i.emoji+" "+i.qty+"x "+i.name),
                 h("span",null,"₱"+(i.lineTotal||0).toFixed(2))
               ),
-              i.takeout&&h("div",{style:{fontSize:9,color:"#E65100",fontWeight:800,paddingLeft:18}},"📦 TAKE-OUT"),
+              i.takeout&&h("div",{style:{fontSize:9,color:"#E65100",fontWeight:800,paddingLeft:18}},
+                i.partialTO?("📦 T/O "+(i.toQty||0)+" pcs (split)"):"📦 T/O"),
               i.variant&&h("div",{style:{fontSize:9,color:C.muted,paddingLeft:18}},"📦 "+i.variant),
               (i.options||[]).length>0&&h("div",{style:{fontSize:9,color:C.muted,paddingLeft:18}},"✓ "+i.options.join(", ")),
               (i.freebies||[]).map((f,fi)=>h("div",{key:fi,style:{fontSize:9,color:"#2E7D32",fontWeight:700,paddingLeft:18}},
