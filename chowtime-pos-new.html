@@ -10978,8 +10978,13 @@ function App(){
           const saved=zSel?zHist.find(x=>x.date===zSel):null;
           // A saved rollup stores cashOnHand; buildZ calls the same figure
           // totalCash. Map it so one renderer serves both.
+          // buildZ and the rollup name two figures differently. Map them here
+          // so one renderer serves both — a second renderer would eventually
+          // drift and the live and saved readings would disagree.
           const zd=saved
-            ? Object.assign({},saved,{totalCash:saved.cashOnHand})
+            ? Object.assign({},saved,{
+                totalCash:saved.cashOnHand,
+                scPwd:(Number(saved.scTxns)||0)+(Number(saved.pwdTxns)||0)})
             : live;
           const isSaved=!!saved;
           return h("div",null,
