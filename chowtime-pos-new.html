@@ -2001,31 +2001,57 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
               h("div",{style:{fontSize:11,fontWeight:700}},i.name),
               h("div",{style:{fontSize:9,color:C.muted}},i.unit+(i.note?" · "+i.note:""))
             ),
-            h("div",{style:{fontSize:11,color:C.muted,fontWeight:600}},i.qty+" "+i.unit),
-            // Actual qty
-            h("div",{style:{display:"flex",alignItems:"center",gap:4}},
-              h("button",{onClick:()=>setActualQtys(p=>({...p,[i.id]:Math.max(0,(p[i.id]??i.qty)-1)})),
-                style:{width:20,height:20,borderRadius:4,border:"1px solid "+C.border,
-                  background:"#fff",cursor:"pointer",fontSize:12,fontWeight:700}},"−"),
-              h("input",{type:"number",min:0,value:actual,
-                onChange:e=>setActualQtys(p=>({...p,[i.id]:parseFloat(e.target.value)||0})),
-                style:{width:36,textAlign:"center",padding:"2px",border:"1px solid "+C.border,
-                  borderRadius:5,fontSize:11,fontWeight:700,outline:"none",
-                  color:diff<0?C.danger:diff>0?C.info:C.text}}),
-              h("button",{onClick:()=>setActualQtys(p=>({...p,[i.id]:(p[i.id]??i.qty)+1})),
-                style:{width:20,height:20,borderRadius:4,border:`1px solid ${C.primary}`,
-                  background:"#FFF0F0",cursor:"pointer",fontWeight:700,color:C.primary,fontSize:12}},"+"),
-              diff!==0&&h("span",{style:{fontSize:8,color:diff<0?C.danger:C.info,fontWeight:700}},
-                (diff>0?"+":"")+diff)
-            ),
-            // Price
-            h("div",{style:{display:"flex",alignItems:"center",gap:3}},
+            (function(){
+              const sz=Number(i.packSize)||0;
+              const pu=i.packUnit||"pack";
+              const asPack=(v)=>sz>1?(Math.round((v/sz)*1000)/1000):v;
+              return h("div",{style:{fontSize:11,color:C.muted,fontWeight:600}},
+                sz>1?h("div",null,
+                      h("div",null,asPack(i.qty)+" "+pu),
+                      h("div",{style:{fontSize:8,opacity:.7}},i.qty+" "+i.unit))
+                    :(i.qty+" "+i.unit));
+            })(),
+            // Actual qty — steps by a whole pack when the item has one
+            (function(){
+              const sz=Number(i.packSize)||1;
+              const pu=i.packUnit||"pack";
+              const step=(d)=>setActualQtys(p=>({...p,
+                [i.id]:Math.max(0,(p[i.id]??i.qty)+d*sz)}));
+              const shown=sz>1?(Math.round((actual/sz)*1000)/1000):actual;
+              return h("div",{style:{display:"flex",alignItems:"center",gap:4,flexWrap:"wrap"}},
+                h("button",{onClick:()=>step(-1),
+                  style:{width:20,height:20,borderRadius:4,border:"1px solid "+C.border,
+                    background:"#fff",cursor:"pointer",fontSize:12,fontWeight:700}},"−"),
+                h("input",{type:"number",min:0,value:shown,
+                  onChange:e=>{
+                    const v=parseFloat(e.target.value)||0;
+                    setActualQtys(p=>({...p,[i.id]:Math.max(0,v*sz)}));
+                  },
+                  style:{width:40,textAlign:"center",padding:"2px",border:"1px solid "+C.border,
+                    borderRadius:5,fontSize:11,fontWeight:700,outline:"none",
+                    color:diff<0?C.danger:diff>0?C.info:C.text}}),
+                h("button",{onClick:()=>step(1),
+                  style:{width:20,height:20,borderRadius:4,border:`1px solid ${C.primary}`,
+                    background:"#FFF0F0",cursor:"pointer",fontWeight:700,color:C.primary,fontSize:12}},"+"),
+                sz>1&&h("div",{style:{width:"100%",fontSize:8,color:C.muted}},
+                  pu+" → "+actual+" "+i.unit),
+                diff!==0&&h("span",{style:{fontSize:8,color:diff<0?C.danger:C.info,fontWeight:700}},
+                  (diff>0?"+":"")+(sz>1?(Math.round((diff/sz)*1000)/1000)+" "+pu:diff))
+              );
+            })(),
+            // Price — always per BASE unit
+            h("div",{style:{display:"flex",alignItems:"center",gap:3,flexWrap:"wrap"}},
               h("span",{style:{fontSize:10,color:C.muted}},"₱"),
               h("input",{type:"number",min:0,step:"0.01",value:price||"",
                 onChange:e=>setPrices(p=>({...p,[i.id]:parseFloat(e.target.value)||0})),
                 placeholder:"0.00",
                 style:{width:65,padding:"5px",border:"1px solid "+C.border,borderRadius:6,
-                  fontSize:11,fontWeight:700,outline:"none",textAlign:"right"}})
+                  fontSize:11,fontWeight:700,outline:"none",textAlign:"right"}}),
+              h("div",{style:{width:"100%",fontSize:8,color:C.muted}},
+                "kada "+i.unit+
+                ((Number(i.packSize)||0)>1&&price
+                  ?"  ·  ₱"+(price*Number(i.packSize)).toFixed(2)+" kada "+(i.packUnit||"pack")
+                  :""))
             ),
             h("div",{style:{fontSize:11,fontWeight:800,color:C.primary,textAlign:"right"}},
               "₱"+(actual*price).toFixed(2))
@@ -2184,10 +2210,10 @@ function DRCheckForm({po,db,branchId,user,showT,INIT_INVENTORY,setAdvances,advan
               h("div",{style:{fontSize:9,color:C.muted}},"DR Qty: "+drQty+" "+item.unit+" (PO: "+item.qty+")")
             ),
             h("div",{style:{display:"flex",alignItems:"center",gap:7}},
-              h("button",{onClick:()=>setReceivedQtys(p=>({...p,[item.id]:Math.max(0,(p[item.id]??drQty)-1)})),
+              h("button",{onClick:()=>setReceivedQtys(p=>({...p,[item.id]:Math.max(0,(p[item.id]??drQty)-(Number(item.packSize)||1))})),
                 style:{width:26,height:26,borderRadius:6,border:"1px solid "+C.border,background:"#fff",cursor:"pointer",fontSize:14,fontWeight:900}},"−"),
               h("span",{style:{minWidth:32,textAlign:"center",fontWeight:900,fontSize:13,color:diff<0?C.danger:diff>0?C.info:C.success}},received),
-              h("button",{onClick:()=>setReceivedQtys(p=>({...p,[item.id]:(p[item.id]??drQty)+1})),
+              h("button",{onClick:()=>setReceivedQtys(p=>({...p,[item.id]:(p[item.id]??drQty)+(Number(item.packSize)||1)})),
                 style:{width:26,height:26,borderRadius:6,border:`1px solid ${C.primary}`,background:"#FFF0F0",cursor:"pointer",fontWeight:900,color:C.primary,fontSize:14}},"+"),
               diff!==0&&h("span",{style:{fontSize:9,fontWeight:700,color:diff<0?C.danger:C.info}},
                 (diff>0?"+":"")+diff+" ⚠️")
