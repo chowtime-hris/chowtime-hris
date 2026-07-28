@@ -581,9 +581,20 @@ function buildEscPos(ord,bName,cs,paperSize){
       "- P"+da.toFixed(2)));
     if(ord.discScope==="items")a(ln("* discounted item"));
   }
-  if(isVAT&&!zerovat){a(row("VATable","P"+vatable.toFixed(2)));a(row("VAT 12%","P"+vatAmt.toFixed(2)));}
-  if(!isVAT&&!zerovat)a(ln("Non-VAT"));
-  if(zerovat)a(ln("Zero-Rated"));
+  if(isVAT&&!zerovat){
+    a(row("VATable Sales","P"+vatable.toFixed(2)));
+    a(row("VAT-Exempt Sales","P0.00"));
+    a(row("Zero-Rated Sales","P0.00"));
+    a(row("VAT 12%","P"+vatAmt.toFixed(2)));
+  }
+  if(!isVAT&&!zerovat){
+    a(ln("NON-VAT REGISTERED"));
+    a(row("VAT-Exempt Sales","P"+net.toFixed(2)));
+  }
+  if(zerovat){
+    a(ln("ZERO-RATED"));
+    a(row("Zero-Rated Sales","P"+net.toFixed(2)));
+  }
 
   a([ESC,0x45,0x01]);a([ESC,0x21,0x10]);
   a(row("TOTAL","P"+net.toFixed(2)));
@@ -595,7 +606,17 @@ function buildEscPos(ord,bName,cs,paperSize){
 
   a(dash());
   a([ESC,0x61,0x01]);
+  a(dash());
+  if(!isVAT){
+    a([ESC,0x45,0x01]);
+    a(ln("THIS DOCUMENT IS NOT VALID"));
+    a(ln("FOR CLAIMING INPUT TAX"));
+    a([ESC,0x45,0x00]);
+  }
   a(ln("This serves as your Sales Invoice"));
+  if(cs.ptuNo)a(ln("PTU No: "+cs.ptuNo));
+  if(cs.minNo)a(ln("MIN: "+cs.minNo));
+  if(cs.posSerial)a(ln("Serial No: "+cs.posSerial));
   a(B([NL]));
   a(ln(cs.receiptFooter||"Thank you for dining with us!"));
   a(B([NL]));
@@ -1004,9 +1025,30 @@ function buildEscPosZ(zd,branchName,cashier,cs,paperSize,isZ){
   a(dash());
 
   a(row("Transactions",String(zd.txns||0)));
+  a(row("Cancelled",String(zd.cancelled||0)));
+  a(row("Total Quantity",String(zd.qtySold||0)));
   a(row("Dine-in",String(zd.dineIn||0)));
   a(row("Takeout",String(zd.takeout||0)));
-  a(row("SC/PWD",String(zd.scPwd||0)));
+  a(row("Invoice From",String(zd.siFrom||"-")));
+  a(row("Invoice To",String(zd.siTo||"-")));
+  a(dash());
+
+  a(ln("BREAKDOWN OF SALES"));
+  a(row("VATable Sales","P"+n(zd.vatableSales)));
+  a(row("VAT Amount","P"+n(zd.vatAmount)));
+  a(row("VAT-Exempt Sales","P"+n(zd.vatExempt)));
+  a(row("Zero-Rated Sales","P"+n(zd.zeroSales)));
+  a(dash());
+
+  a(ln("DISCOUNT SUMMARY"));
+  a(row("SC Disc. ("+(zd.scTxns||0)+")","P"+n(zd.discSC)));
+  a(row("PWD Disc. ("+(zd.pwdTxns||0)+")","P"+n(zd.discPWD)));
+  a(row("Employee Disc.","P"+n(zd.discEmp)));
+  a(row("Other Disc.","P"+n(zd.discOther)));
+  a(dash());
+
+  a(ln("SALES ADJUSTMENT"));
+  a(row("VOID ("+(zd.voidCount||0)+")","P"+n(zd.voidAmt)));
   a(dash());
 
   a([ESC,0x61,0x01]);
@@ -9028,10 +9070,37 @@ function App(){
     const voidAmt=voided.reduce((s,o)=>
       s+((Number(o.originalTotal)||Number(o.subtotal)||0)-(Number(o.total)||0)),0);
     const voidCount=voided.length;
+
+    // Discount breakdown by type — BIR wants these stated separately, and we
+    // already store discType.id on every order.
+    const discBy=(id)=>live.filter(o=>(o.discType&&o.discType.id)===id)
+      .reduce((s,o)=>s+(Number(o.discAmt)||0),0);
+    const discCount=(id)=>live.filter(o=>(o.discType&&o.discType.id)===id).length;
+    const discSC=discBy("sc"), discPWD=discBy("pwd");
+    const discEmp=discBy("emp"), discOther=discBy("promo")+discBy("custom");
+    const scTxns=discCount("sc"), pwdTxns=discCount("pwd");
+
+    // VAT split off net
+    const vatMode=(companySettings&&companySettings.vatMode)||"vat";
+    const isVATreg=vatMode!=="nonvat", zeroRated=vatMode==="zerovat";
+    const vatableSales=(isVATreg&&!zeroRated)?net/1.12:0;
+    const vatAmount=(isVATreg&&!zeroRated)?net-vatableSales:0;
+    const vatExempt=!isVATreg?net:0;
+    const zeroSales=zeroRated?net:0;
+
+    // Invoice number range for the day
+    const ids=live.map(o=>String(o.id||"")).filter(Boolean).sort();
+    const siFrom=ids.length?ids[0]:"—", siTo=ids.length?ids[ids.length-1]:"—";
+    const qtySold=live.reduce((s,o)=>
+      s+(o.items||[]).reduce((a,i)=>a+(Number(i.qty)||0),0),0);
+    const cancelled=bo.filter(o=>o.status==="cancelled").length;
     const opening=bc.filter(c=>c.type==="in"&&(c.desc||"").includes("Opening")).reduce((s,c)=>s+(c.amount||0),0);
     const cashIn=bc.filter(c=>c.type==="in"&&!(c.desc||"").includes("Opening")).reduce((s,c)=>s+(c.amount||0),0);
     const cashOut=bc.filter(c=>c.type==="out").reduce((s,c)=>s+(c.amount||0),0);
     return{gross,discounts,net,voidAmt,voidCount,opening,cashIn,cashOut,
+      discSC,discPWD,discEmp,discOther,scTxns,pwdTxns,
+      vatableSales,vatAmount,vatExempt,zeroSales,isVATreg,zeroRated,
+      siFrom,siTo,qtySold,cancelled,
       totalCash:opening+net+cashIn-cashOut,
       dineIn:bo.filter(o=>o.orderType==="dine-in").length,
       takeout:bo.filter(o=>o.orderType==="takeout").length,
