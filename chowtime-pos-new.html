@@ -5663,10 +5663,33 @@ function StockEditModal({item,db,user,branchId,showT,onClose,boms=[]}){
           )
         ),
         h("div",{style:{marginBottom:12}},
-          h("div",{style:{fontSize:9,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},"MIN STOCK (Alert Threshold)"),
+          h("div",{style:{fontSize:9,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4,
+            display:"flex",justifyContent:"space-between"}},
+            h("span",null,"MIN STOCK (Alert Threshold)"),
+            h("span",{style:{color:"#1565C0"}},"sa "+(details.unit||"pc"))),
           h("input",{type:"number",value:details.minStock,
             onChange:e=>setDetails(p=>({...p,minStock:e.target.value})),
-            style:{width:"100%",padding:"8px",border:"1px solid #ddd",borderRadius:7,fontSize:12,outline:"none",boxSizing:"border-box"}})
+            style:{width:"100%",padding:"8px",border:"1px solid #ddd",borderRadius:7,fontSize:12,outline:"none",boxSizing:"border-box"}}),
+          // minStock is compared straight against stock, which is in the base
+          // unit — so show the pack equivalent instead of making them convert.
+          Number(details.packSize)>1&&h("div",{style:{marginTop:6,background:"#E3F2FD",
+            borderRadius:7,padding:"7px 9px"}},
+            h("div",{style:{fontSize:10,color:"#1565C0",fontWeight:700,marginBottom:5}},
+              (Number(details.minStock)||0).toLocaleString("en-PH")+" "+(details.unit||"pc")
+              +" = "+((Number(details.minStock)||0)/Number(details.packSize)).toFixed(2)
+              +" "+(details.packUnit||"pack")),
+            h("div",{style:{display:"flex",gap:6,alignItems:"center"}},
+              h("span",{style:{fontSize:10,color:"#555",flex:1}},
+                "O ilagay sa "+(details.packUnit||"pack")+":"),
+              h("input",{type:"number",min:0,placeholder:"hal. 10",
+                onChange:e=>{
+                  const p2=parseFloat(e.target.value);
+                  if(!isNaN(p2))setDetails(p=>({...p,minStock:String(p2*(Number(p.packSize)||1))}));
+                },
+                style:{width:74,padding:"6px 8px",border:"1px solid #90CAF9",
+                  borderRadius:7,fontSize:12,textAlign:"right",outline:"none"}})
+            )
+          )
         ),
         // Pack detail — enables pack counting on the Adjust Stock tab
         h("div",{style:{background:"#FFFDE7",border:"1px solid #FFE082",borderRadius:8,
@@ -7495,9 +7518,15 @@ function NewInventoryItemForm({db,user,branchId,showT,onClose,invBranch}){
           : "Iwanang blangko kung iisa lang ang unit. Hindi nito binabago ang BOM deduction.")
     ),
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
-      fld("Current Stock","stock","number"),
-      fld("Min Stock (Alert)","minStock","number")
+      fld("Current Stock ("+(form.unit||"pc")+")","stock","number"),
+      fld("Min Stock ("+(form.unit||"pc")+")","minStock","number")
     ),
+    Number(form.packSize)>1&&h("div",{style:{background:"#E3F2FD",borderRadius:7,
+      padding:"7px 9px",marginBottom:10,fontSize:10,color:"#1565C0",fontWeight:700}},
+      "Stock "+fmtPacks({unit:form.unit,packUnit:form.packUnit,packSize:Number(form.packSize)},
+        Number(form.stock)||0)
+      +"  ·  Alert sa "+((Number(form.minStock)||0)/Number(form.packSize)).toFixed(2)
+      +" "+(form.packUnit||"pack")),
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
       fld("Selling Price (₱)","price","number"),
       fld("Cost Price (₱)","cost","number")
