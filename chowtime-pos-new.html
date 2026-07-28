@@ -570,39 +570,39 @@ function buildEscPos(ord,bName,cs,paperSize){
     });
     if(i.options&&i.options.length)a(ln("  "+i.options.join(", ")));
     var p=i.lineTotal&&i.qty?(i.lineTotal/i.qty):(i.unitPrice||i.price||0);
-    a(row("  x"+i.qty+" @ P"+p.toFixed(2),"P"+(i.lineTotal||(p*i.qty)).toFixed(2)));
+    a(row("  x"+i.qty+" @ P"+p.toFixed(2),"P"+peso((i.lineTotal||(p*i.qty)))));
   });
 
   a(dash());
   if(da>0){
-    a(row("Subtotal","P"+sub.toFixed(2)));
+    a(row("Subtotal","P"+peso(sub)));
     a(row("Discount"+(ord.discRate?" "+Math.round(ord.discRate*100)+"%":"")
       +(ord.discScope==="items"?" ("+((ord.discItems||[]).length)+" item/s)":""),
       "- P"+da.toFixed(2)));
     if(ord.discScope==="items")a(ln("* discounted item"));
   }
   if(isVAT&&!zerovat){
-    a(row("VATable Sales","P"+vatable.toFixed(2)));
+    a(row("VATable Sales","P"+peso(vatable)));
     a(row("VAT-Exempt Sales","P0.00"));
     a(row("Zero-Rated Sales","P0.00"));
-    a(row("VAT 12%","P"+vatAmt.toFixed(2)));
+    a(row("VAT 12%","P"+peso(vatAmt)));
   }
   if(!isVAT&&!zerovat){
     a(ln("NON-VAT REGISTERED"));
-    a(row("VAT-Exempt Sales","P"+net.toFixed(2)));
+    a(row("VAT-Exempt Sales","P"+peso(net)));
   }
   if(zerovat){
     a(ln("ZERO-RATED"));
-    a(row("Zero-Rated Sales","P"+net.toFixed(2)));
+    a(row("Zero-Rated Sales","P"+peso(net)));
   }
 
   a([ESC,0x45,0x01]);a([ESC,0x21,0x10]);
-  a(row("TOTAL","P"+net.toFixed(2)));
+  a(row("TOTAL","P"+peso(net)));
   a([ESC,0x21,0x00]);a([ESC,0x45,0x00]);
 
   var paid=(ord.payments&&ord.payments.reduce(function(s,p){return s+(p.amount||0);},0))||parseFloat(ord.cash||0)||net;
-  a(row("Payment ("+(ord.payMethod||"CASH").toUpperCase()+")","P"+paid.toFixed(2)));
-  if(paid>net)a(row("CHANGE","P"+(paid-net).toFixed(2)));
+  a(row("Payment ("+(ord.payMethod||"CASH").toUpperCase()+")","P"+peso(paid)));
+  if(paid>net)a(row("CHANGE","P"+peso((paid-net))));
 
   a(dash());
   a([ESC,0x61,0x01]);
@@ -1426,7 +1426,7 @@ function ItemCustomizer({item,onAdd,onClose,optionGroups=[],priceType="retail",u
           ),
           h("button",{onClick:handleAdd,disabled:blocked,style:{flex:1,padding:"12px",background:blocked?"#ddd":`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:10,color:blocked?"#999":"#fff",fontWeight:800,fontSize:13,cursor:blocked?"not-allowed":"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:9}},
             "Add to Order",
-            h("span",{style:{background:"rgba(255,255,255,.22)",padding:"2px 9px",borderRadius:20,fontSize:12}},"₱"+lineTotal.toFixed(2))
+            h("span",{style:{background:"rgba(255,255,255,.22)",padding:"2px 9px",borderRadius:20,fontSize:12}},"₱"+peso(lineTotal))
           )
         )
       )
@@ -1786,7 +1786,7 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
           })(),
           // Last price (from item data)
           h("div",{style:{fontSize:10,color:C.muted,textAlign:"center"}},
-            (item.price||0)>0?"₱"+(item.price||0).toFixed(2):"—"),
+            (item.price||0)>0?"₱"+peso(item.price||0):"—"),
           // Note
           h("input",{value:item.note||"",
             onChange:e=>setItems(p=>p.map((x,i)=>i===idx?{...x,note:e.target.value}:x)),
@@ -1843,16 +1843,16 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
                 border:"1px solid "+C.border}},
                 h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:4}},
                   h("span",{style:{fontSize:11,color:C.muted}},"Est. Subtotal:"),
-                  h("span",{style:{fontSize:11,fontWeight:700}},"₱"+estSubtotal.toFixed(2))
+                  h("span",{style:{fontSize:11,fontWeight:700}},"₱"+peso(estSubtotal))
                 ),
                 vatType==="vat"&&h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:4}},
                   h("span",{style:{fontSize:11,color:C.muted}},"VAT (12%):"),
-                  h("span",{style:{fontSize:11,fontWeight:700,color:"#E65100"}},"₱"+vatAmt.toFixed(2))
+                  h("span",{style:{fontSize:11,fontWeight:700,color:"#E65100"}},"₱"+peso(vatAmt))
                 ),
                 h("div",{style:{display:"flex",justifyContent:"space-between",
                   padding:"6px 0",borderTop:"2px solid "+C.primary,marginTop:4}},
                   h("span",{style:{fontSize:12,fontWeight:800}},"EST. GRAND TOTAL:"),
-                  h("span",{style:{fontSize:14,fontWeight:900,color:C.primary}},"₱"+grandTotal.toFixed(2))
+                  h("span",{style:{fontSize:14,fontWeight:900,color:C.primary}},"₱"+peso(grandTotal))
                 ),
                 h("div",{style:{fontSize:9,color:C.muted,marginTop:4}},
                   vatType==="vat"?"✓ VAT Inclusive":
@@ -2146,11 +2146,11 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
               h("div",{style:{width:"100%",fontSize:8,color:C.muted}},
                 "kada "+i.unit+
                 ((Number(i.packSize)||0)>1&&price
-                  ?"  ·  ₱"+(price*Number(i.packSize)).toFixed(2)+" kada "+(i.packUnit||"pack")
+                  ?"  ·  ₱"+peso((price*Number(i.packSize)))+" kada "+(i.packUnit||"pack")
                   :""))
             ),
             h("div",{style:{fontSize:11,fontWeight:800,color:C.primary,textAlign:"right"}},
-              "₱"+(actual*price).toFixed(2))
+              "₱"+peso((actual*price)))
           );
         }),
         // Total row
@@ -2158,7 +2158,7 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
           padding:"10px 12px",background:"#f9f9f9",borderTop:"2px solid "+C.border}},
           h("div",{style:{fontSize:11,fontWeight:800,gridColumn:"1/5"}},"GROSS TOTAL"),
           h("div",{style:{fontSize:13,fontWeight:900,color:C.primary,textAlign:"right"}},
-            "₱"+totalAmt.toFixed(2))
+            "₱"+peso(totalAmt))
         )
       ),
 
@@ -2487,7 +2487,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
         payload
       );
       setSaved(true);
-      showT(isClosing?"Closing count saved! ₱"+closingBalance.toFixed(2)+" carried over ✓":"Cash count saved ✓");
+      showT(isClosing?"Closing count saved! ₱"+peso(closingBalance)+" carried over ✓":"Cash count saved ✓");
     }catch(e){showT("Save failed","err");console.error(e);}
   };
 
@@ -2590,10 +2590,10 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
       :selHistory?h("div",null,
         // Summary cards
         h("div",{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:13}},
-          h(Stat,{label:"Total Cash",value:"₱"+selHistory.totalCash?.toFixed(2),icon:"💵",color:C.primary}),
-          h(Stat,{label:"Opening Fund",value:"₱"+(selHistory.openingFund||0).toFixed(2),icon:"🌅",color:C.info}),
-          h(Stat,{label:"Remittance",value:"₱"+(selHistory.remittance||0).toFixed(2),icon:"🏦",color:C.warning}),
-          h(Stat,{label:"Closing Balance",value:"₱"+(selHistory.closingBalance||0).toFixed(2),sub:"Tomorrow's opening",icon:"🌙",color:C.success})
+          h(Stat,{label:"Total Cash",value:"₱"+peso(selHistory.totalCash),icon:"💵",color:C.primary}),
+          h(Stat,{label:"Opening Fund",value:"₱"+peso(selHistory.openingFund||0),icon:"🌅",color:C.info}),
+          h(Stat,{label:"Remittance",value:"₱"+peso(selHistory.remittance||0),icon:"🏦",color:C.warning}),
+          h(Stat,{label:"Closing Balance",value:"₱"+peso(selHistory.closingBalance||0),sub:"Tomorrow's opening",icon:"🌙",color:C.success})
         ),
         h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
           h("div",{style:{background:"#fff",borderRadius:12,padding:"13px 15px",border:"1px solid "+C.border}},
@@ -2601,21 +2601,21 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
             h("div",{style:{marginTop:9}},
               DENOMS.map(d=>{const qty=(selHistory.counts||{})[d.value]||0;return qty>0?h("div",{key:d.value,style:{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #f5f5f5"}},
                 h("span",{style:{fontSize:11,fontWeight:600}},d.label+" × "+qty),
-                h("span",{style:{fontSize:11,fontWeight:700,color:d.type==="bill"?C.info:C.muted}},"₱"+(qty*d.value).toFixed(2))
+                h("span",{style:{fontSize:11,fontWeight:700,color:d.type==="bill"?C.info:C.muted}},"₱"+peso((qty*d.value)))
               ):null;})
             )
           ),
           h("div",{style:{background:"#fff",borderRadius:12,padding:"13px 15px",border:"1px solid "+C.border}},
             h("b",{style:{fontSize:12}},"Summary"),
             h("div",{style:{marginTop:9}},
-              [["Bills Total","₱"+(selHistory.billsTotal||0).toFixed(2),C.info],
-               ["Coins Total","₱"+(selHistory.coinsTotal||0).toFixed(2),C.muted],
-               ["Total Cash","₱"+(selHistory.totalCash||0).toFixed(2),C.primary],
-               ["Opening Fund","₱"+(selHistory.openingFund||0).toFixed(2),C.success],
-               ["Today's Sales","₱"+(selHistory.todaySales||0).toFixed(2),C.primary],
+              [["Bills Total","₱"+peso(selHistory.billsTotal||0),C.info],
+               ["Coins Total","₱"+peso(selHistory.coinsTotal||0),C.muted],
+               ["Total Cash","₱"+peso(selHistory.totalCash||0),C.primary],
+               ["Opening Fund","₱"+peso(selHistory.openingFund||0),C.success],
+               ["Today's Sales","₱"+peso(selHistory.todaySales||0),C.primary],
                ["Variance",(selHistory.variance||0)>=0?"+"+(selHistory.variance||0).toFixed(2):(selHistory.variance||0).toFixed(2),(selHistory.variance||0)>=0?C.success:C.danger],
-               ["Remittance","₱"+(selHistory.remittance||0).toFixed(2),C.warning],
-               ["Closing Balance","₱"+(selHistory.closingBalance||0).toFixed(2),C.success],
+               ["Remittance","₱"+peso(selHistory.remittance||0),C.warning],
+               ["Closing Balance","₱"+peso(selHistory.closingBalance||0),C.success],
               ].map(([l,v,col])=>h("div",{key:l,style:{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #f5f5f5"}},
                 h("span",{style:{fontSize:11,color:C.muted}},l),
                 h("span",{style:{fontSize:11,fontWeight:800,color:col}},v)
@@ -2639,7 +2639,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
           h("div",null,
             h("div",{style:{fontSize:10,fontWeight:700,color:openingFund>0?C.success:"#795548"}},
             openingSource==="logged"?"Opening Fund (naitala ngayon)":"Yesterday's Closing Balance → Today's Opening Fund"),
-            h("div",{style:{fontSize:18,fontWeight:900,color:openingFund>0?C.success:C.muted}},"₱"+openingFund.toFixed(2)),
+            h("div",{style:{fontSize:18,fontWeight:900,color:openingFund>0?C.success:C.muted}},"₱"+peso(openingFund)),
             h("div",{style:{fontSize:9,color:C.muted}},prevRecord?"From "+prevRecord.date+" closing":"No previous record — set manually if needed")
           ),
           h("div",{style:{fontSize:24}},openingFund>0?"✅":"📭")
@@ -2649,7 +2649,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
         h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden",marginBottom:10}},
           h("div",{style:{padding:"10px 14px",background:"#E3F2FD",borderBottom:"1px solid #BBDEFB",display:"flex",justifyContent:"space-between"}},
             h("b",{style:{fontSize:12,color:C.info}},"💵 Bills"),
-            h("span",{style:{fontSize:12,fontWeight:800,color:C.info}},"₱"+billsTotal.toFixed(2))
+            h("span",{style:{fontSize:12,fontWeight:800,color:C.info}},"₱"+peso(billsTotal))
           ),
           h("div",{style:{padding:"8px 14px"}},
             DENOMS.filter(d=>d.type==="bill").map(d=>h("div",{key:d.value,style:{display:"flex",alignItems:"center",gap:10,padding:"7px 0",borderBottom:"1px solid #f5f5f5"}},
@@ -2657,7 +2657,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
                 h("span",{style:{fontSize:10,fontWeight:900,color:d.color}},d.label)
               ),
               h("div",{style:{flex:1}},
-                h("div",{style:{fontSize:9,color:C.muted}},"× "+( counts[d.value]||0)+" = ₱"+((counts[d.value]||0)*d.value).toFixed(2))
+                h("div",{style:{fontSize:9,color:C.muted}},"× "+( counts[d.value]||0)+" = ₱"+peso(((counts[d.value]||0)*d.value)))
               ),
               h("div",{style:{display:"flex",alignItems:"center",gap:6}},
                 h("button",{onClick:()=>setCounts(p=>({...p,[d.value]:Math.max(0,(p[d.value]||0)-1)})),
@@ -2676,7 +2676,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
         h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
           h("div",{style:{padding:"10px 14px",background:"#F3E5F5",borderBottom:"1px solid #CE93D8",display:"flex",justifyContent:"space-between"}},
             h("b",{style:{fontSize:12,color:"#6A1B9A"}},"🪙 Coins"),
-            h("span",{style:{fontSize:12,fontWeight:800,color:"#6A1B9A"}},"₱"+coinsTotal.toFixed(2))
+            h("span",{style:{fontSize:12,fontWeight:800,color:"#6A1B9A"}},"₱"+peso(coinsTotal))
           ),
           h("div",{style:{padding:"8px 14px"}},
             DENOMS.filter(d=>d.type==="coin").map(d=>h("div",{key:d.value,style:{display:"flex",alignItems:"center",gap:10,padding:"7px 0",borderBottom:"1px solid #f5f5f5"}},
@@ -2684,7 +2684,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
                 h("span",{style:{fontSize:10,fontWeight:900,color:d.color}},d.label)
               ),
               h("div",{style:{flex:1}},
-                h("div",{style:{fontSize:9,color:C.muted}},"× "+(counts[d.value]||0)+" = ₱"+((counts[d.value]||0)*d.value).toFixed(2))
+                h("div",{style:{fontSize:9,color:C.muted}},"× "+(counts[d.value]||0)+" = ₱"+peso(((counts[d.value]||0)*d.value)))
               ),
               h("div",{style:{display:"flex",alignItems:"center",gap:6}},
                 h("button",{onClick:()=>setCounts(p=>({...p,[d.value]:Math.max(0,(p[d.value]||0)-1)})),
@@ -2705,15 +2705,15 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
         // Total summary card
         h("div",{style:{background:`linear-gradient(135deg,${C.primary},${C.dark})`,borderRadius:13,padding:"16px 18px",marginBottom:10}},
           h("div",{style:{color:C.accent,fontSize:9,fontWeight:700,letterSpacing:2}},"CASH COUNT TOTAL"),
-          h("div",{style:{color:"#fff",fontSize:28,fontWeight:900,margin:"6px 0"}},"₱"+totalCash.toFixed(2)),
+          h("div",{style:{color:"#fff",fontSize:28,fontWeight:900,margin:"6px 0"}},"₱"+peso(totalCash)),
           h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:10}},
             h("div",{style:{background:"rgba(255,255,255,.12)",borderRadius:8,padding:"8px 10px"}},
               h("div",{style:{color:"rgba(255,255,255,.6)",fontSize:8}},"BILLS"),
-              h("div",{style:{color:"#fff",fontSize:13,fontWeight:800}},"₱"+billsTotal.toFixed(2))
+              h("div",{style:{color:"#fff",fontSize:13,fontWeight:800}},"₱"+peso(billsTotal))
             ),
             h("div",{style:{background:"rgba(255,255,255,.12)",borderRadius:8,padding:"8px 10px"}},
               h("div",{style:{color:"rgba(255,255,255,.6)",fontSize:8}},"COINS"),
-              h("div",{style:{color:"#fff",fontSize:13,fontWeight:800}},"₱"+coinsTotal.toFixed(2))
+              h("div",{style:{color:"#fff",fontSize:13,fontWeight:800}},"₱"+peso(coinsTotal))
             )
           )
         ),
@@ -2783,28 +2783,28 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
           h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:6}},"VARIANCE CHECK"),
           h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:3}},
             h("span",{style:{fontSize:11,color:C.muted}},"Opening Fund"),
-            h("span",{style:{fontSize:11,fontWeight:700}},"₱"+openingFund.toFixed(2))
+            h("span",{style:{fontSize:11,fontWeight:700}},"₱"+peso(openingFund))
           ),
           h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:3}},
             h("span",{style:{fontSize:11,color:C.muted}},"Cash Sales Today"),
-            h("span",{style:{fontSize:11,fontWeight:700}},"₱"+todaySales.toFixed(2))
+            h("span",{style:{fontSize:11,fontWeight:700}},"₱"+peso(todaySales))
           ),
           h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:3}},
             h("span",{style:{fontSize:11,color:C.muted}},"Cash In"),
-            h("span",{style:{fontSize:11,fontWeight:700,color:C.success}},"+₱"+cashIn.toFixed(2))
+            h("span",{style:{fontSize:11,fontWeight:700,color:C.success}},"+₱"+peso(cashIn))
           ),
           h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:3}},
             h("span",{style:{fontSize:11,color:C.muted}},"Cash Out"),
-            h("span",{style:{fontSize:11,fontWeight:700,color:C.danger}},"-₱"+cashOut.toFixed(2))
+            h("span",{style:{fontSize:11,fontWeight:700,color:C.danger}},"-₱"+peso(cashOut))
           ),
           h("div",{style:{display:"flex",justifyContent:"space-between",padding:"6px 0",borderTop:"1px dashed #ddd",marginTop:3}},
             h("span",{style:{fontSize:11,color:C.muted}},"Expected Total"),
-            h("span",{style:{fontSize:11,fontWeight:700}},"₱"+expectedCash.toFixed(2))
+            h("span",{style:{fontSize:11,fontWeight:700}},"₱"+peso(expectedCash))
           ),
           h("div",{style:{display:"flex",justifyContent:"space-between",marginTop:4}},
             h("span",{style:{fontSize:12,fontWeight:800}},"VARIANCE"),
             h("span",{style:{fontSize:14,fontWeight:900,color:Math.abs(variance)<0.01?C.success:variance>0?C.info:C.danger}},
-              (variance>=0?"+":"")+"₱"+variance.toFixed(2))
+              (variance>=0?"+":"")+"₱"+peso(variance))
           ),
           h("div",{style:{fontSize:9,color:C.muted,marginTop:4}},
             Math.abs(variance)<0.01?"✅ Count is accurate":
@@ -2827,7 +2827,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
               h("div",{style:{fontSize:9,color:"#6A1B9A",fontWeight:700}},"CLOSING BALANCE"),
               h("div",{style:{fontSize:9,color:C.muted}},"Stays in cash box = Tomorrow's Opening Fund")
             ),
-            h("div",{style:{fontSize:20,fontWeight:900,color:closingBalance>=0?"#6A1B9A":C.danger}},"₱"+closingBalance.toFixed(2))
+            h("div",{style:{fontSize:20,fontWeight:900,color:closingBalance>=0?"#6A1B9A":C.danger}},"₱"+peso(closingBalance))
           )
         ),
 
@@ -2933,7 +2933,7 @@ function CALoanPage({user,branchId,curBranch,db,hrisDB,showT,mode,hrisEmps=[]}){
       ),
       h("div",{style:{textAlign:"right"}},
         h("div",{style:{color:"rgba(255,255,255,.5)",fontSize:9}},"OUTSTANDING BALANCE"),
-        h("div",{style:{color:totalOwed>0?C.warning:"#4ade80",fontSize:20,fontWeight:900}},"₱"+totalOwed.toFixed(2))
+        h("div",{style:{color:totalOwed>0?C.warning:"#4ade80",fontSize:20,fontWeight:900}},"₱"+peso(totalOwed))
       )
     ),
 
@@ -2975,13 +2975,13 @@ function CALoanPage({user,branchId,curBranch,db,hrisDB,showT,mode,hrisEmps=[]}){
                 n+" cutoffs"))
             ),
             amount&&parseFloat(amount)>0&&h("div",{style:{marginTop:8,padding:"9px 12px",background:"#E3F2FD",borderRadius:8,fontSize:11,color:"#1565C0",fontWeight:600}},
-              "₱"+Math.ceil(parseFloat(amount)/parseInt(installments)).toFixed(2)+" deducted per cutoff × "+installments+" = ₱"+parseFloat(amount).toFixed(2)
+              "₱"+peso(Math.ceil(parseFloat(amount)/parseInt(installments)))+" deducted per cutoff × "+installments+" = ₱"+peso(parseFloat(amount))
             )
           ),
 
           // CA deduction note
           isCA&&amount&&parseFloat(amount)>0&&h("div",{style:{marginBottom:11,padding:"9px 12px",background:"#FFF8E1",borderRadius:8,fontSize:11,color:"#795548",fontWeight:600}},
-            "💡 Full ₱"+parseFloat(amount).toFixed(2)+" will be deducted on your NEXT CUTOFF payroll"
+            "💡 Full ₱"+peso(parseFloat(amount))+" will be deducted on your NEXT CUTOFF payroll"
           ),
 
           h("button",{onClick:submit,
@@ -3001,12 +3001,12 @@ function CALoanPage({user,branchId,curBranch,db,hrisDB,showT,mode,hrisEmps=[]}){
             :myRequests.map(r=>h("div",{key:r._docId,style:{padding:"10px 12px",borderRadius:9,border:"1px solid "+C.border,marginBottom:8,background:{"pending":"#FFF8E1","approved":"#E8F5E9","rejected":"#FFEBEE","released":"#E3F2FD"}[r.status]||"#fff"}},
               h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:4}},
                 h("div",{style:{fontSize:12,fontWeight:800,color:{"pending":C.warning,"approved":C.success,"rejected":C.danger,"released":C.info}[r.status]||C.text}},
-                  "₱"+r.amount.toFixed(2)),
+                  "₱"+peso(r.amount)),
                 h(Badge,{label:r.status.toUpperCase(),color:{"pending":C.warning,"approved":C.success,"rejected":C.danger,"released":C.info}[r.status]||C.muted})
               ),
               h("div",{style:{fontSize:10,color:C.muted}},r.reason),
               h("div",{style:{fontSize:9,color:C.muted,marginTop:3}},r.date+" · "+r.type),
-              r.status==="approved"&&r.balance>0&&h("div",{style:{fontSize:10,fontWeight:700,color:C.warning,marginTop:3}},"Balance: ₱"+(r.balance||r.amount).toFixed(2)),
+              r.status==="approved"&&r.balance>0&&h("div",{style:{fontSize:10,fontWeight:700,color:C.warning,marginTop:3}},"Balance: ₱"+peso((r.balance||r.amount))),
               r.status==="rejected"&&r.rejectReason&&h("div",{style:{fontSize:10,color:C.danger,marginTop:3}},"Reason: "+r.rejectReason),
               r.status==="approved"&&h("div",{style:{fontSize:9,color:C.success,marginTop:3}},"✅ Auto-deducted sa next cutoff payroll")
             ))
@@ -3153,9 +3153,9 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
               :h("div",{style:{fontSize:8,color:C.warning,fontWeight:600}},"⚠️ No HRIS link")
           ),
           h("div",{style:{fontSize:10,color:C.muted}},req.reason||"—"),
-          h("div",{style:{fontSize:12,fontWeight:800,color:C.primary}},"₱"+req.amount.toFixed(2)),
+          h("div",{style:{fontSize:12,fontWeight:800,color:C.primary}},"₱"+peso(req.amount)),
           h("div",null,
-            h("div",{style:{fontSize:11,fontWeight:700,color:"#1565C0"}},"₱"+req.cutoffDeduct.toFixed(2)),
+            h("div",{style:{fontSize:11,fontWeight:700,color:"#1565C0"}},"₱"+peso(req.cutoffDeduct)),
             h("div",{style:{fontSize:8,color:C.muted}},req.type==="Cash Advance"?"Full @ cutoff":req.installments+"x cutoffs")
           ),
           h("div",null,h(Badge,{label:req.status.toUpperCase(),
@@ -3239,7 +3239,7 @@ function HRISBranchPage({user,branchId,curBranch,db,hrisDB,showT}){
             h("div",{style:{fontSize:9,color:C.muted}},r.reason+" · "+r.date),
             r.status==="approved"&&h("div",{style:{fontSize:9,color:C.success,fontWeight:600}},"✅ In payroll · ₱"+r.cutoffDeduct+"/cutoff")
           ),
-          h("div",{style:{fontSize:13,fontWeight:900,color:r.type==="Cash Advance"?C.primary:"#1565C0"}},"₱"+r.amount.toFixed(2)),
+          h("div",{style:{fontSize:13,fontWeight:900,color:r.type==="Cash Advance"?C.primary:"#1565C0"}},"₱"+peso(r.amount)),
           h(Badge,{label:r.status.toUpperCase(),color:{pending:C.warning,approved:C.success,rejected:C.danger}[r.status]||C.muted})
         ))
     )
@@ -4133,7 +4133,7 @@ function IngredientsPage({db,user,showT}){
                   h("div",{style:{fontWeight:600,fontSize:12}},ing.name),
                   h("div",{style:{fontSize:10,color:C.muted}},ing.unit),
                   h("div",{style:{fontSize:11,fontWeight:700,color:C.primary}},
-                    "₱"+(ing.cost||0).toFixed(2)),
+                    "₱"+peso(ing.cost||0)),
                   h("div",{style:{fontSize:9,color:C.muted}},ing.supplier||"—"),
                   h("div",{style:{display:"flex",gap:4}},
                     h("button",{onClick:e=>{e.stopPropagation();setEditing({...ing});},
@@ -4250,7 +4250,7 @@ function IngredientsPage({db,user,showT}){
                 h("span",{style:{fontSize:11,color:C.muted}},
                   "Cost per "+editing.unit+":"),
                 h("span",{style:{fontSize:14,fontWeight:900,color:C.success}},
-                  "₱"+(editing.cost||0).toFixed(2))
+                  "₱"+peso(editing.cost||0))
               ),
 
               h("div",{style:{display:"flex",gap:8}},
@@ -4295,6 +4295,11 @@ function baseToPacks(it,base){
   if(!sz)return {packs:0,loose:b,hasPacks:false};
   return {packs:Math.floor(b/sz),loose:Math.round((b%sz)*1000)/1000,hasPacks:true};
 }
+// Money always renders with thousands separators. Reading P330000.00 off a
+// screen is guesswork; P330,000.00 is not.
+const peso=(v)=>(Number(v)||0).toLocaleString("en-PH",
+  {minimumFractionDigits:2,maximumFractionDigits:2});
+
 const _n=(v)=>{const x=Math.round((Number(v)||0)*1000)/1000;return x.toLocaleString("en-PH");};
 // "4,484 pc" or "4,484 pc = 149 box + 14 pc"
 function fmtStock(it,base){
@@ -4560,7 +4565,7 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
           h("span",{style:{fontSize:9,color:C.muted}},"%")
         ),
         h("div",{style:{fontSize:9}},
-          h("div",{style:{color:C.primary,fontWeight:700}},cost>0?"₱"+cost.toFixed(2):"—"),
+          h("div",{style:{color:C.primary,fontWeight:700}},cost>0?"₱"+peso(cost):"—"),
           h("div",{style:{color:C.muted,fontSize:8}},
             actualDeduct>0?(actualDeduct.toFixed(3).replace(/\.?0+$/,"")+" "+(row.convUnit||ing.unit||"")):"—")
         ),
@@ -4588,11 +4593,11 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
       (row.ingId&&pSz>0&&(ing.cost||0)>0)&&h("div",{style:{background:"#E3F2FD",
         borderRadius:6,padding:"5px 8px",marginTop:3,fontSize:9,color:"#1565C0"}},
         h("b",null,"Cost check: "),
-        "₱"+(ing.cost||0).toFixed(2)+" kada "+baseU+
-        "  →  ₱"+((ing.cost||0)*pSz).toFixed(2)+" kada "+pU+" ("+pSz+" "+baseU+")",
+        "₱"+peso(ing.cost||0)+" kada "+baseU+
+        "  →  ₱"+peso(((ing.cost||0)*pSz))+" kada "+pU+" ("+pSz+" "+baseU+")",
         h("div",{style:{marginTop:2}},
           "Kung hindi ito ang bayad mo kada "+pU+", ang naka-set na cost ay presyo ng buong "+pU+
-          " — dapat ₱"+(((ing.cost||0)/pSz).toFixed(2))+" kada "+baseU+".")
+          " — dapat ₱"+(peso((ing.cost||0)/pSz))+" kada "+baseU+".")
       ),
       // Stock is held in the ingredient's base unit. A recipe written in any
       // other unit silently deducts the wrong amount unless CONV is set by hand.
@@ -4632,7 +4637,7 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
     ),
     rows.length>0&&h("div",{style:{marginTop:8,padding:"6px 10px",background:"#f5f5f5",
       borderRadius:8,fontSize:10,fontWeight:700}},
-      "Total Cost: ₱"+getCost(rows).toFixed(2))
+      "Total Cost: ₱"+peso(getCost(rows)))
   );
 
   return h("div",null,
@@ -4813,9 +4818,9 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
                 background:vi===0?"#fff":"#fafafa"}},
               h("div",{style:{fontWeight:vi===0?700:400,fontSize:11,paddingLeft:vi===0?0:14}},
                 vi===0?item.name:"↳ "+v),
-              h("div",{style:{fontSize:11,fontWeight:700}},"₱"+sell.toFixed(2)),
-              h("div",{style:{fontSize:11,color:cost>0?C.danger:C.muted}},cost>0?"₱"+cost.toFixed(2):"—"),
-              h("div",{style:{fontSize:11,fontWeight:700,color:margin>0?C.success:C.danger}},cost>0?"₱"+margin.toFixed(2):"—"),
+              h("div",{style:{fontSize:11,fontWeight:700}},"₱"+peso(sell)),
+              h("div",{style:{fontSize:11,color:cost>0?C.danger:C.muted}},cost>0?"₱"+peso(cost):"—"),
+              h("div",{style:{fontSize:11,fontWeight:700,color:margin>0?C.success:C.danger}},cost>0?"₱"+peso(margin):"—"),
               h("div",{style:{fontSize:11,fontWeight:700,
                 color:pct>50?C.success:pct>30?C.warning:C.danger}},
                 cost>0?pct.toFixed(1)+"%":"—")
@@ -5451,7 +5456,7 @@ async function performVoid(db, args){
 }
 
 function voidSummary(r){
-  return "₱"+r.voidAmt.toFixed(2)+" reversed · "+r.restocked+" ingredient/s restocked"
+  return "₱"+peso(r.voidAmt)+" reversed · "+r.restocked+" ingredient/s restocked"
     +(r.restockFailed?" ("+r.restockFailed+" failed)":"")
     +(r.missingId?" ("+r.missingId+" walang BOM link)":"")
     +(!r.orderUpdated?" ⚠️ order hindi na-update":"");
@@ -5627,7 +5632,7 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
                   h("span",{style:{fontSize:11,fontWeight:800,color:C.danger}},"#"+o.id),
                   h("div",{style:{display:"flex",gap:8,alignItems:"center"}},
                     h("span",{style:{fontSize:12,fontWeight:900,color:C.primary}},
-                      "₱"+o.total?.toFixed(2)),
+                      "₱"+peso(o.total)),
                     h("span",{style:{
                       fontSize:9,fontWeight:700,padding:"2px 8px",borderRadius:10,
                       background:selOrder?.id===o.id?"#FFCDD2":"#f5f5f5",
@@ -5665,7 +5670,7 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
                         ),
                         h("span",{style:{fontSize:11,fontWeight:700,
                           color:selItems[itemIdx]!==false?C.primary:C.muted}},
-                          "₱"+((item.price||0)*(item.qty||1)).toFixed(2))
+                          "₱"+peso(((item.price||0)*(item.qty||1))))
                       )
                     ),
                     // Summary
@@ -5675,7 +5680,7 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
                       h("span",{style:{fontSize:10,color:C.danger,fontWeight:600}},
                         voidedItems.length+"/"+(o.items||[]).length+" items selected"),
                       h("span",{style:{fontSize:12,fontWeight:900,color:C.danger}},
-                        "Void: ₱"+voidAmt.toFixed(2))
+                        "Void: ₱"+peso(voidAmt))
                     )
                   )
                   :h("div",{onClick:()=>setSelOrder(o),style:{cursor:"pointer"}},
@@ -5695,7 +5700,7 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
               ?h("div",{style:{background:"#FFEBEE",borderRadius:9,padding:"12px",marginBottom:14}},
                 h("div",{style:{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6}},"SELECTED ORDER"),
                 h("div",{style:{fontSize:14,fontWeight:900,color:C.danger}},"#"+selOrder.id),
-                h("div",{style:{fontSize:18,fontWeight:900,color:C.primary,marginTop:2}},"₱"+selOrder.total?.toFixed(2)),
+                h("div",{style:{fontSize:18,fontWeight:900,color:C.primary,marginTop:2}},"₱"+peso(selOrder.total)),
                 h("div",{style:{fontSize:10,color:C.muted,marginTop:3}},
                   (selOrder.items||[]).map(i=>i.qty+"x "+i.name).join(", "))
               )
@@ -5739,7 +5744,7 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
                 h("div",{style:{fontSize:10,color:C.muted,marginTop:2}},
                   "By: "+req.requestedBy+" · "+req.date)
               ),
-              h("div",{style:{fontSize:16,fontWeight:900,color:C.primary}},"₱"+req.orderTotal?.toFixed(2))
+              h("div",{style:{fontSize:16,fontWeight:900,color:C.primary}},"₱"+peso(req.orderTotal))
             ),
             h("div",{style:{padding:"12px 16px"}},
               h("div",{style:{fontSize:11,marginBottom:8}},
@@ -5749,7 +5754,7 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
               // Show partial vs full indicator
               req.isPartial&&h("div",{style:{background:"#FFF8E1",border:"1px solid #FFE082",
                 borderRadius:6,padding:"5px 10px",marginBottom:6,fontSize:10,color:"#795548",fontWeight:700}},
-                "⚡ PARTIAL VOID — "+req.voidedItems?.length+"/"+req.orderItems?.length+" items · ₱"+req.voidAmount?.toFixed(2)
+                "⚡ PARTIAL VOID — "+req.voidedItems?.length+"/"+req.orderItems?.length+" items · ₱"+peso(req.voidAmount)
               ),
               h("div",{style:{fontSize:10,color:C.muted,marginBottom:6}},
                 "Void items: "+(req.voidedItems||req.orderItems||[]).map(i=>i.qty+"x "+i.name).join(", ")),
@@ -5786,7 +5791,7 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
             h("div",{style:{fontSize:11,fontWeight:700}},"#"+req.orderId+" · "+req.requestedBy),
             h("div",{style:{fontSize:9,color:C.muted}},req.reason+" · "+req.date)
           ),
-          h("div",{style:{fontSize:12,fontWeight:800,color:C.primary}},"₱"+req.orderTotal?.toFixed(2)),
+          h("div",{style:{fontSize:12,fontWeight:800,color:C.primary}},"₱"+peso(req.orderTotal)),
           h(Badge,{label:req.status.toUpperCase(),
             color:{pending:C.warning,approved:C.danger,rejected:C.success}[req.status]||C.muted})
         ))
@@ -5953,12 +5958,12 @@ function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inve
         h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,padding:"16px"}},
           h("div",{style:{fontSize:10,color:C.muted,marginBottom:4}},"TRANSACTIONS"),
           h("div",{style:{fontSize:22,fontWeight:900}},""+txnCount),
-          h("div",{style:{fontSize:10,color:C.muted,marginTop:4}},"Avg: ₱"+avgTxn.toFixed(2))
+          h("div",{style:{fontSize:10,color:C.muted,marginTop:4}},"Avg: ₱"+peso(avgTxn))
         ),
         h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,padding:"16px"}},
           h("div",{style:{fontSize:10,color:C.muted,marginBottom:4}},"VAT (12%)"),
-          h("div",{style:{fontSize:22,fontWeight:900,color:"#6A1B9A"}},"₱"+vat.toFixed(2)),
-          h("div",{style:{fontSize:10,color:C.muted,marginTop:4}},"Vatable: ₱"+vatable.toFixed(2))
+          h("div",{style:{fontSize:22,fontWeight:900,color:"#6A1B9A"}},"₱"+peso(vat)),
+          h("div",{style:{fontSize:10,color:C.muted,marginTop:4}},"Vatable: ₱"+peso(vatable))
         ),
         h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,padding:"16px"}},
           h("div",{style:{fontSize:10,color:C.muted,marginBottom:4}},"VOID ORDERS"),
@@ -5988,7 +5993,7 @@ function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inve
             pctBar(gross>0?it.rev/gross*100:0)
           ),
           h("div",{style:{fontSize:12,fontWeight:700}},it.qty),
-          h("div",{style:{fontSize:12,fontWeight:700,color:C.primary}},"₱"+it.rev.toFixed(2)),
+          h("div",{style:{fontSize:12,fontWeight:700,color:C.primary}},"₱"+peso(it.rev)),
           h("div",{style:{fontSize:11,color:C.muted}},(gross>0?(it.rev/gross*100).toFixed(1):0)+"%"),
           h("div",{style:{fontSize:12,fontWeight:900,color:i<3?C.warning:C.muted}},"#"+(i+1))
         ))
@@ -6014,7 +6019,7 @@ function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inve
               pctBar(gross>0?c.rev/gross*100:0,col)
             ),
             h("div",{style:{fontSize:12}},""+c.qty),
-            h("div",{style:{fontSize:12,fontWeight:700,color:col}},"₱"+c.rev.toFixed(2)),
+            h("div",{style:{fontSize:12,fontWeight:700,color:col}},"₱"+peso(c.rev)),
             h("div",{style:{fontSize:11,color:C.muted}},(gross>0?(c.rev/gross*100).toFixed(1):0)+"%")
           );
         })
@@ -6027,7 +6032,7 @@ function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inve
         payList.map(p=>h("div",{key:p.method,
           style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,padding:"16px"}},
           h("div",{style:{fontSize:10,color:C.muted,marginBottom:4,textTransform:"uppercase"}},p.method),
-          h("div",{style:{fontSize:20,fontWeight:900,color:C.primary}},"₱"+p.total.toFixed(2)),
+          h("div",{style:{fontSize:20,fontWeight:900,color:C.primary}},"₱"+peso(p.total)),
           h("div",{style:{fontSize:10,color:C.muted}},p.count+" transactions"),
           pctBar(gross>0?p.total/gross*100:0)
         ))
@@ -6053,7 +6058,7 @@ function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inve
               pctBar(totalAll>0?b.total/totalAll*100:0,C.primary)
             ),
             h("div",{style:{fontSize:12}},b.count),
-            h("div",{style:{fontSize:12,fontWeight:700,color:C.primary}},"₱"+b.total.toFixed(2)),
+            h("div",{style:{fontSize:12,fontWeight:700,color:C.primary}},"₱"+peso(b.total)),
             h("div",{style:{fontSize:11,color:C.muted}},(totalAll>0?(b.total/totalAll*100).toFixed(1):0)+"%")
           );
         })
@@ -6097,7 +6102,7 @@ function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inve
               h("div",{style:{fontSize:9,color:C.muted}},po.branchName||po.branch)
             ),
             h("div",{style:{color:C.muted}},po.deliveryDate||po.date),
-            h("div",{style:{fontWeight:700,color:C.primary}},"₱"+(po.totalAmount||0).toFixed(2)),
+            h("div",{style:{fontWeight:700,color:C.primary}},"₱"+peso(po.totalAmount||0)),
             h("div",null,h("span",{style:{fontSize:9,padding:"2px 7px",
               background:"#E8F5E9",color:C.success,borderRadius:8,fontWeight:700}},"PAID"))
           ))
@@ -6319,7 +6324,7 @@ function StockEditModal({item,db,user,branchId,showT,onClose,boms=[]}){
         h("div",{style:{color:"rgba(255,255,255,.6)",fontSize:9,letterSpacing:2,fontWeight:700}},"INVENTORY ITEM"),
         h("div",{style:{color:"#fff",fontWeight:900,fontSize:15}},item.name),
         h("div",{style:{color:"rgba(255,255,255,.5)",fontSize:10}},
-          "Stock: "+fmtStock(item,current)+" · ₱"+(item.price||0).toFixed(2))
+          "Stock: "+fmtStock(item,current)+" · ₱"+peso(item.price||0))
       ),
       h("button",{onClick:onClose,
         style:{background:"rgba(255,255,255,.15)",border:"none",color:"#fff",
@@ -6592,8 +6597,8 @@ function StockEditModal({item,db,user,branchId,showT,onClose,boms=[]}){
         packSizeOf(item)>0&&h("div",{style:{background:"#E3F2FD",borderRadius:8,
           padding:"8px 10px",marginBottom:12,fontSize:10,color:"#1565C0"}},
           h("div",{style:{fontWeight:800,marginBottom:3}},"Per "+packUnitOf(item)+" ("+packSizeOf(item)+" "+(details.unit||"pc")+")"),
-          h("div",null,"Sell: ₱"+((parseFloat(details.price)||0)*packSizeOf(item)).toFixed(2)
-            +"   ·   Cost: ₱"+((parseFloat(details.cost)||0)*packSizeOf(item)).toFixed(2)),
+          h("div",null,"Sell: ₱"+peso(((parseFloat(details.price)||0)*packSizeOf(item)))
+            +"   ·   Cost: ₱"+peso(((parseFloat(details.cost)||0)*packSizeOf(item)))),
           h("div",{style:{marginTop:3,color:"#555"}},
             "Kung hindi ito ang aktwal na presyo kada "+packUnitOf(item)+
             ", ang inilagay mo ay presyo ng buong "+packUnitOf(item)+" — hatiin sa "+packSizeOf(item)+".")
@@ -6601,8 +6606,8 @@ function StockEditModal({item,db,user,branchId,showT,onClose,boms=[]}){
         (parseFloat(details.cost)||0)>(parseFloat(details.price)||0)&&(parseFloat(details.price)||0)>0
           &&h("div",{style:{background:"#FFEBEE",border:"1px solid #FFCDD2",borderRadius:8,
             padding:"8px 10px",marginBottom:12,fontSize:10,color:"#C62828",fontWeight:700}},
-            "⚠️ Mas mataas ang cost (₱"+(parseFloat(details.cost)||0).toFixed(2)+
-            ") kaysa sell price (₱"+(parseFloat(details.price)||0).toFixed(2)+
+            "⚠️ Mas mataas ang cost (₱"+peso(parseFloat(details.cost)||0)+
+            ") kaysa sell price (₱"+peso(parseFloat(details.price)||0)+
             ") — magkaiba ang unit ng dalawa."),
         details.price>0&&h("div",{style:{background:"#E8F5E9",borderRadius:8,
           padding:"8px 12px",marginBottom:12,display:"flex",justifyContent:"space-between"}},
@@ -6820,17 +6825,17 @@ function PaymentModal({po,db,user,showT,onClose}){
       h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:16}},
         h("div",{style:{background:"#f9f9f9",borderRadius:8,padding:"10px",textAlign:"center"}},
           h("div",{style:{fontSize:9,color:C.muted,marginBottom:3}},"GRAND TOTAL"),
-          h("div",{style:{fontSize:14,fontWeight:900,color:C.text}},"₱"+grandTotal.toFixed(2))
+          h("div",{style:{fontSize:14,fontWeight:900,color:C.text}},"₱"+peso(grandTotal))
         ),
         h("div",{style:{background:"#E8F5E9",borderRadius:8,padding:"10px",textAlign:"center"}},
           h("div",{style:{fontSize:9,color:C.muted,marginBottom:3}},"TOTAL PAID"),
-          h("div",{style:{fontSize:14,fontWeight:900,color:C.success}},"₱"+totalPaid.toFixed(2))
+          h("div",{style:{fontSize:14,fontWeight:900,color:C.success}},"₱"+peso(totalPaid))
         ),
         h("div",{style:{background:balance>0?"#FFEBEE":"#E8F5E9",borderRadius:8,
           padding:"10px",textAlign:"center"}},
           h("div",{style:{fontSize:9,color:C.muted,marginBottom:3}},"BALANCE"),
           h("div",{style:{fontSize:14,fontWeight:900,color:balance>0?C.danger:C.success}},
-            "₱"+balance.toFixed(2))
+            "₱"+peso(balance))
         )
       ),
 
@@ -6843,7 +6848,7 @@ function PaymentModal({po,db,user,showT,onClose}){
             padding:"6px 10px",background:"#f9f9f9",borderRadius:7,marginBottom:4,
             fontSize:11}},
             h("div",null,
-              h("span",{style:{fontWeight:700}},"₱"+p.amount.toFixed(2)),
+              h("span",{style:{fontWeight:700}},"₱"+peso(p.amount)),
               h("span",{style:{color:C.muted,marginLeft:8}},
                 p.method.toUpperCase()+(p.ref?" · Ref: "+p.ref:""))
             ),
@@ -6893,8 +6898,8 @@ function PaymentModal({po,db,user,showT,onClose}){
         h("span",null,"After payment:"),
         h("div",{style:{textAlign:"right"}},
           h("div",{style:{fontWeight:800,color:payStatus==="Paid"?C.success:payStatus==="Partial"?C.warning:C.danger}},
-            payStatus==="Paid"?"✅ FULLY PAID":payStatus==="Partial"?"⚡ PARTIAL — Balance: ₱"+newBalance.toFixed(2):"Unpaid"),
-          h("div",{style:{fontSize:9,color:C.muted}},"New total paid: ₱"+newPaid.toFixed(2))
+            payStatus==="Paid"?"✅ FULLY PAID":payStatus==="Partial"?"⚡ PARTIAL — Balance: ₱"+peso(newBalance):"Unpaid"),
+          h("div",{style:{fontSize:9,color:C.muted}},"New total paid: ₱"+peso(newPaid))
         )
       ),
 
@@ -7205,7 +7210,7 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
                 fontSize:11,fontWeight:700,outline:"none",textAlign:"right"}})
           ),
           h("div",{style:{fontSize:11,fontWeight:800,color:"#6A1B9A",textAlign:"right"}},
-            "₱"+(aq*(prices[i.id]||0)).toFixed(2))
+            "₱"+peso((aq*(prices[i.id]||0))))
         );
       }),
       // Total row
@@ -7213,7 +7218,7 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
         padding:"10px 20px",background:"#f9f9f9",borderTop:"2px solid #6A1B9A"}},
         h("div",{style:{fontSize:11,fontWeight:800,gridColumn:"1/5"}},"GROSS TOTAL"),
         h("div",{style:{fontSize:14,fontWeight:900,color:"#6A1B9A",textAlign:"right"}},
-          "₱"+total.toFixed(2))
+          "₱"+peso(total))
       )
     ),
 
@@ -7255,12 +7260,12 @@ function printPODR(po){
       const q=i.actualQty!=null?i.actualQty:(i.qty||0);
       rows+="<tr><td>"+itemNo+++"</td><td>"+cat+"</td><td>"+i.name+"</td>"+
         "<td>"+q+" "+(i.unit||"")+"</td>"+
-        "<td style='text-align:right'>"+"₱"+(i.price||0).toFixed(2)+"</td>"+
-        "<td style='text-align:right'>"+"₱"+((i.price||0)*q).toFixed(2)+"</td></tr>";
+        "<td style='text-align:right'>"+"₱"+peso(i.price||0)+"</td>"+
+        "<td style='text-align:right'>"+"₱"+peso(((i.price||0)*q))+"</td></tr>";
     });
     rows+="<tr style='background:#f5f5f5;font-weight:bold'>"+
       "<td colspan='2'></td><td>Total "+cat+"</td>"+
-      "<td></td><td></td><td style='text-align:right'>"+"₱"+cTotal.toFixed(2)+"</td></tr>";
+      "<td></td><td></td><td style='text-align:right'>"+"₱"+peso(cTotal)+"</td></tr>";
   });
   const html="<!DOCTYPE html><html><head><title>"+(po.drNum||po.poNum)+"</title>"+
     "<style>body{font-family:Arial;font-size:11px;padding:20px;}"+
@@ -7274,7 +7279,7 @@ function printPODR(po){
     rows+
     "<tr style='background:#C8151B;color:#fff;font-weight:bold'>"+
     "<td colspan='5' style='text-align:right'>GRAND TOTAL</td>"+
-    "<td>"+"₱"+grand.toFixed(2)+"</td></tr></table>"+
+    "<td>"+"₱"+peso(grand)+"</td></tr></table>"+
     "<div style='margin-top:30px;display:grid;grid-template-columns:repeat(4,1fr);gap:20px'>"+
     ["Prepared by","Approved by","Delivered by","Received by"].map(function(s){
       return "<div style='text-align:center;border-top:1px solid #000;padding-top:4px'>"+s+"</div>";
@@ -8226,7 +8231,7 @@ function PayrollPage({db,hrisDB,user,showT,branches,branchId,staff,advances}){
                   border:"1px solid #FFE082",fontSize:10}},
                 h("div",{style:{fontWeight:700}},d.type||"CA"),
                 h("div",{style:{color:C.danger}},
-                  "₱"+d.cutoffDeduct+"/cutoff · Bal: ₱"+(d.balance||0).toFixed(2)),
+                  "₱"+d.cutoffDeduct+"/cutoff · Bal: ₱"+peso(d.balance||0)),
                 h("div",{style:{color:C.muted}},d.reason||"")
               ))
             )
@@ -9620,10 +9625,10 @@ function App(){
             h("div",{style:{textAlign:"right",flexShrink:0}},
               h("div",{style:{fontSize:11,fontWeight:800,
                 color:priceType==="franchisee"?"#E65100":priceType==="wholesale"?"#6A1B9A":C.text}},
-                "₱"+(getPriceByType(i)*(i.qty||1)).toFixed(2)),
+                "₱"+peso((getPriceByType(i)*(i.qty||1)))),
               h("div",{style:{fontSize:8,color:C.muted,textDecoration:"line-through",
                 visibility:priceType!=="retail"?"visible":"hidden",height:priceType!=="retail"?"auto":"0px",overflow:"hidden"}},
-                "₱"+i.lineTotal.toFixed(2))
+                "₱"+peso(i.lineTotal))
             )
           ))
         ),
@@ -9844,22 +9849,22 @@ function App(){
                     display:"flex",alignItems:"center",justifyContent:"center"}},
                     on&&h("span",{style:{color:"#fff",fontSize:9,fontWeight:900}},"✓")),
                   h("span",{style:{flex:1,fontSize:10,fontWeight:on?700:400}},i.qty+"x "+i.name),
-                  h("span",{style:{fontSize:10,color:C.muted}},"₱"+lineAmt(i).toFixed(2))
+                  h("span",{style:{fontSize:10,color:C.muted}},"₱"+peso(lineAmt(i)))
                 );
               }),
               h("div",{style:{fontSize:9,color:C.muted,marginTop:5,paddingTop:5,
                 borderTop:"1px dashed "+C.border}},
-                "Base ₱"+chkDiscBase.toFixed(2)+" × "+Math.round(discRate*100)+"% = -₱"+chkDiscAmt.toFixed(2))
+                "Base ₱"+peso(chkDiscBase)+" × "+Math.round(discRate*100)+"% = -₱"+peso(chkDiscAmt))
             )
           )
         ),
         // Totals
         h("div",{style:{background:C.bg,borderRadius:10,padding:"10px 13px",marginBottom:10}},
-          h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:2,color:C.muted}},h("span",null,"Subtotal"),h("span",null,"₱"+chkSub.toFixed(2))),
+          h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:2,color:C.muted}},h("span",null,"Subtotal"),h("span",null,"₱"+peso(chkSub))),
           chkDiscAmt>0&&h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:2,color:C.danger}},
             h("span",null,"Discount "+Math.round(discRate*100)+"%"+(discAll?"":" ("+discTargets.length+" item"+(discTargets.length>1?"s":"")+")")),
-            h("span",null,"-₱"+chkDiscAmt.toFixed(2))),
-          h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:14,fontWeight:900,color:C.primary,paddingTop:6,borderTop:"1px dashed "+C.border}},h("span",null,"TOTAL"),h("span",null,"₱"+chkTotal.toFixed(2)))
+            h("span",null,"-₱"+peso(chkDiscAmt))),
+          h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:14,fontWeight:900,color:C.primary,paddingTop:6,borderTop:"1px dashed "+C.border}},h("span",null,"TOTAL"),h("span",null,"₱"+peso(chkTotal)))
         ),
         // Cash tendered — always rendered, hidden via display:none
         h("div",{style:{display:chkPay==="cash"?"block":"none"}},
@@ -9895,12 +9900,12 @@ function App(){
             display:chkCash&&parseFloat(chkCash)>=chkTotal?"flex":"none",
             justifyContent:"space-between"}},
             h("span",null,"Change:"),
-            h("span",null,"₱"+(parseFloat(chkCash||0)-chkTotal).toFixed(2))
+            h("span",null,"₱"+peso((parseFloat(chkCash||0)-chkTotal)))
           ),
           h("div",{style:{marginTop:5,padding:"8px 12px",background:"#FFEBEE",borderRadius:8,
             fontSize:12,color:C.danger,fontWeight:700,
             display:chkCash&&parseFloat(chkCash)<chkTotal?"block":"none"}},
-            "Short ₱"+(chkTotal-parseFloat(chkCash||0)).toFixed(2)
+            "Short ₱"+peso((chkTotal-parseFloat(chkCash||0)))
           ),
           h("div",{style:{marginTop:5,padding:"8px 12px",background:"#f5f5f5",borderRadius:8,
             fontSize:11,color:C.muted,textAlign:"center"}},
@@ -9915,7 +9920,7 @@ function App(){
             background:"#E3F2FD",border:"1px solid #90CAF9",
             borderRadius:8,color:"#1565C0",
             fontSize:12,fontWeight:700,cursor:"pointer"}},
-          "💵 Exact Amount — ₱"+chkTotal.toFixed(2)),
+          "💵 Exact Amount — ₱"+peso(chkTotal)),
 
         // Hold vs cancel — same row so the safe option is as easy to reach
         h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}},
@@ -9948,7 +9953,7 @@ function App(){
             const cash=parseFloat(chkCash)||0;
             const isCredit=chkPay==="credit"||chkPay==="gcash"||chkPay==="maya"||chkPay==="bank";
             if(!isCredit&&cash<chkTotal){
-              showT("₱"+(chkTotal-cash).toFixed(2)+" short — enter full payment","err");
+              showT("₱"+peso((chkTotal-cash))+" short — enter full payment","err");
               return;
             }
             setTimeout(placeOrder,50);
@@ -9990,7 +9995,7 @@ function App(){
             (ord.items||[]).map((i,idx)=>h("div",{key:idx,style:{marginBottom:5}},
               h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:11,fontWeight:700}},
                 h("span",null,i.emoji+" "+i.qty+"x "+i.name),
-                h("span",null,"₱"+(i.lineTotal||0).toFixed(2))
+                h("span",null,"₱"+peso(i.lineTotal||0))
               ),
               i.takeout&&h("div",{style:{fontSize:9,color:"#E65100",fontWeight:800,paddingLeft:18}},
                 i.partialTO?("📦 T/O "+(i.toQty||0)+" pcs (split)"):"📦 T/O"),
@@ -10006,15 +10011,15 @@ function App(){
             ))
           ),
           h("div",{style:{fontSize:10,color:C.muted}},
-            h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:2}},h("span",null,"Subtotal"),h("span",null,"₱"+s.toFixed(2))),
-            da>0&&h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:2,color:C.danger}},h("span",null,"Disc. ("+dt.label+")"),h("span",null,"-₱"+da.toFixed(2))),
-            h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:2}},h("span",null,"VATable"),h("span",null,"₱"+vatable.toFixed(2))),
-            h("div",{style:{display:"flex",justifyContent:"space-between"}},h("span",null,"VAT 12%"),h("span",null,"₱"+vat.toFixed(2)))
+            h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:2}},h("span",null,"Subtotal"),h("span",null,"₱"+peso(s))),
+            da>0&&h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:2,color:C.danger}},h("span",null,"Disc. ("+dt.label+")"),h("span",null,"-₱"+peso(da))),
+            h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:2}},h("span",null,"VATable"),h("span",null,"₱"+peso(vatable))),
+            h("div",{style:{display:"flex",justifyContent:"space-between"}},h("span",null,"VAT 12%"),h("span",null,"₱"+peso(vat)))
           ),
-          h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:14,fontWeight:900,color:C.primary,margin:"8px 0"}},h("span",null,"TOTAL"),h("span",null,"₱"+(ord.total||0).toFixed(2))),
+          h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:14,fontWeight:900,color:C.primary,margin:"8px 0"}},h("span",null,"TOTAL"),h("span",null,"₱"+peso(ord.total||0))),
           ord.cash&&parseFloat(ord.cash)>0&&h("div",null,
-            h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:10,color:C.muted}},h("span",null,"Cash"),h("span",null,"₱"+parseFloat(ord.cash).toFixed(2))),
-            h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:11,fontWeight:800,color:C.success}},h("span",null,"Change"),h("span",null,"₱"+(parseFloat(ord.cash)-(ord.total||0)).toFixed(2)))
+            h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:10,color:C.muted}},h("span",null,"Cash"),h("span",null,"₱"+peso(parseFloat(ord.cash)))),
+            h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:11,fontWeight:800,color:C.success}},h("span",null,"Change"),h("span",null,"₱"+peso((parseFloat(ord.cash)-(ord.total||0)))))
           ),
           da>0&&h("div",{style:{background:"#FFF8E1",borderRadius:7,padding:"6px 10px",marginTop:7,fontSize:9,color:"#795548"}},
             h("div",null,h("b",null,dt.label+" ID: "),ord.discId||"___________"),
@@ -10470,7 +10475,7 @@ function App(){
                     h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:2}},
                       h("div",{style:{fontSize:10,fontWeight:700}},o.id||"—"),
                       h("div",{style:{fontSize:12,fontWeight:900,color:C.primary}},
-                        "₱"+(o.subtotal||0).toFixed(2))
+                        "₱"+peso(o.subtotal||0))
                     ),
                     h("div",{style:{display:"flex",justifyContent:"space-between"}},
                       h("div",{style:{fontSize:9,color:C.muted}},
@@ -10659,7 +10664,7 @@ function App(){
                   fontSize:12,fontWeight:900}},String(cartCount)),
                 h("span",null,"View Cart & Charge")
               ),
-              h("span",null,"₱"+cartTotal.toFixed(2)+" →")
+              h("span",null,"₱"+peso(cartTotal)+" →")
             )
           )
         ),
@@ -10735,8 +10740,8 @@ function App(){
                 h("div",{style:{fontSize:9,color:C.muted,marginTop:2}},(o.items||[]).map(i=>i.name).join(" · "))
               ),
               h("div",{style:{textAlign:"right",flexShrink:0}},
-                h("div",{style:{fontSize:11,fontWeight:900}},"₱"+(o.total||0).toFixed(2)),
-                (o.discAmt||0)>0&&h("div",{style:{fontSize:8,color:C.danger}},"-₱"+(o.discAmt||0).toFixed(2)),
+                h("div",{style:{fontSize:11,fontWeight:900}},"₱"+peso(o.total||0)),
+                (o.discAmt||0)>0&&h("div",{style:{fontSize:8,color:C.danger}},"-₱"+peso(o.discAmt||0)),
                 h("div",{style:{fontSize:8,color:C.muted}},o.time||"")
               ),
               h("div",{style:{display:"flex",gap:4,flexShrink:0,alignItems:"center"}},
@@ -10785,21 +10790,21 @@ function App(){
               ),
               h("div",{style:{textAlign:"right"}},
                 h("div",{style:{color:C.accent,fontSize:8}},"CASH ON HAND"),
-                h("div",{style:{color:"#fff",fontSize:24,fontWeight:900}},"₱"+zd.totalCash.toFixed(2))
+                h("div",{style:{color:"#fff",fontSize:24,fontWeight:900}},"₱"+peso(zd.totalCash))
               )
             ),
             h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}},
               h("div",{style:{background:"#fff",borderRadius:12,padding:"13px 15px",border:"1px solid "+C.border}},
                 h("b",{style:{fontSize:12}},"Sales Summary"),
                 h("div",{style:{marginTop:9}},
-                  [["Opening Fund","₱"+zd.opening.toFixed(2),C.success],
-                   ["Gross Sales","₱"+zd.gross.toFixed(2),C.primary],
-                   ["Discounts","-₱"+zd.discounts.toFixed(2),C.danger],
-                   ["Voids ("+(zd.voidCount||0)+")","-₱"+(zd.voidAmt||0).toFixed(2),C.danger],
-                   ["Net Sales","₱"+zd.net.toFixed(2),C.success],
-                   ["Cash In","₱"+zd.cashIn.toFixed(2),C.info],
-                   ["Cash Out","-₱"+zd.cashOut.toFixed(2),C.warning],
-                   ["TOTAL CASH","₱"+zd.totalCash.toFixed(2),C.primary]
+                  [["Opening Fund","₱"+peso(zd.opening),C.success],
+                   ["Gross Sales","₱"+peso(zd.gross),C.primary],
+                   ["Discounts","-₱"+peso(zd.discounts),C.danger],
+                   ["Voids ("+(zd.voidCount||0)+")","-₱"+peso(zd.voidAmt||0),C.danger],
+                   ["Net Sales","₱"+peso(zd.net),C.success],
+                   ["Cash In","₱"+peso(zd.cashIn),C.info],
+                   ["Cash Out","-₱"+peso(zd.cashOut),C.warning],
+                   ["TOTAL CASH","₱"+peso(zd.totalCash),C.primary]
                   ].map(([l,v,col])=>h("div",{key:l,style:{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f5f5f5"}},
                     h("span",{style:{fontSize:11,color:C.muted}},l),
                     h("span",{style:{fontSize:11,fontWeight:800,color:col}},v)
@@ -10810,11 +10815,11 @@ function App(){
                 h("b",{style:{fontSize:12}},"Transaction Summary"),
                 h("div",{style:{marginTop:9}},
                   [["Total Transactions",zd.txns],["Dine-in",zd.dineIn],["Takeout",zd.takeout],
-                   ["SC/PWD",zd.scPwd+" txns"],["Avg Transaction","₱"+(zd.txns>0?(zd.net/zd.txns).toFixed(2):"0.00")],
-               ["Cash Sales","₱"+orders.filter(o=>o.branch===branchId&&(o.payMethod||"cash")==="cash").reduce((s,o)=>s+(o.total||0),0).toFixed(2)],
-               ["GCash","₱"+orders.filter(o=>o.branch===branchId&&o.payMethod==="gcash").reduce((s,o)=>s+(o.total||0),0).toFixed(2)],
-               ["FoodPanda","₱"+orders.filter(o=>o.branch===branchId&&o.payMethod==="foodpanda").reduce((s,o)=>s+(o.total||0),0).toFixed(2)],
-               ["GrabFood","₱"+orders.filter(o=>o.branch===branchId&&o.payMethod==="grabfood").reduce((s,o)=>s+(o.total||0),0).toFixed(2)]
+                   ["SC/PWD",zd.scPwd+" txns"],["Avg Transaction","₱"+(zd.txns>0?peso(zd.net/zd.txns):"0.00")],
+               ["Cash Sales","₱"+peso(orders.filter(o=>o.branch===branchId&&(o.payMethod||"cash")==="cash").reduce((s,o)=>s+(o.total||0),0))],
+               ["GCash","₱"+peso(orders.filter(o=>o.branch===branchId&&o.payMethod==="gcash").reduce((s,o)=>s+(o.total||0),0))],
+               ["FoodPanda","₱"+peso(orders.filter(o=>o.branch===branchId&&o.payMethod==="foodpanda").reduce((s,o)=>s+(o.total||0),0))],
+               ["GrabFood","₱"+peso(orders.filter(o=>o.branch===branchId&&o.payMethod==="grabfood").reduce((s,o)=>s+(o.total||0),0))]
                   ].map(([l,v])=>h("div",{key:l,style:{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f5f5f5"}},
                     h("span",{style:{fontSize:11,color:C.muted}},l),
                     h("span",{style:{fontSize:12,fontWeight:800,color:C.text}},v)
@@ -11087,8 +11092,8 @@ function App(){
                   h("span",{style:{background:C.info,color:"#fff",fontSize:8,padding:"2px 7px",borderRadius:20,fontWeight:700}},(item.stock||0).toLocaleString()+" "+(item.unit||"")),
                   packSizeOf(item)>0&&h("div",{style:{fontSize:8,color:C.muted,marginTop:2}},fmtPacks(item))
                 ),
-                h("div",{style:{fontSize:10}},"₱"+(item.price||0).toFixed(2)),
-                h("div",{style:{fontSize:10}},"₱"+(item.cost||0).toFixed(2)),
+                h("div",{style:{fontSize:10}},"₱"+peso(item.price||0)),
+                h("div",{style:{fontSize:10}},"₱"+peso(item.cost||0)),
                 h("div",{style:{fontSize:10,color:C.success,fontWeight:700}},(item.margin||0)+"%"),
                 h("div",{style:{fontSize:10,color:C.muted}},item.cat||""),
                 h("div",{style:{display:"flex",gap:5,alignItems:"center"}},
@@ -11314,9 +11319,9 @@ function App(){
         page==="sales_report"&&h("div",null,
           h(SectionHeader,{title:"Sales Report (Firebase)"}),
           h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:12}},
-            h(Stat,{label:"Gross Sales",value:"₱"+orders.filter(o=>o.status!=="void").reduce((s,o)=>s+(o.subtotal||0),0).toFixed(2),icon:"💰",color:C.primary}),
-            h(Stat,{label:"Total Discounts",value:"₱"+orders.reduce((s,o)=>s+(o.discAmt||0),0).toFixed(2),icon:"🏷️",color:C.danger}),
-            h(Stat,{label:"Net Sales",value:"₱"+orders.filter(o=>o.status!=="void"&&o.status!=="cancelled").reduce((s,o)=>s+(o.total||0),0).toFixed(2),icon:"📈",color:C.success})
+            h(Stat,{label:"Gross Sales",value:"₱"+peso(orders.filter(o=>o.status!=="void").reduce((s,o)=>s+(o.subtotal||0),0)),icon:"💰",color:C.primary}),
+            h(Stat,{label:"Total Discounts",value:"₱"+peso(orders.reduce((s,o)=>s+(o.discAmt||0),0)),icon:"🏷️",color:C.danger}),
+            h(Stat,{label:"Net Sales",value:"₱"+peso(orders.filter(o=>o.status!=="void"&&o.status!=="cancelled").reduce((s,o)=>s+(o.total||0),0)),icon:"📈",color:C.success})
           ),
           h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
             h("div",{style:{background:"#fff",borderRadius:12,padding:"13px 15px",border:"1px solid "+C.border}},
@@ -11350,7 +11355,7 @@ function App(){
                       h("div",{style:{fontSize:11,fontWeight:700}},pm.label.split(" ").slice(1).join(" ")),
                       h("div",{style:{fontSize:9,color:C.muted}},pmOrders.length+" txns")
                     ),
-                    h("div",{style:{fontWeight:800,fontSize:12,color:pm.color}},"₱"+pmOrders.reduce((s,o)=>s+(o.total||0),0).toFixed(2))
+                    h("div",{style:{fontWeight:800,fontSize:12,color:pm.color}},"₱"+peso(pmOrders.reduce((s,o)=>s+(o.total||0),0)))
                   );
                 }),
                 orders.length===0&&h("div",{style:{textAlign:"center",padding:"20px",color:C.muted,fontSize:11}},"No data yet")
@@ -11482,7 +11487,7 @@ function App(){
                       background:stCol,color:"#fff",fontWeight:700}},
                       (o.status||"").toUpperCase()),
                     h("span",{style:{fontWeight:800,fontSize:12}},
-                      "₱"+(o.subtotal||0).toFixed(2))
+                      "₱"+peso(o.subtotal||0))
                   )
                 );
               }),
@@ -12287,9 +12292,9 @@ function App(){
                       h("span",{style:{fontSize:8,color:C.muted}},"🔒 locked"),
                     h("div",{style:{textAlign:"right"}},
                       h("div",{style:{fontSize:14,fontWeight:900,color:stColor}},
-                        "₱"+total.toFixed(2)),
+                        "₱"+peso(total)),
                       h("div",{style:{fontSize:9,color:paid>=total&&total>0?C.success:C.warning}},
-                        paid>0?"Paid: ₱"+paid.toFixed(2)+" / ₱"+total.toFixed(2):
+                        paid>0?"Paid: ₱"+peso(paid)+" / ₱"+peso(total):
                         po.paymentStatus||"Unpaid")
                     )
                   )
@@ -12415,11 +12420,11 @@ function App(){
                   ),
                   h("div",{style:{textAlign:"right"}},
                     h("div",{style:{fontSize:15,fontWeight:900,color:stColor}},
-                      "₱"+(po.totalAmount||0).toFixed(2)),
+                      "₱"+peso(po.totalAmount||0)),
                     totalPaid>0&&h("div",{style:{fontSize:9,
                       color:balance<=0?C.success:C.warning}},
-                      "Paid: ₱"+totalPaid.toFixed(2)+
-                      (balance>0?" | Bal: ₱"+balance.toFixed(2):" ✅ FULLY PAID"))
+                      "Paid: ₱"+peso(totalPaid)+
+                      (balance>0?" | Bal: ₱"+peso(balance):" ✅ FULLY PAID"))
                   )
                 ),
 
@@ -12651,7 +12656,7 @@ function App(){
                 h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:4}},
                   h("b",{style:{fontSize:12}},hd.label||"(walang pangalan)"),
                   h("span",{style:{fontSize:11,fontWeight:900,color:C.primary}},
-                    "₱"+(hd.total||0).toFixed(2))
+                    "₱"+peso(hd.total||0))
                 ),
                 h("div",{style:{fontSize:9,color:C.muted,marginBottom:6}},
                   (hd.count||0)+" item/s · "+(hd.ctx&&hd.ctx.type||"dine-in")+
@@ -12717,17 +12722,17 @@ function App(){
                 h("div",{style:{textAlign:"right",flexShrink:0}},
                   h("div",{style:{fontSize:11,fontWeight:800,
                     color:priceType==="franchisee"?"#E65100":priceType==="wholesale"?"#6A1B9A":C.text}},
-                    "₱"+(getPriceByType(item)*(item.qty||1)).toFixed(2)),
+                    "₱"+peso((getPriceByType(item)*(item.qty||1)))),
                   h("div",{style:{fontSize:8,color:C.muted,textDecoration:"line-through",
                     visibility:priceType!=="retail"?"visible":"hidden"}},
-                    "₱"+item.lineTotal.toFixed(2))
+                    "₱"+peso(item.lineTotal))
                 )
               )
             ))
         ),
         h("div",{style:{padding:"10px 14px 16px",borderTop:"1px solid "+C.border,
           display:cart.length>0?"block":"none"}},
-          h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:12,fontWeight:800,marginBottom:9}},h("span",null,"Subtotal"),h("span",null,"₱"+cartTotal.toFixed(2))),
+          h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:12,fontWeight:800,marginBottom:9}},h("span",null,"Subtotal"),h("span",null,"₱"+peso(cartTotal))),
           h("button",{onClick:()=>{setCartOpen(false);setModal("checkout");},style:{width:"100%",padding:"12px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:10,color:"#fff",fontSize:12,fontWeight:800,cursor:"pointer"}},"Proceed to Checkout →")
         )
       )
