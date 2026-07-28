@@ -3831,13 +3831,26 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
       const factor=row.convFactor||1;
       const actualDeduct=(row.qty||0)/factor;
       const cost=(ing.cost||0)*actualDeduct*(1+(row.markup||0)/100);
-      return h("div",{key:i,style:{display:"grid",
+      const baseU=String(ing.unit||"");
+      const usedU=String(row.deductUnit||row.unit||"");
+      const pSz=packSizeOf(ing);
+      const pU=packUnitOf(ing);
+      const mismatch=!!(baseU&&usedU&&usedU.toLowerCase()!==baseU.toLowerCase());
+      const usesPack=!!(mismatch&&pSz>0&&pU&&usedU.toLowerCase()===String(pU).toLowerCase());
+      return h("div",{key:i,style:{marginBottom:6}},
+      h("div",{style:{display:"grid",
         gridTemplateColumns:"1fr 80px 70px 110px 60px 80px 36px",
-        gap:6,marginBottom:6,alignItems:"center"}},
+        gap:6,alignItems:"center"}},
         h("select",{value:row.ingId||"",
           onChange:e=>{
             const g=ingredients.find(x=>x.id===e.target.value)||{};
-            const u=[...rows]; u[i]={...u[i],ingId:e.target.value,ingName:g.name||"",unit:g.unit||""}; setRows(u);
+            // Seed the recipe in the ingredient's OWN unit so conv stays 1.
+            // packSize is deliberately NOT used here — it converts pack<->base
+            // for buying and counting, not recipe<->stock.
+            const u=[...rows];
+            u[i]={...u[i],ingId:e.target.value,ingName:g.name||"",unit:g.unit||"",
+              deductUnit:g.unit||"",convUnit:g.unit||"",convFactor:1};
+            setRows(u);
           },
           style:{padding:"5px",border:"1px solid "+C.border,borderRadius:6,fontSize:10,outline:"none"}},
           h("option",{value:""},"— Select —"),
@@ -3875,6 +3888,29 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
         h("button",{onClick:()=>setRows(rows.filter((_,j)=>j!==i)),
           style:{background:"none",border:"none",color:C.danger,fontSize:16,cursor:"pointer",lineHeight:1}},
           "×")
+      ),
+      // Stock is held in the ingredient's base unit. A recipe written in any
+      // other unit silently deducts the wrong amount unless CONV is set by hand.
+      mismatch&&h("div",{style:{background:usesPack?"#FFF8E1":"#FFEBEE",
+        border:"1px solid "+(usesPack?"#FFE082":"#FFCDD2"),
+        borderRadius:6,padding:"5px 8px",marginTop:3,
+        display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}},
+        h("div",{style:{flex:1,minWidth:180,fontSize:9,
+          color:usesPack?"#E65100":C.danger,fontWeight:700}},
+          usesPack
+            ? ("Recipe naka-"+usedU+", pero ang stock ay naka-"+baseU+". 1 "+pU+" = "+pSz+" "+baseU+".")
+            : ("⚠️ Recipe naka-"+usedU+", stock naka-"+baseU+" — itakda ang CONV nang manu-mano o mali ang mababawas.")),
+        usesPack&&h("button",{
+          onClick:()=>{
+            const u=[...rows];
+            u[i]={...u[i],qty:(parseFloat(row.qty)||0)*pSz,
+              deductUnit:baseU,convUnit:baseU,convFactor:1};
+            setRows(u);
+          },
+          style:{padding:"4px 9px",borderRadius:6,border:"none",background:"#E65100",
+            color:"#fff",fontSize:9,fontWeight:800,cursor:"pointer"}},
+          "Gawing "+baseU+" ×"+pSz)
+      )
       );
     }),
     h("div",{style:{display:"flex",gap:8,marginTop:10}},
