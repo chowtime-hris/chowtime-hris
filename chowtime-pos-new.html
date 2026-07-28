@@ -500,7 +500,11 @@ function buildEscPos(ord,bName,cs,paperSize){
       +(ord.discScope==="items"&&i.discounted?" *":"")));
     a([ESC,0x45,0x00]);
     if(i.variant)a(ln("  ["+i.variant+"]"));
-    (i.freebies||[]).forEach(function(f){a(ln("  > "+f.label+" x"+f.qty));});
+    (i.freebies||[]).forEach(function(f){
+      var to=f.toQty||0,q=f.qty||0;
+      var tag=(!i.takeout||to<=0)?"":(to>=q?"  [T/O]":"  ["+to+" T/O]");
+      a(ln("  > "+f.label+" x"+q+tag));
+    });
     if(i.options&&i.options.length)a(ln("  "+i.options.join(", ")));
     var p=i.lineTotal&&i.qty?(i.lineTotal/i.qty):(i.unitPrice||i.price||0);
     a(row("  x"+i.qty+" @ P"+p.toFixed(2),"P"+(i.lineTotal||(p*i.qty)).toFixed(2)));
@@ -745,7 +749,9 @@ function printReceipt(ord, branchName, companySettings, paperSize){
     var name=i.name+(i.variant?" ["+i.variant+"]":"")+(i.options&&i.options.length?" ("+i.options.join(", ")+")":"")+mark;
     var picks=(i.freebies&&i.freebies.length)
       ?i.freebies.map(function(f){
-         return "<div style='padding-left:12px;color:#000'>&#9656; "+f.label+" x"+f.qty+"</div>";
+         var to=f.toQty||0,q=f.qty||0;
+         var tag=(!i.takeout||to<=0)?"":(to>=q?" <b>[T/O]</b>":" <b>["+to+" T/O]</b>");
+         return "<div style='padding-left:12px;color:#000'>&#9656; "+f.label+" x"+q+tag+"</div>";
        }).join("")
       :"";
     return "<div class='row'><span class='b' style='flex:1;margin-right:4px'>"+name+"</span>"+
@@ -8875,7 +8881,10 @@ function App(){
               i.variant&&h("div",{style:{fontSize:9,color:C.muted}},"📦 "+i.variant),
               i.options?.length>0&&h("div",{style:{fontSize:9,color:C.muted}},"✓ "+i.options.join(" · ")),
               (i.freebies||[]).map((f,fi)=>h("div",{key:fi,style:{fontSize:9,color:"#2E7D32",fontWeight:700}},
-                "▸ "+f.label+" ×"+f.qty)),
+                "▸ "+f.label+" ×"+f.qty,
+                (i.takeout&&(f.toQty||0)>0)&&h("span",{style:{color:"#E65100",fontWeight:900}},
+                  (f.toQty>=(f.qty||0))?"  [T/O]":"  ["+f.toQty+" T/O]")
+              )),
               i.note&&h("div",{style:{fontSize:9,color:C.muted,fontStyle:"italic"}},'"'+i.note+'"')
             ),
             h("div",{style:{textAlign:"right",flexShrink:0}},
@@ -9258,7 +9267,10 @@ function App(){
               i.variant&&h("div",{style:{fontSize:9,color:C.muted,paddingLeft:18}},"📦 "+i.variant),
               (i.options||[]).length>0&&h("div",{style:{fontSize:9,color:C.muted,paddingLeft:18}},"✓ "+i.options.join(", ")),
               (i.freebies||[]).map((f,fi)=>h("div",{key:fi,style:{fontSize:9,color:"#2E7D32",fontWeight:700,paddingLeft:18}},
-                "▸ "+f.label+" ×"+f.qty)),
+                "▸ "+f.label+" ×"+f.qty,
+                (i.takeout&&(f.toQty||0)>0)&&h("span",{style:{color:"#E65100",fontWeight:900}},
+                  (f.toQty>=(f.qty||0))?"  [T/O]":"  ["+f.toQty+" T/O]")
+              )),
               i.isBogo&&(i.freebies||[]).length===0&&h("div",{style:{fontSize:9,color:"#FF4B2B",fontWeight:700,paddingLeft:18}},"BOGO – "+((i.qty||1)*2)+" items"),
               i.note&&h("div",{style:{fontSize:9,color:C.muted,fontStyle:"italic",paddingLeft:18}},'"'+i.note+'"')
             ))
