@@ -4791,8 +4791,7 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
       //  - divide by convFactor (deduction does; the old restock did not)
       //  - restock option-group picks too (that is where the food BOM lives)
       //  - resolve the same inventory collection the deduction wrote to
-      const logCol = "inventory_log_"+req.branch;
-      let restocked=0, restockFailed=0;
+      let restocked=0, restockFailed=0, missingId=0;
       try{
         const bomSnap = await getDocs(collection(db,"bom"));
         const bomData = {};
@@ -4814,6 +4813,8 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
             const restoreQty = ((row.qty||0)*(mult||1))/(row.convFactor||1);
             try{
               const col=await colFor(row.ingId);
+              // "inventory" -> "inventory_log", "inventory_x" -> "inventory_log_x"
+              const logCol=col.replace(/^inventory/,"inventory_log");
               let _vprev=null;
               try{
                 const _vs=await getDoc(doc(db,col,row.ingId));
@@ -4849,6 +4850,9 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
 
         for(const item of (req.voidedItems||req.orderItems||[])){
           const itemId = item.id;
+          // Orders placed before item ids were saved cannot be traced back to a
+          // BOM, so nothing can be returned — say so instead of failing quietly.
+          if(!itemId&&!(item.optionRefs||[]).length)missingId++;
           if(itemId){
             const variant = item.variant||"default";
             const vKey = (!variant||variant==="default")
@@ -4892,8 +4896,10 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
 
       showT((req.isPartial?"Partial void":"Order #"+req.orderId+" voided")+
         " ✓ · "+restocked+" ingredient/s restocked"+
-        (restockFailed?" ("+restockFailed+" failed — check log)":""),
-        restockFailed?"warn":"ok");
+        (restockFailed?" ("+restockFailed+" failed)":"")+
+        (missingId?" ("+missingId+" item/s walang BOM link — lumang order)":"")+
+        (!restocked&&!missingId?" — walang BOM na nakita":""),
+        (restockFailed||missingId||!restocked)?"warn":"ok");
     }catch(e){showT("Error approving void","err");console.error(e);}
   };
 
