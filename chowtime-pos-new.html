@@ -552,7 +552,7 @@ function buildEscPos(ord,bName,cs,paperSize){
   a(dash());
   a([ESC,0x61,0x00]);    // LEFT
   a(row("Order #:",(ord.id||"—")));
-  a(row("Date:",(ord.date||new Date().toISOString().slice(0,10))+" "+(ord.time||"")));
+  a(row("Date:",(ord.date||localDate())+" "+(ord.time||"")));
   a(row("Cashier:",(ord.cashier||"")));
   if(ord.custName)a(row("Customer:",ord.custName));
   a(dash());
@@ -1464,7 +1464,7 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
   const [deliveryReq,setDeliveryReq] = useState("");
   const [notes,setNotes]     = useState("");
   const [discount,setDiscount] = useState(0);
-  const today = new Date().toISOString().slice(0,10);
+  const today = localDate();
   const [soNum,setSoNum] = useState("");
   // Generate branch-sequential PO number on mount
   useEffect(()=>{
@@ -1521,7 +1521,7 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
         // store base-unit quantities; pack display is derived at render time
         items:ordered.map(i=>({id:i.id,name:i.name,qty:i.orderQty,note:i.note||""})),
         createdBy:user.name,at:serverTimestamp(),
-        date:new Date().toISOString().slice(0,10)
+        date:localDate()
       });
       setLabel(""); await loadBatches();
       showT(label+" na-save \u2713");
@@ -1895,7 +1895,7 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
   const [drNotes,setDrNotes] = useState("");
   const [expanded,setExpanded] = useState(false);
   const drNum = "DR-"+po.poNum?.replace("SO-","").replace("PO-","");
-  const today = new Date().toISOString().slice(0,10);
+  const today = localDate();
 
   const totalAmt = (po.items||[]).reduce((s,i)=>{
     const qty = actualQtys[i.id]??i.qty;
@@ -2347,7 +2347,7 @@ const DENOMS = [
 ];
 
 function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
-  const today = new Date().toISOString().slice(0,10);
+  const today = localDate();
   const [counts,setCounts]   = useState(DENOMS.reduce((a,d)=>({...a,[d.value]:0}),{}));
   const [remit,setRemit]     = useState("");
   const [countNote,setNote]  = useState("");
@@ -2396,7 +2396,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
   const isToday=(o)=>{
     if(o.date) return o.date===today;
     const t=o.timestamp&&o.timestamp.toDate?o.timestamp.toDate():null;
-    return t?t.toISOString().slice(0,10)===today:false;
+    return t?localDate(t)===today:false;
   };
   // Cash counts reconcile the DRAWER, so only cash tenders belong here —
   // GCash / card sales never touch it.
@@ -2443,7 +2443,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
       await addDoc(collection(db,"cash_log"),{
         branch:branchId,type:cashEntry.type,
         desc:cashEntry.desc.trim(),amount:amt,
-        date:now.toISOString().slice(0,10),
+        date:localDate(now),
         time:now.toLocaleTimeString("en-PH",{hour:"2-digit",minute:"2-digit"}),
         by:user.name,timestamp:serverTimestamp(),at:serverTimestamp()
       });
@@ -2862,7 +2862,7 @@ function CALoanPage({user,branchId,curBranch,db,hrisDB,showT,mode,hrisEmps=[]}){
   const [installments, setInst] = useState("2");
   const [myRequests, setMyReqs] = useState([]);
   const [loading, setLoading]   = useState(true);
-  const today = new Date().toISOString().slice(0,10);
+  const today = localDate();
 
   useEffect(()=>{ setLoading(false); },[hrisEmps]);
 
@@ -4295,6 +4295,16 @@ function baseToPacks(it,base){
   if(!sz)return {packs:0,loose:b,hasPacks:false};
   return {packs:Math.floor(b/sz),loose:Math.round((b%sz)*1000)/1000,hasPacks:true};
 }
+// toISOString() converts to UTC. Manila is UTC+8, so every sale before 08:00
+// was being stamped with the PREVIOUS day's date — and every date arithmetic
+// helper shifted back one day. Always derive the calendar date locally.
+function localDate(d){
+  const x=(d instanceof Date)?d:new Date();
+  return x.getFullYear()+"-"+
+    String(x.getMonth()+1).padStart(2,"0")+"-"+
+    String(x.getDate()).padStart(2,"0");
+}
+
 // Money always renders with thousands separators. Reading P330000.00 off a
 // screen is guesswork; P330,000.00 is not.
 const peso=(v)=>(Number(v)||0).toLocaleString("en-PH",
@@ -5439,7 +5449,7 @@ function dateRange(fromISO,toISO){
   const out=[]; const a=new Date(fromISO+"T00:00:00"), b=new Date(toISO+"T00:00:00");
   if(isNaN(a)||isNaN(b)||a>b)return out;
   for(let d=new Date(a); d<=b; d.setDate(d.getDate()+1)){
-    out.push(d.toISOString().slice(0,10));
+    out.push(localDate(d));
   }
   return out;
 }
@@ -5449,7 +5459,7 @@ function daysBefore(toISO,count){
   const out=[]; const d=new Date(toISO+"T00:00:00");
   for(let k=1;k<=count;k++){
     const x=new Date(d); x.setDate(x.getDate()-k);
-    out.push(x.toISOString().slice(0,10));
+    out.push(localDate(x));
   }
   return out;
 }
@@ -5468,7 +5478,7 @@ async function notify(db,n){
       ref:(n&&n.ref)||"",
       by:(n&&n.by)||"",
       read:false,
-      date:new Date().toISOString().slice(0,10),
+      date:localDate(),
       at:serverTimestamp()
     });
   }catch(e){console.warn("notify failed:",e);}
@@ -5604,7 +5614,7 @@ async function performVoid(db, args){
       desc:"Void refund — Order #"+(order.id||"")+" (naalis na sa sales)",
       orderId:order.id||"",reason:"Void: "+reason,by:byName,
       time:now.toLocaleTimeString("en-PH",{hour:"2-digit",minute:"2-digit"}),
-      date:now.toISOString().slice(0,10),
+      date:localDate(now),
       timestamp:serverTimestamp(),at:serverTimestamp()});
   }catch(e){console.warn("Cash reversal log failed",e);}
 
@@ -5665,7 +5675,7 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
         reason,
         status:"pending",
         timestamp:serverTimestamp(),
-        date:new Date().toISOString().slice(0,10)
+        date:localDate()
       });
       showT((isPartial?"Partial":"Full")+" void request submitted ✓");
       setSelOrder(null);setSelItems({});setReason("");setTab("history");
@@ -5719,7 +5729,7 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
   };
 
   // Today's non-voided orders for this branch
-  const today = new Date().toISOString().slice(0,10);
+  const today = localDate();
   const todayOrders = orders.filter(o=>
     o.branch===branchId &&
     o.status!=="void" && o.status!=="cancelled" &&
@@ -5959,12 +5969,12 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
 function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inventory=[]}){
   const [tab,setTab]       = useState("general");
   const [period,setPeriod] = useState("today");
-  const [dateFrom,setFrom] = useState(new Date().toISOString().slice(0,10));
-  const [dateTo,setTo]     = useState(new Date().toISOString().slice(0,10));
+  const [dateFrom,setFrom] = useState(localDate());
+  const [dateTo,setTo]     = useState(localDate());
 
-  const today = new Date().toISOString().slice(0,10);
-  const getWeekStart=()=>{const d=new Date();d.setDate(d.getDate()-d.getDay());return d.toISOString().slice(0,10);};
-  const getMonthStart=()=>new Date().toISOString().slice(0,8)+"01";
+  const today = localDate();
+  const getWeekStart=()=>{const d=new Date();d.setDate(d.getDate()-d.getDay());return localDate(d);};
+  const getMonthStart=()=>localDate().slice(0,8)+"01";
 
   const filtOrders = orders.filter(o=>{
     if(o.status==="voided")return false;
@@ -7072,7 +7082,7 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
   if(!po) return null;
   const [prices,setPrices]   = useState({});
   const [actualQtys,setActual] = useState({});
-  const [deliveryDate,setDD]  = useState(new Date().toISOString().slice(0,10));
+  const [deliveryDate,setDD]  = useState(localDate());
   const [notes,setNotes]      = useState("");
   const [saving,setSaving]    = useState(false);
 
@@ -8702,7 +8712,7 @@ function App(){
   const [editingPO,setEditingPO]=useState(null);         // branch editing its own PO
   const [closing,setClosing]=useState(false);            // day rollup in progress
   const [bfFrom,setBfFrom]=useState("");                 // backfill range
-  const [bfTo,setBfTo]=useState(new Date().toISOString().slice(0,10));
+  const [bfTo,setBfTo]=useState(localDate());
   const [bfBusy,setBfBusy]=useState(false);
   const [bfLog,setBfLog]=useState(null);
   const [zHist,setZHist]=useState([]);                   // saved daily_sales
@@ -8840,7 +8850,7 @@ function App(){
         const dSnap=await getDocs(query(collection(db,"daily_sales"),
           where("branch","==",bId)));
         const done=new Set(dSnap.docs.map(d=>(d.data()||{}).date));
-        const today=new Date().toISOString().slice(0,10);
+        const today=localDate();
         const missing=daysBefore(today,7).filter(d=>!done.has(d));
         for(const d of missing.reverse()){
           const r=await rollupDay(db,bId,d,
@@ -9415,7 +9425,7 @@ function App(){
       discRate:discRate,discBase:chkDiscBase,discScope:discAll?"order":"items",
       discItems:discAll?[]:cart.filter(i=>discTargets.includes(i.cartId)).map(i=>i.name),
       discId:chkDiscId,custName:chkCust,tableNo:chkTable,
-      cash:chkCash,total:chkTotal,time:now,date:new Date().toISOString().slice(0,10),
+      cash:chkCash,total:chkTotal,time:now,date:localDate(),
       status:"pending",orderType:chkType,mixedType:mixedType,
       takeoutCount:toCount,
       payMethod:chkPay,priceType,cashier:user.name,
@@ -10541,7 +10551,7 @@ function App(){
           // ── TOP KPI ROW ──
           h("div",{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}},
             h(Stat,{label:"All Branch Sales Today",
-              value:"₱"+orders.filter(o=>o.date===new Date().toISOString().slice(0,10))
+              value:"₱"+orders.filter(o=>o.date===localDate())
                 .filter(o=>o.status!=="void"&&o.status!=="cancelled")
                 .reduce((s,o)=>s+(o.total||0),0).toLocaleString(),
               sub:"From Firebase orders",icon:"📈",color:C.primary}),
@@ -10569,11 +10579,11 @@ function App(){
                 h("div",{style:{fontSize:22,fontWeight:900}},
                   "₱"+orders.filter(o=>o.branch==="ct-main"&&
                     o.status!=="void"&&o.status!=="cancelled"&&
-                    o.date===new Date().toISOString().slice(0,10))
+                    o.date===localDate())
                     .reduce((s,o)=>s+(o.total||0),0).toLocaleString()),
                 h("div",{style:{fontSize:9,opacity:.6}},
                   orders.filter(o=>o.branch==="ct-main"&&
-                    o.date===new Date().toISOString().slice(0,10)).length+" transactions today")
+                    o.date===localDate()).length+" transactions today")
               ),
               // Commissary PO collections
               h("div",{style:{background:"rgba(255,255,255,.1)",borderRadius:10,padding:"12px"}},
@@ -10591,7 +10601,7 @@ function App(){
                 h("div",{style:{fontSize:22,fontWeight:900}},
                   "₱"+orders.filter(o=>o.branch==="ct-main"&&
                     (o.priceType==="wholesale"||o.priceType==="franchisee")&&
-                    o.date===new Date().toISOString().slice(0,10))
+                    o.date===localDate())
                     .reduce((s,o)=>s+(o.subtotal||0),0).toLocaleString()),
                 h("div",{style:{fontSize:9,opacity:.6}},"Special price type orders")
               )
@@ -10611,14 +10621,14 @@ function App(){
               ),
               branches.map(function(b){
                 const bOrders=orders.filter(function(o){
-                  return o.branch===b.id&&o.date===new Date().toISOString().slice(0,10);
+                  return o.branch===b.id&&o.date===localDate();
                 });
                 const bSales=bOrders
                   .filter(function(o){return o.status!=="void"&&o.status!=="cancelled";})
                   .reduce(function(s,o){return s+(o.total||0);},0);
                 const bPending=bOrders.filter(function(o){return o.status==="pending";}).length;
                 const allBranchSales=orders.filter(function(o){
-                  return o.date===new Date().toISOString().slice(0,10);
+                  return o.date===localDate();
                 }).filter(function(o){return o.status!=="void"&&o.status!=="cancelled";})
                   .reduce(function(s,o){return s+(o.total||0);},0);
                 const pct=allBranchSales>0?Math.round(bSales/allBranchSales*100):0;
@@ -10906,11 +10916,11 @@ function App(){
 
         // ══ ORDERS ══
         (page==="orders"||page==="all_orders")&&(()=>{
-          const _today=new Date().toISOString().slice(0,10);
+          const _today=localDate();
           const _isToday=(o)=>{
             if(o.date)return o.date===_today;
             const t=o.timestamp&&o.timestamp.toDate?o.timestamp.toDate():null;
-            return t?t.toISOString().slice(0,10)===_today:false;
+            return t?localDate(t)===_today:false;
           };
           // Orders     = today, the branch you are transacting as (service view)
           // All Orders = every branch, every date (management view)
@@ -11005,7 +11015,7 @@ function App(){
                   color:!zSel?C.primary:C.text}},
                 "Ngayon (live)"),
               h("input",{type:"date",value:zSel,
-                max:new Date().toISOString().slice(0,10),
+                max:localDate(),
                 min:zHist.length?zHist[zHist.length-1].date:undefined,
                 onChange:e=>setZSel(e.target.value),
                 style:{padding:"6px 10px",borderRadius:8,fontSize:11,outline:"none",
@@ -11101,7 +11111,7 @@ function App(){
               // subscription scrolled past it.
               isZ&&!isSaved&&h("button",{
                 onClick:async()=>{
-                  const d=new Date().toISOString().slice(0,10);
+                  const d=localDate();
                   if(!confirm("I-close ang "+d+" para sa "+curBranch.name+"?\n"
                     +"Ise-save ang Z-Reading bilang permanenteng record."))return;
                   setClosing(true);
@@ -11188,8 +11198,8 @@ function App(){
                 [["7 araw",7],["30 araw",30],["90 araw",90]].map(([lbl,n])=>
                   h("button",{key:lbl,onClick:()=>{
                       const t=new Date();const f=new Date();f.setDate(f.getDate()-n);
-                      setBfFrom(f.toISOString().slice(0,10));
-                      setBfTo(t.toISOString().slice(0,10));
+                      setBfFrom(localDate(f));
+                      setBfTo(localDate(t));
                     },
                     style:{padding:"7px 11px",borderRadius:20,fontSize:10,cursor:"pointer",
                       border:"1px solid "+C.border,background:"#fff",color:C.text}},lbl))
@@ -11244,7 +11254,7 @@ function App(){
                 h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"AMOUNT (₱)"),h("input",{type:"number",onFocus:e=>e.target.select(),value:newExp.amount,onChange:e=>setNewExp(p=>({...p,amount:e.target.value})),placeholder:"0.00",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:14,fontWeight:700,outline:"none",boxSizing:"border-box"}})),
                 h("button",{onClick:async()=>{
                   if(!newExp.desc||!newExp.amount){showT("Fill all fields","warn");return;}
-                  await addDoc(collection(db,"expenses"),{branch:branchId,cat:newExp.cat,desc:newExp.desc,amount:parseFloat(newExp.amount),date:new Date().toISOString().slice(0,10),by:user.name,status:user.role==="owner"?"approved":"pending",timestamp:serverTimestamp()});
+                  await addDoc(collection(db,"expenses"),{branch:branchId,cat:newExp.cat,desc:newExp.desc,amount:parseFloat(newExp.amount),date:localDate(),by:user.name,status:user.role==="owner"?"approved":"pending",timestamp:serverTimestamp()});
                   setNewExp({cat:"Utilities",desc:"",amount:""});setModal(null);showT("Expense recorded!");
                 },style:{padding:"10px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:8,color:"#fff",fontWeight:700,cursor:"pointer"}},"Save Expense")
               )
@@ -11300,7 +11310,7 @@ function App(){
                 h("button",{onClick:async()=>{
                   if(!newCash.desc||!newCash.amount){showT("Fill all fields","warn");return;}
                   const now=new Date();
-                  await addDoc(collection(db,"cash_log"),{type:newCash.type,branch:branchId,desc:newCash.desc,amount:parseFloat(newCash.amount),time:now.toLocaleTimeString("en-PH",{hour:"2-digit",minute:"2-digit"}),date:now.toISOString().slice(0,10),by:user.name,timestamp:serverTimestamp(),at:serverTimestamp()});
+                  await addDoc(collection(db,"cash_log"),{type:newCash.type,branch:branchId,desc:newCash.desc,amount:parseFloat(newCash.amount),time:now.toLocaleTimeString("en-PH",{hour:"2-digit",minute:"2-digit"}),date:localDate(now),by:user.name,timestamp:serverTimestamp(),at:serverTimestamp()});
                   setNewCash({type:"in",desc:"",amount:""});setModal(null);showT("Cash "+newCash.type+" recorded!");
                 },style:{padding:"10px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:8,color:"#fff",fontWeight:700,cursor:"pointer"}},"Save")
               )
@@ -11334,7 +11344,7 @@ function App(){
                 h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"DEDUCTION DATE"),h("input",{type:"date",value:newAdv.deductDate,onChange:e=>setNewAdv(p=>({...p,deductDate:e.target.value})),style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box"}})),
                 h("button",{onClick:async()=>{
                   if(!newAdv.staff||!newAdv.amount){showT("Fill all fields","warn");return;}
-                  await addDoc(collection(db,"advances"),{branch:branchId,staff:newAdv.staff,amount:parseFloat(newAdv.amount),reason:newAdv.reason,date:new Date().toISOString().slice(0,10),deductDate:newAdv.deductDate,status:"pending",requestedBy:user.name,timestamp:serverTimestamp()});
+                  await addDoc(collection(db,"advances"),{branch:branchId,staff:newAdv.staff,amount:parseFloat(newAdv.amount),reason:newAdv.reason,date:localDate(),deductDate:newAdv.deductDate,status:"pending",requestedBy:user.name,timestamp:serverTimestamp()});
                   setNewAdv({staff:"",amount:"",reason:"",deductDate:""});setModal(null);showT("Request submitted!");
                 },style:{padding:"10px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:8,color:"#fff",fontWeight:700,cursor:"pointer"}},"Submit Request")
               )
@@ -11626,7 +11636,7 @@ function App(){
               (function(){
                 // Calculate consumption per day from orders (BOM deduction)
                 const consMap={};
-                const sevenDaysAgo=new Date(Date.now()-7*86400000).toISOString().slice(0,10);
+                const sevenDaysAgo=localDate(new Date(Date.now()-7*86400000));
                 // Use inventory items sorted by consumption rate
                 return inventory
                   .filter(function(i){return (i.stock||0)>=0;})
@@ -11749,12 +11759,12 @@ function App(){
               h("div",{style:{color:"rgba(255,255,255,.5)",fontSize:9}},"LIVE SALES"),
               h("div",{style:{color:"#fff",fontSize:22,fontWeight:900}},
                 "₱"+myOrders.filter(function(o){
-                  return o.date===new Date().toISOString().slice(0,10);
+                  return o.date===localDate();
                 }).filter(function(o){return o.status!=="void"&&o.status!=="cancelled";})
                   .reduce(function(s,o){return s+(o.total||0);},0).toLocaleString()),
               h("div",{style:{color:"rgba(255,255,255,.5)",fontSize:9}},
                 myOrders.filter(function(o){
-                  return o.date===new Date().toISOString().slice(0,10);
+                  return o.date===localDate();
                 }).length+" orders today")
             )
           ),
@@ -11769,7 +11779,7 @@ function App(){
               icon:"🔥",color:C.info}),
             h(Stat,{label:"Served Today",
               value:myOrders.filter(function(o){
-                return o.status==="served"&&o.date===new Date().toISOString().slice(0,10);
+                return o.status==="served"&&o.date===localDate();
               }).length,
               icon:"✅",color:C.success}),
             h(Stat,{label:"Expenses",
@@ -11795,7 +11805,7 @@ function App(){
               h(Stat,{label:"This Month",
                 value:"₱"+advances.filter(function(a){
                   return a._type==="po"&&a.paymentStatus==="Paid"&&
-                    (a.date||"").slice(0,7)===new Date().toISOString().slice(0,7);
+                    (a.date||"").slice(0,7)===localDate().slice(0,7);
                 }).reduce(function(s,a){return s+(a.totalAmount||0);},0).toLocaleString(),
                 icon:"📊",color:C.primary})
             ),
@@ -11831,7 +11841,7 @@ function App(){
               fontSize:12,fontWeight:800}},"📋 Recent Orders"),
             h("div",{style:{maxHeight:280,overflowY:"auto"}},
               myOrders.filter(function(o){
-                return o.date===new Date().toISOString().slice(0,10);
+                return o.date===localDate();
               }).slice(0,10).map(function(o){
                 const stCol={pending:C.warning,cooking:C.info,served:C.success,voided:C.danger}[o.status]||C.muted;
                 return h("div",{key:o._docId||o.id,
@@ -11852,7 +11862,7 @@ function App(){
                 );
               }),
               myOrders.filter(function(o){
-                return o.date===new Date().toISOString().slice(0,10);
+                return o.date===localDate();
               }).length===0&&h("div",{style:{padding:"20px",textAlign:"center",
                 color:C.muted,fontSize:11}},"No orders today yet")
             )
