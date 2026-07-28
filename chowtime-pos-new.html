@@ -4801,9 +4801,12 @@ async function performVoid(db, args){
   try{
     const now=new Date();
     await addDoc(collection(db,"cash_log"),{
-      branch:branch,type:"out",subType:"void_refund",
+      // NOT "out": zeroing order.total already removes this sale from `net`,
+      // and the drawer is opening + net + cashIn - cashOut. Counting it here
+      // too would subtract the same peso twice.
+      branch:branch,type:"void_refund",subType:"void_refund",
       amount:out.voidAmt,
-      desc:"Void refund — Order #"+(order.id||""),
+      desc:"Void refund — Order #"+(order.id||"")+" (naalis na sa sales)",
       orderId:order.id||"",reason:"Void: "+reason,by:byName,
       time:now.toLocaleTimeString("en-PH",{hour:"2-digit",minute:"2-digit"}),
       date:now.toISOString().slice(0,10),
@@ -10016,7 +10019,8 @@ function App(){
           h(SectionHeader,{title:"Cash In / Cash Out",action:()=>setModal("add_cash"),actionLabel:"Add Entry"}),
           h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}},
             h(Stat,{label:"Total Cash In",value:"₱"+cashLog.filter(c=>c.type==="in"&&(user.role==="owner"||c.branch===branchId)).reduce((s,c)=>s+(c.amount||0),0).toLocaleString(),icon:"💰",color:C.success}),
-            h(Stat,{label:"Total Cash Out",value:"₱"+cashLog.filter(c=>c.type==="out"&&(user.role==="owner"||c.branch===branchId)).reduce((s,c)=>s+(c.amount||0),0).toLocaleString(),icon:"💸",color:C.danger})
+            h(Stat,{label:"Total Cash Out",value:"₱"+cashLog.filter(c=>c.type==="out"&&(user.role==="owner"||c.branch===branchId)).reduce((s,c)=>s+(c.amount||0),0).toLocaleString(),icon:"💸",color:C.danger}),
+            h(Stat,{label:"Void Refunds",value:"₱"+cashLog.filter(c=>c.type==="void_refund"&&(user.role==="owner"||c.branch===branchId)).reduce((s,c)=>s+(c.amount||0),0).toLocaleString(),sub:"Naalis na sa sales",icon:"🚫",color:"#E65100"})
           ),
           h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
             cashLog.filter(c=>user.role==="owner"||c.branch===branchId).map(c=>h("div",{key:c._docId,style:{display:"flex",alignItems:"center",gap:9,padding:"10px 14px",borderBottom:"1px solid #f9f9f9"}},
