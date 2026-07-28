@@ -5976,31 +5976,78 @@ function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inve
   const getWeekStart=()=>{const d=new Date();d.setDate(d.getDate()-d.getDay());return localDate(d);};
   const getMonthStart=()=>localDate().slice(0,8)+"01";
 
-  const filtOrders = orders.filter(o=>{
-    if(o.status==="voided")return false;
-    const d=o.date||"";
+  const inPeriod=(d)=>{
+    if(!d)return false;
     if(period==="today")return d===today;
-    if(period==="week")return d>=getWeekStart();
-    if(period==="month")return d>=getMonthStart();
+    if(period==="week")return d>=getWeekStart()&&d<=today;
+    if(period==="month")return d>=getMonthStart()&&d<=today;
     if(period==="custom")return d>=dateFrom&&d<=dateTo;
     return true;
+  };
+
+  const filtOrders = orders.filter(o=>{
+    if(o.status==="voided"||o.status==="void")return false;
+    return inPeriod(o.date||"");
   });
 
-  const gross   = filtOrders.reduce((s,o)=>s+(o.subtotal||0),0);
-  const discAmt = filtOrders.reduce((s,o)=>s+(o.discAmt||0),0);
+  // Saved daily rollups for this branch — the only source that reaches
+  // further back than the live subscription's 300-order window.
+  const [rollups,setRollups]=useState([]);
+  useEffect(()=>{
+    let alive=true;
+    (async()=>{
+      try{
+        const snap=await getDocs(query(collection(db,"daily_sales"),
+          where("branch","==",branchId),limit(400)));
+        if(alive)setRollups(snap.docs.map(d=>d.data()));
+      }catch(e){ if(alive)setRollups([]); }
+    })();
+    return()=>{alive=false;};
+  },[branchId]);
+
+  const periodRolls=rollups.filter(r=>inPeriod(r.date)&&r.date!==today);
+  // today is never in the rollups yet, so take it live and add the saved days
+  const todayOrders=orders.filter(o=>(o.date||"")===today
+    &&o.status!=="void"&&o.status!=="voided");
+  const useRollups=period!=="today"&&periodRolls.length>0;
+
+  const liveGross=(list)=>list.reduce((s2,o)=>s2+(o.subtotal||0),0);
+  const liveDisc =(list)=>list.reduce((s2,o)=>s2+(o.discAmt||0),0);
+  const rollSum=(k)=>periodRolls.reduce((s2,r)=>s2+(Number(r[k])||0),0);
+
+  const gross   = useRollups
+    ? rollSum("gross")+liveGross(todayOrders)
+    : liveGross(filtOrders);
+  const discAmt = useRollups
+    ? rollSum("discounts")+liveDisc(todayOrders)
+    : liveDisc(filtOrders);
   const netSales= gross-discAmt;
   const vatable = netSales/1.12;
   const vat     = netSales-vatable;
-  const txnCount= filtOrders.length;
+  const txnCount= useRollups
+    ? rollSum("txns")+todayOrders.length
+    : filtOrders.length;
   const avgTxn  = txnCount>0?gross/txnCount:0;
+  const daysCovered=useRollups?(periodRolls.length+(todayOrders.length?1:0)):0;
 
   // Item breakdown
   const itemMap={};
-  filtOrders.forEach(o=>(o.items||[]).forEach(i=>{
-    if(!itemMap[i.name])itemMap[i.name]={name:i.name,cat:i.cat||i.category||"",qty:0,rev:0};
-    itemMap[i.name].qty+=(i.qty||1);
-    itemMap[i.name].rev+=(i.lineTotal||0);
-  }));
+  const addItem=(name,cat,qty,rev)=>{
+    if(!name)return;
+    if(!itemMap[name])itemMap[name]={name:name,cat:cat||"",qty:0,rev:0};
+    itemMap[name].qty+=qty||0;
+    itemMap[name].rev+=rev||0;
+  };
+  if(useRollups){
+    // rollups keep the top 20 per day; revenue per item is not stored, so
+    // quantities are exact and revenue is only shown for the live day
+    periodRolls.forEach(r=>(r.topItems||[]).forEach(t=>addItem(t.name,"",t.qty,0)));
+    todayOrders.forEach(o=>(o.items||[]).forEach(i=>
+      addItem(i.name,i.cat||i.category,i.qty||1,i.lineTotal||0)));
+  }else{
+    filtOrders.forEach(o=>(o.items||[]).forEach(i=>
+      addItem(i.name,i.cat||i.category,i.qty||1,i.lineTotal||0)));
+  }
   const itemList=Object.values(itemMap).sort((a,b)=>b.rev-a.rev);
 
   // Category breakdown
@@ -8710,6 +8757,7 @@ function App(){
   const [chkToPicks,setChkToPicks]=useState({});         // {cartId:{pickIdx:toQty}}
   const [posBoms,setPosBoms]=useState({});               // bom docs for stock checks
   const [editingPO,setEditingPO]=useState(null);         // branch editing its own PO
+  const [dayTick,setDayTick]=useState(localDate());      // forces a re-render at midnight
   const [closing,setClosing]=useState(false);            // day rollup in progress
   const [bfFrom,setBfFrom]=useState("");                 // backfill range
   const [bfTo,setBfTo]=useState(localDate());
@@ -9334,6 +9382,19 @@ function App(){
     });
     return short;
   };
+
+  // A tablet left open past midnight keeps rendering yesterday's date: every
+  // `today` is computed during render, and nothing re-renders on its own at
+  // 00:00. Sales after midnight would keep landing on the previous day's
+  // screens until someone touched the UI. Arm a timer for the next local
+  // midnight, bump state, then re-arm.
+  useEffect(()=>{
+    const now=new Date();
+    const next=new Date(now.getFullYear(),now.getMonth(),now.getDate()+1,0,0,5);
+    const ms=next-now;
+    const t=setTimeout(()=>setDayTick(localDate()),Math.max(1000,ms));
+    return()=>clearTimeout(t);
+  },[dayTick]);
 
   // ── HOLD / PARK A TRANSACTION ────────────────────────────
   // Keeps the whole checkout context, not just the cart, so resuming lands the
