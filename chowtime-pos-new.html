@@ -269,7 +269,6 @@ const DISCS = [
   {id:"pwd",  label:"PWD",            rate:0.20},
   {id:"emp",  label:"Employee Meal",  rate:0.50},
   {id:"promo",label:"Promo/Other",    rate:0.10},
-  {id:"custom",label:"Custom %",      rate:0, custom:true},
 ];
 const EXPENSE_CATS = ["Utilities","Supplies","Repairs","Salaries","Transport","Marketing","Others"];
 
@@ -377,25 +376,7 @@ async function testPrintBT(cs,paperSize,showT){
 // ─── ESC/POS BLUETOOTH PRINTER ───────────────────────────
 var _btDevice=null, _btChar=null;
 
-var _btChunk=180;                       // adapts down if the printer rejects it
-var _btSleep=function(ms){return new Promise(function(r){setTimeout(r,ms);});};
-
-// Bind the GATT characteristic on an already-chosen device (no picker prompt).
-async function _btBind(dev){
-  var srv=await dev.gatt.connect();
-  var svc=await srv.getPrimaryService("000018f0-0000-1000-8000-00805f9b34fb");
-  _btChar=await svc.getCharacteristic("00002af1-0000-1000-8000-00805f9b34fb");
-  _btDevice=dev;
-  return true;
-}
-
 async function btConnect(){
-  // Reconnect silently if we already picked a printer this session — the
-  // cashier should not have to re-pick every time the link drops.
-  if(_btDevice){
-    try{ await _btBind(_btDevice); return true; }
-    catch(e){ console.warn("BT reconnect:",e); _btChar=null; }
-  }
   try{
     var dev=await navigator.bluetooth.requestDevice({
       filters:[{namePrefix:"Xprinter"},{namePrefix:"XP-"},
@@ -403,49 +384,23 @@ async function btConnect(){
                {namePrefix:"Printer"},{namePrefix:"BlueTooth"}],
       optionalServices:["000018f0-0000-1000-8000-00805f9b34fb"]
     });
-    await _btBind(dev);
-    dev.addEventListener("gattserverdisconnected",function(){_btChar=null;});
+    var srv=await dev.gatt.connect();
+    var svc=await srv.getPrimaryService("000018f0-0000-1000-8000-00805f9b34fb");
+    _btChar=await svc.getCharacteristic("00002af1-0000-1000-8000-00805f9b34fb");
+    _btDevice=dev;
+    dev.addEventListener("gattserverdisconnected",function(){_btDevice=null;_btChar=null;});
     return true;
   }catch(e){console.warn("BT connect:",e);return false;}
 }
 
-// Write one chunk, preferring the unacknowledged path when the printer
-// exposes it (much faster), falling back to the acknowledged write.
-async function _btWrite(slice){
-  if(_btChar.writeValueWithoutResponse){
-    try{ await _btChar.writeValueWithoutResponse(slice); return; }
-    catch(e){ /* fall through to acknowledged write */ }
-  }
-  await _btChar.writeValue(slice);
-}
-
 async function btPrint(bytes){
   if(!_btChar){var ok=await btConnect();if(!ok)return false;}
-  // A receipt + KOT in one go is ~1-2KB. At the old 20-byte chunk size that is
-  // 60-100 sequential writes; cheap thermal modules drop data or truncate.
-  // Try a large chunk first and step down if the characteristic rejects it.
-  var sizes=[_btChunk,100,60,20];
-  for(var si=0;si<sizes.length;si++){
-    var size=sizes[si];
-    try{
-      for(var i=0;i<bytes.length;i+=size){
-        await _btWrite(bytes.slice(i,i+size));
-        if(!_btChar.writeValueWithoutResponse)continue;
-        await _btSleep(6);            // let the printer buffer drain
-      }
-      _btChunk=size;                  // remember what worked
-      await _btSleep(120);            // let the last bytes flush before we return
-      return true;
-    }catch(e){
-      console.warn("BT print @"+size+"B:",e);
-      if(!_btChar){                   // link died — one silent reconnect, then retry
-        var re=await btConnect();
-        if(!re)return false;
-      }
+  try{
+    for(var i=0;i<bytes.length;i+=20){
+      await _btChar.writeValue(bytes.slice(i,i+20));
     }
-  }
-  _btChar=null;
-  return false;
+    return true;
+  }catch(e){console.warn("BT print:",e);_btChar=null;return false;}
 }
 
 function buildEscPos(ord,bName,cs,paperSize){
@@ -496,28 +451,16 @@ function buildEscPos(ord,bName,cs,paperSize){
 
   (ord.items||[]).forEach(function(i){
     a([ESC,0x45,0x01]);
-    a(ln(i.name+(i.takeout&&ord.mixedType?(i.partialTO?" [T/O split]":" [T/O]"):"")
-      +(ord.discScope==="items"&&i.discounted?" *":"")));
+    a(ln(i.name));
     a([ESC,0x45,0x00]);
     if(i.variant)a(ln("  ["+i.variant+"]"));
-    (i.freebies||[]).forEach(function(f){
-      var to=f.toQty||0,q=f.qty||0;
-      var tag=(!i.takeout||to<=0)?"":(to>=q?"  [T/O]":"  ["+to+" T/O]");
-      a(ln("  > "+f.label+" x"+q+tag));
-    });
     if(i.options&&i.options.length)a(ln("  "+i.options.join(", ")));
     var p=i.lineTotal&&i.qty?(i.lineTotal/i.qty):(i.unitPrice||i.price||0);
     a(row("  x"+i.qty+" @ P"+p.toFixed(2),"P"+(i.lineTotal||(p*i.qty)).toFixed(2)));
   });
 
   a(dash());
-  if(da>0){
-    a(row("Subtotal","P"+sub.toFixed(2)));
-    a(row("Discount"+(ord.discRate?" "+Math.round(ord.discRate*100)+"%":"")
-      +(ord.discScope==="items"?" ("+((ord.discItems||[]).length)+" item/s)":""),
-      "- P"+da.toFixed(2)));
-    if(ord.discScope==="items")a(ln("* discounted item"));
-  }
+  if(da>0){a(row("Subtotal","P"+sub.toFixed(2)));a(row("Discount","- P"+da.toFixed(2)));}
   if(isVAT&&!zerovat){a(row("VATable","P"+vatable.toFixed(2)));a(row("VAT 12%","P"+vatAmt.toFixed(2)));}
   if(!isVAT&&!zerovat)a(ln("Non-VAT"));
   if(zerovat)a(ln("Zero-Rated"));
@@ -549,143 +492,9 @@ function buildEscPos(ord,bName,cs,paperSize){
   return out;
 }
 
-// Kitchen ticket in ESC/POS. No prices — the cook only needs what to make.
-function buildEscPosKOT(ord,bName,cs,paperSize){
-  cs=cs||{};
-  var W=paperSize==="58mm"?32:48;
-  var NL=0x0A, ESC=0x1B, GS=0x1D;
-  var enc=new TextEncoder();
-  var T=function(x){return enc.encode(x);};
-  var B=function(arr){return new Uint8Array(arr);};
-  function ln(t){return T(t+"\n");}
-  function dash(){return T("-".repeat(W)+"\n");}
-
-  var parts=[], a=function(v){parts.push(v instanceof Uint8Array?v:B(v));};
-
-  a([ESC,0x40]);          // INIT
-  a([ESC,0x61,0x01]);     // CENTER
-  a([ESC,0x21,0x30]);     // DOUBLE W+H
-  a(ln("KOT"));
-  a([ESC,0x21,0x00]);     // NORMAL
-  a(ln("KITCHEN ORDER TICKET"));
-  a(dash());
-  a([ESC,0x61,0x00]);     // LEFT
-  a([ESC,0x45,0x01]);
-  a(ln("Order: "+(ord.id||"-")+"   "+(ord.time||"")));
-  a([ESC,0x45,0x00]);
-  a(ln(bName+"   "+(ord.date||"")));
-  if(ord.mixedType){
-    a([ESC,0x45,0x01]);
-    a(ln("Type: MIXED — check each item"));
-    a([ESC,0x45,0x00]);
-  }else if(ord.orderType)a(ln("Type: "+String(ord.orderType).toUpperCase()));
-  if(ord.takeoutCount)a(ln("T/O: "+ord.takeoutCount+" pcs"));
-  if(ord.tableNo)a(ln("Table: "+ord.tableNo));
-  if(ord.custName)a(ln("Customer: "+ord.custName));
-  a(dash());
-
-  (ord.items||[]).forEach(function(i){
-    var pTot=(i.freebies||[]).reduce(function(x,f){return x+(f.qty||0);},0);
-    a([ESC,0x21,0x10]);   // DOUBLE HEIGHT
-    a([ESC,0x45,0x01]);
-    a(ln(i.qty+"x "+i.name+(pTot?"  ("+pTot+" pcs)":"")));
-    a([ESC,0x21,0x00]);
-    a([ESC,0x45,0x00]);
-    // packing instruction has to be impossible to miss
-    if(i.takeout){
-      a([ESC,0x61,0x01]);a([ESC,0x45,0x01]);a([ESC,0x21,0x10]);
-      a(ln(i.partialTO?">>> SPLIT - CHECK EACH <<<":">>> T/O <<<"));
-      a([ESC,0x21,0x00]);a([ESC,0x45,0x00]);a([ESC,0x61,0x00]);
-    }
-    if(i.variant)a(ln("   ["+i.variant+"]"));
-    (i.freebies||[]).forEach(function(f){
-      var to=f.toQty||0, q=f.qty||0;
-      var tag=to<=0?"  (dine-in)":(to>=q?"  [T/O]":"  ["+to+" T/O / "+(q-to)+" dine-in]");
-      a([ESC,0x45,0x01]);
-      a(ln("   > "+q+"x "+f.label+tag));
-      a([ESC,0x45,0x00]);
-    });
-    if(i.options&&i.options.length)a(ln("   "+i.options.join(", ")));
-    if(i.note){a([ESC,0x45,0x01]);a(ln("   ** "+i.note+" **"));a([ESC,0x45,0x00]);}
-    a(T("\n"));
-  });
-
-  a(dash());
-  if(ord.note){a([ESC,0x45,0x01]);a(ln("NOTE: "+ord.note));a([ESC,0x45,0x00]);a(dash());}
-  a([ESC,0x61,0x01]);
-  a(ln("Printed: "+new Date().toLocaleTimeString("en-PH")));
-  a(B([NL,NL,NL]));
-  a([GS,0x56,0x41,0x10]); // PARTIAL CUT
-
-  var total=0; parts.forEach(function(p){total+=p.length;});
-  var out=new Uint8Array(total), off=0;
-  parts.forEach(function(p){out.set(p,off);off+=p.length;});
-  return out;
-}
-
-// ── CASH DRAWER ──────────────────────────────────────────
-// ESC p m t1 t2 — pulse the drawer solenoid through the printer's RJ11 port.
-// m=0 -> pin 2 (near-universal), m=1 -> pin 5. t1/t2 are on/off pulse widths.
-// The drawer must be cabled to the PRINTER, not the tablet: the tablet has no
-// way to reach it, so this only fires on the Bluetooth path, never browser print.
-function escposKick(pin){
-  return new Uint8Array([0x1B,0x70,(pin===5?0x01:0x00),0x19,0xFA]);
-}
-
-function _cat(){
-  var arrs=Array.prototype.slice.call(arguments).filter(Boolean);
-  var n=0; arrs.forEach(function(x){n+=x.length;});
-  var out=new Uint8Array(n), off=0;
-  arrs.forEach(function(x){out.set(x,off);off+=x.length;});
-  return out;
-}
-
-// Auto-open only makes sense when cash actually changes hands.
-function shouldKick(ord,cs){
-  if(cs&&cs.autoKickDrawer===false)return false;
-  var m=String((ord&&ord.payMethod)||"cash").toLowerCase();
-  return m==="cash";
-}
-
-function kickBytes(ord,cs){
-  return shouldKick(ord,cs)?escposKick((cs&&cs.drawerPin)||2):null;
-}
-
-// Auto-open after a sale. Silent no-op when the printer is not connected —
-// never prompts, never blocks the next order.
-async function btKickIfConnected(ord,cs){
-  if(!_btChar)return false;
-  if(!shouldKick(ord,cs))return false;
-  try{ return await btPrint(escposKick((cs&&cs.drawerPin)||2)); }
-  catch(e){ return false; }
-}
-
-// Manual open — for no-sale, change fund, or a drawer that failed to pop.
-async function btKickDrawer(cs){
-  if(!_btChar){var ok=await btConnect();if(!ok)return false;}
-  return await btPrint(escposKick((cs&&cs.drawerPin)||2));
-}
-
 async function printEscPos(ord,bName,cs,paperSize){
-  var data=_cat(kickBytes(ord,cs),buildEscPos(ord,bName,cs,paperSize));
+  var data=buildEscPos(ord,bName,cs,paperSize);
   return await btPrint(data);
-}
-
-async function printEscPosKOT(ord,bName,cs,paperSize){
-  var data=buildEscPosKOT(ord,bName,cs,paperSize);
-  return await btPrint(data);
-}
-
-// Customer receipt + kitchen ticket in ONE Bluetooth session.
-// Sent as a single byte stream so the connection is not dropped between
-// documents; the partial cut at the end of the receipt separates them.
-async function printEscPosBoth(ord,bName,cs,paperSize){
-  // kick first so the drawer pops while the receipt is still feeding
-  return await btPrint(_cat(
-    kickBytes(ord,cs),
-    buildEscPos(ord,bName,cs,paperSize),
-    buildEscPosKOT(ord,bName,cs,paperSize)
-  ));
 }
 
 
@@ -744,30 +553,15 @@ function printReceipt(ord, branchName, companySettings, paperSize){
   (ord.items||[]).map(function(i){
     var price=i.lineTotal&&i.qty?(i.lineTotal/i.qty):(i.unitPrice||i.price||0);
     var total=i.lineTotal||(price*(i.qty||1));
-    var mark=(i.takeout&&ord.mixedType?(i.partialTO?" [T/O split]":" [T/O]"):"")
-      +((ord.discScope==="items"&&i.discounted)?" *":"");
-    var name=i.name+(i.variant?" ["+i.variant+"]":"")+(i.options&&i.options.length?" ("+i.options.join(", ")+")":"")+mark;
-    var picks=(i.freebies&&i.freebies.length)
-      ?i.freebies.map(function(f){
-         var to=f.toQty||0,q=f.qty||0;
-         var tag=(!i.takeout||to<=0)?"":(to>=q?" <b>[T/O]</b>":" <b>["+to+" T/O]</b>");
-         return "<div style='padding-left:12px;color:#000'>&#9656; "+f.label+" x"+q+tag+"</div>";
-       }).join("")
-      :"";
+    var name=i.name+(i.variant?" ["+i.variant+"]":"")+(i.options&&i.options.length?" ("+i.options.join(", ")+")":"");
     return "<div class='row'><span class='b' style='flex:1;margin-right:4px'>"+name+"</span>"+
       "<span class='b'>\u20b1"+total.toFixed(2)+"</span></div>"+
-      picks+
       "<div style='padding-left:8px;margin-bottom:3px;color:#555'>x"+i.qty+" @ \u20b1"+price.toFixed(2)+"</div>";
   }).join("")+
   "<div class='hr'></div>"+
   // TOTALS
-  (da>0&&ord.discScope==="items"
-    ?"<div style='font-size:10px;color:#555;margin-bottom:2px'>* discounted item</div>":"")+
   (da>0?"<div class='row'><span>Subtotal</span><span>\u20b1"+sub.toFixed(2)+"</span></div>"+
-    "<div class='row'><span>Discount ("+dtLabel+
-      (ord.discRate?" "+Math.round(ord.discRate*100)+"%":"")+
-      (ord.discScope==="items"?", "+((ord.discItems||[]).length||0)+" item/s":"")+
-      ")</span><span>-\u20b1"+da.toFixed(2)+"</span></div>":"") +
+    "<div class='row'><span>Discount ("+dtLabel+")</span><span>-\u20b1"+da.toFixed(2)+"</span></div>":"") +
   (isVAT&&!zerovat?
     "<div class='row sub'><span>VATable Sales</span><span>\u20b1"+vatable.toFixed(2)+"</span></div>"+
     "<div class='row sub'><span>VAT Amount (12%)</span><span>\u20b1"+vatAmt.toFixed(2)+"</span></div>":"")+
@@ -822,29 +616,15 @@ function printKOT(ord, branchName, companySettings, paperSize){
   "<div class='row b'><span>Order: "+ord.id+"</span><span>"+ord.time+"</span></div>"+
   "<div class='row'><span>"+branchName+"</span><span>"+ord.date+"</span></div>"+
   (ord.custName?"<div class='row b'><span>Customer: "+ord.custName+"</span></div>":"")+
-  (ord.mixedType?"<div class='row b'><span>Type: MIXED &mdash; check each item</span></div>"
-    :(ord.orderType?"<div class='row'><span>Type: "+String(ord.orderType).toUpperCase()+"</span></div>":""))+
-  (ord.takeoutCount?"<div class='row'><span>T/O: "+ord.takeoutCount+" pcs</span></div>":"")+
   "<div class='hr'></div>"+
   // ITEMS - big and bold for kitchen
   (ord.items||[]).map(function(i,ix){
     var vLine = i.variant?"  ["+i.variant+"]":"";
     var oLine = (i.options&&i.options.length)?"  ("+i.options.join(", ")+")":"";
     var noteL = i.note?"  **"+i.note+"**":"";
-    var pLine = (i.freebies&&i.freebies.length)
-      ?i.freebies.map(function(f){
-         var to=f.toQty||0,q=f.qty||0;
-         var tag=to<=0?" (dine-in)":(to>=q?" [T/O]":" ["+to+" T/O / "+(q-to)+" dine-in]");
-         return "&#9656; "+q+"x "+f.label+tag;
-       }).join("<br>")
-      :"";
-    var pTot  = (i.freebies||[]).reduce(function(a,f){return a+(f.qty||0);},0);
     return "<div style='margin-bottom:8px;border-bottom:1px dotted #000;padding-bottom:4px'>"+
-      "<div class='row'><span class='item'>"+i.qty+"x "+i.name+
-        (pTot?" <span style=\'font-size:11px;font-weight:700\'>("+pTot+" pcs)</span>":"")+"</span></div>"+
-      (i.takeout?"<div style='text-align:center;font-size:15px;font-weight:900;border:2px solid #000;margin:3px 0;padding:2px'>&gt;&gt;&gt; "+(i.partialTO?"SPLIT - CHECK EACH":"T/O")+" &lt;&lt;&lt;</div>":"")+
+      "<div class='row'><span class='item'>"+i.qty+"x "+i.name+"</span></div>"+
       (vLine?"<div style='font-size:12px;font-weight:700;padding-left:12px'>"+vLine+"</div>":"")+
-      (pLine?"<div style='font-size:14px;font-weight:900;padding-left:12px;margin:3px 0'>"+pLine+"</div>":"")+
       (oLine?"<div style='font-size:11px;padding-left:12px'>"+oLine+"</div>":"")+
       (noteL?"<div style='font-size:11px;font-weight:900;padding-left:12px'>"+noteL+"</div>":"")+
       "</div>";
@@ -890,13 +670,7 @@ function printZ(zd,branchName,cashier){
 }
 
 // ─── ITEM CUSTOMIZER ─────────────────────────────────────
-function ItemCustomizer({item,onAdd,onClose,optionGroups=[],priceType="retail",userRole="cashier",bomCheck=null}){
-  // bomCheck is optional — without it the customizer behaves exactly as before
-  const oosChoice=(gid,cid)=>{
-    if(!bomCheck)return null;
-    const sh=bomCheck.bomShort(bomCheck.choiceBomRows(gid,cid),1);
-    return sh.length?sh:null;
-  };
+function ItemCustomizer({item,onAdd,onClose,optionGroups=[],priceType="retail",userRole="cashier"}){
   const [selV,setSelV]=useState(item.variants[0]);
   // Item-level groups: always shown for all variants (Flavor, Sauce, etc.)
   const itemGroupIds=(item.optionGroups)||[];
@@ -905,39 +679,6 @@ function ItemCustomizer({item,onAdd,onClose,optionGroups=[],priceType="retail",u
   // Combined: item groups always + variant-specific groups
   const allLinkedIds=[...new Set([...itemGroupIds,...variantGroupIds])];
   const linkedGroups=(optionGroups||[]).filter(function(g){return allLinkedIds.includes(g.id);});
-  // FIX: Firebase writes choices[] (see BOMPage). Old code read options[] -> always empty.
-  const grpChoices=function(g){return (g&&(g.choices||g.options))||[];};
-  // MODEL: a picker group needs N picks PER ITEM, and a variant says how many
-  // items one ordered unit contains. Solo = 1 item, BOGO = 2 items.
-  // So "1 flavor per item" resolves to 1 pick on Solo and 2 picks on BOGO,
-  // and scales again with order qty — no per-variant config needed.
-  const bogoCat=/bogo|buy\s*1\s*get/i.test(String((item&&item.category)||""));
-  const bogoVar=/bogo|buy\s*1\s*get/i.test(String((selV&&selV.label)||""));
-  const isBogoSel=bogoCat||bogoVar;
-  const unitsPerOrder=(selV&&typeof selV.itemsPerUnit==="number")
-    ? selV.itemsPerUnit
-    : (isBogoSel?2:1);
-  // picks required per ITEM:
-  //   perItem: 1        -> explicit field on the option_groups doc (best)
-  //   "Get 2"/"Pili 2"  -> from the name
-  //   "[R] ..." prefix  -> required, 1 per item
-  //   otherwise         -> 0, stays a plain optional group
-  const perItem=function(g){
-    if(typeof g.perItem==="number")return g.perItem;
-    var nm=String((g&&g.name)||"");
-    var m=/(?:get|choose|pick|select|pili|kuha)\s*(\d+)/i.exec(nm);
-    if(m)return parseInt(m[1],10)||0;
-    if(/^\s*\[R\]/i.test(nm))return 1;
-    return 0;
-  };
-  const getPerUnit=function(g){
-    // legacy absolute field stays absolute so existing docs don't double up,
-    // but only when it actually carries a value — a stored 0 must not shadow
-    // perItem and silently keep a group optional.
-    if(typeof g.getPerUnit==="number"&&g.getPerUnit>0)return g.getPerUnit;
-    return perItem(g)*unitsPerOrder;
-  };
-  const isFreeGrp=function(g){return getPerUnit(g)>0;};
 
   const [selO,setSelO]=useState({});
   const [selP,setSelP]=useState(null);
@@ -954,50 +695,13 @@ function ItemCustomizer({item,onAdd,onClose,optionGroups=[],priceType="retail",u
       return newSel;
     });
   };
-  const freeQty=(gid,cid)=>{const a=selO["og_"+gid]||[];const f=a.find(x=>x.id===cid);return f?(f.qty||0):0;};
-  const freeTotal=(gid)=>(selO["og_"+gid]||[]).reduce((s,c)=>s+(c.qty||0),0);
-  const bumpFree=(gid,ch,d,cap)=>setSelO(p=>{
-    const k="og_"+gid;const cur=(p[k]||[]).slice();
-    const i=cur.findIndex(x=>x.id===ch.id);
-    const now=i>=0?(cur[i].qty||0):0;
-    const tot=cur.reduce((s,c)=>s+(c.qty||0),0);
-    if(d>0&&tot>=cap)return p;
-    let next=now+d; if(next<0)next=0;
-    if(i>=0){ if(next===0)cur.splice(i,1); else cur[i]=Object.assign({},cur[i],{qty:next}); }
-    else if(next>0){ cur.push({id:ch.id,label:ch.label||ch.name,priceAdd:ch.priceAdd||0,qty:next}); }
-    const r=Object.assign({},p);r[k]=cur;return r;
-  });
-  // qty change must re-cap freebies (4 BOGO -> 4 picks; drop to 2 -> trim to 2)
-  const setQtySafe=(nq)=>{
-    const q=Math.max(1,nq);
-    setQty(q);
-    setSelO(p=>{
-      const r=Object.assign({},p);
-      linkedGroups.forEach(function(g){
-        if(!isFreeGrp(g))return;
-        const k="og_"+g.id,cap=getPerUnit(g)*q;
-        let cur=(r[k]||[]).map(function(c){return Object.assign({},c);});
-        let tot=cur.reduce(function(s,c){return s+(c.qty||0);},0);
-        while(tot>cap&&cur.length){
-          const last=cur[cur.length-1];
-          const take=Math.min(last.qty,tot-cap);
-          last.qty-=take;tot-=take;
-          if(last.qty<=0)cur.pop();
-        }
-        r[k]=cur;
-      });
-      return r;
-    });
-  };
   const tog=(oid,ch,multi)=>setSelO(p=>{
     const cur=p[oid]||[];
     if(multi){const ex=cur.find(c=>c.id===ch.id);return ex?{...p,[oid]:cur.filter(c=>c.id!==ch.id)}:{...p,[oid]:[...cur,ch]};}
     const ex=cur.find(c=>c.id===ch.id);return ex?{...p,[oid]:[]}:{...p,[oid]:[ch]};
   });
   const ck=(oid,cid)=>(selO[oid]||[]).some(c=>c.id===cid);
-  // FIX: og_ groups were counted here AND again in linkedGroupsPrice = double charge
-  const optsTotal=Object.entries(selO).filter(([k])=>!k.startsWith("og_"))
-    .reduce((s,[,cs])=>s+(cs||[]).reduce((a,c)=>a+(c.priceAdd||0),0),0);
+  const optsTotal=Object.values(selO).flat().reduce((s,c)=>s+(c.priceAdd||0),0);
   // Get base price by priceType (for Main/commissary account)
   const getBase=()=>{
     if(priceType==="franchisee"&&item.franchiseePrice) return item.franchiseePrice;
@@ -1011,44 +715,21 @@ function ItemCustomizer({item,onAdd,onClose,optionGroups=[],priceType="retail",u
   const baseForCalc=variantIsTotal?(selV?.priceAdd||getBase()):getBase();
   const variantAdd=variantIsTotal?0:(selV?.priceAdd||0);
   const unitPrice=baseForCalc+variantAdd+optsTotal+(selP?.priceAdd||0);
-  // BOGO can come from a promo, the item's category, or a variant labelled "BOGO w/ Drink"
-  const isBogo=(selP&&selP.discount==="bogo")||isBogoSel;
-  // normal linked groups: per-unit upcharge
-  const linkedPerUnit=linkedGroups.filter(g=>!isFreeGrp(g))
-    .reduce((s,g)=>s+((selO["og_"+g.id]||[]).reduce((a,c)=>a+(c.priceAdd||0),0)),0);
-  // freebie upcharges: already picked N times, do NOT multiply by qty again
-  const freebieAdd=linkedGroups.filter(isFreeGrp)
-    .reduce((s,g)=>s+((selO["og_"+g.id]||[]).reduce((a,c)=>a+((c.priceAdd||0)*(c.qty||0)),0)),0);
-  // FIX: old code returned unitPrice (qty ignored) for BOGO -> 4 BOGO charged as 1
-  const lineTotal=(unitPrice+linkedPerUnit)*qty+freebieAdd;
+  const isBogo=selP?.discount==="bogo";
+  // Add prices from linked option groups
+  const linkedGroupsPrice=Object.entries(selO).filter(([k])=>k.startsWith("og_")).reduce((sum,[,choices])=>{
+    return sum+(choices||[]).reduce((s,c)=>s+(c.priceAdd||0),0);
+  },0);
+  const lineTotal=isBogo?unitPrice:(unitPrice+linkedGroupsPrice)*qty;
   const missing=item.options.filter(o=>o.required&&!(selO[o.id]||[]).length).map(o=>o.label);
-  const freeGaps=linkedGroups.filter(isFreeGrp).map(function(g){
-    return {name:g.name,need:getPerUnit(g)*qty,got:freeTotal(g.id)};
-  }).filter(function(x){return x.got!==x.need;});
-  const blocked=missing.length>0||freeGaps.length>0;
 
   const handleAdd=()=>{
-    if(blocked)return;
-    const freebies=[],optionRefs=[],labels=[];
-    Object.entries(selO).filter(([k])=>!k.startsWith("og_"))
-      .forEach(([,cs])=>(cs||[]).forEach(c=>labels.push(c.label)));
-    linkedGroups.forEach(function(g){
-      const free=isFreeGrp(g);
-      (selO["og_"+g.id]||[]).forEach(function(c){
-        const n=free?(c.qty||0):1;
-        if(n<=0)return;
-        optionRefs.push({groupId:g.id,groupName:g.name,choiceId:c.id,label:c.label,qty:n,free:free});
-        if(free)freebies.push({groupId:g.id,groupName:g.name,id:c.id,label:c.label,qty:n,priceAdd:c.priceAdd||0});
-        else labels.push(c.label);
-      });
-    });
+    if(missing.length)return;
     onAdd({
       cartId:Date.now()+Math.random(),id:item.id,
       name:item.name,emoji:item.emoji,unitPrice,qty,
       variant:selV?.label,
-      options:labels,
-      freebies:freebies,optionRefs:optionRefs,
-      freePerUnit:linkedGroups.filter(isFreeGrp).reduce((s,g)=>s+getPerUnit(g),0),
+      options:Object.values(selO).flat().map(function(c){return c.label;}),
       promo:selP?.label,isBogo,note,lineTotal
     });
   };
@@ -1134,92 +815,37 @@ function ItemCustomizer({item,onAdd,onClose,optionGroups=[],priceType="retail",u
         ...linkedGroups.map(function(group){
           const groupKey="og_"+group.id;
           const selected=selO[groupKey]||[];
-          const per=getPerUnit(group);
-          const free=per>0;
-          const cap=per*qty;
-          const got=selected.reduce(function(a,c){return a+(c.qty||0);},0);
-          const short=free&&got!==cap;
-          const choices=grpChoices(group);
           return h("div",{key:group.id,
             style:{padding:"13px 0",borderBottom:"1px solid "+C.border}},
-            h("div",{style:{fontSize:11,fontWeight:800,marginBottom:6,
-              display:"flex",gap:7,alignItems:"center",flexWrap:"wrap"}},
-              (function(){
-                var nm=String(group.name||"").replace(/^\s*\[R\]\s*/i,"");
-                if(!free)return nm;
-                return /(get|choose|pick|select|pili|kuha)\s*\d+/i.test(nm)
-                  ?nm.replace(/(get|choose|pick|select|pili|kuha)\s*\d+/i,"Pumili ng "+cap)
-                  :nm;
-              })(),
-              free
-                ?h("span",{style:{background:short?C.danger:"#2E7D32",color:"#fff",fontSize:9,
-                    padding:"1px 7px",borderRadius:20}},got+"/"+cap+(short?" • Required":" ✓"))
-                :h("span",{style:{fontSize:9,color:C.muted,fontWeight:400}},"• Optional")
+            h("div",{style:{fontSize:11,fontWeight:800,marginBottom:8,
+              display:"flex",gap:7,alignItems:"center"}},
+              group.name,
+              h("span",{style:{fontSize:9,color:C.muted,fontWeight:400}},"• Optional")
             ),
-            free&&h("div",{style:{fontSize:9,color:C.muted,marginBottom:7}},
-              cap===1
-                ?"Pumili ng 1 — required."
-                :"Pumili ng "+cap+" ("+(unitsPerOrder*qty)+" item × "
-                  +perItem(group)+") — pwedeng ulitin ang parehong pili."),
-            choices.length===0&&h("div",{style:{fontSize:10,color:C.danger,background:"#FFEBEE",
-              padding:"8px 10px",borderRadius:8}},
-              "⚠️ Walang choices ang group na ito. Idagdag sa Menu & BOM → Option Groups."),
             h("div",{style:{display:"grid",
               gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:6}},
-              choices.map(function(opt){
-                const lbl=opt.label||opt.name;
-                if(free){
-                  const n=freeQty(group.id,opt.id);
-                  const oos=oosChoice(group.id,opt.id);
-                  const canAdd=got<cap&&!oos;
-                  return h("div",{key:opt.id,
-                    style:{padding:"7px 8px",borderRadius:9,textAlign:"center",
-                      border:"2px solid "+(oos?"#eee":(n>0?C.primary:C.border)),
-                      background:oos?"#FAFAFA":(n>0?C.primary+"12":"#fff"),
-                      opacity:oos?.55:1}},
-                    h("div",{style:{fontSize:11,fontWeight:n>0?700:400,
-                      color:oos?C.muted:(n>0?C.primary:C.text),marginBottom:5}},lbl),
-                    oos&&h("div",{style:{fontSize:8,color:C.danger,fontWeight:800,marginBottom:3}},
-                      "UBOS: "+oos[0].ingName),
-                    (opt.priceAdd||0)>0&&h("div",{style:{fontSize:9,color:C.primary,
-                      fontWeight:700,marginBottom:3}},"+₱"+(opt.priceAdd||0)+" ea"),
-                    h("div",{style:{display:"flex",alignItems:"center",
-                      justifyContent:"center",gap:8}},
-                      h("button",{onClick:function(){bumpFree(group.id,opt,-1,cap);},
-                        style:{width:24,height:24,borderRadius:6,border:"none",
-                          background:n>0?C.primary:"#eee",color:n>0?"#fff":"#bbb",
-                          fontSize:14,fontWeight:900,cursor:n>0?"pointer":"default"}},"−"),
-                      h("span",{style:{minWidth:14,fontWeight:900,fontSize:12}},n),
-                      h("button",{onClick:function(){bumpFree(group.id,opt,1,cap);},
-                        style:{width:24,height:24,borderRadius:6,border:"none",
-                          background:canAdd?C.primary:"#eee",color:canAdd?"#fff":"#bbb",
-                          fontSize:14,fontWeight:900,cursor:canAdd?"pointer":"default"}},"+")
-                    )
-                  );
-                }
-                const on=selected.some(function(x){return x.id===opt.id;});
-                const oos2=on?null:oosChoice(group.id,opt.id);
-                return h("button",{key:opt.id,disabled:!!oos2,
+              (group.options||[]).map(function(opt){
+                const on=selected.some(function(s){return s.id===opt.id;});
+                return h("button",{key:opt.id,
                   onClick:function(){
-                    if(oos2)return;
                     setSelO(function(p){
                       var cur=p[groupKey]||[];
                       var next=on
-                        ?cur.filter(function(x){return x.id!==opt.id;})
-                        :[...cur,{id:opt.id,label:lbl,priceAdd:opt.priceAdd||0}];
+                        ?cur.filter(function(s){return s.id!==opt.id;})
+                        :[...cur,{id:opt.id,label:opt.label||opt.name,priceAdd:opt.priceAdd||0}];
                       var r={};Object.assign(r,p);r[groupKey]=next;return r;
                     });
                   },
-                  style:{padding:"8px 10px",borderRadius:9,
-                    cursor:oos2?"not-allowed":"pointer",opacity:oos2?.55:1,
-                    textAlign:"center",border:"2px solid "+(oos2?"#eee":(on?C.primary:C.border)),
-                    background:oos2?"#FAFAFA":(on?C.primary+"12":"#fff")}},
+                  style:{padding:"8px 10px",borderRadius:9,cursor:"pointer",
+                    textAlign:"center",border:"2px solid "+(on?C.primary:C.border),
+                    background:on?C.primary+"12":"#fff"}},
                   h("div",{style:{fontSize:11,fontWeight:on?700:400,
-                    color:oos2?C.muted:(on?C.primary:C.text)}},lbl),
-                  oos2&&h("div",{style:{fontSize:8,color:C.danger,fontWeight:800}},
-                    "UBOS: "+oos2[0].ingName),
-                  !oos2&&(opt.priceAdd||0)>0&&h("div",{style:{fontSize:9,color:C.primary,fontWeight:700}},
-                    "+₱"+(opt.priceAdd||0))
+                    color:on?C.primary:C.text}},opt.label||opt.name),
+                  (opt.priceAdd||0)>0&&h("div",{style:{fontSize:9,color:C.primary,fontWeight:700}},
+                    "+₱"+(opt.priceAdd||0)),
+                  (opt.bom||[]).length>0&&h("div",{style:{fontSize:8,
+                    color:on?C.primary:C.muted,marginTop:2}},
+                    "BOM ✓")
                 );
               })
             )
@@ -1234,17 +860,14 @@ function ItemCustomizer({item,onAdd,onClose,optionGroups=[],priceType="retail",u
       // Footer
       h("div",{style:{padding:"11px 18px 16px",borderTop:"1px solid "+C.border}},
         missing.length>0&&h("div",{style:{background:"#FFEBEE",borderRadius:8,padding:"7px 11px",marginBottom:8,fontSize:11,color:C.danger,fontWeight:600}},"⚠️ Select: "+missing.join(", ")),
-        freeGaps.length>0&&h("div",{style:{background:"#FFEBEE",borderRadius:8,padding:"7px 11px",marginBottom:8,fontSize:11,color:C.danger,fontWeight:600}},
-          freeGaps.map(function(g){return g.name+": "+g.got+"/"+g.need;}).join(" · ")+" — kulang pa ang pili"),
-        isBogo&&h("div",{style:{background:"#FFF8E1",borderRadius:8,padding:"7px 11px",marginBottom:8,fontSize:11,color:"#E65100",fontWeight:600}},
-          "🎉 "+qty+"x BOGO = "+(qty*2)+" items total"),
+        isBogo&&h("div",{style:{background:"#FFF8E1",borderRadius:8,padding:"7px 11px",marginBottom:8,fontSize:11,color:"#E65100",fontWeight:600}},"🎉 BOGO: Order "+qty+", get "+qty+" FREE!"),
         h("div",{style:{display:"flex",gap:9,alignItems:"center"}},
           h("div",{style:{display:"flex",alignItems:"center",gap:7,background:C.bg,borderRadius:9,padding:"4px"}},
-            h("button",{onClick:()=>setQtySafe(qty-1),style:{width:30,height:30,borderRadius:7,border:"none",background:qty>1?"#fff":"#eee",cursor:qty>1?"pointer":"default",fontSize:16,fontWeight:700,color:qty>1?C.primary:C.muted}},"−"),
+            h("button",{onClick:()=>setQty(q=>Math.max(1,q-1)),style:{width:30,height:30,borderRadius:7,border:"none",background:qty>1?"#fff":"#eee",cursor:qty>1?"pointer":"default",fontSize:16,fontWeight:700,color:qty>1?C.primary:C.muted}},"−"),
             h("span",{style:{minWidth:20,textAlign:"center",fontWeight:900,fontSize:14}},qty),
-            h("button",{onClick:()=>setQtySafe(qty+1),style:{width:30,height:30,borderRadius:7,border:"none",background:"#fff",cursor:"pointer",fontSize:16,fontWeight:700,color:C.primary}},"+")
+            h("button",{onClick:()=>setQty(q=>q+1),style:{width:30,height:30,borderRadius:7,border:"none",background:"#fff",cursor:"pointer",fontSize:16,fontWeight:700,color:C.primary}},"+")
           ),
-          h("button",{onClick:handleAdd,disabled:blocked,style:{flex:1,padding:"12px",background:blocked?"#ddd":`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:10,color:blocked?"#999":"#fff",fontWeight:800,fontSize:13,cursor:blocked?"not-allowed":"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:9}},
+          h("button",{onClick:handleAdd,disabled:!!missing.length,style:{flex:1,padding:"12px",background:missing.length?"#ddd":`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:10,color:missing.length?"#999":"#fff",fontWeight:800,fontSize:13,cursor:missing.length?"not-allowed":"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:9}},
             "Add to Order",
             h("span",{style:{background:"rgba(255,255,255,.22)",padding:"2px 9px",borderRadius:20,fontSize:12}},"₱"+lineTotal.toFixed(2))
           )
@@ -1350,39 +973,23 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
           // Item name
           h("div",null,
             h("div",{style:{fontSize:11,fontWeight:700,color:(item.orderQty||0)>0?C.primary:C.text}},item.name),
-            h("div",{style:{fontSize:9,color:C.muted}},
-              packSizeOf(item)>0
-                ? ("Order sa "+packUnitOf(item)+" · 1 "+packUnitOf(item)+" = "+packSizeOf(item)+" "+item.unit)
-                : ("Unit: "+item.unit))
+            h("div",{style:{fontSize:9,color:C.muted}},"Unit: "+item.unit)
           ),
           // Category
           h("div",{style:{fontSize:10,color:C.muted}},item.cat),
-          // Qty input — steps by pack when the item is bought by the pack
-          (function(){
-            const sz=packSizeOf(item)||1;
-            const step=(d)=>setItems(p=>p.map((x,i)=>i===idx
-              ?{...x,orderQty:Math.max(0,(x.orderQty||0)+d*sz)}:x));
-            const shown=sz>1?((item.orderQty||0)/sz):(item.orderQty||0);
-            return h("div",null,
-              h("div",{style:{display:"flex",alignItems:"center",gap:4}},
-                h("button",{onClick:()=>step(-1),
-                  style:{width:22,height:22,borderRadius:5,border:"1px solid "+C.border,
-                    background:"#fff",cursor:"pointer",fontSize:13,fontWeight:700,flexShrink:0}},"−"),
-                h("input",{type:"number",min:0,value:shown,
-                  onChange:e=>{
-                    const v=parseFloat(e.target.value)||0;
-                    setItems(p=>p.map((x,i)=>i===idx?{...x,orderQty:Math.max(0,v*sz)}:x));
-                  },
-                  style:{width:40,textAlign:"center",padding:"3px",border:"1px solid "+C.border,
-                    borderRadius:5,fontSize:12,fontWeight:700,outline:"none"}}),
-                h("button",{onClick:()=>step(1),
-                  style:{width:22,height:22,borderRadius:5,border:`1px solid ${C.primary}`,
-                    background:"#FFF0F0",cursor:"pointer",fontWeight:700,color:C.primary,fontSize:13,flexShrink:0}},"+")
-              ),
-              sz>1&&h("div",{style:{fontSize:8,color:C.muted,marginTop:2,textAlign:"center"}},
-                packUnitOf(item)+" → "+(item.orderQty||0)+" "+baseUnitOf(item))
-            );
-          })(),
+          // Qty input
+          h("div",{style:{display:"flex",alignItems:"center",gap:4}},
+            h("button",{onClick:()=>setItems(p=>p.map((x,i)=>i===idx?{...x,orderQty:Math.max(0,(x.orderQty||0)-1)}:x)),
+              style:{width:22,height:22,borderRadius:5,border:"1px solid "+C.border,
+                background:"#fff",cursor:"pointer",fontSize:13,fontWeight:700,flexShrink:0}},"−"),
+            h("input",{type:"number",min:0,value:item.orderQty||0,
+              onChange:e=>setItems(p=>p.map((x,i)=>i===idx?{...x,orderQty:parseInt(e.target.value)||0}:x)),
+              style:{width:40,textAlign:"center",padding:"3px",border:"1px solid "+C.border,
+                borderRadius:5,fontSize:12,fontWeight:700,outline:"none"}}),
+            h("button",{onClick:()=>setItems(p=>p.map((x,i)=>i===idx?{...x,orderQty:(x.orderQty||0)+1}:x)),
+              style:{width:22,height:22,borderRadius:5,border:`1px solid ${C.primary}`,
+                background:"#FFF0F0",cursor:"pointer",fontWeight:700,color:C.primary,fontSize:13,flexShrink:0}},"+")
+          ),
           // Last price (from item data)
           h("div",{style:{fontSize:10,color:C.muted,textAlign:"center"}},
             item.cost>0?"₱"+item.cost.toFixed(2):"—"),
@@ -1410,7 +1017,7 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
           h("div",null,
             h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:4}},
               h("span",{style:{fontSize:11,color:C.muted}},"Total Items Ordered:"),
-              h("span",{style:{fontSize:11,fontWeight:700}},ordered.length+" item/s")
+              h("span",{style:{fontSize:11,fontWeight:700}},ordered.reduce((s,i)=>s+(i.orderQty||0),0)+" units")
             ),
             h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:4}},
               h("span",{style:{fontSize:11,color:C.muted}},"Line Items:"),
@@ -1521,43 +1128,7 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
         drNotes,
         issuedBy:user.name, issuedAt:serverTimestamp()
       });
-
-      // Issuing a DR moves goods OUT of main. Without this the branch gained
-      // stock on receipt while main never lost any — stock from nothing.
-      // stockIssued guards against a re-issue deducting twice.
-      let moved=0;
-      if(!po.stockIssued){
-        for(const it of delivered){
-          if(!it.id||!(it.actualQty>0))continue;
-          try{
-            let _dprev=null;
-            try{
-              const _ds=await getDoc(doc(db,"inventory",it.id));
-              if(_ds.exists())_dprev=Number(_ds.data().stock)||0;
-            }catch(e7){}
-            await updateDoc(doc(db,"inventory",it.id),{
-              stock:increment(-(it.actualQty||0)),
-              lastIssued:serverTimestamp()
-            });
-            moved++;
-            await addDoc(collection(db,"inventory_log"),{
-              itemId:it.id,itemName:it.name||it.id,unit:it.unit||"",
-              type:"deduct",amount:-(it.actualQty||0),
-              prevStock:_dprev,
-              newStock:_dprev==null?null:Math.round((_dprev-(it.actualQty||0))*1000)/1000,
-              desc:"Na-issue mula sa Main: "+(it.actualQty||0)+" "+(it.unit||"")
-                +" papuntang "+(po.branch||"")+" sa ilalim ng "+drNum,
-              source:"transfer",
-              ref:drNum,
-              reason:"DR "+drNum+" — issued to "+(po.branch||""),
-              drNum:drNum,poId:po._docId,branch:po.branch||"",
-              by:user.name,at:serverTimestamp(),timestamp:serverTimestamp()
-            });
-          }catch(e2){console.warn("Main stock deduct failed",it.id,e2);}
-        }
-        try{ await updateDoc(doc(db,"advances",po._docId),{stockIssued:true}); }catch(e3){}
-      }
-      showT(drNum+" issued ✓ · "+moved+" item/s deducted from main");
+      showT(drNum+" issued ✓ Branch notified");
     }catch(e){showT("Error issuing DR","err");console.error(e);}
   };
 
@@ -1769,17 +1340,11 @@ function DRCheckForm({po,db,branchId,user,showT,INIT_INVENTORY,setAdvances,advan
   const [expanded,setExpanded]=useState(true);
 
   const confirmReceipt=async()=>{
-    const received=(po.deliveredItems||po.items||[]).map(i=>{
-      // expected = what the DR says was issued (fall back to what was ordered)
-      const expected = (i.actualQty!=null) ? i.actualQty : i.qty;
-      // FIX: was `a ?? b!=null ? b : c` — ?? binds tighter than ?:, so the
-      // number the receiver typed was evaluated as a boolean and thrown away.
-      // Typing 7 gave 10; typing 0 gave the full ordered qty.
-      const got = (receivedQtys[i.id]!=null && receivedQtys[i.id]!=="")
-        ? (parseFloat(receivedQtys[i.id])||0)
-        : expected;
-      return {...i, receivedQty:got, expectedQty:expected, discrepancy:got-expected};
-    });
+    const received=(po.deliveredItems||po.items||[]).map(i=>({
+      ...i,
+      receivedQty:receivedQtys[i.id]??i.actualQty!=null?i.actualQty:i.qty,
+      discrepancy:(receivedQtys[i.id]??i.actualQty!=null?i.actualQty:i.qty)-(i.actualQty!=null?i.actualQty:i.qty)
+    }));
     const hasDisc=received.some(i=>i.discrepancy!==0);
     try{
       await updateDoc(doc(db,"advances",po._docId),{
@@ -3670,45 +3235,6 @@ function IngredientsPage({db,user,showT}){
 // ─── BOM MANAGER COMPONENT ───────────────────────────────
 const UNITS = ["pc","pack","box","sack","kg","g","L","mL","cup","gal","tray","dozen","set","sheet","bottle","can","bag"];
 
-// ── PACK MODEL ─────────────────────────────────────────────────────
-// `stock` is ALWAYS carried in the item's base unit (item.unit) — deduction
-// never has to convert, so the hot path stays as it is today.
-// packSize/packUnit describe how the item is BOUGHT and COUNTED, and are used
-// only at the edges: receiving, physical count, PO, and display.
-// Items without packSize behave exactly as before.
-function packSizeOf(it){ const n=Number(it&&it.packSize)||0; return n>1?n:0; }
-function packUnitOf(it){ return (it&&it.packUnit)||"pack"; }
-function baseUnitOf(it){ return (it&&it.unit)||""; }
-// packs + loose base units -> base units
-function packsToBase(it,packs,loose){
-  const sz=packSizeOf(it)||1;
-  return (Number(packs)||0)*sz+(Number(loose)||0);
-}
-// base units -> {packs, loose}
-function baseToPacks(it,base){
-  const sz=packSizeOf(it);
-  const b=Number(base)||0;
-  if(!sz)return {packs:0,loose:b,hasPacks:false};
-  return {packs:Math.floor(b/sz),loose:Math.round((b%sz)*1000)/1000,hasPacks:true};
-}
-const _n=(v)=>{const x=Math.round((Number(v)||0)*1000)/1000;return x.toLocaleString("en-PH");};
-// "4,484 pc" or "4,484 pc = 149 box + 14 pc"
-function fmtStock(it,base){
-  const b=(base!==undefined&&base!==null)?base:(it&&it.stock);
-  const sz=packSizeOf(it);
-  const txt=_n(b)+" "+baseUnitOf(it);
-  if(!sz)return txt;
-  const s=baseToPacks(it,b);
-  return txt+" = "+_n(s.packs)+" "+packUnitOf(it)+(s.loose?" + "+_n(s.loose)+" "+baseUnitOf(it):"");
-}
-// short form for tight rows: "149 box + 14 pc"
-function fmtPacks(it,base){
-  const sz=packSizeOf(it);
-  if(!sz)return "";
-  const s=baseToPacks(it,(base!==undefined&&base!==null)?base:(it&&it.stock));
-  return _n(s.packs)+" "+packUnitOf(it)+(s.loose?" + "+_n(s.loose)+" "+baseUnitOf(it):"");
-}
-
 function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
   const [mainTab,setMainTab] = useState("products");
   // Products tab state
@@ -3737,8 +3263,6 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
   const [showAddChoice,setShowAddChoice] = useState(false);
   const [editingGrp,setEditingGrp]   = useState(null); // group id being renamed
   const [editingChoice,setEditingChoice] = useState(null); // choice id being renamed
-  const [editChVal,setEditChVal]         = useState("");   // controlled label
-  const [editChPrice,setEditChPrice]     = useState("");   // controlled priceAdd
 
   const ingredients = inventory;
 
@@ -3797,33 +3321,6 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
     setSaving(false);
   };
 
-  // selGroup is a snapshot captured on click — it never refreshes when the
-  // onSnapshot listener updates `groups`. Reading choices from it means edits
-  // are computed against stale data and can silently clobber newer ones.
-  // Always resolve against the live list.
-  const liveGroup = selGroup ? (groups.find(g=>g.id===selGroup.id)||selGroup) : null;
-  const liveChoices = (liveGroup&&liveGroup.choices)||[];
-
-  // Save a renamed / repriced choice
-  const saveChoiceEdit=async(ch)=>{
-    const label=(editChVal||"").trim();
-    if(!label){showT("Enter choice name","warn");return;}
-    if(liveChoices.find(c=>c.id!==ch.id&&c.label===label)){
-      showT("May ganitong choice na","warn");return;
-    }
-    const price=parseFloat(editChPrice)||0;
-    if(label===ch.label&&price===(ch.priceAdd||0)){setEditingChoice(null);return;}
-    const newChoices=liveChoices.map(c=>c.id===ch.id?Object.assign({},c,{label:label,priceAdd:price}):c);
-    try{
-      await updateDoc(doc(db,"option_groups",liveGroup.id),{choices:newChoices});
-      setEditingChoice(null);
-      showT("Saved ✓");
-    }catch(err){
-      console.error("Save choice failed:",err);
-      showT("Save failed: "+((err&&err.message)||err).toString().slice(0,70),"err");
-    }
-  };
-
   // Create new option group
   const createGroup=async()=>{
     const name=newGrpName.trim();
@@ -3841,9 +3338,9 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
   const addChoice=async()=>{
     const label=newChoiceLbl.trim();
     if(!label||!selGroup){showT("Enter choice name","warn");return;}
-    if(liveChoices.find(c=>c.label===label)){showT("Choice already exists","warn");return;}
+    if((selGroup.choices||[]).find(c=>c.label===label)){showT("Choice already exists","warn");return;}
     const price=parseFloat(newChoicePrice)||0;
-    const newChoices=[...liveChoices,{id:"ch_"+Date.now(),label,priceAdd:price}];
+    const newChoices=[...(selGroup.choices||[]),{id:"ch_"+Date.now(),label,priceAdd:price}];
     try{
       await updateDoc(doc(db,"option_groups",selGroup.id),{choices:newChoices});
       setNewChoiceLbl(""); setNewChoicePrice(""); setShowAddChoice(false);
@@ -3854,7 +3351,7 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
   // Delete choice
   const deleteChoice=async(ch)=>{
     if(!confirm("Delete choice \""+ch.label+"\"?"))return;
-    const newChoices=liveChoices.filter(c=>c.id!==ch.id);
+    const newChoices=(selGroup.choices||[]).filter(c=>c.id!==ch.id);
     try{
       await updateDoc(doc(db,"option_groups",selGroup.id),{choices:newChoices});
       if(selChoice&&selChoice.id===ch.id){setSelChoice(null);setEditOptBom([]);}
@@ -3890,10 +3387,7 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
     setSavingOpt(false);
   };
 
-  // BOMEditor sub-component.
-  // NOTE: call this as BOMEditor({...}), NOT h(BOMEditor,{...}).
-  // It is defined inside the parent, so h() would give React a new element type
-  // on every render and remount the inputs (focus loss after each keystroke).
+  // BOMEditor sub-component
   const BOMEditor=({rows,setRows,onSave,saving:sv})=>h("div",null,
     h("div",{style:{display:"grid",
       gridTemplateColumns:"1fr 80px 70px 110px 60px 80px 36px",
@@ -3906,26 +3400,13 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
       const factor=row.convFactor||1;
       const actualDeduct=(row.qty||0)/factor;
       const cost=(ing.cost||0)*actualDeduct*(1+(row.markup||0)/100);
-      const baseU=String(ing.unit||"");
-      const usedU=String(row.deductUnit||row.unit||"");
-      const pSz=packSizeOf(ing);
-      const pU=packUnitOf(ing);
-      const mismatch=!!(baseU&&usedU&&usedU.toLowerCase()!==baseU.toLowerCase());
-      const usesPack=!!(mismatch&&pSz>0&&pU&&usedU.toLowerCase()===String(pU).toLowerCase());
-      return h("div",{key:i,style:{marginBottom:6}},
-      h("div",{style:{display:"grid",
+      return h("div",{key:i,style:{display:"grid",
         gridTemplateColumns:"1fr 80px 70px 110px 60px 80px 36px",
-        gap:6,alignItems:"center"}},
+        gap:6,marginBottom:6,alignItems:"center"}},
         h("select",{value:row.ingId||"",
           onChange:e=>{
             const g=ingredients.find(x=>x.id===e.target.value)||{};
-            // Seed the recipe in the ingredient's OWN unit so conv stays 1.
-            // packSize is deliberately NOT used here — it converts pack<->base
-            // for buying and counting, not recipe<->stock.
-            const u=[...rows];
-            u[i]={...u[i],ingId:e.target.value,ingName:g.name||"",unit:g.unit||"",
-              deductUnit:g.unit||"",convUnit:g.unit||"",convFactor:1};
-            setRows(u);
+            const u=[...rows]; u[i]={...u[i],ingId:e.target.value,ingName:g.name||"",unit:g.unit||""}; setRows(u);
           },
           style:{padding:"5px",border:"1px solid "+C.border,borderRadius:6,fontSize:10,outline:"none"}},
           h("option",{value:""},"— Select —"),
@@ -3963,55 +3444,6 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
         h("button",{onClick:()=>setRows(rows.filter((_,j)=>j!==i)),
           style:{background:"none",border:"none",color:C.danger,fontSize:16,cursor:"pointer",lineHeight:1}},
           "×")
-      ),
-      // Same unit on both sides but CONV != 1 divides the recipe amount for no
-      // reason — the money still looks right, only the quantity is wrong.
-      (!mismatch&&row.ingId&&factor!==1)&&h("div",{style:{background:"#FFEBEE",
-        border:"1px solid #FFCDD2",borderRadius:6,padding:"5px 8px",marginTop:3,
-        display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}},
-        h("div",{style:{flex:1,minWidth:180,fontSize:9,color:C.danger,fontWeight:700}},
-          "⚠️ Parehong "+baseU+" ang recipe at stock, pero CONV = "+factor+
-          " — "+(row.qty||0)+" "+baseU+" ay nagiging "+actualDeduct.toFixed(3).replace(/\.?0+$/,"")+
-          " "+baseU+" lang. Dapat 1."),
-        h("button",{
-          onClick:()=>{const u=[...rows];u[i]={...u[i],convFactor:1};setRows(u);},
-          style:{padding:"4px 9px",borderRadius:6,border:"none",background:C.danger,
-            color:"#fff",fontSize:9,fontWeight:800,cursor:"pointer"}},
-          "Ibalik sa 1")
-      ),
-      // Cost basis is the other half people get wrong: a pack price entered as
-      // a per-piece cost inflates every recipe by the pack size.
-      (row.ingId&&pSz>0&&(ing.cost||0)>0)&&h("div",{style:{background:"#E3F2FD",
-        borderRadius:6,padding:"5px 8px",marginTop:3,fontSize:9,color:"#1565C0"}},
-        h("b",null,"Cost check: "),
-        "₱"+(ing.cost||0).toFixed(2)+" kada "+baseU+
-        "  →  ₱"+((ing.cost||0)*pSz).toFixed(2)+" kada "+pU+" ("+pSz+" "+baseU+")",
-        h("div",{style:{marginTop:2}},
-          "Kung hindi ito ang bayad mo kada "+pU+", ang naka-set na cost ay presyo ng buong "+pU+
-          " — dapat ₱"+(((ing.cost||0)/pSz).toFixed(2))+" kada "+baseU+".")
-      ),
-      // Stock is held in the ingredient's base unit. A recipe written in any
-      // other unit silently deducts the wrong amount unless CONV is set by hand.
-      mismatch&&h("div",{style:{background:usesPack?"#FFF8E1":"#FFEBEE",
-        border:"1px solid "+(usesPack?"#FFE082":"#FFCDD2"),
-        borderRadius:6,padding:"5px 8px",marginTop:3,
-        display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}},
-        h("div",{style:{flex:1,minWidth:180,fontSize:9,
-          color:usesPack?"#E65100":C.danger,fontWeight:700}},
-          usesPack
-            ? ("Recipe naka-"+usedU+", pero ang stock ay naka-"+baseU+". 1 "+pU+" = "+pSz+" "+baseU+".")
-            : ("⚠️ Recipe naka-"+usedU+", stock naka-"+baseU+" — itakda ang CONV nang manu-mano o mali ang mababawas.")),
-        usesPack&&h("button",{
-          onClick:()=>{
-            const u=[...rows];
-            u[i]={...u[i],qty:(parseFloat(row.qty)||0)*pSz,
-              deductUnit:baseU,convUnit:baseU,convFactor:1};
-            setRows(u);
-          },
-          style:{padding:"4px 9px",borderRadius:6,border:"none",background:"#E65100",
-            color:"#fff",fontSize:9,fontWeight:800,cursor:"pointer"}},
-          "Gawing "+baseU+" ×"+pSz)
-      )
       );
     }),
     h("div",{style:{display:"flex",gap:8,marginTop:10}},
@@ -4123,7 +3555,7 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
                       v==="default"?"Base":v))
                 ),
                 h("div",{style:{padding:"14px 16px"}},
-                  BOMEditor({rows:editBom,setRows:setEditBom,onSave:saveBOM,saving:saving}))
+                  h(BOMEditor,{rows:editBom,setRows:setEditBom,onSave:saveBOM,saving:saving}))
               ),
               // Item Options sub-tab
               itemBomTab==="options"&&h("div",{style:{display:"grid",gridTemplateColumns:"200px 1fr",minHeight:300}},
@@ -4167,7 +3599,7 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
                           fontWeight:700,color:C.primary,borderBottom:"1px solid "+C.border}},
                           selItemOpt.optLabel+" → "+selItemOpt.choiceLabel),
                         h("div",{style:{padding:"10px 12px"}},
-                          BOMEditor({
+                          h(BOMEditor,{
                             rows:editItemOptBom,setRows:setEditItemOptBom,saving:savingItemOpt,
                             onSave:async()=>{
                               setSavingItemOpt(true);
@@ -4320,19 +3752,7 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
                             h("div",{style:{fontSize:12,fontWeight:isSel?800:500,color:isSel?C.primary:C.text}},
                               grp.name),
                             h("div",{style:{fontSize:9,color:C.muted}},
-                              (grp.choices||[]).length+" choices"+(hasAnyBOM?" · has BOM":"")),
-                            (function(){
-                              const pi=(typeof grp.perItem==="number")
-                                ? grp.perItem
-                                : (/(?:get|choose|pick|select|pili|kuha)\s*(\d+)/i.test(grp.name||"")
-                                    ? parseInt(/(?:get|choose|pick|select|pili|kuha)\s*(\d+)/i.exec(grp.name)[1],10)
-                                    : (/^\s*\[R\]/i.test(grp.name||"")?1:0));
-                              return h("span",{style:{fontSize:8,fontWeight:800,padding:"1px 6px",
-                                borderRadius:20,marginLeft:5,
-                                background:pi>0?"#E8F5E9":"#F5F5F5",
-                                color:pi>0?"#1B5E20":"#999"}},
-                                pi>0?("REQUIRED "+pi+"/item"):"OPTIONAL");
-                            })()
+                              (grp.choices||[]).length+" choices"+(hasAnyBOM?" · has BOM":""))
                           ),
                       !editingGrp&&h("div",{style:{display:"flex",gap:4},
                         onClick:e=>e.stopPropagation()},
@@ -4366,30 +3786,6 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
                 cursor:"pointer",fontWeight:700}},
               showAddChoice?"✕":"+ Add")
           ),
-          // Required picks per item — drives the customizer's N/N counter
-          selGroup&&h("div",{style:{padding:"8px 14px",borderBottom:"1px solid "+C.border,
-            background:"#FFFDE7",display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}},
-            h("span",{style:{fontSize:10,fontWeight:700,flex:1,minWidth:150}},
-              "Required picks kada item"),
-            h("input",{type:"number",min:0,max:10,
-              value:(typeof (liveGroup||{}).perItem==="number"?liveGroup.perItem:0),
-              onChange:async e=>{
-                const v=Math.max(0,Math.min(10,parseInt(e.target.value,10)||0));
-                try{
-                  await updateDoc(doc(db,"option_groups",selGroup.id),{perItem:v});
-                }catch(err){
-                  console.error("perItem save failed:",err);
-                  showT("Save failed: "+((err&&err.message)||err).toString().slice(0,70),"err");
-                }
-              },
-              style:{width:64,padding:"6px 8px",border:"1px solid "+C.border,
-                borderRadius:7,fontSize:11,textAlign:"center",outline:"none"}}),
-            h("div",{style:{fontSize:9,color:C.muted,width:"100%"}},
-              (typeof (liveGroup||{}).perItem==="number"&&liveGroup.perItem>0)
-                ? "Solo = "+liveGroup.perItem+" pick, BOGO = "+(liveGroup.perItem*2)
-                  +" picks. Naka-required, hindi ma-checkout hangga't kulang."
-                : "0 = optional, walang required na bilang.")
-          ),
           // Add choice form
           selGroup&&showAddChoice&&h("div",{style:{padding:"8px 14px",
             borderBottom:"1px solid "+C.border,background:"#f0f8ff",
@@ -4416,13 +3812,13 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
           !selGroup
             ? h("div",{style:{padding:"30px",textAlign:"center",color:C.muted,fontSize:11}},
                 "← Select an option group")
-            : liveChoices.length===0
+            : (selGroup.choices||[]).length===0
               ? h("div",{style:{padding:"20px",textAlign:"center",color:C.muted,fontSize:11}},
                   "No choices yet.",h("br",null),
                   h("span",{style:{color:C.primary,cursor:"pointer",fontWeight:700},
                     onClick:()=>setShowAddChoice(true)},"+ Add choice"))
               : h("div",{style:{overflowY:"auto",maxHeight:"60vh"}},
-                  liveChoices.map(ch=>{
+                  (selGroup.choices||[]).map(ch=>{
                     const bomDocId="optgrp_"+selGroup.id;
                     const key="optgrp_"+selGroup.id+"__"+ch.id;
                     const isSel=selChoice&&selChoice.id===ch.id;
@@ -4432,31 +3828,24 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
                       background:editingChoice===ch.id?"#FFF8E1":isSel?"#FFF0F0":"#fff"}},
                     editingChoice===ch.id
                       // EDIT MODE - full row replacement
-                      ? h("div",{style:{display:"flex",gap:6,alignItems:"center",
-                            padding:"8px 14px",flexWrap:"wrap"}},
-                          h("input",{value:editChVal,autoFocus:true,
-                            onChange:e=>setEditChVal(e.target.value),
-                            onKeyDown:e=>{
-                              if(e.key==="Enter"){e.preventDefault();saveChoiceEdit(ch);}
-                              if(e.key==="Escape"){e.preventDefault();setEditingChoice(null);}
-                            },
-                            style:{flex:1,minWidth:120,padding:"6px 10px",
-                              border:"2px solid "+C.primary,
+                      ? h("div",{style:{display:"flex",gap:6,alignItems:"center",padding:"8px 14px"}},
+                          h("input",{id:"edit-ch-input",
+                            defaultValue:ch.label,key:"inp-"+ch.id,autoFocus:true,
+                            style:{flex:1,padding:"6px 10px",border:"2px solid "+C.primary,
                               borderRadius:7,fontSize:12,outline:"none"}}),
-                          h("div",{style:{display:"flex",alignItems:"center",gap:3}},
-                            h("span",{style:{fontSize:11,color:C.muted}},"+₱"),
-                            h("input",{type:"number",value:editChPrice,
-                              onChange:e=>setEditChPrice(e.target.value),
-                              onKeyDown:e=>{
-                                if(e.key==="Enter"){e.preventDefault();saveChoiceEdit(ch);}
-                                if(e.key==="Escape"){e.preventDefault();setEditingChoice(null);}
-                              },
-                              placeholder:"0",
-                              style:{width:62,padding:"6px 8px",border:"1px solid "+C.border,
-                                borderRadius:7,fontSize:12,outline:"none",textAlign:"right"}})
-                          ),
                           h("button",{
-                            onClick:()=>saveChoiceEdit(ch),
+                            onClick:async()=>{
+                              const inp=document.getElementById("edit-ch-input");
+                              const newLabel=inp?inp.value.trim():"";
+                              if(newLabel&&newLabel!==ch.label){
+                                const newChoices=(selGroup.choices||[]).map(c=>c.id===ch.id?{...c,label:newLabel}:c);
+                                try{
+                                  await updateDoc(doc(db,"option_groups",selGroup.id),{choices:newChoices});
+                                  showT("Saved ✓");
+                                }catch(err){showT("Error","err");}
+                              }
+                              setEditingChoice(null);
+                            },
                             style:{padding:"6px 14px",background:C.primary,border:"none",
                               borderRadius:7,color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}},
                             "💾 Save"),
@@ -4464,9 +3853,7 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
                             onClick:()=>setEditingChoice(null),
                             style:{padding:"6px 10px",background:"#eee",border:"none",
                               borderRadius:7,color:C.text,fontSize:12,cursor:"pointer"}},
-                            "Cancel"),
-                          h("div",{style:{fontSize:9,color:C.muted,width:"100%"}},
-                            "Enter = save · Esc = cancel")
+                            "Cancel")
                         )
                       // NORMAL MODE
                       : h("div",{style:{display:"flex",justifyContent:"space-between",
@@ -4487,12 +3874,7 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
                             h("span",{style:{fontSize:9,fontWeight:700,
                               color:has?C.success:C.muted}},has?"✓ BOM":"—"),
                             h("button",{
-                              onClick:e=>{
-                                e.stopPropagation();
-                                setEditChVal(ch.label||"");
-                                setEditChPrice(String(ch.priceAdd||0));
-                                setEditingChoice(ch.id);
-                              },
+                              onClick:e=>{e.stopPropagation();setEditingChoice(ch.id);},
                               style:{background:"none",border:"none",color:C.primary,
                                 fontSize:12,cursor:"pointer",padding:"2px 5px"},title:"Rename"},
                               "✏️"),
@@ -4524,7 +3906,7 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
                     "Deducted from inventory whenever this option is ordered")
                 ),
                 h("div",{style:{padding:"12px 16px"}},
-                  BOMEditor({
+                  h(BOMEditor,{
                     rows:editOptBom,setRows:setEditOptBom,saving:savingOpt,
                     onSave:saveOptBOM
                   })
@@ -4717,10 +4099,7 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
     const voidedItems = (selOrder.items||[]).filter((_,i)=>selItems[i]!==false);
     if(!voidedItems.length){showT("Select at least 1 item to void","warn");return;}
     const isPartial = voidedItems.length < (selOrder.items||[]).length;
-    // order items store lineTotal/unitPrice — there is no `price` field,
-    // so the old formula always produced 0.
-    const voidAmt = voidedItems.reduce((s,i)=>
-      s+(Number(i.lineTotal)||((Number(i.unitPrice)||0)*(i.qty||1))),0);
+    const voidAmt = voidedItems.reduce((s,i)=>(s+(i.price||0)*(i.qty||1)),0);
     setSubmitting(true);
     try{
       await addDoc(collection(db,"void_requests"),{
@@ -4754,8 +4133,7 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
   },[selOrder?.id]);
 
   const voidedItems = selOrder?(selOrder.items||[]).filter((_,i)=>selItems[i]!==false):[];
-  const voidAmt = voidedItems.reduce((s,i)=>
-    s+(Number(i.lineTotal)||((Number(i.unitPrice)||0)*(i.qty||1))),0);
+  const voidAmt = voidedItems.reduce((s,i)=>s+(i.price||0)*(i.qty||1),0);
 
   const approveVoid = async(req)=>{
     try{
@@ -4771,7 +4149,6 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
         const newTotal = (order?.total||0) - (req.voidAmount||0);
         await updateDoc(doc(db,"orders",req.orderId),{
           status:"partial-void",
-          originalTotal:(order&&order.originalTotal)||(order&&order.total)||0,
           total:Math.max(0,newTotal),
           voidedItems:req.voidedItems,
           voidedBy:user.name,
@@ -4779,133 +4156,74 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
           voidedAt:serverTimestamp()
         });
       } else {
-        // Full void — status alone was not enough: every sales sum reads
-        // o.total without checking status, so the money never came off.
-        const ord0 = orders.find(o=>o.id===req.orderId);
+        // Full void
         await updateDoc(doc(db,"orders",req.orderId),{
           status:"void",
-          originalTotal:(ord0&&ord0.total)||req.voidAmount||0,
-          total:0,
           voidedBy:user.name,
           voidReason:req.reason,
           voidedAt:serverTimestamp()
         });
       }
 
-      // ── BOM RESTOCK ──────────────────────────────────────
-      // Must mirror the deduction exactly, or a void leaves the books wrong:
-      //  - divide by convFactor (deduction does; the old restock did not)
-      //  - restock option-group picks too (that is where the food BOM lives)
-      //  - resolve the same inventory collection the deduction wrote to
-      let restocked=0, restockFailed=0, missingId=0;
+      // ── BOM RESTOCK (variant-aware) ──────────────────────
+      const invCol = "inventory_"+req.branch;
+      const logCol = "inventory_log_"+req.branch;
       try{
         const bomSnap = await getDocs(collection(db,"bom"));
         const bomData = {};
         bomSnap.docs.forEach(d=>{ bomData[d.id]={...d.data()}; });
 
-        const colFor=async(ingId)=>{
-          try{
-            const bd=await getDoc(doc(db,"inventory_"+req.branch,ingId));
-            if(bd.exists())return "inventory_"+req.branch;
-            const md=await getDoc(doc(db,"inventory",ingId));
-            if(md.exists())return "inventory";
-          }catch(e){}
-          return "inventory_"+req.branch;
-        };
+        for(const item of (req.voidedItems||req.orderItems||[])){
+          const itemId = item.id;
+          const variant = item.variant||"default";
+          const vKey = (!variant||variant==="default")
+            ? itemId
+            : itemId+"__"+variant.replace(/\s+/g,"_");
 
-        const giveBack=async(rows,mult,label,itemName)=>{
-          for(const row of rows||[]){
+          const itemBOM = bomData[itemId]||{};
+          const rows = itemBOM[vKey]||itemBOM[itemId]||[];
+
+          for(const row of rows){
             if(!row.ingId||!row.qty) continue;
-            const restoreQty = ((row.qty||0)*(mult||1))/(row.convFactor||1);
+            const restoreQty = (row.qty||0)*(item.qty||1);
             try{
-              const col=await colFor(row.ingId);
-              // "inventory" -> "inventory_log", "inventory_x" -> "inventory_log_x"
-              const logCol=col.replace(/^inventory/,"inventory_log");
-              let _vprev=null;
-              try{
-                const _vs=await getDoc(doc(db,col,row.ingId));
-                if(_vs.exists())_vprev=Number(_vs.data().stock)||0;
-              }catch(e6){}
-              await updateDoc(doc(db,col,row.ingId),{
+              await updateDoc(doc(db,invCol,row.ingId),{
                 stock:increment(restoreQty),
                 lastUpdated:serverTimestamp()
               });
-              restocked++;
+              // Log the restock
               await addDoc(collection(db,logCol),{
                 itemId:row.ingId,
                 itemName:row.ingName||row.ingId,
                 unit:row.unit||"",
                 type:"add",
                 amount:restoreQty,
-                prevStock:_vprev,
-                newStock:_vprev==null?null:Math.round((_vprev+restoreQty)*1000)/1000,
-                desc:"Naibalik: "+(Math.round(restoreQty*1000)/1000)+" "+(row.unit||"")
-                  +" mula sa void ng order "+req.orderId+" ("+itemName+(label?" / "+label:"")+")",
-                source:"void",
-                ref:req.orderId,
-                convFactor:row.convFactor||1,
-                invCol:col,
-                orderId:req.orderId,
-                reason:"VOID: "+req.orderId+" ("+itemName+(label?" / "+label:"")+")",
+                reason:"VOID: "+req.orderId+" ("+item.name+(variant!=="default"?" - "+variant:"")+")",
                 by:user.name,
                 at:serverTimestamp()
               });
-            }catch(e2){restockFailed++;console.warn("BOM restock failed",row.ingId,e2);}
-          }
-        };
-
-        for(const item of (req.voidedItems||req.orderItems||[])){
-          const itemId = item.id;
-          // Orders placed before item ids were saved cannot be traced back to a
-          // BOM, so nothing can be returned — say so instead of failing quietly.
-          if(!itemId&&!(item.optionRefs||[]).length)missingId++;
-          if(itemId){
-            const variant = item.variant||"default";
-            const vKey = (!variant||variant==="default")
-              ? itemId
-              : itemId+"__"+variant.replace(/\s+/g,"_");
-            const itemBOM = bomData[itemId]||{};
-            await giveBack(itemBOM[vKey]||itemBOM[itemId]||[], item.qty||1,
-              variant!=="default"?variant:"", item.name);
-          }
-          // picks — same multiplier rule as the deduction
-          for(const ref of (item.optionRefs||[])){
-            if(!ref.groupId||!ref.choiceId) continue;
-            const d = bomData["optgrp_"+ref.groupId]||{};
-            const rows = d["optgrp_"+ref.groupId+"__"+ref.choiceId]||[];
-            const mult = ref.free?(ref.qty||1):((ref.qty||1)*(item.qty||1));
-            await giveBack(rows, mult, ref.label, item.name);
+            }catch(e2){console.warn("BOM restock failed",e2);}
           }
         }
       }catch(bomErr){console.warn("BOM restock error:",bomErr);}
 
       // ── PAYMENT REVERSAL ────────────────────────────────
       try{
-        const voidAmt = req.voidAmount||(req.voidedItems||[]).reduce((s,i)=>
-          s+(Number(i.lineTotal)||((Number(i.unitPrice)||0)*(i.qty||1))),0);
-        const now=new Date();
+        const voidAmt = req.voidAmount||(req.voidedItems||[]).reduce((s,i)=>s+(i.price||0)*(i.qty||1),0);
         await addDoc(collection(db,"cash_log"),{
           branch:req.branch,
-          type:"out",                       // so Cash Monitor actually totals it
-          subType:"void_refund",
-          amount:voidAmt,                   // positive: money leaving the drawer
-          desc:"Void refund — Order #"+req.orderId,
+          type:"void_refund",
+          amount:-voidAmt,
           orderId:req.orderId,
           reason:"Void approved: "+(req.reason||""),
           by:user.name,
-          time:now.toLocaleTimeString("en-PH",{hour:"2-digit",minute:"2-digit"}),
-          date:now.toISOString().slice(0,10),
-          timestamp:serverTimestamp(),      // required by the orderBy query
+          date:new Date().toISOString().slice(0,10),
           at:serverTimestamp()
         });
       }catch(e){console.warn("Payment reversal log failed",e);}
 
       showT((req.isPartial?"Partial void":"Order #"+req.orderId+" voided")+
-        " ✓ · "+restocked+" ingredient/s restocked"+
-        (restockFailed?" ("+restockFailed+" failed)":"")+
-        (missingId?" ("+missingId+" item/s walang BOM link — lumang order)":"")+
-        (!restocked&&!missingId?" — walang BOM na nakita":""),
-        (restockFailed||missingId||!restocked)?"warn":"ok");
+        " ✓ BOM restocked + Payment reversed");
     }catch(e){showT("Error approving void","err");console.error(e);}
   };
 
@@ -5520,21 +4838,11 @@ function StockEditModal({item,db,user,branchId,showT,onClose,boms=[]}){
     price:item.price||0,
     cost:item.cost||0,
     minStock:item.minStock||10,
-    packUnit:item.packUnit||"",
-    packSize:item.packSize||"",
   });
 
-  var current=Math.round((Number(item.stock)||0)*1000)/1000;
-  var packSz=packSizeOf(item);
-  // When an item has a pack size, physical counting is far easier in packs:
-  // enter "149" packs + "14" loose instead of computing 4,484 by hand.
-  var [byPack,setByPack]=useState(false);
-  var [looseVal,setLooseVal]=useState("");
-  var rawVal=parseFloat(display)||0;
+  var current=item.stock||0;
+  var numVal=parseFloat(display)||0;
   var isNeg=display.startsWith("-");
-  var numVal=(packSz&&byPack)
-    ? packsToBase(item,Math.abs(rawVal),parseFloat(looseVal)||0)
-    : Math.abs(rawVal);
   var preview=mode==="adjust"
     ? Math.max(0,current+(isNeg?-numVal:numVal))
     : Math.max(0,numVal);
@@ -5594,8 +4902,6 @@ function StockEditModal({item,db,user,branchId,showT,onClose,boms=[]}){
         name:details.name,
         unit:details.unit,
         cat:details.cat,
-        packUnit:details.packUnit||"",
-        packSize:parseFloat(details.packSize)||0,
         price:parseFloat(details.price)||0,
         cost:parseFloat(details.cost)||0,
         minStock:parseFloat(details.minStock)||10,
@@ -5649,25 +4955,11 @@ function StockEditModal({item,db,user,branchId,showT,onClose,boms=[]}){
     setSaving(false);
   };
 
-  // Prefill the pad with what is on hand so editing means adjusting a number,
-  // not retyping it. Also unblocks SAVE, which is disabled while display is "".
-  useEffect(function(){
-    if(mode!=="set"){setDisplay("");return;}
-    if(packSz&&byPack){
-      var sp=baseToPacks(item,current);
-      setDisplay(String(sp.packs));
-      setLooseVal(sp.loose?String(sp.loose):"");
-    }else{
-      setDisplay(String(current));
-      setLooseVal("");
-    }
-  },[mode,byPack,packSz,current]);
-
   var KEYS=[
     ["7","8","9"],
     ["4","5","6"],
     ["1","2","3"],
-    [".","0","⌫"],
+    [mode==="adjust"?"-":".", "0","⌫"],
   ];
 
   return h("div",{style:{background:"#fff",width:400,borderRadius:16,
@@ -5680,7 +4972,7 @@ function StockEditModal({item,db,user,branchId,showT,onClose,boms=[]}){
         h("div",{style:{color:"rgba(255,255,255,.6)",fontSize:9,letterSpacing:2,fontWeight:700}},"INVENTORY ITEM"),
         h("div",{style:{color:"#fff",fontWeight:900,fontSize:15}},item.name),
         h("div",{style:{color:"rgba(255,255,255,.5)",fontSize:10}},
-          "Stock: "+fmtStock(item,current)+" · ₱"+(item.price||0).toFixed(2))
+          "Stock: "+String(current)+" "+(item.unit||"")+" · ₱"+(item.price||0).toFixed(2))
       ),
       h("button",{onClick:onClose,
         style:{background:"rgba(255,255,255,.15)",border:"none",color:"#fff",
@@ -5730,44 +5022,6 @@ function StockEditModal({item,db,user,branchId,showT,onClose,boms=[]}){
           border:"2px solid #1565C0"}},
           h("div",{style:{fontSize:9,color:"#888",marginBottom:2,textAlign:"left"}},
             mode==="adjust"?(isNeg?"DEDUCT":"ADD")+" AMOUNT":"SET STOCK TO"),
-          mode==="adjust"&&h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",
-            gap:5,marginBottom:8}},
-            h("button",{onClick:function(){setDisplay(function(p){return p.replace(/^-/,"");});},
-              style:{padding:"7px",borderRadius:7,fontSize:11,fontWeight:800,cursor:"pointer",
-                border:"2px solid "+(!isNeg?"#1B5E20":"#ddd"),
-                background:!isNeg?"#E8F5E9":"#fff",color:!isNeg?"#1B5E20":"#666"}},"+ ADD"),
-            h("button",{onClick:function(){setDisplay(function(p){return p.startsWith("-")?p:"-"+p;});},
-              style:{padding:"7px",borderRadius:7,fontSize:11,fontWeight:800,cursor:"pointer",
-                border:"2px solid "+(isNeg?"#C62828":"#ddd"),
-                background:isNeg?"#FFEBEE":"#fff",color:isNeg?"#C62828":"#666"}},"− DEDUCT")
-          ),
-          packSz>0&&h("div",{style:{marginBottom:8}},
-            h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5,marginBottom:6}},
-              h("button",{onClick:function(){setByPack(false);setLooseVal("");},
-                style:{padding:"6px",borderRadius:7,fontSize:10,fontWeight:700,cursor:"pointer",
-                  border:"2px solid "+(!byPack?"#1565C0":"#ddd"),
-                  background:!byPack?"#E3F2FD":"#fff",color:!byPack?"#1565C0":"#666"}},
-                "Bilang sa "+baseUnitOf(item)),
-              h("button",{onClick:function(){setByPack(true);},
-                style:{padding:"6px",borderRadius:7,fontSize:10,fontWeight:700,cursor:"pointer",
-                  border:"2px solid "+(byPack?"#1565C0":"#ddd"),
-                  background:byPack?"#E3F2FD":"#fff",color:byPack?"#1565C0":"#666"}},
-                "Bilang sa "+packUnitOf(item))
-            ),
-            byPack&&h("div",{style:{display:"flex",gap:6,alignItems:"center"}},
-              h("div",{style:{fontSize:10,color:"#666",flex:1}},
-                "Tirang "+baseUnitOf(item)+" (hindi buong "+packUnitOf(item)+")"),
-              h("input",{type:"number",min:0,value:looseVal,
-                onChange:function(e){setLooseVal(e.target.value);},
-                placeholder:"0",
-                style:{width:74,padding:"6px 8px",border:"1px solid #ddd",
-                  borderRadius:7,fontSize:12,textAlign:"right",outline:"none"}})
-            ),
-            byPack&&h("div",{style:{fontSize:10,color:"#1565C0",fontWeight:700,marginTop:5}},
-              (Math.abs(rawVal)||0)+" "+packUnitOf(item)+
-              ((parseFloat(looseVal)||0)?" + "+looseVal+" "+baseUnitOf(item):"")+
-              " = "+numVal.toLocaleString("en-PH")+" "+baseUnitOf(item))
-          ),
           h("div",{style:{fontSize:30,fontWeight:900,color:"#1565C0",minHeight:40,letterSpacing:2}},
             display||"0"),
           display&&h("div",{style:{fontSize:11,color:"#666",marginTop:4,
@@ -5841,104 +5095,25 @@ function StockEditModal({item,db,user,branchId,showT,onClose,boms=[]}){
         ),
         h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}},
           h("div",null,
-            h("div",{style:{fontSize:9,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},"SELL PRICE — BRANCH PAYS (₱/"+(details.unit||"pc")+")"),
+            h("div",{style:{fontSize:9,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},"SELL PRICE (₱)"),
             h("input",{type:"number",value:details.price,
               onChange:e=>setDetails(p=>({...p,price:e.target.value})),
               style:{width:"100%",padding:"8px",border:"1px solid #ddd",borderRadius:7,fontSize:13,fontWeight:700,outline:"none",boxSizing:"border-box",color:"#1565C0"}})
           ),
           h("div",null,
-            h("div",{style:{fontSize:9,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},"COST — USED BY BOM (₱/"+(details.unit||"pc")+")"),
+            h("div",{style:{fontSize:9,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},"COST PRICE (₱)"),
             h("input",{type:"number",value:details.cost,
               onChange:e=>setDetails(p=>({...p,cost:e.target.value})),
               style:{width:"100%",padding:"8px",border:"1px solid #ddd",borderRadius:7,fontSize:13,fontWeight:700,outline:"none",boxSizing:"border-box",color:"#C62828"}})
           )
         ),
         h("div",{style:{marginBottom:12}},
-          h("div",{style:{fontSize:9,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4,
-            display:"flex",justifyContent:"space-between"}},
-            h("span",null,"MIN STOCK (Alert Threshold)"),
-            h("span",{style:{color:"#1565C0"}},"sa "+(details.unit||"pc"))),
+          h("div",{style:{fontSize:9,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},"MIN STOCK (Alert Threshold)"),
           h("input",{type:"number",value:details.minStock,
             onChange:e=>setDetails(p=>({...p,minStock:e.target.value})),
-            style:{width:"100%",padding:"8px",border:"1px solid #ddd",borderRadius:7,fontSize:12,outline:"none",boxSizing:"border-box"}}),
-          // minStock is compared straight against stock, which is in the base
-          // unit — so show the pack equivalent instead of making them convert.
-          Number(details.packSize)>1&&h("div",{style:{marginTop:6,background:"#E3F2FD",
-            borderRadius:7,padding:"7px 9px"}},
-            h("div",{style:{fontSize:10,color:"#1565C0",fontWeight:700,marginBottom:5}},
-              (Number(details.minStock)||0).toLocaleString("en-PH")+" "+(details.unit||"pc")
-              +" = "+((Number(details.minStock)||0)/Number(details.packSize)).toFixed(2)
-              +" "+(details.packUnit||"pack")),
-            h("div",{style:{display:"flex",gap:6,alignItems:"center"}},
-              h("span",{style:{fontSize:10,color:"#555",flex:1}},
-                "O ilagay sa "+(details.packUnit||"pack")+":"),
-              h("input",{type:"number",min:0,placeholder:"hal. 10",
-                onChange:e=>{
-                  const p2=parseFloat(e.target.value);
-                  if(!isNaN(p2))setDetails(p=>({...p,minStock:String(p2*(Number(p.packSize)||1))}));
-                },
-                style:{width:74,padding:"6px 8px",border:"1px solid #90CAF9",
-                  borderRadius:7,fontSize:12,textAlign:"right",outline:"none"}})
-            )
-          )
-        ),
-        // Pack detail — enables pack counting on the Adjust Stock tab
-        h("div",{style:{background:"#FFFDE7",border:"1px solid #FFE082",borderRadius:8,
-          padding:"9px 10px",marginBottom:12}},
-          h("div",{style:{fontSize:9,fontWeight:800,color:"#E65100",letterSpacing:1,marginBottom:6}},
-            "PACK DETAIL (optional)"),
-          h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
-            h("div",null,
-              h("div",{style:{fontSize:9,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},"PACK UNIT"),
-              h("select",{value:details.packUnit||"",
-                onChange:e=>setDetails(p=>({...p,packUnit:e.target.value})),
-                style:{width:"100%",padding:"8px",border:"1px solid #ddd",borderRadius:7,fontSize:12,outline:"none"}},
-                h("option",{value:""},"— wala —"),
-                UNITS.map(u=>h("option",{key:u,value:u},u)))
-            ),
-            h("div",null,
-              h("div",{style:{fontSize:9,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},
-                "ILAN KADA PACK"),
-              h("input",{type:"number",min:0,value:details.packSize||"",
-                onChange:e=>setDetails(p=>({...p,packSize:e.target.value})),
-                placeholder:"hal. 30",
-                style:{width:"100%",padding:"8px",border:"1px solid #ddd",
-                  borderRadius:7,fontSize:12,outline:"none",boxSizing:"border-box"}})
-            )
-          ),
-          h("div",{style:{fontSize:9,color:"#888",marginTop:5}},
-            (Number(details.packSize)>1&&details.packUnit)
-              ? ("1 "+details.packUnit+" = "+details.packSize+" "+(details.unit||"pc")
-                 +". Lalabas ang pack toggle sa Adjust Stock.")
-              : "Iwanang blangko kung iisa lang ang unit."),
-          // Changing the base unit silently reinterprets every existing count.
-          details.unit!==(item.unit||"pc")&&h("div",{style:{background:"#FFEBEE",
-            border:"1px solid #FFCDD2",borderRadius:7,padding:"7px 9px",marginTop:7}},
-            h("div",{style:{fontSize:10,fontWeight:800,color:"#C62828"}},
-              "⚠️ Binabago mo ang UNIT: "+(item.unit||"pc")+" → "+details.unit),
-            h("div",{style:{fontSize:9,color:"#C62828",marginTop:2}},
-              "Ang stock na "+(item.stock||0)+" ay mababasa na ngayon bilang "+
-              (item.stock||0)+" "+details.unit+". Hindi ito kusang kinoconvert — "+
-              "i-set mo ang tamang bilang sa Adjust Stock pagkatapos mag-save."))
+            style:{width:"100%",padding:"8px",border:"1px solid #ddd",borderRadius:7,fontSize:12,outline:"none",boxSizing:"border-box"}})
         ),
         // Margin preview
-        // Both prices are per BASE unit. Entering a pack price here inflates
-        // every downstream figure by the pack size, so show the per-pack value.
-        packSizeOf(item)>0&&h("div",{style:{background:"#E3F2FD",borderRadius:8,
-          padding:"8px 10px",marginBottom:12,fontSize:10,color:"#1565C0"}},
-          h("div",{style:{fontWeight:800,marginBottom:3}},"Per "+packUnitOf(item)+" ("+packSizeOf(item)+" "+(details.unit||"pc")+")"),
-          h("div",null,"Sell: ₱"+((parseFloat(details.price)||0)*packSizeOf(item)).toFixed(2)
-            +"   ·   Cost: ₱"+((parseFloat(details.cost)||0)*packSizeOf(item)).toFixed(2)),
-          h("div",{style:{marginTop:3,color:"#555"}},
-            "Kung hindi ito ang aktwal na presyo kada "+packUnitOf(item)+
-            ", ang inilagay mo ay presyo ng buong "+packUnitOf(item)+" — hatiin sa "+packSizeOf(item)+".")
-        ),
-        (parseFloat(details.cost)||0)>(parseFloat(details.price)||0)&&(parseFloat(details.price)||0)>0
-          &&h("div",{style:{background:"#FFEBEE",border:"1px solid #FFCDD2",borderRadius:8,
-            padding:"8px 10px",marginBottom:12,fontSize:10,color:"#C62828",fontWeight:700}},
-            "⚠️ Mas mataas ang cost (₱"+(parseFloat(details.cost)||0).toFixed(2)+
-            ") kaysa sell price (₱"+(parseFloat(details.price)||0).toFixed(2)+
-            ") — magkaiba ang unit ng dalawa."),
         details.price>0&&h("div",{style:{background:"#E8F5E9",borderRadius:8,
           padding:"8px 12px",marginBottom:12,display:"flex",justifyContent:"space-between"}},
           h("span",{style:{fontSize:11,color:"#555"}},"Margin:"),
@@ -7053,41 +6228,6 @@ function PrinterPage({db,user,showT,companySettings,setCompanySettings}){
       border:"1px solid "+C.border,padding:"16px",marginBottom:14}},
       h("div",{style:{fontSize:13,fontWeight:800,marginBottom:14}},"🖨️ Print Settings"),
 
-      // Cash drawer
-      h("div",{style:{background:"#F1F8E9",border:"1px solid #C5E1A5",borderRadius:9,
-        padding:"11px 13px",marginBottom:14}},
-        h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center"}},
-          h("div",{style:{flex:1,marginRight:10}},
-            h("div",{style:{fontSize:12,fontWeight:800,color:"#33691E"}},
-              "💵 Auto-open cash drawer"),
-            h("div",{style:{fontSize:9,color:"#666",marginTop:2}},
-              "Bumubukas agad pagkatapos ng CASH na order. Hindi bumubukas sa GCash o card.")),
-          h("button",{
-            onClick:()=>setCompanySettings(p=>Object.assign({},p,
-              {autoKickDrawer:!(p&&p.autoKickDrawer!==false)})),
-            style:{width:44,height:24,borderRadius:20,border:"none",flexShrink:0,
-              background:(companySettings.autoKickDrawer!==false)?"#558B2F":"#ccc",
-              cursor:"pointer",position:"relative"}},
-            h("div",{style:{position:"absolute",top:3,width:18,height:18,borderRadius:"50%",
-              background:"#fff",transition:"left .15s",
-              left:(companySettings.autoKickDrawer!==false)?"calc(100% - 21px)":"3px"}}))
-        ),
-        h("div",{style:{display:"flex",gap:8,alignItems:"center",marginTop:9}},
-          h("span",{style:{fontSize:10,color:"#555",flex:1}},
-            "Drawer pin (2 ang karaniwan; subukan ang 5 kung hindi pumuputok)"),
-          h("select",{value:String(companySettings.drawerPin||2),
-            onChange:e=>setCompanySettings(p=>Object.assign({},p,
-              {drawerPin:parseInt(e.target.value,10)||2})),
-            style:{padding:"5px 8px",border:"1px solid "+C.border,borderRadius:6,
-              fontSize:11,outline:"none"}},
-            h("option",{value:"2"},"Pin 2"),
-            h("option",{value:"5"},"Pin 5"))
-        ),
-        h("div",{style:{fontSize:9,color:"#888",marginTop:7}},
-          "Kailangang naka-connect na ang Bluetooth printer. Kung hindi, tahimik itong "+
-          "lalaktaw — walang lalabas na device picker sa gitna ng transaksyon.")
-      ),
-
       // Paper size + Tax mode in grid
       h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}},
         h("div",null,
@@ -7626,7 +6766,7 @@ function NewInventoryItemForm({db,user,branchId,showT,onClose,invBranch}){
   const [cats,setCats]=useState(DEFAULT_CATS);
   const [newCat,setNewCat]=useState("");
   const [showAddCat,setShowAddCat]=useState(false);
-  const [form,setForm]=useState({name:"",unit:"pc",cat:"Other",stock:"0",minStock:"10",price:"0",cost:"0",packUnit:"",packSize:""});
+  const [form,setForm]=useState({name:"",unit:"pc",cat:"Other",stock:"0",minStock:"10",price:"0",cost:"0"});
   const [saving,setSaving]=useState(false);
 
   // Load custom categories
@@ -7666,8 +6806,6 @@ function NewInventoryItemForm({db,user,branchId,showT,onClose,invBranch}){
       const id="inv_"+Date.now();
       await setDoc(doc(db,col,id),{
         id,name:form.name,unit:form.unit,cat:form.cat,
-        packUnit:form.packUnit||"",
-        packSize:parseFloat(form.packSize)||0,
         stock:parseFloat(form.stock)||0,
         minStock:parseFloat(form.minStock)||10,
         price:parseFloat(form.price)||0,
@@ -7730,46 +6868,10 @@ function NewInventoryItemForm({db,user,branchId,showT,onClose,invBranch}){
           cats.map(c=>h("option",{key:c,value:c},c)))
       )
     ),
-    // Pack detail — how it is bought/counted vs how it is consumed
-    h("div",{style:{background:"#FFFDE7",border:"1px solid #FFE082",borderRadius:8,
-      padding:"9px 10px",marginBottom:10}},
-      h("div",{style:{fontSize:9,fontWeight:800,color:"#E65100",letterSpacing:1,marginBottom:6}},
-        "PACK DETAIL (optional)"),
-      h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
-        h("div",null,
-          h("div",{style:{fontSize:9,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},"PACK UNIT"),
-          h("select",{value:form.packUnit||"",
-            onChange:e=>setForm(p=>({...p,packUnit:e.target.value})),
-            style:{width:"100%",padding:"8px",border:"1px solid #ddd",borderRadius:7,fontSize:12,outline:"none"}},
-            h("option",{value:""},"— wala —"),
-            UNITS.map(u=>h("option",{key:u,value:u},u)))
-        ),
-        h("div",null,
-          h("div",{style:{fontSize:9,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},
-            "ILAN KADA PACK"),
-          h("input",{type:"number",min:0,value:form.packSize||"",
-            onChange:e=>setForm(p=>({...p,packSize:e.target.value})),
-            placeholder:"hal. 30",
-            style:{width:"100%",padding:"8px",border:"1px solid #ddd",
-              borderRadius:7,fontSize:12,outline:"none",boxSizing:"border-box"}})
-        )
-      ),
-      h("div",{style:{fontSize:9,color:"#888",marginTop:5}},
-        (Number(form.packSize)>1&&form.packUnit)
-          ? ("1 "+form.packUnit+" = "+form.packSize+" "+(form.unit||"pc")
-             +". Ang stock ay laging naka-"+(form.unit||"pc")+"; pack ang gamit sa receiving at bilangan.")
-          : "Iwanang blangko kung iisa lang ang unit. Hindi nito binabago ang BOM deduction.")
-    ),
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
-      fld("Current Stock ("+(form.unit||"pc")+")","stock","number"),
-      fld("Min Stock ("+(form.unit||"pc")+")","minStock","number")
+      fld("Current Stock","stock","number"),
+      fld("Min Stock (Alert)","minStock","number")
     ),
-    Number(form.packSize)>1&&h("div",{style:{background:"#E3F2FD",borderRadius:7,
-      padding:"7px 9px",marginBottom:10,fontSize:10,color:"#1565C0",fontWeight:700}},
-      "Stock "+fmtPacks({unit:form.unit,packUnit:form.packUnit,packSize:Number(form.packSize)},
-        Number(form.stock)||0)
-      +"  ·  Alert sa "+((Number(form.minStock)||0)/Number(form.packSize)).toFixed(2)
-      +" "+(form.packUnit||"pack")),
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
       fld("Selling Price (₱)","price","number"),
       fld("Cost Price (₱)","cost","number")
@@ -7867,14 +6969,6 @@ function App(){
   // Checkout fields
   const [chkDisc,setChkDisc]=useState(DISCS[0]);
   const [chkDiscId,setChkDiscId]=useState("");
-  const [chkDiscPct,setChkDiscPct]=useState("");      // for Custom %
-  const [chkDiscTargets,setChkDiscTargets]=useState([]); // cartIds; empty = whole order
-  const [chkToTargets,setChkToTargets]=useState([]);     // cartIds that are take-out
-  const [chkToMode,setChkToMode]=useState("all");        // "all" follows ORDER TYPE
-  const [chkToPicks,setChkToPicks]=useState({});         // {cartId:{pickIdx:toQty}}
-  const [posBoms,setPosBoms]=useState({});               // bom docs for stock checks
-  const [heldOrders,setHeldOrders]=useState([]);         // parked / on-hold carts
-  const [showHeld,setShowHeld]=useState(false);
   const [chkCust,setChkCust]=useState("");
   const [chkTable,setChkTable]=useState("");
   const [chkType,setChkType]=useState("dine-in");
@@ -7980,22 +7074,6 @@ function App(){
         ?query(collection(db,"cash_log"),orderBy("timestamp","desc"),limit(100))
         :query(collection(db,"cash_log"),where("branch","==",bId),orderBy("timestamp","desc"),limit(50));
       unsubs.push(onSnapshot(cq,snap=>setCashLog(snap.docs.map(d=>({...d.data(),_docId:d.id}))),()=>{}));
-    }catch(e){}
-
-    // BOM docs — needed to tell whether an item can still be made
-    try{
-      unsubs.push(onSnapshot(collection(db,"bom"),snap=>{
-        const b={};snap.docs.forEach(d=>{b[d.id]={...d.data()};});
-        setPosBoms(b);
-      },()=>{}));
-    }catch(e){}
-
-    // Held (parked) orders for this branch
-    try{
-      unsubs.push(onSnapshot(
-        query(collection(db,"held_orders"),where("branch","==",bId)),
-        snap=>setHeldOrders(snap.docs.map(d=>({...d.data(),_docId:d.id}))),
-        ()=>{}));
     }catch(e){}
 
     // Advances + POs
@@ -8257,49 +7335,11 @@ function App(){
     return item.unitPrice||item.basePrice||0;
   };
   const priceMultiplier=1; // kept for compatibility
-  // one place for a line's money value (incl. premium-pick upcharges)
-  const lineAmt=(i)=>getPriceByType(i)*(i.qty||1)
-    +(i.freebies||[]).reduce((a,f)=>a+((f.priceAdd||0)*(f.qty||0)),0);
-  const cartTotal=cart.reduce((s,i)=>s+lineAmt(i),0);
+  const cartTotal=cart.reduce((s,i)=>s+(getPriceByType(i)*(i.qty||1)),0);
   const cartCount=cart.reduce((s,i)=>s+i.qty,0);
   const chkSub=cartTotal;
-  // Discount = % rate, applied to the whole order OR to selected lines only
-  const discRate=chkDisc.custom
-    ? Math.min(100,Math.max(0,parseFloat(chkDiscPct)||0))/100
-    : (chkDisc.rate||0);
-  const discTargets=(chkDiscTargets||[]).filter(cid=>cart.some(i=>i.cartId===cid));
-  const discAll=discTargets.length===0;
-  const chkDiscBase=discAll?chkSub
-    :cart.filter(i=>discTargets.includes(i.cartId)).reduce((s,i)=>s+lineAmt(i),0);
-  const chkDiscAmt=Math.round(chkDiscBase*discRate*100)/100;
+  const chkDiscAmt=chkSub*chkDisc.rate;
   const chkTotal=chkSub-chkDiscAmt;
-  // Take-out can apply to the whole order (follows ORDER TYPE) or to chosen lines.
-  const toTargets=(chkToTargets||[]).filter(cid=>cart.some(i=>i.cartId===cid));
-  const toAll=chkToMode==="all";
-  const orderIsTO=chkType!=="dine-in";
-  // A BOGO line holds 2+ picks and they can split — one T/O, one dine-in.
-  const hasPicks=(i)=>((i.freebies||[]).length>0);
-  const pickTot=(i)=>(i.freebies||[]).reduce((a,f)=>a+(f.qty||0),0);
-  const pickTO=(i,fi)=>((chkToPicks[i.cartId]||{})[fi])||0;
-  const linePickTO=(i)=>(i.freebies||[]).reduce((a,f,fi)=>a+pickTO(i,fi),0);
-  // how many PIECES of this line go out the door
-  const lineTOQty=(i)=>{
-    if(toAll)return orderIsTO?(hasPicks(i)?pickTot(i):(i.qty||1)):0;
-    if(hasPicks(i))return linePickTO(i);
-    return toTargets.includes(i.cartId)?(i.qty||1):0;
-  };
-  const isTO=(i)=>lineTOQty(i)>0;
-  const isPartial=(i)=>{
-    const t=lineTOQty(i), full=hasPicks(i)?pickTot(i):(i.qty||1);
-    return t>0&&t<full;
-  };
-  const toCount=cart.reduce((a,i)=>a+lineTOQty(i),0);
-  const mixedType=!toAll&&cart.length>0
-    &&(cart.some(isPartial)||(!cart.every(isTO)&&!cart.every(i=>!isTO(i))));
-  // label a cart line so two lines of the same item are tellable apart
-  const lineLabel=(i)=>(i.qty+"x "+i.name);
-  const lineSub=(i)=>[i.variant||"",
-    (i.freebies||[]).map(f=>f.label+" ×"+f.qty).join(", ")].filter(Boolean).join(" · ");
   const myOrders=user?.role==="owner"?orders:orders.filter(o=>o.branch===branchId);
   const menuWithOverrides=[
     // Main menu items with branch overrides
@@ -8323,166 +7363,7 @@ function App(){
   // ── CART ACTIONS ─────────────────────────────────────────
   const addToCart=ci=>{setCart(p=>[...p,ci]);setCustomizing(null);showT(ci.name+" added!");};
   const rmCart=cid=>setCart(p=>p.filter(i=>i.cartId!==cid));
-  // FIX: old code froze lineTotal at unitPrice for BOGO -> 4 BOGO billed as 1.
-  // Also rescales freebie picks so count always matches qty.
-  const chgQty=(cid,d)=>setCart(p=>p.map(i=>{
-    if(i.cartId!==cid)return i;
-    const q=Math.max(1,(i.qty||1)+d);
-    const per=i.freePerUnit||0;
-    let fr=(i.freebies||[]).map(f=>Object.assign({},f));
-    if(per>0){
-      const cap=per*q;
-      let tot=fr.reduce((a,f)=>a+(f.qty||0),0);
-      while(tot>cap&&fr.length){                      // qty down -> trim from the end
-        const last=fr[fr.length-1];
-        const take=Math.min(last.qty,tot-cap);
-        last.qty-=take;tot-=take;
-        if(last.qty<=0)fr.pop();
-      }
-      if(tot<cap&&fr.length){fr[0].qty+=(cap-tot);}   // qty up -> top up the first pick
-    }
-    const freeAdd=fr.reduce((a,f)=>a+((f.priceAdd||0)*(f.qty||0)),0);
-    return Object.assign({},i,{qty:q,freebies:fr,lineTotal:(i.unitPrice||0)*q+freeAdd});
-  }));
-
-  // Firestore rejects the WHOLE document if any field is `undefined`.
-  // Cart items carry variant/promo/emoji straight from the customizer, and those
-  // are undefined whenever nothing was selected — placeOrder normalised them with
-  // ||"" but a raw cart write does not, which is what broke Hold.
-  // Recurses only into plain objects/arrays so FieldValue sentinels
-  // (serverTimestamp) and Dates pass through untouched.
-  const stripUndef=(v)=>{
-    if(Array.isArray(v))return v.map(stripUndef).filter(x=>x!==undefined);
-    if(v&&typeof v==="object"
-       &&(v.constructor===Object||v.constructor===undefined)){
-      const o={};
-      Object.keys(v).forEach(k=>{
-        const c=stripUndef(v[k]);
-        if(c!==undefined)o[k]=c;
-      });
-      return o;
-    }
-    return v;
-  };
-
-  // ── BOM STOCK CHECKS ─────────────────────────────────────
-  // An ingredient with no inventory record is treated as untracked and never
-  // blocks a sale — only things you actually count can stop an order.
-  const stockOf=(ingId)=>{
-    const it=inventory.find(x=>x.id===ingId);
-    return it?(Number(it.stock)||0):null;
-  };
-  const vKeyOf=(itemId,vLabel)=>(!vLabel||vLabel==="default")
-    ? itemId : itemId+"__"+String(vLabel).replace(/\s+/g,"_");
-  const itemBomRows=(itemId,vLabel)=>{
-    const d=posBoms[itemId]||{};
-    return d[vKeyOf(itemId,vLabel)]||d[itemId]||[];
-  };
-  const choiceBomRows=(gid,cid)=>{
-    const d=posBoms["optgrp_"+gid]||{};
-    return d["optgrp_"+gid+"__"+cid]||[];
-  };
-  // rows x multiplier -> [{ingName,need,have,unit}] for anything that falls short
-  const bomShort=(rows,mult)=>{
-    const out=[];
-    (rows||[]).forEach(r=>{
-      if(!r.ingId||!r.qty)return;
-      const need=((r.qty||0)*(mult||1))/(r.convFactor||1);
-      const have=stockOf(r.ingId);
-      if(have===null)return;
-      if(have<need)out.push({ingName:r.ingName||r.ingId,need:need,have:have,unit:r.unit||""});
-    });
-    return out;
-  };
-  // Aggregate across the WHOLE cart. One BOGO may pass on its own while four of
-  // them do not, so per-tap checks are not enough — this is the real guard.
-  const cartShort=()=>{
-    const need={};
-    const bump=(rows,mult,label)=>{
-      (rows||[]).forEach(r=>{
-        if(!r.ingId||!r.qty)return;
-        const amt=((r.qty||0)*(mult||1))/(r.convFactor||1);
-        if(!need[r.ingId])need[r.ingId]={name:r.ingName||r.ingId,unit:r.unit||"",amt:0,from:[]};
-        need[r.ingId].amt+=amt;
-        if(label&&need[r.ingId].from.indexOf(label)<0)need[r.ingId].from.push(label);
-      });
-    };
-    cart.forEach(i=>{
-      bump(itemBomRows(i.id,i.variant),i.qty||1,i.name);
-      (i.optionRefs||[]).forEach(ref=>{
-        if(!ref.groupId||!ref.choiceId)return;
-        const mult=ref.free?(ref.qty||1):((ref.qty||1)*(i.qty||1));
-        bump(choiceBomRows(ref.groupId,ref.choiceId),mult,ref.label);
-      });
-    });
-    const short=[];
-    Object.keys(need).forEach(id=>{
-      const have=stockOf(id);
-      if(have===null)return;
-      if(have<need[id].amt)short.push(Object.assign({},need[id],{have:have,id:id}));
-    });
-    return short;
-  };
-
-  // ── HOLD / PARK A TRANSACTION ────────────────────────────
-  // Keeps the whole checkout context, not just the cart, so resuming lands the
-  // cashier exactly where they left off (discount scope, take-out picks, etc).
-  const holdOrder=async(label)=>{
-    if(!cart.length){showT("Walang laman ang cart","warn");return;}
-    try{
-      await addDoc(collection(db,"held_orders"),stripUndef({
-        branch:branchId||"",
-        label:(label||chkCust||chkTable||"").trim(),
-        cart:cart,
-        ctx:{type:chkType||"dine-in",cust:chkCust||"",table:chkTable||"",pay:chkPay||"cash",
-             discId:(chkDisc&&chkDisc.id)||"none",discPct:chkDiscPct||"",discIdNo:chkDiscId||"",
-             discTargets:chkDiscTargets||[],toTargets:chkToTargets||[],
-             toMode:chkToMode||"all",toPicks:chkToPicks||{}},
-        count:cartCount||0,total:Number(chkTotal)||0,
-        heldBy:(user&&user.name)||"",heldAt:serverTimestamp(),
-        heldAtLocal:new Date().toLocaleTimeString("en-PH",{hour:"2-digit",minute:"2-digit"})
-      }));
-      setCart([]);setChkCash("");setChkCust("");setChkTable("");
-      setChkDiscTargets([]);setChkToTargets([]);setChkDiscPct("");
-      setModal(null);setCartOpen(false);
-      showT("Naka-hold ✓ — nasa ⏸ Held");
-    }catch(e){
-      console.error("Hold failed:",e);
-      showT("Hold failed: "+((e&&e.message)||e||"unknown").toString().slice(0,80),"err");
-    }
-  };
-
-  const resumeHeld=async(hd)=>{
-    if(cart.length&&!confirm("May laman pa ang cart. Palitan ito ng naka-hold na order?"))return;
-    try{
-      setCart(hd.cart||[]);
-      const c=hd.ctx||{};
-      setChkType(c.type||"dine-in");
-      setChkCust(c.cust||"");setChkTable(c.table||"");
-      if(c.pay)setChkPay(c.pay);
-      setChkDisc(DISCS.find(d=>d.id===c.discId)||DISCS[0]);
-      setChkDiscPct(c.discPct||"");setChkDiscId(c.discIdNo||"");
-      setChkDiscTargets(c.discTargets||[]);setChkToTargets(c.toTargets||[]);
-      setChkToMode(c.toMode||"all");setChkToPicks(c.toPicks||{});
-      await deleteDoc(doc(db,"held_orders",hd._docId));
-      setShowHeld(false);setCartOpen(true);
-      showT("Resumed ✓");
-    }catch(e){
-      console.error("Resume failed:",e);
-      showT("Resume failed: "+((e&&e.message)||e||"unknown").toString().slice(0,80),"err");
-    }
-  };
-
-  const discardHeld=async(hd)=>{
-    if(!confirm("Burahin ang naka-hold na order na ito?"))return;
-    try{
-      await deleteDoc(doc(db,"held_orders",hd._docId));
-      showT("Held order deleted","warn");
-    }catch(e){
-      console.error("Delete held failed:",e);
-      showT("Delete failed: "+((e&&e.message)||e||"unknown").toString().slice(0,80),"err");
-    }
-  };
+  const chgQty=(cid,d)=>setCart(p=>p.map(i=>i.cartId===cid?{...i,qty:Math.max(1,i.qty+d),lineTotal:i.isBogo?i.unitPrice:i.unitPrice*Math.max(1,i.qty+d)}:i));
 
   // ── PLACE ORDER (Firebase) ───────────────────────────────
   const placeOrder=async()=>{
@@ -8498,26 +7379,16 @@ function App(){
     const now=new Date().toLocaleTimeString("en-PH",{hour:"2-digit",minute:"2-digit"});
     const ord={
       id,branch:branchId,
-      items:cart.map(i=>({id:i.id,qty:i.qty,name:i.name,emoji:i.emoji,
+      items:cart.map(i=>({qty:i.qty,name:i.name,emoji:i.emoji,
         variant:i.variant||"",options:i.options||[],
-        freebies:(i.freebies||[]).map((f,fi)=>Object.assign({},f,{
-          toQty:toAll?(orderIsTO?(f.qty||0):0):pickTO(i,fi)})),
-        optionRefs:i.optionRefs||[],freePerUnit:i.freePerUnit||0,
-        discounted:discAll?discRate>0:discTargets.includes(i.cartId),
-        takeout:isTO(i),partialTO:isPartial(i),toQty:lineTOQty(i),
         unitPrice:getPriceByType(i),
-        lineTotal:getPriceByType(i)*(i.qty||1)
-          +(i.freebies||[]).reduce((a,f)=>a+((f.priceAdd||0)*(f.qty||0)),0),
+        lineTotal:getPriceByType(i)*(i.qty||1),
         isBogo:i.isBogo||false,promo:i.promo||"",note:i.note||""})),
       subtotal:chkSub,discAmt:chkDiscAmt,
-      discType:{id:chkDisc.id,label:chkDisc.label,rate:discRate},
-      discRate:discRate,discBase:chkDiscBase,discScope:discAll?"order":"items",
-      discItems:discAll?[]:cart.filter(i=>discTargets.includes(i.cartId)).map(i=>i.name),
+      discType:{id:chkDisc.id,label:chkDisc.label,rate:chkDisc.rate},
       discId:chkDiscId,custName:chkCust,tableNo:chkTable,
       cash:chkCash,total:chkTotal,time:now,date:new Date().toISOString().slice(0,10),
-      status:"pending",orderType:chkType,mixedType:mixedType,
-      takeoutCount:toCount,
-      payMethod:chkPay,priceType,cashier:user.name,
+      status:"pending",orderType:chkType,payMethod:chkPay,priceType,cashier:user.name,
       bomDeducted:false,
       timestamp:serverTimestamp()
     };
@@ -8565,14 +7436,6 @@ function App(){
             }
             
             try{
-              // Read first so the log can carry before -> after. increment() is
-              // atomic server-side, so `next` is computed, not read back; it can
-              // drift only if two terminals hit the same ingredient at once.
-              let _prev=null;
-              try{
-                const _s=await getDoc(doc(db,deductCol,row.ingId));
-                if(_s.exists())_prev=Number(_s.data().stock)||0;
-              }catch(e4){}
               await updateDoc(doc(db,deductCol,row.ingId),{
                 stock: increment(-deductAmt),
                 lastDeducted: serverTimestamp()
@@ -8586,14 +7449,8 @@ function App(){
                 amount:-deductAmt,
                 convFactor:convFactor,
                 invCol:deductCol,
-                prevStock:_prev,
-                newStock:_prev==null?null:Math.round((_prev-deductAmt)*1000)/1000,
-                desc:"Nabawas sa "+(curBranch&&curBranch.full||branchId)+": "
-                  +(Math.round(deductAmt*1000)/1000)+" "+(row.unit||"")
-                  +" para sa order "+ord.id+" ("+cartItem.name
-                  +(variant!=="default"?" – "+variant:"")+" ×"+(cartItem.qty||1)+")",
-                source:"sales",
-                ref:ord.id,
+                prevStock:null,
+                newStock:null,
                 transactionId:ord.id,
                 orderId:ord.id,
                 menuItem:cartItem.name,
@@ -8629,68 +7486,41 @@ function App(){
           }
         }
 
-        // ── Deduct Option Group BOMs (flavors, drinks, freebies) ──
-        // FIX: old code read group.options (Firebase writes choices[]) and looked for
-        // an embedded opt.bom — BOMs actually live in bom/optgrp_<groupId>.
-        // Result: option-group ingredients were NEVER deducted. Now keyed by ID.
-        const bomCache={};
+        // ── Deduct Option Group BOMs (flavors, drinks, etc.) ──
+        const optSnap = await getDocs(collection(db,"option_groups"));
+        const optGroups = optSnap.docs.map(d=>({...d.data(),id:d.id}));
+
         for(const cartItem of cart){
-          for(const ref of (cartItem.optionRefs||[])){
-            if(!ref.groupId||!ref.choiceId)continue;
-            const docId="optgrp_"+ref.groupId;
-            if(!(docId in bomCache)){
-              try{const bs=await getDoc(doc(db,"bom",docId));bomCache[docId]=bs.exists()?bs.data():{};}
-              catch(e2){bomCache[docId]={};}
-            }
-            const rows=bomCache[docId][docId+"__"+ref.choiceId]||[];
-            // freebie qty already counts every free unit; paid options scale with line qty
-            const mult=ref.free?(ref.qty||1):((ref.qty||1)*(cartItem.qty||1));
-            for(const row of rows){
-              if(!row.ingId||!row.qty)continue;
-              const actualDeduct=((row.qty||0)*mult)/(row.convFactor||1);
-              try{
-                // invCol was never declared in this scope -> ReferenceError,
-                // swallowed by the catch below, so picks were never deducted.
-                let pCol = isOwnerRole ? "inventory" : "inventory_"+branchId;
-                if(!isOwnerRole){
+          const selectedOpts = cartItem.options||[];
+          for(const optLabel of selectedOpts){
+            // Find matching option in any group
+            for(const group of optGroups){
+              const opt=(group.options||[]).find(o=>o.name===optLabel);
+              if(opt&&opt.bom&&opt.bom.length){
+                for(const row of opt.bom){
+                  if(!row.ingId||!row.qty)continue;
+                  const deductAmt=(row.qty||0)*(cartItem.qty||1);
+                  const convFactor=row.convFactor||1;
+                  const actualDeduct=deductAmt/convFactor;
                   try{
-                    const bd=await getDoc(doc(db,"inventory_"+branchId,row.ingId));
-                    if(!bd.exists()){
-                      const md=await getDoc(doc(db,"inventory",row.ingId));
-                      if(md.exists())pCol="inventory";
-                    }
-                  }catch(e3){}
+                    await updateDoc(doc(db,invCol,row.ingId),{
+                      stock:increment(-actualDeduct),
+                      lastDeducted:serverTimestamp()
+                    });
+                    await addDoc(collection(db,logCol),{
+                      itemId:row.ingId,itemName:row.ingName||row.ingId,
+                      unit:row.unit||"",type:"deduct",amount:-actualDeduct,
+                      transactionId:ord.id,
+                      orderId:ord.id,
+                      menuItem:cartItem.name,
+                      optionLabel:optLabel,
+                      branch:branchId,
+                      reason:"Order: "+ord.id+" — "+cartItem.name+" ["+optLabel+"]",
+                      by:user.name,at:serverTimestamp()
+                    });
+                  }catch(e2){console.warn("Option BOM deduct failed",e2);}
                 }
-                let _pprev=null;
-                try{
-                  const _ps=await getDoc(doc(db,pCol,row.ingId));
-                  if(_ps.exists())_pprev=Number(_ps.data().stock)||0;
-                }catch(e5){}
-                await updateDoc(doc(db,pCol,row.ingId),{
-                  stock:increment(-actualDeduct),
-                  lastDeducted:serverTimestamp()
-                });
-                await addDoc(collection(db,logCol),{
-                  itemId:row.ingId,itemName:row.ingName||row.ingId,
-                  unit:row.unit||"",type:"deduct",amount:-actualDeduct,
-                  prevStock:_pprev,
-                  newStock:_pprev==null?null:Math.round((_pprev-actualDeduct)*1000)/1000,
-                  convFactor:row.convFactor||1,invCol:pCol,
-                  desc:"Nabawas sa "+(curBranch&&curBranch.full||branchId)+": "
-                    +(Math.round(actualDeduct*1000)/1000)+" "+(row.unit||"")
-                    +" para sa order "+ord.id+" ("+cartItem.name+" → "+ref.label
-                    +" ×"+(ref.qty||1)+")",
-                  source:"sales",
-                  ref:ord.id,
-                  transactionId:ord.id,
-                  orderId:ord.id,
-                  menuItem:cartItem.name,
-                  optionLabel:ref.label+(ref.free?" (x"+ref.qty+")":""),
-                  branch:branchId,
-                  reason:"Order: "+ord.id+" — "+cartItem.name+" ["+ref.label+"]",
-                  by:user.name,at:serverTimestamp()
-                });
-              }catch(e2){console.warn("Option BOM deduct failed",e2);}
+              }
             }
           }
         }
@@ -8706,9 +7536,6 @@ function App(){
       setCart([]);setChkCash("");setChkCust("");setChkTable("");
       setChkDisc(DISCS[0]);setChkDiscId("");setChkPay("cash");
       setCartOpen(false);setModal("receipt");
-      // Cash drawer opens on its own for cash sales, before the receipt is
-      // even printed — the cashier needs it open to make change.
-      btKickIfConnected(ord,companySettings);
       showT("Order "+id+" placed! ✓");
     }catch(e){
       showT("Saved offline — will sync","warn");
@@ -8856,23 +7683,6 @@ function App(){
       h("div",{style:{flex:1,overflowY:"auto",padding:"12px 18px"}},
         // Summary
         h("div",{style:{marginBottom:11}},
-          (function(){
-            const short=cartShort();
-            if(!short.length)return null;
-            return h("div",{style:{background:"#FFEBEE",border:"2px solid "+C.danger,
-              borderRadius:10,padding:"9px 11px",marginBottom:11}},
-              h("div",{style:{fontSize:11,fontWeight:900,color:C.danger,marginBottom:5}},
-                "🚫 OUT OF STOCK — hindi matutuloy"),
-              short.map(x=>h("div",{key:x.id,style:{fontSize:10,marginBottom:2}},
-                h("b",null,x.name),
-                h("span",{style:{color:C.muted}},
-                  "  kailangan "+(Math.round(x.amt*1000)/1000)+" "+x.unit
-                  +" · meron "+(Math.round(x.have*1000)/1000)+" "+x.unit)
-              )),
-              h("div",{style:{fontSize:9,color:C.muted,marginTop:5}},
-                "Bawasan ang qty, alisin ang item, o mag-receive muna ng stock.")
-            );
-          })(),
           h("div",{style:{fontSize:9,fontWeight:800,color:C.muted,letterSpacing:1,marginBottom:6}},"ORDER SUMMARY"),
           cart.map((i,idx)=>h("div",{key:idx,style:{display:"flex",gap:8,padding:"6px 0",borderBottom:"1px solid #f9f9f9",alignItems:"flex-start"}},
             h("span",{style:{fontSize:15,flexShrink:0}},i.emoji),
@@ -8880,11 +7690,6 @@ function App(){
               h("div",{style:{fontSize:11,fontWeight:700}},i.qty+"x "+i.name,i.isBogo&&h("span",{style:{background:"#FF4B2B",color:"#fff",fontSize:8,padding:"1px 5px",borderRadius:20,marginLeft:4}},"BOGO")),
               i.variant&&h("div",{style:{fontSize:9,color:C.muted}},"📦 "+i.variant),
               i.options?.length>0&&h("div",{style:{fontSize:9,color:C.muted}},"✓ "+i.options.join(" · ")),
-              (i.freebies||[]).map((f,fi)=>h("div",{key:fi,style:{fontSize:9,color:"#2E7D32",fontWeight:700}},
-                "▸ "+f.label+" ×"+f.qty,
-                (i.takeout&&(f.toQty||0)>0)&&h("span",{style:{color:"#E65100",fontWeight:900}},
-                  (f.toQty>=(f.qty||0))?"  [T/O]":"  ["+f.toQty+" T/O]")
-              )),
               i.note&&h("div",{style:{fontSize:9,color:C.muted,fontStyle:"italic"}},'"'+i.note+'"')
             ),
             h("div",{style:{textAlign:"right",flexShrink:0}},
@@ -8902,112 +7707,7 @@ function App(){
           h("div",{style:{fontSize:9,fontWeight:800,color:C.muted,letterSpacing:1,marginBottom:6}},"ORDER TYPE"),
           h("div",{style:{display:"flex",gap:6}},
             [["dine-in","🪑 Dine-in"],["takeout","📦 Takeout"],["delivery","🛵 Delivery"]].map(([t,l])=>
-              h("button",{key:t,onClick:()=>{setChkType(t);setChkToTargets([]);},style:{flex:1,padding:"8px 0",borderRadius:9,border:`2px solid ${chkType===t?C.primary:C.border}`,background:chkType===t?"#FFF0F0":"#fff",color:chkType===t?C.primary:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}},l)
-            )
-          ),
-          // Which lines are take-out
-          cart.length>0&&h("div",{style:{marginTop:7}},
-            h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5}},
-              h("button",{onClick:()=>{setChkToMode("all");setChkToTargets([]);setChkToPicks({});},
-                style:{padding:"7px 9px",borderRadius:8,fontSize:10,fontWeight:600,cursor:"pointer",
-                  border:"2px solid "+(toAll?C.primary:C.border),
-                  background:toAll?"#FFF0F0":"#fff",color:toAll?C.primary:C.text}},
-                "Lahat: "+(chkType==="dine-in"?"dine-in":"T/O")),
-              h("button",{onClick:()=>setChkToMode("some"),
-                style:{padding:"7px 9px",borderRadius:8,fontSize:10,fontWeight:600,cursor:"pointer",
-                  border:"2px solid "+(!toAll?C.primary:C.border),
-                  background:!toAll?"#FFF0F0":"#fff",color:!toAll?C.primary:C.text}},
-                "📦 Piling item lang")
-            ),
-            !toAll&&h("div",{style:{background:C.bg,borderRadius:8,padding:"8px 9px",marginTop:5}},
-              h("div",{style:{fontSize:9,color:C.muted,marginBottom:6}},
-                "Naka-check = T/O. Hindi naka-check = dine-in."),
-              cart.map(function(i){
-                const picks=i.freebies||[];
-                // ── BOGO / multi-pick line: each pick decided separately ──
-                if(picks.length){
-                  const tot=pickTot(i), got=linePickTO(i);
-                  const setP=(fi,v)=>setChkToPicks(function(p){
-                    const cur=Object.assign({},p[i.cartId]||{});
-                    if(v<=0)delete cur[fi]; else cur[fi]=v;
-                    const r=Object.assign({},p);
-                    if(Object.keys(cur).length)r[i.cartId]=cur; else delete r[i.cartId];
-                    return r;
-                  });
-                  return h("div",{key:i.cartId,
-                    style:{marginBottom:7,paddingBottom:6,borderBottom:"1px dashed "+C.border}},
-                    h("div",{style:{display:"flex",justifyContent:"space-between",gap:8}},
-                      h("div",{style:{flex:1}},
-                        h("div",{style:{fontSize:10,fontWeight:700}},lineLabel(i)),
-                        i.variant&&h("div",{style:{fontSize:9,color:C.muted}},i.variant)
-                      ),
-                      h("span",{style:{fontSize:9,fontWeight:800,flexShrink:0,
-                        color:got===0?C.muted:(got===tot?"#E65100":"#1565C0")}},
-                        got===0?"🪑 dine-in":(got===tot?"📦 T/O":"⚡ "+got+"/"+tot+" T/O"))
-                    ),
-                    h("div",{style:{marginTop:5}},
-                      picks.map(function(f,fi){
-                        const n=pickTO(i,fi);
-                        // qty 1 -> plain checkbox; qty >1 -> split counter
-                        if((f.qty||0)<=1){
-                          const on=n>0;
-                          return h("button",{key:fi,onClick:()=>setP(fi,on?0:1),
-                            style:{display:"flex",width:"100%",gap:8,alignItems:"center",
-                              padding:"4px 2px 4px 10px",background:"none",border:"none",
-                              cursor:"pointer",textAlign:"left"}},
-                            h("div",{style:{width:15,height:15,borderRadius:4,flexShrink:0,
-                              border:"2px solid "+(on?"#E65100":C.border),
-                              background:on?"#E65100":"#fff",display:"flex",
-                              alignItems:"center",justifyContent:"center"}},
-                              on&&h("span",{style:{color:"#fff",fontSize:9,fontWeight:900}},"✓")),
-                            h("span",{style:{flex:1,fontSize:10,fontWeight:on?700:400}},"▸ "+f.label),
-                            h("span",{style:{fontSize:9,fontWeight:700,
-                              color:on?"#E65100":C.muted}},on?"T/O":"dine-in")
-                          );
-                        }
-                        return h("div",{key:fi,
-                          style:{display:"flex",gap:8,alignItems:"center",padding:"4px 2px 4px 10px"}},
-                          h("span",{style:{flex:1,fontSize:10}},"▸ "+f.label+" ×"+f.qty),
-                          h("div",{style:{display:"flex",alignItems:"center",gap:6}},
-                            h("button",{onClick:()=>setP(fi,Math.max(0,n-1)),
-                              style:{width:20,height:20,borderRadius:5,border:"none",
-                                background:n>0?"#E65100":"#eee",color:n>0?"#fff":"#bbb",
-                                fontSize:12,fontWeight:900,cursor:"pointer"}},"−"),
-                            h("span",{style:{minWidth:26,textAlign:"center",fontSize:9,
-                              fontWeight:800,color:n>0?"#E65100":C.muted}},n+"/"+f.qty),
-                            h("button",{onClick:()=>setP(fi,Math.min(f.qty,n+1)),
-                              style:{width:20,height:20,borderRadius:5,border:"none",
-                                background:n<f.qty?"#E65100":"#eee",color:n<f.qty?"#fff":"#bbb",
-                                fontSize:12,fontWeight:900,cursor:"pointer"}},"+")
-                          )
-                        );
-                      })
-                    )
-                  );
-                }
-                // ── plain line ──
-                const on=toTargets.includes(i.cartId);
-                return h("button",{key:i.cartId,
-                  onClick:()=>setChkToTargets(p=>on?p.filter(x=>x!==i.cartId):[...p,i.cartId]),
-                  style:{display:"flex",width:"100%",gap:8,alignItems:"center",
-                    padding:"6px 2px",background:"none",border:"none",
-                    cursor:"pointer",textAlign:"left",
-                    borderBottom:"1px dashed "+C.border}},
-                  h("div",{style:{width:16,height:16,borderRadius:4,flexShrink:0,
-                    border:"2px solid "+(on?"#E65100":C.border),background:on?"#E65100":"#fff",
-                    display:"flex",alignItems:"center",justifyContent:"center"}},
-                    on&&h("span",{style:{color:"#fff",fontSize:9,fontWeight:900}},"✓")),
-                  h("div",{style:{flex:1}},
-                    h("div",{style:{fontSize:10,fontWeight:on?700:400}},lineLabel(i)),
-                    lineSub(i)&&h("div",{style:{fontSize:9,color:C.muted}},lineSub(i))
-                  ),
-                  h("span",{style:{fontSize:9,fontWeight:700,color:on?"#E65100":C.muted}},
-                    on?"📦 T/O":"🪑 dine-in")
-                );
-              }),
-              h("div",{style:{fontSize:9,color:C.muted,marginTop:5,paddingTop:5,
-                borderTop:"1px dashed "+C.border,fontWeight:700}},
-                "T/O total: "+toCount+" pcs")
+              h("button",{key:t,onClick:()=>setChkType(t),style:{flex:1,padding:"8px 0",borderRadius:9,border:`2px solid ${chkType===t?C.primary:C.border}`,background:chkType===t?"#FFF0F0":"#fff",color:chkType===t?C.primary:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}},l)
             )
           )
         ),
@@ -9071,64 +7771,22 @@ function App(){
         h("div",{style:{marginBottom:10}},
           h("div",{style:{fontSize:9,fontWeight:800,color:C.muted,letterSpacing:1,marginBottom:6}},"DISCOUNT"),
           h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5}},
-            DISCS.map(d=>h("button",{key:d.id,onClick:()=>{setChkDisc(d);if(d.id==="none")setChkDiscTargets([]);},
+            DISCS.map(d=>h("button",{key:d.id,onClick:()=>setChkDisc(d),
               style:{padding:"7px 9px",borderRadius:8,border:`2px solid ${chkDisc.id===d.id?C.primary:C.border}`,
                 background:chkDisc.id===d.id?"#FFF0F0":"#fff",color:chkDisc.id===d.id?C.primary:C.text,
                 fontWeight:600,fontSize:10,cursor:"pointer",textAlign:"left",display:"flex",justifyContent:"space-between"}},
               h("span",null,d.label),
-              d.rate>0&&h("span",{style:{color:C.muted,fontSize:9}},Math.round(d.rate*100)+"%")
+              d.rate>0&&h("span",{style:{color:C.muted,fontSize:9}},(d.rate*100)|0+"%")
             ))
           ),
-          // Custom % input
-          chkDisc.custom&&h("div",{style:{display:"flex",gap:6,alignItems:"center",marginTop:5}},
-            h("input",{type:"number",min:0,max:100,value:chkDiscPct,
-              onChange:e=>setChkDiscPct(e.target.value),placeholder:"e.g. 15",
-              style:{flex:1,padding:"8px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:11,outline:"none",boxSizing:"border-box"}}),
-            h("span",{style:{fontSize:13,fontWeight:900,color:C.primary}},"%")
-          ),
-          discRate>0&&h("input",{value:chkDiscId,onChange:e=>setChkDiscId(e.target.value),
+          chkDisc.rate>0&&h("input",{value:chkDiscId,onChange:e=>setChkDiscId(e.target.value),
             placeholder:chkDisc.label+" ID",
-            style:{width:"100%",padding:"8px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:11,outline:"none",boxSizing:"border-box",marginTop:5}}),
-          // Scope: whole order vs selected lines
-          discRate>0&&h("div",{style:{marginTop:7}},
-            h("div",{style:{fontSize:9,fontWeight:800,color:C.muted,letterSpacing:1,marginBottom:5}},"APPLY TO"),
-            h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5}},
-              h("button",{onClick:()=>setChkDiscTargets([]),
-                style:{padding:"7px 9px",borderRadius:8,fontSize:10,fontWeight:600,cursor:"pointer",
-                  border:"2px solid "+(discAll?C.primary:C.border),
-                  background:discAll?"#FFF0F0":"#fff",color:discAll?C.primary:C.text}},"Buong order"),
-              h("button",{onClick:()=>{if(discAll&&cart.length)setChkDiscTargets([cart[0].cartId]);},
-                style:{padding:"7px 9px",borderRadius:8,fontSize:10,fontWeight:600,cursor:"pointer",
-                  border:"2px solid "+(!discAll?C.primary:C.border),
-                  background:!discAll?"#FFF0F0":"#fff",color:!discAll?C.primary:C.text}},"Piling item lang")
-            ),
-            !discAll&&h("div",{style:{background:C.bg,borderRadius:8,padding:"7px 9px",marginTop:5}},
-              cart.map(function(i){
-                const on=discTargets.includes(i.cartId);
-                return h("button",{key:i.cartId,
-                  onClick:()=>setChkDiscTargets(p=>on?p.filter(x=>x!==i.cartId):[...p,i.cartId]),
-                  style:{display:"flex",width:"100%",gap:8,alignItems:"center",padding:"5px 2px",
-                    background:"none",border:"none",cursor:"pointer",textAlign:"left"}},
-                  h("div",{style:{width:16,height:16,borderRadius:4,flexShrink:0,
-                    border:"2px solid "+(on?C.primary:C.border),background:on?C.primary:"#fff",
-                    display:"flex",alignItems:"center",justifyContent:"center"}},
-                    on&&h("span",{style:{color:"#fff",fontSize:9,fontWeight:900}},"✓")),
-                  h("span",{style:{flex:1,fontSize:10,fontWeight:on?700:400}},i.qty+"x "+i.name),
-                  h("span",{style:{fontSize:10,color:C.muted}},"₱"+lineAmt(i).toFixed(2))
-                );
-              }),
-              h("div",{style:{fontSize:9,color:C.muted,marginTop:5,paddingTop:5,
-                borderTop:"1px dashed "+C.border}},
-                "Base ₱"+chkDiscBase.toFixed(2)+" × "+Math.round(discRate*100)+"% = -₱"+chkDiscAmt.toFixed(2))
-            )
-          )
+            style:{width:"100%",padding:"8px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:11,outline:"none",boxSizing:"border-box",marginTop:5}})
         ),
         // Totals
         h("div",{style:{background:C.bg,borderRadius:10,padding:"10px 13px",marginBottom:10}},
           h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:2,color:C.muted}},h("span",null,"Subtotal"),h("span",null,"₱"+chkSub.toFixed(2))),
-          chkDiscAmt>0&&h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:2,color:C.danger}},
-            h("span",null,"Discount "+Math.round(discRate*100)+"%"+(discAll?"":" ("+discTargets.length+" item"+(discTargets.length>1?"s":"")+")")),
-            h("span",null,"-₱"+chkDiscAmt.toFixed(2))),
+          chkDiscAmt>0&&h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:2,color:C.danger}},h("span",null,"Discount"),h("span",null,"-₱"+chkDiscAmt.toFixed(2))),
           h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:14,fontWeight:900,color:C.primary,paddingTop:6,borderTop:"1px dashed "+C.border}},h("span",null,"TOTAL"),h("span",null,"₱"+chkTotal.toFixed(2)))
         ),
         // Cash tendered — always rendered, hidden via display:none
@@ -9187,34 +7845,22 @@ function App(){
             fontSize:12,fontWeight:700,cursor:"pointer"}},
           "💵 Exact Amount — ₱"+chkTotal.toFixed(2)),
 
-        // Hold vs cancel — same row so the safe option is as easy to reach
-        h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}},
-          h("button",{
-            onClick:()=>holdOrder(chkCust||chkTable),
-            style:{padding:"9px",background:"#FFF8E1",border:"1px solid #FFE082",
-              borderRadius:8,color:"#E65100",fontSize:12,fontWeight:700,cursor:"pointer"}},
-            "⏸ Hold Order"),
-          h("button",{
-            onClick:()=>{
-              if(!confirm("Cancel this transaction? Mawawala ang order."))return;
-              setCart([]);setChkCash("");setChkDiscTargets([]);setChkToTargets([]);
-              setModal(null);
-              showT("Transaction cancelled","warn");
-            },
-            style:{padding:"9px",background:"#FFEBEE",border:"1px solid #FFCDD2",
-              borderRadius:8,color:C.danger,fontSize:12,fontWeight:700,cursor:"pointer"}},
-            "🚫 Cancel")
-        ),
+        // Void/Cancel transaction
+        h("button",{
+          onClick:()=>{
+            if(!confirm("Cancel this transaction?"))return;
+            setCart([]);setChkCash("");setModal(null);
+            showT("Transaction cancelled","warn");
+          },
+          style:{width:"100%",padding:"9px",marginBottom:8,
+            background:"#FFEBEE",border:"1px solid #FFCDD2",
+            borderRadius:8,color:C.danger,
+            fontSize:12,fontWeight:700,cursor:"pointer"}},
+          "🚫 Cancel Transaction"),
 
         // Confirm button - with payment validation
         h("button",{
           onClick:()=>{
-            // Out of stock beats everything — never sell what cannot be made.
-            const short=cartShort();
-            if(short.length){
-              showT("Kulang ang stock: "+short.map(x=>x.name).join(", "),"err");
-              return;
-            }
             const cash=parseFloat(chkCash)||0;
             const isCredit=chkPay==="credit"||chkPay==="gcash"||chkPay==="maya"||chkPay==="bank";
             if(!isCredit&&cash<chkTotal){
@@ -9223,7 +7869,7 @@ function App(){
             }
             setTimeout(placeOrder,50);
           },
-          style:{width:"100%",padding:"13px",opacity:cartShort().length?.5:1,
+          style:{width:"100%",padding:"13px",
             background:`linear-gradient(135deg,${C.primary},${C.dark})`,
             border:"none",borderRadius:10,color:"#fff",
             fontSize:14,fontWeight:800,cursor:"pointer"}},
@@ -9262,16 +7908,9 @@ function App(){
                 h("span",null,i.emoji+" "+i.qty+"x "+i.name),
                 h("span",null,"₱"+(i.lineTotal||0).toFixed(2))
               ),
-              i.takeout&&h("div",{style:{fontSize:9,color:"#E65100",fontWeight:800,paddingLeft:18}},
-                i.partialTO?("📦 T/O "+(i.toQty||0)+" pcs (split)"):"📦 T/O"),
               i.variant&&h("div",{style:{fontSize:9,color:C.muted,paddingLeft:18}},"📦 "+i.variant),
               (i.options||[]).length>0&&h("div",{style:{fontSize:9,color:C.muted,paddingLeft:18}},"✓ "+i.options.join(", ")),
-              (i.freebies||[]).map((f,fi)=>h("div",{key:fi,style:{fontSize:9,color:"#2E7D32",fontWeight:700,paddingLeft:18}},
-                "▸ "+f.label+" ×"+f.qty,
-                (i.takeout&&(f.toQty||0)>0)&&h("span",{style:{color:"#E65100",fontWeight:900}},
-                  (f.toQty>=(f.qty||0))?"  [T/O]":"  ["+f.toQty+" T/O]")
-              )),
-              i.isBogo&&(i.freebies||[]).length===0&&h("div",{style:{fontSize:9,color:"#FF4B2B",fontWeight:700,paddingLeft:18}},"BOGO – "+((i.qty||1)*2)+" items"),
+              i.isBogo&&h("div",{style:{fontSize:9,color:"#FF4B2B",fontWeight:700,paddingLeft:18}},"🎉 BOGO – 1 FREE!"),
               i.note&&h("div",{style:{fontSize:9,color:C.muted,fontStyle:"italic",paddingLeft:18}},'"'+i.note+'"')
             ))
           ),
@@ -9292,61 +7931,31 @@ function App(){
           ),
           h("div",{style:{textAlign:"center",fontSize:9,color:C.muted,margin:"8px 0"}},"Salamat! Kain na! 😊 · VAT REG: 000-123-456-000"),
           h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginTop:4}},
-            // PRIMARY: both docs over one Bluetooth session
-            h("button",{
-              onClick:async function(){
-                var ps=(companySettings&&companySettings.paperSize)||"80mm";
-                showT("Sending 2 docs to printer...","ok");
-                var ok=await printEscPosBoth(ord,curBranch.full,companySettings,ps);
-                if(ok)showT("Receipt + KOT printed ✓");
-                else{
-                  showT("BT failed — printing via browser","warn");
-                  printReceipt(ord,curBranch.full,companySettings);
-                  printKOT(ord,curBranch.full,companySettings);
-                }
-              },
-              style:{gridColumn:"1/-1",padding:"12px",background:"#1565C0",
-                border:"none",borderRadius:8,color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}},
-              "📡 BT Print — Receipt + KOT"),
+            h("button",{onClick:()=>printReceipt(ord,curBranch.full,companySettings),
+              style:{padding:"10px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,
+                border:"none",borderRadius:8,color:"#fff",fontWeight:700,fontSize:11,cursor:"pointer"}},
+              "🖨️ Receipt"),
             h("button",{
               onClick:async function(){
                 var ok=await printEscPos(ord,curBranch.full,companySettings,
                   (companySettings&&companySettings.paperSize)||"80mm");
-                showT(ok?"Receipt printed ✓":"BT print failed",ok?"ok":"warn");
+                if(!ok)showT("BT print failed — use 🖨️ Receipt instead","warn");
+                else showT("Printed via Bluetooth ✓");
               },
-              style:{padding:"10px",background:"#1976D2",
+              style:{padding:"10px",background:"#1565C0",
                 border:"none",borderRadius:8,color:"#fff",
                 fontWeight:700,fontSize:11,cursor:"pointer"}},
-              "📡 BT Receipt"),
-            h("button",{
-              onClick:async function(){
-                var ok=await printEscPosKOT(ord,curBranch.full,companySettings,
-                  (companySettings&&companySettings.paperSize)||"80mm");
-                showT(ok?"KOT printed ✓":"BT print failed",ok?"ok":"warn");
-              },
-              style:{padding:"10px",background:"#E65100",
-                border:"none",borderRadius:8,color:"#fff",
-                fontWeight:700,fontSize:11,cursor:"pointer"}},
-              "📡 BT KOT"),
-            h("button",{onClick:()=>printReceipt(ord,curBranch.full,companySettings),
-              style:{padding:"9px",background:"#fff",border:"1px solid "+C.border,
-                borderRadius:8,color:C.text,fontWeight:600,fontSize:10,cursor:"pointer"}},
-              "🖨️ Receipt (browser)"),
+              "📡 BT Print"),
             h("button",{onClick:()=>printKOT(ord,curBranch.full,companySettings),
-              style:{padding:"9px",background:"#fff",border:"1px solid "+C.border,
-                borderRadius:8,color:C.text,fontWeight:600,fontSize:10,cursor:"pointer"}},
-              "🍳 KOT (browser)"),
-            h("button",{
-              onClick:async function(){
-                var ok=await btKickDrawer(companySettings);
-                showT(ok?"Drawer opened ✓":"Drawer failed — check RJ11 cable",ok?"ok":"warn");
-              },
-              style:{gridColumn:"1/-1",padding:"9px",background:"#fff",
-                border:"2px solid #2E7D32",borderRadius:8,color:"#2E7D32",
-                fontWeight:700,fontSize:11,cursor:"pointer"}},
-              "💵 Open Drawer"),
+              style:{padding:"10px",background:"linear-gradient(135deg,#E65100,#BF360C)",
+                border:"none",borderRadius:8,color:"#fff",fontWeight:700,fontSize:11,cursor:"pointer"}},
+              "🍳 KOT"),
+            h("button",{onClick:()=>{printReceipt(ord,curBranch.full,companySettings);printKOT(ord,curBranch.full,companySettings);},
+              style:{padding:"9px",background:C.success,
+                border:"none",borderRadius:8,color:"#fff",fontWeight:700,fontSize:10,cursor:"pointer"}},
+              "🖨️ Both"),
             h("button",{onClick:()=>setCurOrd(null),
-              style:{gridColumn:"1/-1",padding:"9px",background:C.bg,border:"1px solid "+C.border,
+              style:{padding:"9px",background:C.bg,border:"1px solid "+C.border,
                 borderRadius:8,color:C.text,fontWeight:700,fontSize:11,cursor:"pointer"}},
               "Close"),
             h("div",{style:{gridColumn:"1/-1",display:"flex",gap:6}},
@@ -10171,7 +8780,7 @@ function App(){
           h("div",{style:{display:"flex",gap:9,marginBottom:12}},
             h(Stat,{label:"Total Items",value:inventory.length,icon:"📦",color:C.info}),
             h(Stat,{label:"Low Stock",value:inventory.filter(i=>(i.stock||0)<(i.minStock||0)).length,sub:"Below min level",icon:"⚠️",color:C.danger}),
-            h(Stat,{label:"Inv. Value",value:"₱"+inventory.reduce((s,i)=>s+(i.stock||0)*(i.cost||0),0).toLocaleString("en-PH",{minimumFractionDigits:2,maximumFractionDigits:2}),icon:"💰",color:C.success})
+            h(Stat,{label:"Inv. Value",value:"₱"+inventory.reduce((s,i)=>s+(i.stock||0)*(i.cost||0),0).toLocaleString(),icon:"💰",color:C.success})
           ),
           h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
             h("div",{style:{display:"grid",gridTemplateColumns:"2fr 90px 80px 80px 80px 70px 110px",padding:"8px 14px",borderBottom:"1px solid #f0f0f0",background:"#f9f9f9"}},
@@ -10181,10 +8790,7 @@ function App(){
               const low=(item.stock||0)<(item.minStock||0);
               return h("div",{key:item.id,style:{display:"grid",gridTemplateColumns:"2fr 90px 80px 80px 80px 70px 110px",padding:"9px 14px",borderBottom:"1px solid #f9f9f9",alignItems:"center",background:low?"#FFF8F8":"#fff"}},
                 h("div",{style:{fontWeight:600,fontSize:11,display:"flex",alignItems:"center",gap:5}},low&&h("span",null,"⚠️"),item.name),
-                h("div",null,
-                  h("span",{style:{background:C.info,color:"#fff",fontSize:8,padding:"2px 7px",borderRadius:20,fontWeight:700}},(item.stock||0).toLocaleString()+" "+(item.unit||"")),
-                  packSizeOf(item)>0&&h("div",{style:{fontSize:8,color:C.muted,marginTop:2}},fmtPacks(item))
-                ),
+                h("div",null,h("span",{style:{background:C.info,color:"#fff",fontSize:8,padding:"2px 7px",borderRadius:20,fontWeight:700}},(item.stock||0).toLocaleString()+" "+(item.unit||""))),
                 h("div",{style:{fontSize:10}},"₱"+(item.price||0).toFixed(2)),
                 h("div",{style:{fontSize:10}},"₱"+(item.cost||0).toFixed(2)),
                 h("div",{style:{fontSize:10,color:C.success,fontWeight:700}},(item.margin||0)+"%"),
@@ -10298,52 +8904,29 @@ function App(){
                     const sign=isSet?"→":isAdd?"+":"-";
                     const val=isSet?String(log.newStock||0):
                       String(Math.abs(log.amount||0));
-                    const SRC={sales:{l:"SALES",c:"#C62828",b:"#FFEBEE"},
-                               void:{l:"VOID",c:"#E65100",b:"#FFF3E0"},
-                               transfer:{l:"TRANSFER",c:"#1565C0",b:"#E3F2FD"}};
-                    const src=SRC[log.source]||null;
-                    const when=(function(){
-                      const t=log.at&&log.at.toDate?log.at.toDate()
-                        :(log.timestamp&&log.timestamp.toDate?log.timestamp.toDate():null);
-                      return t?t.toLocaleString("en-PH",{month:"short",day:"numeric",
-                        hour:"2-digit",minute:"2-digit"}):"";
-                    })();
-                    const hasBA=log.prevStock!=null&&log.newStock!=null;
                     return h("div",{key:log._docId||String(ix),
-                      style:{padding:"9px 14px",borderBottom:"1px solid #f5f5f5",
+                      style:{padding:"8px 14px",borderBottom:"1px solid #f5f5f5",
                         borderLeft:"3px solid "+col}},
                       h("div",{style:{display:"flex",justifyContent:"space-between",
-                        alignItems:"center",marginBottom:3,gap:6}},
-                        h("div",{style:{flex:1,minWidth:0,display:"flex",
-                          alignItems:"center",gap:5,flexWrap:"wrap"}},
-                          h("span",{style:{fontSize:11,fontWeight:700,color:C.text}},
-                            log.itemName||""),
-                          src&&h("span",{style:{fontSize:7,fontWeight:800,padding:"1px 5px",
-                            borderRadius:20,background:src.b,color:src.c}},src.l),
-                          log.ref&&h("span",{style:{fontSize:8,color:C.muted}},"#"+log.ref)
-                        ),
-                        h("div",{style:{fontSize:13,fontWeight:900,color:col,flexShrink:0}},
+                        alignItems:"center",marginBottom:2}},
+                        h("div",{style:{fontSize:11,fontWeight:700,color:C.text,
+                          flex:1,marginRight:6,overflow:"hidden",
+                          textOverflow:"ellipsis",whiteSpace:"nowrap"}},
+                          log.itemName||""),
+                        h("div",{style:{fontSize:13,fontWeight:900,color:col,
+                          flexShrink:0}},
                           sign+" "+val+" "+(log.unit||""))
                       ),
-                      // before -> after is what makes the log reconcilable
-                      hasBA&&h("div",{style:{display:"flex",alignItems:"center",gap:6,
-                        background:"#FAFAFA",borderRadius:6,padding:"3px 7px",marginBottom:3}},
-                        h("span",{style:{fontSize:10,color:C.muted}},
-                          Number(log.prevStock).toLocaleString("en-PH")+" "+(log.unit||"")),
-                        h("span",{style:{fontSize:10,color:col,fontWeight:900}},"→"),
-                        h("span",{style:{fontSize:10,fontWeight:800,color:C.text}},
-                          Number(log.newStock).toLocaleString("en-PH")+" "+(log.unit||"")),
-                        log.convFactor&&log.convFactor!==1&&h("span",{style:{fontSize:8,
-                          color:C.muted,marginLeft:"auto"}},"conv ÷"+log.convFactor)
+                      h("div",{style:{display:"flex",justifyContent:"space-between"}},
+                        h("span",{style:{fontSize:9,color:C.muted}},
+                          log.reason||"Adjustment"),
+                        h("span",{style:{fontSize:9,color:C.muted}},
+                          log.by||"")
                       ),
-                      h("div",{style:{fontSize:9,color:C.muted,marginBottom:2}},
-                        log.desc||log.reason||"Adjustment"),
-                      h("div",{style:{display:"flex",justifyContent:"space-between",
-                        fontSize:8,color:"#bbb"}},
-                        h("span",null,(log.by?"ni "+log.by:"")
-                          +(log.invCol?" · "+log.invCol:"")),
-                        h("span",null,when)
-                      )
+                      h("div",{style:{fontSize:8,color:"#ccc",marginTop:1}},
+                        log.prevStock!=null&&log.newStock!=null
+                          ? String(log.prevStock)+" → "+String(log.newStock)+" "+(log.unit||"")
+                          : "")
                     );
                   })
             )
@@ -10414,7 +8997,7 @@ function App(){
           h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:12}},
             h(Stat,{label:"Gross Sales",value:"₱"+orders.reduce((s,o)=>s+(o.subtotal||0),0).toFixed(2),icon:"💰",color:C.primary}),
             h(Stat,{label:"Total Discounts",value:"₱"+orders.reduce((s,o)=>s+(o.discAmt||0),0).toFixed(2),icon:"🏷️",color:C.danger}),
-            h(Stat,{label:"Net Sales",value:"₱"+orders.filter(o=>o.status!=="void"&&o.status!=="cancelled").reduce((s,o)=>s+(o.total||0),0).toFixed(2),icon:"📈",color:C.success})
+            h(Stat,{label:"Net Sales",value:"₱"+orders.reduce((s,o)=>s+(o.total||0),0).toFixed(2),icon:"📈",color:C.success})
           ),
           h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
             h("div",{style:{background:"#fff",borderRadius:12,padding:"13px 15px",border:"1px solid "+C.border}},
@@ -11683,57 +10266,7 @@ function App(){
 
     // ITEM CUSTOMIZER MODAL - always rendered
     h("div",{style:{display:customizing?"block":"none"}},
-      customizing&&h(ItemCustomizer,{item:customizing,onAdd:addToCart,onClose:()=>setCustomizing(null),optionGroups:optGroups,priceType,userRole:user.role,
-        bomCheck:{bomShort,choiceBomRows,itemBomRows}})
-    ),
-
-    // HELD ORDERS - always rendered, hidden when closed
-    h("div",{style:{position:"fixed",inset:0,zIndex:885,
-      display:showHeld?"flex":"none",
-      background:"rgba(0,0,0,.55)",alignItems:"center",justifyContent:"center",padding:16},
-      onClick:e=>e.target===e.currentTarget&&setShowHeld(false)},
-      h("div",{style:{background:"#fff",width:"100%",maxWidth:420,maxHeight:"80vh",
-        borderRadius:16,display:"flex",flexDirection:"column",overflow:"hidden"}},
-        h("div",{style:{padding:"13px 16px",borderBottom:"1px solid "+C.border,
-          display:"flex",justifyContent:"space-between",alignItems:"center"}},
-          h("b",{style:{fontSize:14}},"⏸ Held Orders ("+heldOrders.length+")"),
-          h("button",{onClick:()=>setShowHeld(false),
-            style:{width:26,height:26,borderRadius:"50%",background:C.bg,border:"none",
-              fontSize:16,cursor:"pointer"}},"×")
-        ),
-        h("div",{style:{flex:1,overflowY:"auto",padding:"10px 14px"}},
-          heldOrders.length===0
-            ?h("div",{style:{textAlign:"center",padding:"34px 12px",color:C.muted}},
-              h("div",{style:{fontSize:34,marginBottom:8}},"⏸"),
-              h("div",{style:{fontSize:11}},"Walang naka-hold na order"),
-              h("div",{style:{fontSize:10,marginTop:5}},
-                "I-tap ang ⏸ Hold Order sa checkout para i-park ang order"))
-            :heldOrders
-              .slice()
-              .sort((a,b)=>String(b.heldAtLocal||"").localeCompare(String(a.heldAtLocal||"")))
-              .map(hd=>h("div",{key:hd._docId,
-                style:{background:C.bg,borderRadius:10,padding:"10px 12px",marginBottom:8}},
-                h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:4}},
-                  h("b",{style:{fontSize:12}},hd.label||"(walang pangalan)"),
-                  h("span",{style:{fontSize:11,fontWeight:900,color:C.primary}},
-                    "₱"+(hd.total||0).toFixed(2))
-                ),
-                h("div",{style:{fontSize:9,color:C.muted,marginBottom:6}},
-                  (hd.count||0)+" item/s · "+(hd.ctx&&hd.ctx.type||"dine-in")+
-                  " · "+(hd.heldBy||"")+" · "+(hd.heldAtLocal||"")),
-                h("div",{style:{fontSize:9,color:C.muted,marginBottom:8}},
-                  (hd.cart||[]).map(c=>c.qty+"x "+c.name).join(", ")),
-                h("div",{style:{display:"grid",gridTemplateColumns:"2fr 1fr",gap:6}},
-                  h("button",{onClick:()=>resumeHeld(hd),
-                    style:{padding:"8px",background:C.primary,border:"none",borderRadius:8,
-                      color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}},"▶ Resume"),
-                  h("button",{onClick:()=>discardHeld(hd),
-                    style:{padding:"8px",background:"#fff",border:"1px solid "+C.border,
-                      borderRadius:8,color:C.danger,fontWeight:700,fontSize:11,cursor:"pointer"}},"🗑")
-                )
-              ))
-        )
-      )
+      customizing&&h(ItemCustomizer,{item:customizing,onAdd:addToCart,onClose:()=>setCustomizing(null),optionGroups:optGroups,priceType,userRole:user.role})
     ),
 
     // CART SIDEBAR - always rendered
@@ -11744,15 +10277,7 @@ function App(){
       h("div",{style:{background:"#fff",width:320,display:"flex",flexDirection:"column",boxShadow:"-8px 0 40px rgba(0,0,0,.15)"}},
         h("div",{style:{padding:"13px 15px 10px",borderBottom:"1px solid "+C.border,display:"flex",justifyContent:"space-between"}},
           h("b",{style:{fontSize:13}},"🛒 Order ("+cartCount+")"),
-          h("div",{style:{display:"flex",gap:6,alignItems:"center"}},
-            h("button",{onClick:()=>setShowHeld(true),
-              style:{padding:"4px 9px",borderRadius:20,fontSize:10,fontWeight:700,cursor:"pointer",
-                border:"1px solid "+(heldOrders.length?"#E65100":C.border),
-                background:heldOrders.length?"#FFF3E0":"#fff",
-                color:heldOrders.length?"#E65100":C.muted}},
-              "⏸ Held ("+heldOrders.length+")"),
-            h("button",{onClick:()=>setCartOpen(false),style:{width:26,height:26,borderRadius:"50%",background:C.bg,border:"none",fontSize:16,cursor:"pointer"}},"×")
-          )
+          h("button",{onClick:()=>setCartOpen(false),style:{width:26,height:26,borderRadius:"50%",background:C.bg,border:"none",fontSize:16,cursor:"pointer"}},"×")
         ),
         h("div",{style:{flex:1,overflowY:"auto",padding:"8px 14px"}},
           !cart.length
@@ -11767,9 +10292,7 @@ function App(){
                   ),
                   item.variant&&h("div",{style:{fontSize:9,color:C.muted}},"📦 "+item.variant),
                   item.options?.length>0&&h("div",{style:{fontSize:9,color:C.muted}},"✓ "+item.options.join(" · ")),
-                  (item.freebies||[]).map((f,fi)=>h("div",{key:fi,style:{fontSize:9,color:"#2E7D32",fontWeight:700}},
-                    "▸ "+f.label+" ×"+f.qty)),
-                  item.isBogo&&(item.freebies||[]).length===0&&h("div",{style:{fontSize:9,color:"#FF4B2B",fontWeight:700}},"BOGO – "+((item.qty||1)*2)+" items"),
+                  item.isBogo&&h("div",{style:{fontSize:9,color:"#FF4B2B",fontWeight:700}},"🎉 BOGO – 1 FREE!"),
                   item.note&&h("div",{style:{fontSize:9,color:C.muted,fontStyle:"italic"}},'"'+item.note+'"')
                 )
               ),
@@ -11873,10 +10396,10 @@ function App(){
 
     // MODALS + TOAST - always rendered, display:none when inactive
     h("div",{style:{display:modal==="checkout"?"block":"none"}},
-      CheckoutModal()
+      h(CheckoutModal,null)
     ),
     h("div",{style:{display:modal==="receipt"&&curOrd?"block":"none"}},
-      curOrd&&ReceiptModal({ord:curOrd})
+      curOrd&&h(ReceiptModal,{ord:curOrd})
     ),
     h("div",{style:{display:toast?"block":"none"}},
       toast&&h(Toast,{msg:toast.msg,type:toast.type,onDone:()=>setToast(null)})
