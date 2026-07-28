@@ -3889,6 +3889,32 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
           style:{background:"none",border:"none",color:C.danger,fontSize:16,cursor:"pointer",lineHeight:1}},
           "×")
       ),
+      // Same unit on both sides but CONV != 1 divides the recipe amount for no
+      // reason — the money still looks right, only the quantity is wrong.
+      (!mismatch&&row.ingId&&factor!==1)&&h("div",{style:{background:"#FFEBEE",
+        border:"1px solid #FFCDD2",borderRadius:6,padding:"5px 8px",marginTop:3,
+        display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}},
+        h("div",{style:{flex:1,minWidth:180,fontSize:9,color:C.danger,fontWeight:700}},
+          "⚠️ Parehong "+baseU+" ang recipe at stock, pero CONV = "+factor+
+          " — "+(row.qty||0)+" "+baseU+" ay nagiging "+actualDeduct.toFixed(3).replace(/\.?0+$/,"")+
+          " "+baseU+" lang. Dapat 1."),
+        h("button",{
+          onClick:()=>{const u=[...rows];u[i]={...u[i],convFactor:1};setRows(u);},
+          style:{padding:"4px 9px",borderRadius:6,border:"none",background:C.danger,
+            color:"#fff",fontSize:9,fontWeight:800,cursor:"pointer"}},
+          "Ibalik sa 1")
+      ),
+      // Cost basis is the other half people get wrong: a pack price entered as
+      // a per-piece cost inflates every recipe by the pack size.
+      (row.ingId&&pSz>0&&(ing.cost||0)>0)&&h("div",{style:{background:"#E3F2FD",
+        borderRadius:6,padding:"5px 8px",marginTop:3,fontSize:9,color:"#1565C0"}},
+        h("b",null,"Cost check: "),
+        "₱"+(ing.cost||0).toFixed(2)+" kada "+baseU+
+        "  →  ₱"+((ing.cost||0)*pSz).toFixed(2)+" kada "+pU+" ("+pSz+" "+baseU+")",
+        h("div",{style:{marginTop:2}},
+          "Kung hindi ito ang bayad mo kada "+pU+", ang naka-set na cost ay presyo ng buong "+pU+
+          " — dapat ₱"+(((ing.cost||0)/pSz).toFixed(2))+" kada "+baseU+".")
+      ),
       // Stock is held in the ingredient's base unit. A recipe written in any
       // other unit silently deducts the wrong amount unless CONV is set by hand.
       mismatch&&h("div",{style:{background:usesPack?"#FFF8E1":"#FFEBEE",
@@ -5711,13 +5737,13 @@ function StockEditModal({item,db,user,branchId,showT,onClose,boms=[]}){
         ),
         h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}},
           h("div",null,
-            h("div",{style:{fontSize:9,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},"SELL PRICE (₱)"),
+            h("div",{style:{fontSize:9,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},"SELL PRICE — BRANCH PAYS (₱/"+(details.unit||"pc")+")"),
             h("input",{type:"number",value:details.price,
               onChange:e=>setDetails(p=>({...p,price:e.target.value})),
               style:{width:"100%",padding:"8px",border:"1px solid #ddd",borderRadius:7,fontSize:13,fontWeight:700,outline:"none",boxSizing:"border-box",color:"#1565C0"}})
           ),
           h("div",null,
-            h("div",{style:{fontSize:9,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},"COST PRICE (₱)"),
+            h("div",{style:{fontSize:9,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},"COST — USED BY BOM (₱/"+(details.unit||"pc")+")"),
             h("input",{type:"number",value:details.cost,
               onChange:e=>setDetails(p=>({...p,cost:e.target.value})),
               style:{width:"100%",padding:"8px",border:"1px solid #ddd",borderRadius:7,fontSize:13,fontWeight:700,outline:"none",boxSizing:"border-box",color:"#C62828"}})
@@ -5792,6 +5818,23 @@ function StockEditModal({item,db,user,branchId,showT,onClose,boms=[]}){
               "i-set mo ang tamang bilang sa Adjust Stock pagkatapos mag-save."))
         ),
         // Margin preview
+        // Both prices are per BASE unit. Entering a pack price here inflates
+        // every downstream figure by the pack size, so show the per-pack value.
+        packSizeOf(item)>0&&h("div",{style:{background:"#E3F2FD",borderRadius:8,
+          padding:"8px 10px",marginBottom:12,fontSize:10,color:"#1565C0"}},
+          h("div",{style:{fontWeight:800,marginBottom:3}},"Per "+packUnitOf(item)+" ("+packSizeOf(item)+" "+(details.unit||"pc")+")"),
+          h("div",null,"Sell: ₱"+((parseFloat(details.price)||0)*packSizeOf(item)).toFixed(2)
+            +"   ·   Cost: ₱"+((parseFloat(details.cost)||0)*packSizeOf(item)).toFixed(2)),
+          h("div",{style:{marginTop:3,color:"#555"}},
+            "Kung hindi ito ang aktwal na presyo kada "+packUnitOf(item)+
+            ", ang inilagay mo ay presyo ng buong "+packUnitOf(item)+" — hatiin sa "+packSizeOf(item)+".")
+        ),
+        (parseFloat(details.cost)||0)>(parseFloat(details.price)||0)&&(parseFloat(details.price)||0)>0
+          &&h("div",{style:{background:"#FFEBEE",border:"1px solid #FFCDD2",borderRadius:8,
+            padding:"8px 10px",marginBottom:12,fontSize:10,color:"#C62828",fontWeight:700}},
+            "⚠️ Mas mataas ang cost (₱"+(parseFloat(details.cost)||0).toFixed(2)+
+            ") kaysa sell price (₱"+(parseFloat(details.price)||0).toFixed(2)+
+            ") — magkaiba ang unit ng dalawa."),
         details.price>0&&h("div",{style:{background:"#E8F5E9",borderRadius:8,
           padding:"8px 12px",marginBottom:12,display:"flex",justifyContent:"space-between"}},
           h("span",{style:{fontSize:11,color:"#555"}},"Margin:"),
