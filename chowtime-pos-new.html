@@ -171,9 +171,9 @@ const ROLES = {
   owner:     {label:"Owner / Admin",    emoji:"\u{1F451}", color:"#C8151B",
     nav:["dashboard","branches","pos","orders","all_orders","analytics","z_reading","cash_count","expenses","cash_monitor","inventory","inv_log","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","payroll","kiosk","settings","printer"]},
   manager:   {label:"Branch Manager",   emoji:"\u{1F3EA}", color:"#007AFF",
-    nav:["branch_dash","pos","orders","analytics","z_reading","cash_count","cash_monitor","expenses","inventory","inv_log","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","bom_mgmt","payroll","kiosk","branch_settings","printer"]},
+    nav:["branch_dash","pos","orders","analytics","z_reading","cash_count","expenses","inventory","inv_log","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","bom_mgmt","payroll","kiosk","branch_settings","printer"]},
   cashier:   {label:"Cashier",          emoji:"\u{1F4B3}", color:"#34C759",
-    nav:["pos","orders","x_reading","z_reading","cash_count","cash_monitor","expenses","inventory","ca_request","loan_request","kiosk","void_request"]},
+    nav:["pos","orders","x_reading","z_reading","cash_count","expenses","inventory","ca_request","loan_request","kiosk","void_request"]},
   crew:      {label:"Crew / Kitchen",   emoji:"\u{1F9D1}\u{200D}\u{1F373}", color:"#FF9500",
     nav:["kitchen","ca_request","loan_request","kiosk","pos","orders"]},
   stockclerk:{label:"Stock Clerk",      emoji:"\u{1F4E6}", color:"#AF52DE",
@@ -1972,6 +1972,8 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
   const [saved,setSaved]     = useState(false);
   const [selDate,setSelDate] = useState(today);
   const [showHistory,setShowHistory] = useState(false);
+  const [cashEntry,setCashEntry] = useState({type:"in",desc:"",amount:""});
+  const [addingCash,setAddingCash] = useState(false);
 
   // Load today's existing count + history from Firebase
   useEffect(()=>{
@@ -2022,19 +2024,53 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
     .reduce((s,o)=>s+(o.total||0),0);
 
   const todayCash=(cashLog||[]).filter(c=>c.branch===branchId&&(c.date===today||isToday(c)));
-  const cashIn  = todayCash.filter(c=>c.type==="in")
+  const isOpeningEntry=(c)=>c.type==="in"&&/opening/i.test(c.desc||"");
+  // Opening is its own line, so it must not also count as Cash In
+  const cashIn  = todayCash.filter(c=>c.type==="in"&&!isOpeningEntry(c))
     .reduce((s,c)=>s+(Number(c.amount)||0),0);
   const cashOut = todayCash.filter(c=>c.type==="out")
     .reduce((s,c)=>s+(Number(c.amount)||0),0);
 
-  // Previous day closing → today's opening fund
+  // Opening fund, in order of authority:
+  //   1. an Opening Fund entry recorded today (what the crew actually put in)
+  //   2. yesterday's closing balance, carried over automatically
+  const loggedOpening = todayCash.filter(isOpeningEntry)
+    .reduce((s,c)=>s+(Number(c.amount)||0),0);
   const prevRecord = history.find(c=>c.date<today&&c.closingBalance!==undefined);
-  const openingFund = prevRecord?.closingBalance ?? 0;
+  const carriedOpening = prevRecord?.closingBalance ?? 0;
+  const openingFund = loggedOpening>0 ? loggedOpening : carriedOpening;
+  const openingSource = loggedOpening>0 ? "logged" : (carriedOpening>0?"carried":"none");
 
   const remittanceAmt = parseFloat(remit)||0;
   const closingBalance = totalCash - remittanceAmt;
   const expectedCash = openingFund + todaySales + cashIn - cashOut;
   const variance = totalCash - expectedCash;
+
+  // Cash movements are recorded HERE, not on the monitoring dashboard —
+  // this is the page the crew opens at shift start and shift end, and the
+  // opening fund is the first line of the count.
+  const addCashEntry = async()=>{
+    const amt=parseFloat(cashEntry.amount)||0;
+    if(!cashEntry.desc.trim()){showT("Ilagay ang description","warn");return;}
+    if(amt<=0){showT("Ilagay ang halaga","warn");return;}
+    setAddingCash(true);
+    try{
+      const now=new Date();
+      await addDoc(collection(db,"cash_log"),{
+        branch:branchId,type:cashEntry.type,
+        desc:cashEntry.desc.trim(),amount:amt,
+        date:now.toISOString().slice(0,10),
+        time:now.toLocaleTimeString("en-PH",{hour:"2-digit",minute:"2-digit"}),
+        by:user.name,timestamp:serverTimestamp(),at:serverTimestamp()
+      });
+      setCashEntry({type:"in",desc:"",amount:""});
+      showT("Cash "+(cashEntry.type==="in"?"In":"Out")+" recorded \u2713");
+    }catch(e){
+      console.error("cash entry failed:",e);
+      showT("Failed: "+String(e&&e.message||e).slice(0,70),"err");
+    }
+    setAddingCash(false);
+  };
 
   const saveCashCount = async(isClosing=false)=>{
     if(totalCash===0&&!isClosing){showT("Enter denominations first","warn");return;}
@@ -2048,6 +2084,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
         billsTotal,
         coinsTotal,
         openingFund,
+        openingSource,
         todaySales,
         cashIn,
         cashOut,
@@ -2192,7 +2229,8 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
         // Opening fund info banner
         h("div",{style:{background:openingFund>0?"#E8F5E9":"#FFF8E1",border:"1px solid "+(openingFund>0?"#A5D6A7":"#FFE082"),borderRadius:10,padding:"10px 14px",marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center"}},
           h("div",null,
-            h("div",{style:{fontSize:10,fontWeight:700,color:openingFund>0?C.success:"#795548"}},"Yesterday's Closing Balance → Today's Opening Fund"),
+            h("div",{style:{fontSize:10,fontWeight:700,color:openingFund>0?C.success:"#795548"}},
+            openingSource==="logged"?"Opening Fund (naitala ngayon)":"Yesterday's Closing Balance → Today's Opening Fund"),
             h("div",{style:{fontSize:18,fontWeight:900,color:openingFund>0?C.success:C.muted}},"₱"+openingFund.toFixed(2)),
             h("div",{style:{fontSize:9,color:C.muted}},prevRecord?"From "+prevRecord.date+" closing":"No previous record — set manually if needed")
           ),
@@ -2269,6 +2307,66 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
               h("div",{style:{color:"rgba(255,255,255,.6)",fontSize:8}},"COINS"),
               h("div",{style:{color:"#fff",fontSize:13,fontWeight:800}},"₱"+coinsTotal.toFixed(2))
             )
+          )
+        ),
+
+        // Record cash in / out
+        h("div",{style:{background:"#fff",border:"1px solid "+C.border,borderRadius:12,
+          padding:"12px 14px",marginBottom:10}},
+          h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:8}},
+            "RECORD CASH MOVEMENT"),
+          h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:8}},
+            [["in","\uD83D\uDCB0 Cash In"],["out","\uD83D\uDCB8 Cash Out"]].map(([t,l])=>
+              h("button",{key:t,onClick:()=>setCashEntry(p=>({...p,type:t,desc:""})),
+                style:{padding:"8px",borderRadius:8,fontSize:11,fontWeight:700,cursor:"pointer",
+                  border:"2px solid "+(cashEntry.type===t?(t==="in"?C.success:C.danger):C.border),
+                  background:cashEntry.type===t?(t==="in"?"#E8F5E9":"#FFEBEE"):"#fff",
+                  color:cashEntry.type===t?(t==="in"?C.success:C.danger):C.muted}},l))
+          ),
+          h("div",{style:{display:"flex",gap:5,flexWrap:"wrap",marginBottom:8}},
+            (cashEntry.type==="in"
+              ? ["Opening Fund","Change Fund","Collection"]
+              : ["Remittance","Supplies","Petty cash"]
+            ).map(lbl=>h("button",{key:lbl,
+              onClick:()=>setCashEntry(p=>({...p,desc:lbl})),
+              style:{padding:"5px 9px",borderRadius:20,fontSize:10,cursor:"pointer",
+                fontWeight:cashEntry.desc===lbl?800:500,
+                border:"1px solid "+(cashEntry.desc===lbl?C.primary:C.border),
+                background:cashEntry.desc===lbl?"#FFF0F0":"#fff",
+                color:cashEntry.desc===lbl?C.primary:C.text}},lbl))
+          ),
+          h("div",{style:{display:"flex",gap:6}},
+            h("input",{value:cashEntry.desc,
+              onChange:e=>setCashEntry(p=>({...p,desc:e.target.value})),
+              placeholder:"Description",
+              style:{flex:1,minWidth:0,padding:"8px",border:"1px solid "+C.border,
+                borderRadius:7,fontSize:11,outline:"none"}}),
+            h("input",{type:"number",value:cashEntry.amount,
+              onChange:e=>setCashEntry(p=>({...p,amount:e.target.value})),
+              onKeyDown:e=>{if(e.key==="Enter")addCashEntry();},
+              placeholder:"0.00",
+              style:{width:90,padding:"8px",border:"1px solid "+C.border,
+                borderRadius:7,fontSize:13,fontWeight:700,textAlign:"right",outline:"none"}}),
+            h("button",{onClick:addCashEntry,disabled:addingCash,
+              style:{padding:"8px 14px",borderRadius:7,border:"none",
+                background:addingCash?"#ccc":C.primary,color:"#fff",
+                fontWeight:800,fontSize:11,cursor:"pointer",flexShrink:0}},
+              addingCash?"...":"Add")
+          ),
+          cashEntry.type==="in"&&/opening/i.test(cashEntry.desc||"")&&
+            h("div",{style:{fontSize:9,color:"#1B5E20",background:"#E8F5E9",borderRadius:6,
+              padding:"5px 8px",marginTop:6,fontWeight:700}},
+              "\u2713 Bibilangin bilang Opening Fund sa Z-Reading"),
+          todayCash.length>0&&h("div",{style:{marginTop:9,paddingTop:8,
+            borderTop:"1px dashed "+C.border}},
+            h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:5}},
+              "NGAYONG ARAW ("+todayCash.length+")"),
+            todayCash.slice(0,6).map((c,ci)=>h("div",{key:c._docId||ci,
+              style:{display:"flex",justifyContent:"space-between",fontSize:10,marginBottom:2}},
+              h("span",{style:{color:C.muted}},(c.time?c.time+" · ":"")+(c.desc||"")),
+              h("span",{style:{fontWeight:700,color:c.type==="in"?C.success:C.danger}},
+                (c.type==="in"?"+":"-")+"\u20B1"+(Number(c.amount)||0).toFixed(2))
+            ))
           )
         ),
 
