@@ -5382,6 +5382,10 @@ async function rollupDay(db,branch,date,vatMode,byName){
       dayCash=cSnap.docs.map(d=>d.data()).filter(c=>c.branch===branch);
     }catch(e){}
 
+    // A day with no orders and no cash movement gets no row. An empty record
+    // is indistinguishable from a real zero-sales day and just buries the
+    // days that matter.
+    if(!dayOrders.length&&!dayCash.length)return null;
     const roll=buildDailyRollup(dayOrders,dayCash,branch,date,vatMode);
     roll.closedBy=byName||"auto";
     roll.closedAt=serverTimestamp();
@@ -11000,18 +11004,28 @@ function App(){
                   background:!zSel?"#FFF0F0":"#fff",
                   color:!zSel?C.primary:C.text}},
                 "Ngayon (live)"),
-              h("select",{value:zSel,onChange:e=>setZSel(e.target.value),
-                disabled:zHist.length===0,
-                style:{padding:"6px 10px",borderRadius:8,fontSize:10,outline:"none",
-                  cursor:zHist.length?"pointer":"default",
+              h("input",{type:"date",value:zSel,
+                max:new Date().toISOString().slice(0,10),
+                min:zHist.length?zHist[zHist.length-1].date:undefined,
+                onChange:e=>setZSel(e.target.value),
+                style:{padding:"6px 10px",borderRadius:8,fontSize:11,outline:"none",
+                  cursor:"pointer",
                   border:"1px solid "+(zSel?C.primary:C.border),
-                  background:zHist.length===0?"#f5f5f5":(zSel?"#FFF0F0":"#fff"),
-                  color:zSel?C.primary:C.text,fontWeight:zSel?700:400}},
-                h("option",{value:""},
-                  zHist.length===0?"— walang naka-save —":"— naka-save na araw ("+zHist.length+") —"),
-                zHist.map(r=>h("option",{key:r.date,value:r.date},
-                  r.date+"  ₱"+peso(r.net)+"  ("+(r.txns||0)+" txns)"))
-              ),
+                  background:zSel?"#FFF0F0":"#fff",
+                  color:zSel?C.primary:C.text,fontWeight:zSel?700:400}}),
+              // A date input cannot grey out days without data, so say so
+              // plainly rather than showing an empty reading.
+              zSel&&!saved&&h("span",{style:{fontSize:10,color:C.danger,fontWeight:700}},
+                "Walang record sa "+zSel),
+              // jump straight to the days that actually traded
+              zHist.filter(r=>(r.txns||0)>0).slice(0,4).map(r=>
+                h("button",{key:r.date,onClick:()=>setZSel(r.date),
+                  style:{padding:"5px 10px",borderRadius:20,fontSize:10,cursor:"pointer",
+                    fontWeight:zSel===r.date?800:500,
+                    border:"1px solid "+(zSel===r.date?C.primary:C.border),
+                    background:zSel===r.date?"#FFF0F0":"#fff",
+                    color:zSel===r.date?C.primary:C.text}},
+                  r.date.slice(5)+" · ₱"+peso(r.net))),
               isSaved&&h("span",{style:{fontSize:9,color:C.muted}},
                 "Naka-save "+(saved.backfilled?"(backfill)":"")+" ni "+(saved.closedBy||"?"))
             ),
@@ -11154,6 +11168,23 @@ function App(){
                     fontWeight:800,fontSize:11,
                     cursor:(bfBusy||!bfFrom)?"not-allowed":"pointer"}},
                   bfBusy?"Ginagawa...":"▶ Simulan"),
+                // Clean up the empty rows the old auto-close wrote before it
+                // learned to skip quiet days.
+                zHist.some(r=>!(r.txns||0)&&!(r.net||0))&&h("button",{
+                  onClick:async()=>{
+                    const junk=zHist.filter(r=>!(r.txns||0)&&!(r.net||0)&&!(r.cashOnHand||0));
+                    if(!junk.length)return;
+                    if(!confirm("Burahin ang "+junk.length+" blangkong record?\n"
+                      +"Walang benta at walang cash movement ang mga ito."))return;
+                    let n2=0;
+                    for(const r of junk){
+                      try{await deleteDoc(doc(db,"daily_sales",r._docId));n2++;}catch(e){}
+                    }
+                    showT(n2+" blangkong record na-delete","warn");
+                  },
+                  style:{padding:"7px 11px",borderRadius:20,fontSize:10,cursor:"pointer",
+                    border:"1px solid "+C.danger,background:"#fff",color:C.danger}},
+                  "🧹 Linisin ang blangko ("+zHist.filter(r=>!(r.txns||0)&&!(r.net||0)).length+")"),
                 [["7 araw",7],["30 araw",30],["90 araw",90]].map(([lbl,n])=>
                   h("button",{key:lbl,onClick:()=>{
                       const t=new Date();const f=new Date();f.setDate(f.getDate()-n);
