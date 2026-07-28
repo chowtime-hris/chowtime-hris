@@ -377,7 +377,25 @@ async function testPrintBT(cs,paperSize,showT){
 // ─── ESC/POS BLUETOOTH PRINTER ───────────────────────────
 var _btDevice=null, _btChar=null;
 
+var _btChunk=180;                       // adapts down if the printer rejects it
+var _btSleep=function(ms){return new Promise(function(r){setTimeout(r,ms);});};
+
+// Bind the GATT characteristic on an already-chosen device (no picker prompt).
+async function _btBind(dev){
+  var srv=await dev.gatt.connect();
+  var svc=await srv.getPrimaryService("000018f0-0000-1000-8000-00805f9b34fb");
+  _btChar=await svc.getCharacteristic("00002af1-0000-1000-8000-00805f9b34fb");
+  _btDevice=dev;
+  return true;
+}
+
 async function btConnect(){
+  // Reconnect silently if we already picked a printer this session — the
+  // cashier should not have to re-pick every time the link drops.
+  if(_btDevice){
+    try{ await _btBind(_btDevice); return true; }
+    catch(e){ console.warn("BT reconnect:",e); _btChar=null; }
+  }
   try{
     var dev=await navigator.bluetooth.requestDevice({
       filters:[{namePrefix:"Xprinter"},{namePrefix:"XP-"},
@@ -385,23 +403,49 @@ async function btConnect(){
                {namePrefix:"Printer"},{namePrefix:"BlueTooth"}],
       optionalServices:["000018f0-0000-1000-8000-00805f9b34fb"]
     });
-    var srv=await dev.gatt.connect();
-    var svc=await srv.getPrimaryService("000018f0-0000-1000-8000-00805f9b34fb");
-    _btChar=await svc.getCharacteristic("00002af1-0000-1000-8000-00805f9b34fb");
-    _btDevice=dev;
-    dev.addEventListener("gattserverdisconnected",function(){_btDevice=null;_btChar=null;});
+    await _btBind(dev);
+    dev.addEventListener("gattserverdisconnected",function(){_btChar=null;});
     return true;
   }catch(e){console.warn("BT connect:",e);return false;}
 }
 
+// Write one chunk, preferring the unacknowledged path when the printer
+// exposes it (much faster), falling back to the acknowledged write.
+async function _btWrite(slice){
+  if(_btChar.writeValueWithoutResponse){
+    try{ await _btChar.writeValueWithoutResponse(slice); return; }
+    catch(e){ /* fall through to acknowledged write */ }
+  }
+  await _btChar.writeValue(slice);
+}
+
 async function btPrint(bytes){
   if(!_btChar){var ok=await btConnect();if(!ok)return false;}
-  try{
-    for(var i=0;i<bytes.length;i+=20){
-      await _btChar.writeValue(bytes.slice(i,i+20));
+  // A receipt + KOT in one go is ~1-2KB. At the old 20-byte chunk size that is
+  // 60-100 sequential writes; cheap thermal modules drop data or truncate.
+  // Try a large chunk first and step down if the characteristic rejects it.
+  var sizes=[_btChunk,100,60,20];
+  for(var si=0;si<sizes.length;si++){
+    var size=sizes[si];
+    try{
+      for(var i=0;i<bytes.length;i+=size){
+        await _btWrite(bytes.slice(i,i+size));
+        if(!_btChar.writeValueWithoutResponse)continue;
+        await _btSleep(6);            // let the printer buffer drain
+      }
+      _btChunk=size;                  // remember what worked
+      await _btSleep(120);            // let the last bytes flush before we return
+      return true;
+    }catch(e){
+      console.warn("BT print @"+size+"B:",e);
+      if(!_btChar){                   // link died — one silent reconnect, then retry
+        var re=await btConnect();
+        if(!re)return false;
+      }
     }
-    return true;
-  }catch(e){console.warn("BT print:",e);_btChar=null;return false;}
+  }
+  _btChar=null;
+  return false;
 }
 
 function buildEscPos(ord,bName,cs,paperSize){
@@ -452,7 +496,8 @@ function buildEscPos(ord,bName,cs,paperSize){
 
   (ord.items||[]).forEach(function(i){
     a([ESC,0x45,0x01]);
-    a(ln(i.name+(ord.discScope==="items"&&i.discounted?" *":"")));
+    a(ln(i.name+(i.takeout&&ord.mixedType?" [TO-GO]":"")
+      +(ord.discScope==="items"&&i.discounted?" *":"")));
     a([ESC,0x45,0x00]);
     if(i.variant)a(ln("  ["+i.variant+"]"));
     (i.freebies||[]).forEach(function(f){a(ln("  > "+f.label+" x"+f.qty));});
@@ -525,7 +570,12 @@ function buildEscPosKOT(ord,bName,cs,paperSize){
   a(ln("Order: "+(ord.id||"-")+"   "+(ord.time||"")));
   a([ESC,0x45,0x00]);
   a(ln(bName+"   "+(ord.date||"")));
-  if(ord.orderType)a(ln("Type: "+String(ord.orderType).toUpperCase()));
+  if(ord.mixedType){
+    a([ESC,0x45,0x01]);
+    a(ln("Type: MIXED — check each item"));
+    a([ESC,0x45,0x00]);
+  }else if(ord.orderType)a(ln("Type: "+String(ord.orderType).toUpperCase()));
+  if(ord.takeoutCount)a(ln("To pack: "+ord.takeoutCount+" pcs"));
   if(ord.tableNo)a(ln("Table: "+ord.tableNo));
   if(ord.custName)a(ln("Customer: "+ord.custName));
   a(dash());
@@ -537,6 +587,12 @@ function buildEscPosKOT(ord,bName,cs,paperSize){
     a(ln(i.qty+"x "+i.name+(pTot?"  ("+pTot+" pcs)":"")));
     a([ESC,0x21,0x00]);
     a([ESC,0x45,0x00]);
+    // packing instruction has to be impossible to miss
+    if(i.takeout){
+      a([ESC,0x61,0x01]);a([ESC,0x45,0x01]);a([ESC,0x21,0x10]);
+      a(ln(">>> PACK / TAKE-OUT <<<"));
+      a([ESC,0x21,0x00]);a([ESC,0x45,0x00]);a([ESC,0x61,0x00]);
+    }
     if(i.variant)a(ln("   ["+i.variant+"]"));
     (i.freebies||[]).forEach(function(f){
       a([ESC,0x45,0x01]);
@@ -561,8 +617,42 @@ function buildEscPosKOT(ord,bName,cs,paperSize){
   return out;
 }
 
+// ── CASH DRAWER ──────────────────────────────────────────
+// ESC p m t1 t2 — pulse the drawer solenoid through the printer's RJ11 port.
+// m=0 -> pin 2 (near-universal), m=1 -> pin 5. t1/t2 are on/off pulse widths.
+// The drawer must be cabled to the PRINTER, not the tablet: the tablet has no
+// way to reach it, so this only fires on the Bluetooth path, never browser print.
+function escposKick(pin){
+  return new Uint8Array([0x1B,0x70,(pin===5?0x01:0x00),0x19,0xFA]);
+}
+
+function _cat(){
+  var arrs=Array.prototype.slice.call(arguments).filter(Boolean);
+  var n=0; arrs.forEach(function(x){n+=x.length;});
+  var out=new Uint8Array(n), off=0;
+  arrs.forEach(function(x){out.set(x,off);off+=x.length;});
+  return out;
+}
+
+// Auto-open only makes sense when cash actually changes hands.
+function shouldKick(ord,cs){
+  if(cs&&cs.autoKickDrawer===false)return false;
+  var m=String((ord&&ord.payMethod)||"cash").toLowerCase();
+  return m==="cash";
+}
+
+function kickBytes(ord,cs){
+  return shouldKick(ord,cs)?escposKick((cs&&cs.drawerPin)||2):null;
+}
+
+// Manual open — for no-sale, change fund, or a drawer that failed to pop.
+async function btKickDrawer(cs){
+  if(!_btChar){var ok=await btConnect();if(!ok)return false;}
+  return await btPrint(escposKick((cs&&cs.drawerPin)||2));
+}
+
 async function printEscPos(ord,bName,cs,paperSize){
-  var data=buildEscPos(ord,bName,cs,paperSize);
+  var data=_cat(kickBytes(ord,cs),buildEscPos(ord,bName,cs,paperSize));
   return await btPrint(data);
 }
 
@@ -575,11 +665,12 @@ async function printEscPosKOT(ord,bName,cs,paperSize){
 // Sent as a single byte stream so the connection is not dropped between
 // documents; the partial cut at the end of the receipt separates them.
 async function printEscPosBoth(ord,bName,cs,paperSize){
-  var r=buildEscPos(ord,bName,cs,paperSize);
-  var k=buildEscPosKOT(ord,bName,cs,paperSize);
-  var out=new Uint8Array(r.length+k.length);
-  out.set(r,0); out.set(k,r.length);
-  return await btPrint(out);
+  // kick first so the drawer pops while the receipt is still feeding
+  return await btPrint(_cat(
+    kickBytes(ord,cs),
+    buildEscPos(ord,bName,cs,paperSize),
+    buildEscPosKOT(ord,bName,cs,paperSize)
+  ));
 }
 
 
@@ -638,7 +729,8 @@ function printReceipt(ord, branchName, companySettings, paperSize){
   (ord.items||[]).map(function(i){
     var price=i.lineTotal&&i.qty?(i.lineTotal/i.qty):(i.unitPrice||i.price||0);
     var total=i.lineTotal||(price*(i.qty||1));
-    var mark=(ord.discScope==="items"&&i.discounted)?" *":"";
+    var mark=(i.takeout&&ord.mixedType?" [TO-GO]":"")
+      +((ord.discScope==="items"&&i.discounted)?" *":"");
     var name=i.name+(i.variant?" ["+i.variant+"]":"")+(i.options&&i.options.length?" ("+i.options.join(", ")+")":"")+mark;
     var picks=(i.freebies&&i.freebies.length)
       ?i.freebies.map(function(f){
@@ -713,6 +805,9 @@ function printKOT(ord, branchName, companySettings, paperSize){
   "<div class='row b'><span>Order: "+ord.id+"</span><span>"+ord.time+"</span></div>"+
   "<div class='row'><span>"+branchName+"</span><span>"+ord.date+"</span></div>"+
   (ord.custName?"<div class='row b'><span>Customer: "+ord.custName+"</span></div>":"")+
+  (ord.mixedType?"<div class='row b'><span>Type: MIXED &mdash; check each item</span></div>"
+    :(ord.orderType?"<div class='row'><span>Type: "+String(ord.orderType).toUpperCase()+"</span></div>":""))+
+  (ord.takeoutCount?"<div class='row'><span>To pack: "+ord.takeoutCount+" pcs</span></div>":"")+
   "<div class='hr'></div>"+
   // ITEMS - big and bold for kitchen
   (ord.items||[]).map(function(i,ix){
@@ -726,6 +821,7 @@ function printKOT(ord, branchName, companySettings, paperSize){
     return "<div style='margin-bottom:8px;border-bottom:1px dotted #000;padding-bottom:4px'>"+
       "<div class='row'><span class='item'>"+i.qty+"x "+i.name+
         (pTot?" <span style=\'font-size:11px;font-weight:700\'>("+pTot+" pcs)</span>":"")+"</span></div>"+
+      (i.takeout?"<div style='text-align:center;font-size:15px;font-weight:900;border:2px solid #000;margin:3px 0;padding:2px'>&gt;&gt;&gt; PACK / TAKE-OUT &lt;&lt;&lt;</div>":"")+
       (vLine?"<div style='font-size:12px;font-weight:700;padding-left:12px'>"+vLine+"</div>":"")+
       (pLine?"<div style='font-size:14px;font-weight:900;padding-left:12px;margin:3px 0'>"+pLine+"</div>":"")+
       (oLine?"<div style='font-size:11px;padding-left:12px'>"+oLine+"</div>":"")+
@@ -7197,6 +7293,9 @@ function App(){
   const [chkDiscId,setChkDiscId]=useState("");
   const [chkDiscPct,setChkDiscPct]=useState("");      // for Custom %
   const [chkDiscTargets,setChkDiscTargets]=useState([]); // cartIds; empty = whole order
+  const [chkToTargets,setChkToTargets]=useState([]);     // cartIds that are take-out
+  const [heldOrders,setHeldOrders]=useState([]);         // parked / on-hold carts
+  const [showHeld,setShowHeld]=useState(false);
   const [chkCust,setChkCust]=useState("");
   const [chkTable,setChkTable]=useState("");
   const [chkType,setChkType]=useState("dine-in");
@@ -7302,6 +7401,14 @@ function App(){
         ?query(collection(db,"cash_log"),orderBy("timestamp","desc"),limit(100))
         :query(collection(db,"cash_log"),where("branch","==",bId),orderBy("timestamp","desc"),limit(50));
       unsubs.push(onSnapshot(cq,snap=>setCashLog(snap.docs.map(d=>({...d.data(),_docId:d.id}))),()=>{}));
+    }catch(e){}
+
+    // Held (parked) orders for this branch
+    try{
+      unsubs.push(onSnapshot(
+        query(collection(db,"held_orders"),where("branch","==",bId)),
+        snap=>setHeldOrders(snap.docs.map(d=>({...d.data(),_docId:d.id}))),
+        ()=>{}));
     }catch(e){}
 
     // Advances + POs
@@ -7579,6 +7686,12 @@ function App(){
     :cart.filter(i=>discTargets.includes(i.cartId)).reduce((s,i)=>s+lineAmt(i),0);
   const chkDiscAmt=Math.round(chkDiscBase*discRate*100)/100;
   const chkTotal=chkSub-chkDiscAmt;
+  // Take-out can apply to the whole order (follows ORDER TYPE) or to chosen lines.
+  const toTargets=(chkToTargets||[]).filter(cid=>cart.some(i=>i.cartId===cid));
+  const toAll=toTargets.length===0;
+  const isTO=(i)=>toAll?(chkType!=="dine-in"):toTargets.includes(i.cartId);
+  const mixedType=!toAll&&cart.length>0
+    &&!cart.every(isTO)&&!cart.every(i=>!isTO(i));
   const myOrders=user?.role==="owner"?orders:orders.filter(o=>o.branch===branchId);
   const menuWithOverrides=[
     // Main menu items with branch overrides
@@ -7624,6 +7737,55 @@ function App(){
     return Object.assign({},i,{qty:q,freebies:fr,lineTotal:(i.unitPrice||0)*q+freeAdd});
   }));
 
+  // ── HOLD / PARK A TRANSACTION ────────────────────────────
+  // Keeps the whole checkout context, not just the cart, so resuming lands the
+  // cashier exactly where they left off (discount scope, take-out picks, etc).
+  const holdOrder=async(label)=>{
+    if(!cart.length){showT("Walang laman ang cart","warn");return;}
+    try{
+      await addDoc(collection(db,"held_orders"),{
+        branch:branchId,
+        label:(label||chkCust||chkTable||"").trim(),
+        cart:cart,
+        ctx:{type:chkType,cust:chkCust,table:chkTable,pay:chkPay,
+             discId:chkDisc.id,discPct:chkDiscPct,discIdNo:chkDiscId,
+             discTargets:chkDiscTargets,toTargets:chkToTargets},
+        count:cartCount,total:chkTotal,
+        heldBy:user.name,heldAt:serverTimestamp(),
+        heldAtLocal:new Date().toLocaleTimeString("en-PH",{hour:"2-digit",minute:"2-digit"})
+      });
+      setCart([]);setChkCash("");setChkCust("");setChkTable("");
+      setChkDiscTargets([]);setChkToTargets([]);setChkDiscPct("");
+      setModal(null);setCartOpen(false);
+      showT("Naka-hold ✓ — nasa ⏸ Held");
+    }catch(e){showT("Hold failed","err");}
+  };
+
+  const resumeHeld=async(hd)=>{
+    if(cart.length&&!confirm("May laman pa ang cart. Palitan ito ng naka-hold na order?"))return;
+    try{
+      setCart(hd.cart||[]);
+      const c=hd.ctx||{};
+      setChkType(c.type||"dine-in");
+      setChkCust(c.cust||"");setChkTable(c.table||"");
+      if(c.pay)setChkPay(c.pay);
+      setChkDisc(DISCS.find(d=>d.id===c.discId)||DISCS[0]);
+      setChkDiscPct(c.discPct||"");setChkDiscId(c.discIdNo||"");
+      setChkDiscTargets(c.discTargets||[]);setChkToTargets(c.toTargets||[]);
+      await deleteDoc(doc(db,"held_orders",hd._docId));
+      setShowHeld(false);setCartOpen(true);
+      showT("Resumed ✓");
+    }catch(e){showT("Resume failed","err");}
+  };
+
+  const discardHeld=async(hd)=>{
+    if(!confirm("Burahin ang naka-hold na order na ito?"))return;
+    try{
+      await deleteDoc(doc(db,"held_orders",hd._docId));
+      showT("Held order deleted","warn");
+    }catch(e){showT("Delete failed","err");}
+  };
+
   // ── PLACE ORDER (Firebase) ───────────────────────────────
   const placeOrder=async()=>{
     // Sequential order number per branch — starts at 01
@@ -7642,6 +7804,7 @@ function App(){
         variant:i.variant||"",options:i.options||[],
         freebies:i.freebies||[],optionRefs:i.optionRefs||[],freePerUnit:i.freePerUnit||0,
         discounted:discAll?discRate>0:discTargets.includes(i.cartId),
+        takeout:isTO(i),
         unitPrice:getPriceByType(i),
         lineTotal:getPriceByType(i)*(i.qty||1)
           +(i.freebies||[]).reduce((a,f)=>a+((f.priceAdd||0)*(f.qty||0)),0),
@@ -7652,7 +7815,9 @@ function App(){
       discItems:discAll?[]:cart.filter(i=>discTargets.includes(i.cartId)).map(i=>i.name),
       discId:chkDiscId,custName:chkCust,tableNo:chkTable,
       cash:chkCash,total:chkTotal,time:now,date:new Date().toISOString().slice(0,10),
-      status:"pending",orderType:chkType,payMethod:chkPay,priceType,cashier:user.name,
+      status:"pending",orderType:chkType,mixedType:mixedType,
+      takeoutCount:cart.filter(isTO).reduce((a,i)=>a+(i.qty||1),0),
+      payMethod:chkPay,priceType,cashier:user.name,
       bomDeducted:false,
       timestamp:serverTimestamp()
     };
@@ -7974,7 +8139,41 @@ function App(){
           h("div",{style:{fontSize:9,fontWeight:800,color:C.muted,letterSpacing:1,marginBottom:6}},"ORDER TYPE"),
           h("div",{style:{display:"flex",gap:6}},
             [["dine-in","🪑 Dine-in"],["takeout","📦 Takeout"],["delivery","🛵 Delivery"]].map(([t,l])=>
-              h("button",{key:t,onClick:()=>setChkType(t),style:{flex:1,padding:"8px 0",borderRadius:9,border:`2px solid ${chkType===t?C.primary:C.border}`,background:chkType===t?"#FFF0F0":"#fff",color:chkType===t?C.primary:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}},l)
+              h("button",{key:t,onClick:()=>{setChkType(t);setChkToTargets([]);},style:{flex:1,padding:"8px 0",borderRadius:9,border:`2px solid ${chkType===t?C.primary:C.border}`,background:chkType===t?"#FFF0F0":"#fff",color:chkType===t?C.primary:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}},l)
+            )
+          ),
+          // Which lines are take-out
+          cart.length>1&&h("div",{style:{marginTop:7}},
+            h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5}},
+              h("button",{onClick:()=>setChkToTargets([]),
+                style:{padding:"7px 9px",borderRadius:8,fontSize:10,fontWeight:600,cursor:"pointer",
+                  border:"2px solid "+(toAll?C.primary:C.border),
+                  background:toAll?"#FFF0F0":"#fff",color:toAll?C.primary:C.text}},
+                "Lahat: "+(chkType==="dine-in"?"dine-in":"take-out")),
+              h("button",{onClick:()=>{if(toAll&&cart.length)setChkToTargets([cart[0].cartId]);},
+                style:{padding:"7px 9px",borderRadius:8,fontSize:10,fontWeight:600,cursor:"pointer",
+                  border:"2px solid "+(!toAll?C.primary:C.border),
+                  background:!toAll?"#FFF0F0":"#fff",color:!toAll?C.primary:C.text}},
+                "📦 Piling item lang")
+            ),
+            !toAll&&h("div",{style:{background:C.bg,borderRadius:8,padding:"7px 9px",marginTop:5}},
+              h("div",{style:{fontSize:9,color:C.muted,marginBottom:4}},
+                "Naka-check = i-pack. Hindi naka-check = dine-in."),
+              cart.map(function(i){
+                const on=toTargets.includes(i.cartId);
+                return h("button",{key:i.cartId,
+                  onClick:()=>setChkToTargets(p=>on?p.filter(x=>x!==i.cartId):[...p,i.cartId]),
+                  style:{display:"flex",width:"100%",gap:8,alignItems:"center",padding:"5px 2px",
+                    background:"none",border:"none",cursor:"pointer",textAlign:"left"}},
+                  h("div",{style:{width:16,height:16,borderRadius:4,flexShrink:0,
+                    border:"2px solid "+(on?"#E65100":C.border),background:on?"#E65100":"#fff",
+                    display:"flex",alignItems:"center",justifyContent:"center"}},
+                    on&&h("span",{style:{color:"#fff",fontSize:9,fontWeight:900}},"✓")),
+                  h("span",{style:{flex:1,fontSize:10,fontWeight:on?700:400}},i.qty+"x "+i.name),
+                  h("span",{style:{fontSize:9,fontWeight:700,color:on?"#E65100":C.muted}},
+                    on?"📦 PACK":"🪑 dine-in")
+                );
+              })
             )
           )
         ),
@@ -8154,18 +8353,24 @@ function App(){
             fontSize:12,fontWeight:700,cursor:"pointer"}},
           "💵 Exact Amount — ₱"+chkTotal.toFixed(2)),
 
-        // Void/Cancel transaction
-        h("button",{
-          onClick:()=>{
-            if(!confirm("Cancel this transaction?"))return;
-            setCart([]);setChkCash("");setModal(null);
-            showT("Transaction cancelled","warn");
-          },
-          style:{width:"100%",padding:"9px",marginBottom:8,
-            background:"#FFEBEE",border:"1px solid #FFCDD2",
-            borderRadius:8,color:C.danger,
-            fontSize:12,fontWeight:700,cursor:"pointer"}},
-          "🚫 Cancel Transaction"),
+        // Hold vs cancel — same row so the safe option is as easy to reach
+        h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}},
+          h("button",{
+            onClick:()=>holdOrder(chkCust||chkTable),
+            style:{padding:"9px",background:"#FFF8E1",border:"1px solid #FFE082",
+              borderRadius:8,color:"#E65100",fontSize:12,fontWeight:700,cursor:"pointer"}},
+            "⏸ Hold Order"),
+          h("button",{
+            onClick:()=>{
+              if(!confirm("Cancel this transaction? Mawawala ang order."))return;
+              setCart([]);setChkCash("");setChkDiscTargets([]);setChkToTargets([]);
+              setModal(null);
+              showT("Transaction cancelled","warn");
+            },
+            style:{padding:"9px",background:"#FFEBEE",border:"1px solid #FFCDD2",
+              borderRadius:8,color:C.danger,fontSize:12,fontWeight:700,cursor:"pointer"}},
+            "🚫 Cancel")
+        ),
 
         // Confirm button - with payment validation
         h("button",{
@@ -8217,6 +8422,7 @@ function App(){
                 h("span",null,i.emoji+" "+i.qty+"x "+i.name),
                 h("span",null,"₱"+(i.lineTotal||0).toFixed(2))
               ),
+              i.takeout&&h("div",{style:{fontSize:9,color:"#E65100",fontWeight:800,paddingLeft:18}},"📦 TAKE-OUT"),
               i.variant&&h("div",{style:{fontSize:9,color:C.muted,paddingLeft:18}},"📦 "+i.variant),
               (i.options||[]).length>0&&h("div",{style:{fontSize:9,color:C.muted,paddingLeft:18}},"✓ "+i.options.join(", ")),
               (i.freebies||[]).map((f,fi)=>h("div",{key:fi,style:{fontSize:9,color:"#2E7D32",fontWeight:700,paddingLeft:18}},
@@ -8286,6 +8492,15 @@ function App(){
               style:{padding:"9px",background:"#fff",border:"1px solid "+C.border,
                 borderRadius:8,color:C.text,fontWeight:600,fontSize:10,cursor:"pointer"}},
               "🍳 KOT (browser)"),
+            h("button",{
+              onClick:async function(){
+                var ok=await btKickDrawer(companySettings);
+                showT(ok?"Drawer opened ✓":"Drawer failed — check RJ11 cable",ok?"ok":"warn");
+              },
+              style:{gridColumn:"1/-1",padding:"9px",background:"#fff",
+                border:"2px solid #2E7D32",borderRadius:8,color:"#2E7D32",
+                fontWeight:700,fontSize:11,cursor:"pointer"}},
+              "💵 Open Drawer"),
             h("button",{onClick:()=>setCurOrd(null),
               style:{gridColumn:"1/-1",padding:"9px",background:C.bg,border:"1px solid "+C.border,
                 borderRadius:8,color:C.text,fontWeight:700,fontSize:11,cursor:"pointer"}},
@@ -10601,6 +10816,55 @@ function App(){
       customizing&&h(ItemCustomizer,{item:customizing,onAdd:addToCart,onClose:()=>setCustomizing(null),optionGroups:optGroups,priceType,userRole:user.role})
     ),
 
+    // HELD ORDERS - always rendered, hidden when closed
+    h("div",{style:{position:"fixed",inset:0,zIndex:885,
+      display:showHeld?"flex":"none",
+      background:"rgba(0,0,0,.55)",alignItems:"center",justifyContent:"center",padding:16},
+      onClick:e=>e.target===e.currentTarget&&setShowHeld(false)},
+      h("div",{style:{background:"#fff",width:"100%",maxWidth:420,maxHeight:"80vh",
+        borderRadius:16,display:"flex",flexDirection:"column",overflow:"hidden"}},
+        h("div",{style:{padding:"13px 16px",borderBottom:"1px solid "+C.border,
+          display:"flex",justifyContent:"space-between",alignItems:"center"}},
+          h("b",{style:{fontSize:14}},"⏸ Held Orders ("+heldOrders.length+")"),
+          h("button",{onClick:()=>setShowHeld(false),
+            style:{width:26,height:26,borderRadius:"50%",background:C.bg,border:"none",
+              fontSize:16,cursor:"pointer"}},"×")
+        ),
+        h("div",{style:{flex:1,overflowY:"auto",padding:"10px 14px"}},
+          heldOrders.length===0
+            ?h("div",{style:{textAlign:"center",padding:"34px 12px",color:C.muted}},
+              h("div",{style:{fontSize:34,marginBottom:8}},"⏸"),
+              h("div",{style:{fontSize:11}},"Walang naka-hold na order"),
+              h("div",{style:{fontSize:10,marginTop:5}},
+                "I-tap ang ⏸ Hold Order sa checkout para i-park ang order"))
+            :heldOrders
+              .slice()
+              .sort((a,b)=>String(b.heldAtLocal||"").localeCompare(String(a.heldAtLocal||"")))
+              .map(hd=>h("div",{key:hd._docId,
+                style:{background:C.bg,borderRadius:10,padding:"10px 12px",marginBottom:8}},
+                h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:4}},
+                  h("b",{style:{fontSize:12}},hd.label||"(walang pangalan)"),
+                  h("span",{style:{fontSize:11,fontWeight:900,color:C.primary}},
+                    "₱"+(hd.total||0).toFixed(2))
+                ),
+                h("div",{style:{fontSize:9,color:C.muted,marginBottom:6}},
+                  (hd.count||0)+" item/s · "+(hd.ctx&&hd.ctx.type||"dine-in")+
+                  " · "+(hd.heldBy||"")+" · "+(hd.heldAtLocal||"")),
+                h("div",{style:{fontSize:9,color:C.muted,marginBottom:8}},
+                  (hd.cart||[]).map(c=>c.qty+"x "+c.name).join(", ")),
+                h("div",{style:{display:"grid",gridTemplateColumns:"2fr 1fr",gap:6}},
+                  h("button",{onClick:()=>resumeHeld(hd),
+                    style:{padding:"8px",background:C.primary,border:"none",borderRadius:8,
+                      color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}},"▶ Resume"),
+                  h("button",{onClick:()=>discardHeld(hd),
+                    style:{padding:"8px",background:"#fff",border:"1px solid "+C.border,
+                      borderRadius:8,color:C.danger,fontWeight:700,fontSize:11,cursor:"pointer"}},"🗑")
+                )
+              ))
+        )
+      )
+    ),
+
     // CART SIDEBAR - always rendered
     h("div",{style:{position:"fixed",inset:0,zIndex:880,
       display:cartOpen?"flex":"none",
@@ -10609,7 +10873,15 @@ function App(){
       h("div",{style:{background:"#fff",width:320,display:"flex",flexDirection:"column",boxShadow:"-8px 0 40px rgba(0,0,0,.15)"}},
         h("div",{style:{padding:"13px 15px 10px",borderBottom:"1px solid "+C.border,display:"flex",justifyContent:"space-between"}},
           h("b",{style:{fontSize:13}},"🛒 Order ("+cartCount+")"),
-          h("button",{onClick:()=>setCartOpen(false),style:{width:26,height:26,borderRadius:"50%",background:C.bg,border:"none",fontSize:16,cursor:"pointer"}},"×")
+          h("div",{style:{display:"flex",gap:6,alignItems:"center"}},
+            h("button",{onClick:()=>setShowHeld(true),
+              style:{padding:"4px 9px",borderRadius:20,fontSize:10,fontWeight:700,cursor:"pointer",
+                border:"1px solid "+(heldOrders.length?"#E65100":C.border),
+                background:heldOrders.length?"#FFF3E0":"#fff",
+                color:heldOrders.length?"#E65100":C.muted}},
+              "⏸ Held ("+heldOrders.length+")"),
+            h("button",{onClick:()=>setCartOpen(false),style:{width:26,height:26,borderRadius:"50%",background:C.bg,border:"none",fontSize:16,cursor:"pointer"}},"×")
+          )
         ),
         h("div",{style:{flex:1,overflowY:"auto",padding:"8px 14px"}},
           !cart.length
