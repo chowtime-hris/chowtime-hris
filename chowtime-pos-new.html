@@ -647,6 +647,15 @@ function kickBytes(ord,cs){
   return shouldKick(ord,cs)?escposKick((cs&&cs.drawerPin)||2):null;
 }
 
+// Auto-open after a sale. Silent no-op when the printer is not connected —
+// never prompts, never blocks the next order.
+async function btKickIfConnected(ord,cs){
+  if(!_btChar)return false;
+  if(!shouldKick(ord,cs))return false;
+  try{ return await btPrint(escposKick((cs&&cs.drawerPin)||2)); }
+  catch(e){ return false; }
+}
+
 // Manual open — for no-sale, change fund, or a drawer that failed to pop.
 async function btKickDrawer(cs){
   if(!_btChar){var ok=await btConnect();if(!ok)return false;}
@@ -7032,6 +7041,41 @@ function PrinterPage({db,user,showT,companySettings,setCompanySettings}){
       border:"1px solid "+C.border,padding:"16px",marginBottom:14}},
       h("div",{style:{fontSize:13,fontWeight:800,marginBottom:14}},"🖨️ Print Settings"),
 
+      // Cash drawer
+      h("div",{style:{background:"#F1F8E9",border:"1px solid #C5E1A5",borderRadius:9,
+        padding:"11px 13px",marginBottom:14}},
+        h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center"}},
+          h("div",{style:{flex:1,marginRight:10}},
+            h("div",{style:{fontSize:12,fontWeight:800,color:"#33691E"}},
+              "💵 Auto-open cash drawer"),
+            h("div",{style:{fontSize:9,color:"#666",marginTop:2}},
+              "Bumubukas agad pagkatapos ng CASH na order. Hindi bumubukas sa GCash o card.")),
+          h("button",{
+            onClick:()=>setCompanySettings(p=>Object.assign({},p,
+              {autoKickDrawer:!(p&&p.autoKickDrawer!==false)})),
+            style:{width:44,height:24,borderRadius:20,border:"none",flexShrink:0,
+              background:(companySettings.autoKickDrawer!==false)?"#558B2F":"#ccc",
+              cursor:"pointer",position:"relative"}},
+            h("div",{style:{position:"absolute",top:3,width:18,height:18,borderRadius:"50%",
+              background:"#fff",transition:"left .15s",
+              left:(companySettings.autoKickDrawer!==false)?"calc(100% - 21px)":"3px"}}))
+        ),
+        h("div",{style:{display:"flex",gap:8,alignItems:"center",marginTop:9}},
+          h("span",{style:{fontSize:10,color:"#555",flex:1}},
+            "Drawer pin (2 ang karaniwan; subukan ang 5 kung hindi pumuputok)"),
+          h("select",{value:String(companySettings.drawerPin||2),
+            onChange:e=>setCompanySettings(p=>Object.assign({},p,
+              {drawerPin:parseInt(e.target.value,10)||2})),
+            style:{padding:"5px 8px",border:"1px solid "+C.border,borderRadius:6,
+              fontSize:11,outline:"none"}},
+            h("option",{value:"2"},"Pin 2"),
+            h("option",{value:"5"},"Pin 5"))
+        ),
+        h("div",{style:{fontSize:9,color:"#888",marginTop:7}},
+          "Kailangang naka-connect na ang Bluetooth printer. Kung hindi, tahimik itong "+
+          "lalaktaw — walang lalabas na device picker sa gitna ng transaksyon.")
+      ),
+
       // Paper size + Tax mode in grid
       h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}},
         h("div",null,
@@ -8650,6 +8694,9 @@ function App(){
       setCart([]);setChkCash("");setChkCust("");setChkTable("");
       setChkDisc(DISCS[0]);setChkDiscId("");setChkPay("cash");
       setCartOpen(false);setModal("receipt");
+      // Cash drawer opens on its own for cash sales, before the receipt is
+      // even printed — the cashier needs it open to make change.
+      btKickIfConnected(ord,companySettings);
       showT("Order "+id+" placed! ✓");
     }catch(e){
       showT("Saved offline — will sync","warn");
