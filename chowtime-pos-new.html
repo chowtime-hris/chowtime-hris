@@ -5298,6 +5298,113 @@ function BranchSettingsPage({branchId,curBranch,user,db,showT}){
   );
 }
 
+// ─── DAILY SALES ROLLUP ───────────────────────────────────
+// Every report today is computed live from a capped orders subscription
+// (limit 300), so history scrolls out of reach within days. One document per
+// branch per day keeps years of reporting readable: ~2,900 rows a year for
+// eight branches, versus 100k+ raw orders.
+// Business day = calendar day, midnight to midnight.
+
+// Pure: same figures as buildZ, but from an explicit day's data.
+function buildDailyRollup(dayOrders,dayCash,branch,date,vatMode){
+  const bo=dayOrders||[], bc=dayCash||[];
+  const voided=bo.filter(o=>o.status==="void"||o.status==="partial-void");
+  const live=bo.filter(o=>o.status!=="void"&&o.status!=="cancelled");
+  const num=(v)=>Number(v)||0;
+
+  const gross=live.reduce((s2,o)=>s2+num(o.subtotal),0);
+  const discounts=live.reduce((s2,o)=>s2+num(o.discAmt),0);
+  const net=bo.reduce((s2,o)=>s2+num(o.total),0);
+  const voidAmt=voided.reduce((s2,o)=>
+    s2+((num(o.originalTotal)||num(o.subtotal))-num(o.total)),0);
+
+  const isVATreg=vatMode!=="nonvat", zeroRated=vatMode==="zerovat";
+  const payTotal=(m)=>live.filter(o=>(o.payMethod||"cash")===m)
+    .reduce((s2,o)=>s2+num(o.total),0);
+  const discBy=(id)=>live.filter(o=>(o.discType&&o.discType.id)===id)
+    .reduce((s2,o)=>s2+num(o.discAmt),0);
+
+  // top items by quantity, for year-on-year product tracking
+  const tally={};
+  live.forEach(o=>(o.items||[]).forEach(i=>{
+    const k=i.name||i.id||"?";
+    tally[k]=(tally[k]||0)+num(i.qty);
+  }));
+  const topItems=Object.keys(tally).map(k=>({name:k,qty:tally[k]}))
+    .sort((a,b)=>b.qty-a.qty).slice(0,20);
+
+  const ids=live.map(o=>String(o.id||"")).filter(Boolean).sort();
+  const opening=bc.filter(c=>c.type==="in"&&/opening/i.test(c.desc||""))
+    .reduce((s2,c)=>s2+num(c.amount),0);
+  const cashIn=bc.filter(c=>c.type==="in"&&!/opening/i.test(c.desc||""))
+    .reduce((s2,c)=>s2+num(c.amount),0);
+  const cashOut=bc.filter(c=>c.type==="out").reduce((s2,c)=>s2+num(c.amount),0);
+
+  return {
+    branch:branch,date:date,
+    gross:gross,discounts:discounts,net:net,
+    voidAmt:voidAmt,voidCount:voided.length,
+    txns:live.length,cancelled:bo.filter(o=>o.status==="cancelled").length,
+    qtySold:live.reduce((s2,o)=>s2+(o.items||[]).reduce((a,i)=>a+num(i.qty),0),0),
+    dineIn:live.filter(o=>o.orderType==="dine-in").length,
+    takeout:live.filter(o=>o.orderType==="takeout").length,
+    delivery:live.filter(o=>o.orderType==="delivery").length,
+    vatableSales:(isVATreg&&!zeroRated)?net/1.12:0,
+    vatAmount:(isVATreg&&!zeroRated)?net-(net/1.12):0,
+    vatExempt:!isVATreg?net:0,
+    zeroSales:zeroRated?net:0,
+    discSC:discBy("sc"),discPWD:discBy("pwd"),
+    discEmp:discBy("emp"),discOther:discBy("promo")+discBy("custom"),
+    scTxns:live.filter(o=>(o.discType&&o.discType.id)==="sc").length,
+    pwdTxns:live.filter(o=>(o.discType&&o.discType.id)==="pwd").length,
+    cashSales:payTotal("cash"),gcash:payTotal("gcash"),
+    foodpanda:payTotal("foodpanda"),grabfood:payTotal("grabfood"),
+    opening:opening,cashIn:cashIn,cashOut:cashOut,
+    cashOnHand:opening+net+cashIn-cashOut,
+    siFrom:ids.length?ids[0]:"",siTo:ids.length?ids[ids.length-1]:"",
+    topItems:topItems
+  };
+}
+
+// Fetch one day and write its rollup. Deterministic doc id + setDoc means
+// several tablets closing at once converge on one row instead of duplicating.
+async function rollupDay(db,branch,date,vatMode,byName){
+  try{
+    // Query by date only — a single equality filter needs no composite index.
+    // One day across every branch is small; filter to this branch in memory.
+    const oSnap=await getDocs(query(collection(db,"orders"),where("date","==",date)));
+    const dayOrders=oSnap.docs.map(d=>({...d.data(),_docId:d.id}))
+      .filter(o=>o.branch===branch);
+
+    let dayCash=[];
+    try{
+      const cSnap=await getDocs(query(collection(db,"cash_log"),where("date","==",date)));
+      dayCash=cSnap.docs.map(d=>d.data()).filter(c=>c.branch===branch);
+    }catch(e){}
+
+    const roll=buildDailyRollup(dayOrders,dayCash,branch,date,vatMode);
+    roll.closedBy=byName||"auto";
+    roll.closedAt=serverTimestamp();
+    roll.year=date.slice(0,4);
+    roll.month=date.slice(0,7);
+    await setDoc(doc(db,"daily_sales",branch+"_"+date),roll,{merge:true});
+    return roll;
+  }catch(e){
+    console.error("rollupDay failed",branch,date,e);
+    return null;
+  }
+}
+
+// Days between two ISO dates, exclusive of `to`.
+function daysBefore(toISO,count){
+  const out=[]; const d=new Date(toISO+"T00:00:00");
+  for(let k=1;k<=count;k++){
+    const x=new Date(d); x.setDate(x.getDate()-k);
+    out.push(x.toISOString().slice(0,10));
+  }
+  return out;
+}
+
 // ─── NOTIFICATIONS ────────────────────────────────────────
 // One row per event, addressed to a single branch id via `to`. Everything is
 // best-effort: a failed notify must never block the action that caused it.
@@ -8544,6 +8651,7 @@ function App(){
   const [chkToPicks,setChkToPicks]=useState({});         // {cartId:{pickIdx:toQty}}
   const [posBoms,setPosBoms]=useState({});               // bom docs for stock checks
   const [editingPO,setEditingPO]=useState(null);         // branch editing its own PO
+  const [closing,setClosing]=useState(false);            // day rollup in progress
   const [notifs,setNotifs]=useState([]);                 // addressed to this branch
   const [showNotifs,setShowNotifs]=useState(false);
   const [openNav,setOpenNav]=useState({});               // which sidebar groups are expanded
@@ -8656,6 +8764,32 @@ function App(){
         :query(collection(db,"cash_log"),where("branch","==",bId),orderBy("timestamp","desc"),limit(50));
       unsubs.push(onSnapshot(cq,snap=>setCashLog(snap.docs.map(d=>({...d.data(),_docId:d.id}))),()=>{}));
     }catch(e){}
+
+    // Auto-close any day that was left open. Nothing can run at midnight —
+    // this is a browser app on the Spark plan, so there is no cron and no
+    // Cloud Function. Rolling up on the next open is the reliable equivalent:
+    // it depends on the app being opened, which happens every trading day.
+    (async()=>{
+      try{
+        const dSnap=await getDocs(query(collection(db,"daily_sales"),
+          where("branch","==",bId)));
+        const done=new Set(dSnap.docs.map(d=>(d.data()||{}).date));
+        const today=new Date().toISOString().slice(0,10);
+        const missing=daysBefore(today,7).filter(d=>!done.has(d));
+        for(const d of missing.reverse()){
+          const r=await rollupDay(db,bId,d,
+            (companySettings&&companySettings.vatMode)||"vat","auto");
+          // only announce days that actually traded; a closed branch on a
+          // Sunday should not generate noise
+          if(r&&r.txns>0){
+            await notify(db,{to:bId,type:"info",
+              title:"Na-close ang "+d,
+              message:r.txns+" txns · ₱"+(Number(r.net)||0).toFixed(2)+" net sales",
+              page:"z_reading",ref:d,by:"auto"});
+          }
+        }
+      }catch(e){console.warn("auto-close skipped:",e);}
+    })();
 
     // Notifications addressed to this branch. Sorted client-side so the query
     // stays a single equality filter and needs no composite index.
@@ -10844,7 +10978,27 @@ function App(){
                   color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}},
                 "📡 BT Print "+(isZ?"Z":"X")+"-Reading"),
               h("button",{onClick:()=>printZ(zd,curBranch.full,user.name),style:{padding:"10px 22px",background:"#fff",border:"1px solid "+C.border,borderRadius:9,color:C.text,fontWeight:600,fontSize:12,cursor:"pointer"}},"🖨️ Browser"),
-              isZ&&h("button",{onClick:()=>showT("Day closed. Z-Reading submitted.","info"),style:{padding:"10px 22px",background:"#E3F2FD",border:"none",borderRadius:9,color:C.info,fontWeight:700,fontSize:12,cursor:"pointer"}},"✓ Close Day")
+              // Close Day used to only show a toast — nothing was ever written,
+              // so yesterday's Z-Reading became unrecoverable once the orders
+              // subscription scrolled past it.
+              isZ&&h("button",{
+                onClick:async()=>{
+                  const d=new Date().toISOString().slice(0,10);
+                  if(!confirm("I-close ang "+d+" para sa "+curBranch.name+"?\n"
+                    +"Ise-save ang Z-Reading bilang permanenteng record."))return;
+                  setClosing(true);
+                  const r=await rollupDay(db,branchId,d,
+                    (companySettings&&companySettings.vatMode)||"vat",user.name);
+                  setClosing(false);
+                  if(r)showT("Na-close ang "+d+" · "+r.txns+" txns · ₱"
+                    +peso(r.net)+" net","ok");
+                  else showT("Close failed — subukan ulit","err");
+                },
+                disabled:closing,
+                style:{padding:"10px 22px",background:closing?"#ccc":"#E3F2FD",
+                  border:"none",borderRadius:9,color:closing?"#888":C.info,
+                  fontWeight:700,fontSize:12,cursor:closing?"wait":"pointer"}},
+                closing?"Saving...":"✓ Close Day")
             )
           );
         })(),
