@@ -916,8 +916,10 @@ function ItemCustomizer({item,onAdd,onClose,optionGroups=[],priceType="retail",u
     return 0;
   };
   const getPerUnit=function(g){
-    // legacy absolute field stays absolute so existing docs don't double up
-    if(typeof g.getPerUnit==="number")return g.getPerUnit;
+    // legacy absolute field stays absolute so existing docs don't double up,
+    // but only when it actually carries a value — a stored 0 must not shadow
+    // perItem and silently keep a group optional.
+    if(typeof g.getPerUnit==="number"&&g.getPerUnit>0)return g.getPerUnit;
     return perItem(g)*unitsPerOrder;
   };
   const isFreeGrp=function(g){return getPerUnit(g)>0;};
@@ -1333,23 +1335,39 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
           // Item name
           h("div",null,
             h("div",{style:{fontSize:11,fontWeight:700,color:(item.orderQty||0)>0?C.primary:C.text}},item.name),
-            h("div",{style:{fontSize:9,color:C.muted}},"Unit: "+item.unit)
+            h("div",{style:{fontSize:9,color:C.muted}},
+              packSizeOf(item)>0
+                ? ("Order sa "+packUnitOf(item)+" · 1 "+packUnitOf(item)+" = "+packSizeOf(item)+" "+item.unit)
+                : ("Unit: "+item.unit))
           ),
           // Category
           h("div",{style:{fontSize:10,color:C.muted}},item.cat),
-          // Qty input
-          h("div",{style:{display:"flex",alignItems:"center",gap:4}},
-            h("button",{onClick:()=>setItems(p=>p.map((x,i)=>i===idx?{...x,orderQty:Math.max(0,(x.orderQty||0)-1)}:x)),
-              style:{width:22,height:22,borderRadius:5,border:"1px solid "+C.border,
-                background:"#fff",cursor:"pointer",fontSize:13,fontWeight:700,flexShrink:0}},"−"),
-            h("input",{type:"number",min:0,value:item.orderQty||0,
-              onChange:e=>setItems(p=>p.map((x,i)=>i===idx?{...x,orderQty:parseInt(e.target.value)||0}:x)),
-              style:{width:40,textAlign:"center",padding:"3px",border:"1px solid "+C.border,
-                borderRadius:5,fontSize:12,fontWeight:700,outline:"none"}}),
-            h("button",{onClick:()=>setItems(p=>p.map((x,i)=>i===idx?{...x,orderQty:(x.orderQty||0)+1}:x)),
-              style:{width:22,height:22,borderRadius:5,border:`1px solid ${C.primary}`,
-                background:"#FFF0F0",cursor:"pointer",fontWeight:700,color:C.primary,fontSize:13,flexShrink:0}},"+")
-          ),
+          // Qty input — steps by pack when the item is bought by the pack
+          (function(){
+            const sz=packSizeOf(item)||1;
+            const step=(d)=>setItems(p=>p.map((x,i)=>i===idx
+              ?{...x,orderQty:Math.max(0,(x.orderQty||0)+d*sz)}:x));
+            const shown=sz>1?((item.orderQty||0)/sz):(item.orderQty||0);
+            return h("div",null,
+              h("div",{style:{display:"flex",alignItems:"center",gap:4}},
+                h("button",{onClick:()=>step(-1),
+                  style:{width:22,height:22,borderRadius:5,border:"1px solid "+C.border,
+                    background:"#fff",cursor:"pointer",fontSize:13,fontWeight:700,flexShrink:0}},"−"),
+                h("input",{type:"number",min:0,value:shown,
+                  onChange:e=>{
+                    const v=parseFloat(e.target.value)||0;
+                    setItems(p=>p.map((x,i)=>i===idx?{...x,orderQty:Math.max(0,v*sz)}:x));
+                  },
+                  style:{width:40,textAlign:"center",padding:"3px",border:"1px solid "+C.border,
+                    borderRadius:5,fontSize:12,fontWeight:700,outline:"none"}}),
+                h("button",{onClick:()=>step(1),
+                  style:{width:22,height:22,borderRadius:5,border:`1px solid ${C.primary}`,
+                    background:"#FFF0F0",cursor:"pointer",fontWeight:700,color:C.primary,fontSize:13,flexShrink:0}},"+")
+              ),
+              sz>1&&h("div",{style:{fontSize:8,color:C.muted,marginTop:2,textAlign:"center"}},
+                packUnitOf(item)+" → "+(item.orderQty||0)+" "+baseUnitOf(item))
+            );
+          })(),
           // Last price (from item data)
           h("div",{style:{fontSize:10,color:C.muted,textAlign:"center"}},
             item.cost>0?"₱"+item.cost.toFixed(2):"—"),
@@ -1377,7 +1395,7 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
           h("div",null,
             h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:4}},
               h("span",{style:{fontSize:11,color:C.muted}},"Total Items Ordered:"),
-              h("span",{style:{fontSize:11,fontWeight:700}},ordered.reduce((s,i)=>s+(i.orderQty||0),0)+" units")
+              h("span",{style:{fontSize:11,fontWeight:700}},ordered.length+" item/s")
             ),
             h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:4}},
               h("span",{style:{fontSize:11,color:C.muted}},"Line Items:"),
@@ -1488,7 +1506,32 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
         drNotes,
         issuedBy:user.name, issuedAt:serverTimestamp()
       });
-      showT(drNum+" issued ✓ Branch notified");
+
+      // Issuing a DR moves goods OUT of main. Without this the branch gained
+      // stock on receipt while main never lost any — stock from nothing.
+      // stockIssued guards against a re-issue deducting twice.
+      let moved=0;
+      if(!po.stockIssued){
+        for(const it of delivered){
+          if(!it.id||!(it.actualQty>0))continue;
+          try{
+            await updateDoc(doc(db,"inventory",it.id),{
+              stock:increment(-(it.actualQty||0)),
+              lastIssued:serverTimestamp()
+            });
+            moved++;
+            await addDoc(collection(db,"inventory_log"),{
+              itemId:it.id,itemName:it.name||it.id,unit:it.unit||"",
+              type:"deduct",amount:-(it.actualQty||0),
+              reason:"DR "+drNum+" — issued to "+(po.branch||""),
+              drNum:drNum,poId:po._docId,branch:po.branch||"",
+              by:user.name,at:serverTimestamp(),timestamp:serverTimestamp()
+            });
+          }catch(e2){console.warn("Main stock deduct failed",it.id,e2);}
+        }
+        try{ await updateDoc(doc(db,"advances",po._docId),{stockIssued:true}); }catch(e3){}
+      }
+      showT(drNum+" issued ✓ · "+moved+" item/s deducted from main");
     }catch(e){showT("Error issuing DR","err");console.error(e);}
   };
 
@@ -1700,11 +1743,17 @@ function DRCheckForm({po,db,branchId,user,showT,INIT_INVENTORY,setAdvances,advan
   const [expanded,setExpanded]=useState(true);
 
   const confirmReceipt=async()=>{
-    const received=(po.deliveredItems||po.items||[]).map(i=>({
-      ...i,
-      receivedQty:receivedQtys[i.id]??i.actualQty!=null?i.actualQty:i.qty,
-      discrepancy:(receivedQtys[i.id]??i.actualQty!=null?i.actualQty:i.qty)-(i.actualQty!=null?i.actualQty:i.qty)
-    }));
+    const received=(po.deliveredItems||po.items||[]).map(i=>{
+      // expected = what the DR says was issued (fall back to what was ordered)
+      const expected = (i.actualQty!=null) ? i.actualQty : i.qty;
+      // FIX: was `a ?? b!=null ? b : c` — ?? binds tighter than ?:, so the
+      // number the receiver typed was evaluated as a boolean and thrown away.
+      // Typing 7 gave 10; typing 0 gave the full ordered qty.
+      const got = (receivedQtys[i.id]!=null && receivedQtys[i.id]!=="")
+        ? (parseFloat(receivedQtys[i.id])||0)
+        : expected;
+      return {...i, receivedQty:got, expectedQty:expected, discrepancy:got-expected};
+    });
     const hasDisc=received.some(i=>i.discrepancy!==0);
     try{
       await updateDoc(doc(db,"advances",po._docId),{
@@ -4245,7 +4294,19 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
                             h("div",{style:{fontSize:12,fontWeight:isSel?800:500,color:isSel?C.primary:C.text}},
                               grp.name),
                             h("div",{style:{fontSize:9,color:C.muted}},
-                              (grp.choices||[]).length+" choices"+(hasAnyBOM?" · has BOM":""))
+                              (grp.choices||[]).length+" choices"+(hasAnyBOM?" · has BOM":"")),
+                            (function(){
+                              const pi=(typeof grp.perItem==="number")
+                                ? grp.perItem
+                                : (/(?:get|choose|pick|select|pili|kuha)\s*(\d+)/i.test(grp.name||"")
+                                    ? parseInt(/(?:get|choose|pick|select|pili|kuha)\s*(\d+)/i.exec(grp.name)[1],10)
+                                    : (/^\s*\[R\]/i.test(grp.name||"")?1:0));
+                              return h("span",{style:{fontSize:8,fontWeight:800,padding:"1px 6px",
+                                borderRadius:20,marginLeft:5,
+                                background:pi>0?"#E8F5E9":"#F5F5F5",
+                                color:pi>0?"#1B5E20":"#999"}},
+                                pi>0?("REQUIRED "+pi+"/item"):"OPTIONAL");
+                            })()
                           ),
                       !editingGrp&&h("div",{style:{display:"flex",gap:4},
                         onClick:e=>e.stopPropagation()},
