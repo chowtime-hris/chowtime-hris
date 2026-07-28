@@ -1515,6 +1515,11 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
         for(const it of delivered){
           if(!it.id||!(it.actualQty>0))continue;
           try{
+            let _dprev=null;
+            try{
+              const _ds=await getDoc(doc(db,"inventory",it.id));
+              if(_ds.exists())_dprev=Number(_ds.data().stock)||0;
+            }catch(e7){}
             await updateDoc(doc(db,"inventory",it.id),{
               stock:increment(-(it.actualQty||0)),
               lastIssued:serverTimestamp()
@@ -1523,6 +1528,12 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
             await addDoc(collection(db,"inventory_log"),{
               itemId:it.id,itemName:it.name||it.id,unit:it.unit||"",
               type:"deduct",amount:-(it.actualQty||0),
+              prevStock:_dprev,
+              newStock:_dprev==null?null:Math.round((_dprev-(it.actualQty||0))*1000)/1000,
+              desc:"Na-issue mula sa Main: "+(it.actualQty||0)+" "+(it.unit||"")
+                +" papuntang "+(po.branch||"")+" sa ilalim ng "+drNum,
+              source:"transfer",
+              ref:drNum,
               reason:"DR "+drNum+" — issued to "+(po.branch||""),
               drNum:drNum,poId:po._docId,branch:po.branch||"",
               by:user.name,at:serverTimestamp(),timestamp:serverTimestamp()
@@ -4794,6 +4805,11 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
             const restoreQty = ((row.qty||0)*(mult||1))/(row.convFactor||1);
             try{
               const col=await colFor(row.ingId);
+              let _vprev=null;
+              try{
+                const _vs=await getDoc(doc(db,col,row.ingId));
+                if(_vs.exists())_vprev=Number(_vs.data().stock)||0;
+              }catch(e6){}
               await updateDoc(doc(db,col,row.ingId),{
                 stock:increment(restoreQty),
                 lastUpdated:serverTimestamp()
@@ -4805,6 +4821,12 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
                 unit:row.unit||"",
                 type:"add",
                 amount:restoreQty,
+                prevStock:_vprev,
+                newStock:_vprev==null?null:Math.round((_vprev+restoreQty)*1000)/1000,
+                desc:"Naibalik: "+(Math.round(restoreQty*1000)/1000)+" "+(row.unit||"")
+                  +" mula sa void ng order "+req.orderId+" ("+itemName+(label?" / "+label:"")+")",
+                source:"void",
+                ref:req.orderId,
                 convFactor:row.convFactor||1,
                 invCol:col,
                 orderId:req.orderId,
@@ -8487,6 +8509,14 @@ function App(){
             }
             
             try{
+              // Read first so the log can carry before -> after. increment() is
+              // atomic server-side, so `next` is computed, not read back; it can
+              // drift only if two terminals hit the same ingredient at once.
+              let _prev=null;
+              try{
+                const _s=await getDoc(doc(db,deductCol,row.ingId));
+                if(_s.exists())_prev=Number(_s.data().stock)||0;
+              }catch(e4){}
               await updateDoc(doc(db,deductCol,row.ingId),{
                 stock: increment(-deductAmt),
                 lastDeducted: serverTimestamp()
@@ -8500,8 +8530,14 @@ function App(){
                 amount:-deductAmt,
                 convFactor:convFactor,
                 invCol:deductCol,
-                prevStock:null,
-                newStock:null,
+                prevStock:_prev,
+                newStock:_prev==null?null:Math.round((_prev-deductAmt)*1000)/1000,
+                desc:"Nabawas sa "+(curBranch&&curBranch.full||branchId)+": "
+                  +(Math.round(deductAmt*1000)/1000)+" "+(row.unit||"")
+                  +" para sa order "+ord.id+" ("+cartItem.name
+                  +(variant!=="default"?" – "+variant:"")+" ×"+(cartItem.qty||1)+")",
+                source:"sales",
+                ref:ord.id,
                 transactionId:ord.id,
                 orderId:ord.id,
                 menuItem:cartItem.name,
@@ -8569,6 +8605,11 @@ function App(){
                     }
                   }catch(e3){}
                 }
+                let _pprev=null;
+                try{
+                  const _ps=await getDoc(doc(db,pCol,row.ingId));
+                  if(_ps.exists())_pprev=Number(_ps.data().stock)||0;
+                }catch(e5){}
                 await updateDoc(doc(db,pCol,row.ingId),{
                   stock:increment(-actualDeduct),
                   lastDeducted:serverTimestamp()
@@ -8576,6 +8617,15 @@ function App(){
                 await addDoc(collection(db,logCol),{
                   itemId:row.ingId,itemName:row.ingName||row.ingId,
                   unit:row.unit||"",type:"deduct",amount:-actualDeduct,
+                  prevStock:_pprev,
+                  newStock:_pprev==null?null:Math.round((_pprev-actualDeduct)*1000)/1000,
+                  convFactor:row.convFactor||1,invCol:pCol,
+                  desc:"Nabawas sa "+(curBranch&&curBranch.full||branchId)+": "
+                    +(Math.round(actualDeduct*1000)/1000)+" "+(row.unit||"")
+                    +" para sa order "+ord.id+" ("+cartItem.name+" → "+ref.label
+                    +" ×"+(ref.qty||1)+")",
+                  source:"sales",
+                  ref:ord.id,
                   transactionId:ord.id,
                   orderId:ord.id,
                   menuItem:cartItem.name,
@@ -10183,29 +10233,52 @@ function App(){
                     const sign=isSet?"→":isAdd?"+":"-";
                     const val=isSet?String(log.newStock||0):
                       String(Math.abs(log.amount||0));
+                    const SRC={sales:{l:"SALES",c:"#C62828",b:"#FFEBEE"},
+                               void:{l:"VOID",c:"#E65100",b:"#FFF3E0"},
+                               transfer:{l:"TRANSFER",c:"#1565C0",b:"#E3F2FD"}};
+                    const src=SRC[log.source]||null;
+                    const when=(function(){
+                      const t=log.at&&log.at.toDate?log.at.toDate()
+                        :(log.timestamp&&log.timestamp.toDate?log.timestamp.toDate():null);
+                      return t?t.toLocaleString("en-PH",{month:"short",day:"numeric",
+                        hour:"2-digit",minute:"2-digit"}):"";
+                    })();
+                    const hasBA=log.prevStock!=null&&log.newStock!=null;
                     return h("div",{key:log._docId||String(ix),
-                      style:{padding:"8px 14px",borderBottom:"1px solid #f5f5f5",
+                      style:{padding:"9px 14px",borderBottom:"1px solid #f5f5f5",
                         borderLeft:"3px solid "+col}},
                       h("div",{style:{display:"flex",justifyContent:"space-between",
-                        alignItems:"center",marginBottom:2}},
-                        h("div",{style:{fontSize:11,fontWeight:700,color:C.text,
-                          flex:1,marginRight:6,overflow:"hidden",
-                          textOverflow:"ellipsis",whiteSpace:"nowrap"}},
-                          log.itemName||""),
-                        h("div",{style:{fontSize:13,fontWeight:900,color:col,
-                          flexShrink:0}},
+                        alignItems:"center",marginBottom:3,gap:6}},
+                        h("div",{style:{flex:1,minWidth:0,display:"flex",
+                          alignItems:"center",gap:5,flexWrap:"wrap"}},
+                          h("span",{style:{fontSize:11,fontWeight:700,color:C.text}},
+                            log.itemName||""),
+                          src&&h("span",{style:{fontSize:7,fontWeight:800,padding:"1px 5px",
+                            borderRadius:20,background:src.b,color:src.c}},src.l),
+                          log.ref&&h("span",{style:{fontSize:8,color:C.muted}},"#"+log.ref)
+                        ),
+                        h("div",{style:{fontSize:13,fontWeight:900,color:col,flexShrink:0}},
                           sign+" "+val+" "+(log.unit||""))
                       ),
-                      h("div",{style:{display:"flex",justifyContent:"space-between"}},
-                        h("span",{style:{fontSize:9,color:C.muted}},
-                          log.reason||"Adjustment"),
-                        h("span",{style:{fontSize:9,color:C.muted}},
-                          log.by||"")
+                      // before -> after is what makes the log reconcilable
+                      hasBA&&h("div",{style:{display:"flex",alignItems:"center",gap:6,
+                        background:"#FAFAFA",borderRadius:6,padding:"3px 7px",marginBottom:3}},
+                        h("span",{style:{fontSize:10,color:C.muted}},
+                          Number(log.prevStock).toLocaleString("en-PH")+" "+(log.unit||"")),
+                        h("span",{style:{fontSize:10,color:col,fontWeight:900}},"→"),
+                        h("span",{style:{fontSize:10,fontWeight:800,color:C.text}},
+                          Number(log.newStock).toLocaleString("en-PH")+" "+(log.unit||"")),
+                        log.convFactor&&log.convFactor!==1&&h("span",{style:{fontSize:8,
+                          color:C.muted,marginLeft:"auto"}},"conv ÷"+log.convFactor)
                       ),
-                      h("div",{style:{fontSize:8,color:"#ccc",marginTop:1}},
-                        log.prevStock!=null&&log.newStock!=null
-                          ? String(log.prevStock)+" → "+String(log.newStock)+" "+(log.unit||"")
-                          : "")
+                      h("div",{style:{fontSize:9,color:C.muted,marginBottom:2}},
+                        log.desc||log.reason||"Adjustment"),
+                      h("div",{style:{display:"flex",justifyContent:"space-between",
+                        fontSize:8,color:"#bbb"}},
+                        h("span",null,(log.by?"ni "+log.by:"")
+                          +(log.invCol?" · "+log.invCol:"")),
+                        h("span",null,when)
+                      )
                     );
                   })
             )
