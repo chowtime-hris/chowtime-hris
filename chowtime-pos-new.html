@@ -9716,7 +9716,9 @@ function App(){
     const bo=orders.filter(o=>o.branch===bid&&sameDay(o));
     const bc=cashLog.filter(c=>c.branch===bid&&sameDay(c));
     const voided=bo.filter(o=>o.status==="void"||o.status==="partial-void");
-    const live=bo.filter(o=>o.status!=="void");
+    const live=bo.filter(o=>o.status!=="void"&&o.status!=="cancelled");
+    const payTotal=(m)=>live.filter(o=>(o.payMethod||"cash")===m)
+      .reduce((s2,o)=>s2+(Number(o.total)||0),0);
     const gross=live.reduce((s,o)=>s+(o.subtotal||0),0);
     const discounts=live.reduce((s,o)=>s+(o.discAmt||0),0);
     const net=bo.reduce((s,o)=>s+(o.total||0),0);
@@ -9753,6 +9755,8 @@ function App(){
     const cashIn=bc.filter(c=>c.type==="in"&&!(c.desc||"").includes("Opening")).reduce((s,c)=>s+(c.amount||0),0);
     const cashOut=bc.filter(c=>c.type==="out").reduce((s,c)=>s+(c.amount||0),0);
     return{gross,discounts,net,voidAmt,voidCount,opening,cashIn,cashOut,
+      cashSales:payTotal("cash"),gcash:payTotal("gcash"),
+      foodpanda:payTotal("foodpanda"),grabfood:payTotal("grabfood"),
       discSC,discPWD,discEmp,discOther,scTxns,pwdTxns,
       vatableSales,vatAmount,vatExempt,zeroSales,isVATreg,zeroRated,
       siFrom,siTo,qtySold,cancelled,
@@ -11282,10 +11286,10 @@ function App(){
                 h("div",{style:{marginTop:9}},
                   [["Total Transactions",zd.txns],["Dine-in",zd.dineIn],["Takeout",zd.takeout],
                    ["SC/PWD",zd.scPwd+" txns"],["Avg Transaction","₱"+(zd.txns>0?peso(zd.net/zd.txns):"0.00")],
-               ["Cash Sales","₱"+peso(orders.filter(o=>o.branch===branchId&&(o.payMethod||"cash")==="cash").reduce((s,o)=>s+(o.total||0),0))],
-               ["GCash","₱"+peso(orders.filter(o=>o.branch===branchId&&o.payMethod==="gcash").reduce((s,o)=>s+(o.total||0),0))],
-               ["FoodPanda","₱"+peso(orders.filter(o=>o.branch===branchId&&o.payMethod==="foodpanda").reduce((s,o)=>s+(o.total||0),0))],
-               ["GrabFood","₱"+peso(orders.filter(o=>o.branch===branchId&&o.payMethod==="grabfood").reduce((s,o)=>s+(o.total||0),0))]
+                   ["Cash Sales","₱"+peso(zd.cashSales)],
+                   ["GCash","₱"+peso(zd.gcash)],
+                   ["FoodPanda","₱"+peso(zd.foodpanda)],
+                   ["GrabFood","₱"+peso(zd.grabfood)]
                   ].map(([l,v])=>h("div",{key:l,style:{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f5f5f5"}},
                     h("span",{style:{fontSize:11,color:C.muted}},l),
                     h("span",{style:{fontSize:12,fontWeight:800,color:C.text}},v)
