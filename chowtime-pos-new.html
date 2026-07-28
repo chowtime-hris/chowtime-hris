@@ -4529,7 +4529,10 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
     const voidedItems = (selOrder.items||[]).filter((_,i)=>selItems[i]!==false);
     if(!voidedItems.length){showT("Select at least 1 item to void","warn");return;}
     const isPartial = voidedItems.length < (selOrder.items||[]).length;
-    const voidAmt = voidedItems.reduce((s,i)=>(s+(i.price||0)*(i.qty||1)),0);
+    // order items store lineTotal/unitPrice — there is no `price` field,
+    // so the old formula always produced 0.
+    const voidAmt = voidedItems.reduce((s,i)=>
+      s+(Number(i.lineTotal)||((Number(i.unitPrice)||0)*(i.qty||1))),0);
     setSubmitting(true);
     try{
       await addDoc(collection(db,"void_requests"),{
@@ -4563,7 +4566,8 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
   },[selOrder?.id]);
 
   const voidedItems = selOrder?(selOrder.items||[]).filter((_,i)=>selItems[i]!==false):[];
-  const voidAmt = voidedItems.reduce((s,i)=>s+(i.price||0)*(i.qty||1),0);
+  const voidAmt = voidedItems.reduce((s,i)=>
+    s+(Number(i.lineTotal)||((Number(i.unitPrice)||0)*(i.qty||1))),0);
 
   const approveVoid = async(req)=>{
     try{
@@ -4595,51 +4599,82 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
         });
       }
 
-      // ── BOM RESTOCK (variant-aware) ──────────────────────
-      const invCol = "inventory_"+req.branch;
+      // ── BOM RESTOCK ──────────────────────────────────────
+      // Must mirror the deduction exactly, or a void leaves the books wrong:
+      //  - divide by convFactor (deduction does; the old restock did not)
+      //  - restock option-group picks too (that is where the food BOM lives)
+      //  - resolve the same inventory collection the deduction wrote to
       const logCol = "inventory_log_"+req.branch;
+      let restocked=0, restockFailed=0;
       try{
         const bomSnap = await getDocs(collection(db,"bom"));
         const bomData = {};
         bomSnap.docs.forEach(d=>{ bomData[d.id]={...d.data()}; });
 
-        for(const item of (req.voidedItems||req.orderItems||[])){
-          const itemId = item.id;
-          const variant = item.variant||"default";
-          const vKey = (!variant||variant==="default")
-            ? itemId
-            : itemId+"__"+variant.replace(/\s+/g,"_");
+        const colFor=async(ingId)=>{
+          try{
+            const bd=await getDoc(doc(db,"inventory_"+req.branch,ingId));
+            if(bd.exists())return "inventory_"+req.branch;
+            const md=await getDoc(doc(db,"inventory",ingId));
+            if(md.exists())return "inventory";
+          }catch(e){}
+          return "inventory_"+req.branch;
+        };
 
-          const itemBOM = bomData[itemId]||{};
-          const rows = itemBOM[vKey]||itemBOM[itemId]||[];
-
-          for(const row of rows){
+        const giveBack=async(rows,mult,label,itemName)=>{
+          for(const row of rows||[]){
             if(!row.ingId||!row.qty) continue;
-            const restoreQty = (row.qty||0)*(item.qty||1);
+            const restoreQty = ((row.qty||0)*(mult||1))/(row.convFactor||1);
             try{
-              await updateDoc(doc(db,invCol,row.ingId),{
+              const col=await colFor(row.ingId);
+              await updateDoc(doc(db,col,row.ingId),{
                 stock:increment(restoreQty),
                 lastUpdated:serverTimestamp()
               });
-              // Log the restock
+              restocked++;
               await addDoc(collection(db,logCol),{
                 itemId:row.ingId,
                 itemName:row.ingName||row.ingId,
                 unit:row.unit||"",
                 type:"add",
                 amount:restoreQty,
-                reason:"VOID: "+req.orderId+" ("+item.name+(variant!=="default"?" - "+variant:"")+")",
+                convFactor:row.convFactor||1,
+                invCol:col,
+                orderId:req.orderId,
+                reason:"VOID: "+req.orderId+" ("+itemName+(label?" / "+label:"")+")",
                 by:user.name,
                 at:serverTimestamp()
               });
-            }catch(e2){console.warn("BOM restock failed",e2);}
+            }catch(e2){restockFailed++;console.warn("BOM restock failed",row.ingId,e2);}
+          }
+        };
+
+        for(const item of (req.voidedItems||req.orderItems||[])){
+          const itemId = item.id;
+          if(itemId){
+            const variant = item.variant||"default";
+            const vKey = (!variant||variant==="default")
+              ? itemId
+              : itemId+"__"+variant.replace(/\s+/g,"_");
+            const itemBOM = bomData[itemId]||{};
+            await giveBack(itemBOM[vKey]||itemBOM[itemId]||[], item.qty||1,
+              variant!=="default"?variant:"", item.name);
+          }
+          // picks — same multiplier rule as the deduction
+          for(const ref of (item.optionRefs||[])){
+            if(!ref.groupId||!ref.choiceId) continue;
+            const d = bomData["optgrp_"+ref.groupId]||{};
+            const rows = d["optgrp_"+ref.groupId+"__"+ref.choiceId]||[];
+            const mult = ref.free?(ref.qty||1):((ref.qty||1)*(item.qty||1));
+            await giveBack(rows, mult, ref.label, item.name);
           }
         }
       }catch(bomErr){console.warn("BOM restock error:",bomErr);}
 
       // ── PAYMENT REVERSAL ────────────────────────────────
       try{
-        const voidAmt = req.voidAmount||(req.voidedItems||[]).reduce((s,i)=>s+(i.price||0)*(i.qty||1),0);
+        const voidAmt = req.voidAmount||(req.voidedItems||[]).reduce((s,i)=>
+          s+(Number(i.lineTotal)||((Number(i.unitPrice)||0)*(i.qty||1))),0);
         await addDoc(collection(db,"cash_log"),{
           branch:req.branch,
           type:"void_refund",
@@ -4653,7 +4688,9 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
       }catch(e){console.warn("Payment reversal log failed",e);}
 
       showT((req.isPartial?"Partial void":"Order #"+req.orderId+" voided")+
-        " ✓ BOM restocked + Payment reversed");
+        " ✓ · "+restocked+" ingredient/s restocked"+
+        (restockFailed?" ("+restockFailed+" failed — check log)":""),
+        restockFailed?"warn":"ok");
     }catch(e){showT("Error approving void","err");console.error(e);}
   };
 
@@ -8030,7 +8067,7 @@ function App(){
     const now=new Date().toLocaleTimeString("en-PH",{hour:"2-digit",minute:"2-digit"});
     const ord={
       id,branch:branchId,
-      items:cart.map(i=>({qty:i.qty,name:i.name,emoji:i.emoji,
+      items:cart.map(i=>({id:i.id,qty:i.qty,name:i.name,emoji:i.emoji,
         variant:i.variant||"",options:i.options||[],
         freebies:(i.freebies||[]).map((f,fi)=>Object.assign({},f,{
           toQty:toAll?(orderIsTO?(f.qty||0):0):pickTO(i,fi)})),
@@ -8167,7 +8204,19 @@ function App(){
               if(!row.ingId||!row.qty)continue;
               const actualDeduct=((row.qty||0)*mult)/(row.convFactor||1);
               try{
-                await updateDoc(doc(db,invCol,row.ingId),{
+                // invCol was never declared in this scope -> ReferenceError,
+                // swallowed by the catch below, so picks were never deducted.
+                let pCol = isOwnerRole ? "inventory" : "inventory_"+branchId;
+                if(!isOwnerRole){
+                  try{
+                    const bd=await getDoc(doc(db,"inventory_"+branchId,row.ingId));
+                    if(!bd.exists()){
+                      const md=await getDoc(doc(db,"inventory",row.ingId));
+                      if(md.exists())pCol="inventory";
+                    }
+                  }catch(e3){}
+                }
+                await updateDoc(doc(db,pCol,row.ingId),{
                   stock:increment(-actualDeduct),
                   lastDeducted:serverTimestamp()
                 });
