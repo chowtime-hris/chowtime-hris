@@ -5358,7 +5358,7 @@ function StockEditModal({item,db,user,branchId,showT,onClose,boms=[]}){
     packSize:item.packSize||"",
   });
 
-  var current=item.stock||0;
+  var current=Math.round((Number(item.stock)||0)*1000)/1000;
   var packSz=packSizeOf(item);
   // When an item has a pack size, physical counting is far easier in packs:
   // enter "149" packs + "14" loose instead of computing 4,484 by hand.
@@ -5483,11 +5483,25 @@ function StockEditModal({item,db,user,branchId,showT,onClose,boms=[]}){
     setSaving(false);
   };
 
+  // Prefill the pad with what is on hand so editing means adjusting a number,
+  // not retyping it. Also unblocks SAVE, which is disabled while display is "".
+  useEffect(function(){
+    if(mode!=="set"){setDisplay("");return;}
+    if(packSz&&byPack){
+      var sp=baseToPacks(item,current);
+      setDisplay(String(sp.packs));
+      setLooseVal(sp.loose?String(sp.loose):"");
+    }else{
+      setDisplay(String(current));
+      setLooseVal("");
+    }
+  },[mode,byPack,packSz,current]);
+
   var KEYS=[
     ["7","8","9"],
     ["4","5","6"],
     ["1","2","3"],
-    [mode==="adjust"?"-":".", "0","⌫"],
+    [".","0","⌫"],
   ];
 
   return h("div",{style:{background:"#fff",width:400,borderRadius:16,
@@ -5500,7 +5514,7 @@ function StockEditModal({item,db,user,branchId,showT,onClose,boms=[]}){
         h("div",{style:{color:"rgba(255,255,255,.6)",fontSize:9,letterSpacing:2,fontWeight:700}},"INVENTORY ITEM"),
         h("div",{style:{color:"#fff",fontWeight:900,fontSize:15}},item.name),
         h("div",{style:{color:"rgba(255,255,255,.5)",fontSize:10}},
-          "Stock: "+String(current)+" "+(item.unit||"")+" · ₱"+(item.price||0).toFixed(2))
+          "Stock: "+fmtStock(item,current)+" · ₱"+(item.price||0).toFixed(2))
       ),
       h("button",{onClick:onClose,
         style:{background:"rgba(255,255,255,.15)",border:"none",color:"#fff",
@@ -5550,6 +5564,17 @@ function StockEditModal({item,db,user,branchId,showT,onClose,boms=[]}){
           border:"2px solid #1565C0"}},
           h("div",{style:{fontSize:9,color:"#888",marginBottom:2,textAlign:"left"}},
             mode==="adjust"?(isNeg?"DEDUCT":"ADD")+" AMOUNT":"SET STOCK TO"),
+          mode==="adjust"&&h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",
+            gap:5,marginBottom:8}},
+            h("button",{onClick:function(){setDisplay(function(p){return p.replace(/^-/,"");});},
+              style:{padding:"7px",borderRadius:7,fontSize:11,fontWeight:800,cursor:"pointer",
+                border:"2px solid "+(!isNeg?"#1B5E20":"#ddd"),
+                background:!isNeg?"#E8F5E9":"#fff",color:!isNeg?"#1B5E20":"#666"}},"+ ADD"),
+            h("button",{onClick:function(){setDisplay(function(p){return p.startsWith("-")?p:"-"+p;});},
+              style:{padding:"7px",borderRadius:7,fontSize:11,fontWeight:800,cursor:"pointer",
+                border:"2px solid "+(isNeg?"#C62828":"#ddd"),
+                background:isNeg?"#FFEBEE":"#fff",color:isNeg?"#C62828":"#666"}},"− DEDUCT")
+          ),
           packSz>0&&h("div",{style:{marginBottom:8}},
             h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5,marginBottom:6}},
               h("button",{onClick:function(){setByPack(false);setLooseVal("");},
@@ -9891,7 +9916,7 @@ function App(){
           h("div",{style:{display:"flex",gap:9,marginBottom:12}},
             h(Stat,{label:"Total Items",value:inventory.length,icon:"📦",color:C.info}),
             h(Stat,{label:"Low Stock",value:inventory.filter(i=>(i.stock||0)<(i.minStock||0)).length,sub:"Below min level",icon:"⚠️",color:C.danger}),
-            h(Stat,{label:"Inv. Value",value:"₱"+inventory.reduce((s,i)=>s+(i.stock||0)*(i.cost||0),0).toLocaleString(),icon:"💰",color:C.success})
+            h(Stat,{label:"Inv. Value",value:"₱"+inventory.reduce((s,i)=>s+(i.stock||0)*(i.cost||0),0).toLocaleString("en-PH",{minimumFractionDigits:2,maximumFractionDigits:2}),icon:"💰",color:C.success})
           ),
           h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
             h("div",{style:{display:"grid",gridTemplateColumns:"2fr 90px 80px 80px 80px 70px 110px",padding:"8px 14px",borderBottom:"1px solid #f0f0f0",background:"#f9f9f9"}},
