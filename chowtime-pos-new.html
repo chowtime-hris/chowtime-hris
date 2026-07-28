@@ -5395,6 +5395,51 @@ async function rollupDay(db,branch,date,vatMode,byName){
   }
 }
 
+// Roll up EVERY branch for one date from a single pair of reads.
+// rollupDay() fetches the day per branch; over a 60-day backfill across eight
+// branches that is 480 queries. Fetching the day once and splitting it in
+// memory is 60 — which matters on the Spark plan's daily read quota.
+async function rollupDateAllBranches(db,date,branchIds,vatMode,byName){
+  const res={date:date,written:0,traded:0,skipped:0};
+  try{
+    const oSnap=await getDocs(query(collection(db,"orders"),where("date","==",date)));
+    const allOrders=oSnap.docs.map(d=>({...d.data(),_docId:d.id}));
+    let allCash=[];
+    try{
+      const cSnap=await getDocs(query(collection(db,"cash_log"),where("date","==",date)));
+      allCash=cSnap.docs.map(d=>d.data());
+    }catch(e){}
+
+    for(const b of branchIds){
+      const bo=allOrders.filter(o=>o.branch===b);
+      const bc=allCash.filter(c=>c.branch===b);
+      // a branch with no activity that day gets no row — an empty document
+      // would be indistinguishable from a real zero-sales day
+      if(!bo.length&&!bc.length){res.skipped++;continue;}
+      const roll=buildDailyRollup(bo,bc,b,date,vatMode);
+      roll.closedBy=byName||"backfill";
+      roll.closedAt=serverTimestamp();
+      roll.year=date.slice(0,4);
+      roll.month=date.slice(0,7);
+      roll.backfilled=true;
+      await setDoc(doc(db,"daily_sales",b+"_"+date),roll,{merge:true});
+      res.written++;
+      if(roll.txns>0)res.traded++;
+    }
+  }catch(e){ console.error("backfill",date,e); res.error=String(e&&e.message||e); }
+  return res;
+}
+
+// Inclusive list of ISO dates from `from` to `to`.
+function dateRange(fromISO,toISO){
+  const out=[]; const a=new Date(fromISO+"T00:00:00"), b=new Date(toISO+"T00:00:00");
+  if(isNaN(a)||isNaN(b)||a>b)return out;
+  for(let d=new Date(a); d<=b; d.setDate(d.getDate()+1)){
+    out.push(d.toISOString().slice(0,10));
+  }
+  return out;
+}
+
 // Days between two ISO dates, exclusive of `to`.
 function daysBefore(toISO,count){
   const out=[]; const d=new Date(toISO+"T00:00:00");
@@ -8652,6 +8697,12 @@ function App(){
   const [posBoms,setPosBoms]=useState({});               // bom docs for stock checks
   const [editingPO,setEditingPO]=useState(null);         // branch editing its own PO
   const [closing,setClosing]=useState(false);            // day rollup in progress
+  const [bfFrom,setBfFrom]=useState("");                 // backfill range
+  const [bfTo,setBfTo]=useState(new Date().toISOString().slice(0,10));
+  const [bfBusy,setBfBusy]=useState(false);
+  const [bfLog,setBfLog]=useState(null);
+  const [zHist,setZHist]=useState([]);                   // saved daily_sales
+  const [zSel,setZSel]=useState("");                     // "" = live reading
   const [notifs,setNotifs]=useState([]);                 // addressed to this branch
   const [showNotifs,setShowNotifs]=useState(false);
   const [openNav,setOpenNav]=useState({});               // which sidebar groups are expanded
@@ -8763,6 +8814,17 @@ function App(){
         ?query(collection(db,"cash_log"),orderBy("timestamp","desc"),limit(100))
         :query(collection(db,"cash_log"),where("branch","==",bId),orderBy("timestamp","desc"),limit(50));
       unsubs.push(onSnapshot(cq,snap=>setCashLog(snap.docs.map(d=>({...d.data(),_docId:d.id}))),()=>{}));
+    }catch(e){}
+
+    // Saved daily rollups for this branch, newest first.
+    try{
+      unsubs.push(onSnapshot(
+        query(collection(db,"daily_sales"),where("branch","==",bId),limit(120)),
+        snap=>{
+          const rows=snap.docs.map(d=>({...d.data(),_docId:d.id}));
+          rows.sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")));
+          setZHist(rows);
+        },()=>{}));
     }catch(e){}
 
     // Auto-close any day that was left open. Nothing can run at midnight —
@@ -10912,14 +10974,51 @@ function App(){
         // ══ Z/X READING ══
         (page==="z_reading"||page==="x_reading")&&(()=>{
           const isZ=page==="z_reading";
-          const zd=buildZ(branchId);
+          const live=buildZ(branchId);
+          const saved=zSel?zHist.find(x=>x.date===zSel):null;
+          // A saved rollup stores cashOnHand; buildZ calls the same figure
+          // totalCash. Map it so one renderer serves both.
+          const zd=saved
+            ? Object.assign({},saved,{totalCash:saved.cashOnHand})
+            : live;
+          const isSaved=!!saved;
           return h("div",null,
+            // Which day am I looking at
+            isZ&&h("div",{style:{display:"flex",gap:8,alignItems:"center",
+              marginBottom:11,flexWrap:"wrap"}},
+              h("span",{style:{fontSize:9,fontWeight:800,color:C.muted,letterSpacing:1}},
+                "PETSA"),
+              h("button",{onClick:()=>setZSel(""),
+                style:{padding:"6px 12px",borderRadius:8,fontSize:10,cursor:"pointer",
+                  fontWeight:!zSel?800:500,
+                  border:"1px solid "+(!zSel?C.primary:C.border),
+                  background:!zSel?"#FFF0F0":"#fff",
+                  color:!zSel?C.primary:C.text}},
+                "Ngayon (live)"),
+              h("select",{value:zSel,onChange:e=>setZSel(e.target.value),
+                disabled:zHist.length===0,
+                style:{padding:"6px 10px",borderRadius:8,fontSize:10,outline:"none",
+                  cursor:zHist.length?"pointer":"default",
+                  border:"1px solid "+(zSel?C.primary:C.border),
+                  background:zHist.length===0?"#f5f5f5":(zSel?"#FFF0F0":"#fff"),
+                  color:zSel?C.primary:C.text,fontWeight:zSel?700:400}},
+                h("option",{value:""},
+                  zHist.length===0?"— walang naka-save —":"— naka-save na araw ("+zHist.length+") —"),
+                zHist.map(r=>h("option",{key:r.date,value:r.date},
+                  r.date+"  ₱"+peso(r.net)+"  ("+(r.txns||0)+" txns)"))
+              ),
+              isSaved&&h("span",{style:{fontSize:9,color:C.muted}},
+                "Naka-save "+(saved.backfilled?"(backfill)":"")+" ni "+(saved.closedBy||"?"))
+            ),
             h(SectionHeader,{title:isZ?"Z-Reading (End of Day)":"X-Reading (Current)"}),
             h("div",{style:{background:`linear-gradient(135deg,${C.primary},${C.dark})`,borderRadius:13,padding:"16px 18px",marginBottom:13,display:"flex",justifyContent:"space-between",alignItems:"center"}},
               h("div",null,
                 h("div",{style:{color:C.accent,fontSize:8,fontWeight:700,letterSpacing:2}},isZ?"Z-READING":"X-READING"),
                 h("div",{style:{color:"#fff",fontSize:15,fontWeight:900,marginTop:2}},curBranch.full),
-                h("div",{style:{color:"rgba(255,255,255,.6)",fontSize:9,marginTop:1}},"Cashier: "+user.name+" · "+new Date().toLocaleDateString("en-PH")),
+                h("div",{style:{color:"rgba(255,255,255,.6)",fontSize:9,marginTop:1}},
+                  isSaved
+                    ? ("Naka-save · "+saved.date+" · ni "+(saved.closedBy||"?"))
+                    : ("Cashier: "+user.name+" · "+new Date().toLocaleDateString("en-PH"))),
                 h("div",{style:{color:"rgba(255,255,255,.4)",fontSize:8,marginTop:2}},dbReady?"✓ From Firebase ("+orders.length+" orders)":"Loading Firebase data...")
               ),
               h("div",{style:{textAlign:"right"}},
@@ -10981,7 +11080,7 @@ function App(){
               // Close Day used to only show a toast — nothing was ever written,
               // so yesterday's Z-Reading became unrecoverable once the orders
               // subscription scrolled past it.
-              isZ&&h("button",{
+              isZ&&!isSaved&&h("button",{
                 onClick:async()=>{
                   const d=new Date().toISOString().slice(0,10);
                   if(!confirm("I-close ang "+d+" para sa "+curBranch.name+"?\n"
@@ -10999,6 +11098,77 @@ function App(){
                   border:"none",borderRadius:9,color:closing?"#888":C.info,
                   fontWeight:700,fontSize:12,cursor:closing?"wait":"pointer"}},
                 closing?"Saving...":"✓ Close Day")
+            ),
+
+            // Backfill — auto-close only reaches 7 days back, and a branch
+            // that stops opening the app never rolls up at all.
+            isZ&&!isSaved&&(user.role==="owner"||user.role==="commissary")&&h("div",{
+              style:{background:"#fff",border:"1px solid "+C.border,borderRadius:12,
+                padding:"14px 16px",marginTop:14}},
+              h("div",{style:{fontSize:12,fontWeight:800,marginBottom:3}},
+                "🗄️ Backfill Daily Records"),
+              h("div",{style:{fontSize:10,color:C.muted,marginBottom:10,lineHeight:1.5}},
+                "Bumubuo ng daily_sales record para sa mga nakaraang araw. "+
+                "Kailangan ito para may laman ang Analytics at Z-Reading history. "+
+                "Ligtas ulitin — pinapalitan lang ang parehong araw, hindi dumodoble."),
+              h("div",{style:{display:"flex",gap:8,alignItems:"flex-end",flexWrap:"wrap"}},
+                h("div",null,
+                  h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,
+                    letterSpacing:1,marginBottom:3}},"MULA"),
+                  h("input",{type:"date",value:bfFrom,onChange:e=>setBfFrom(e.target.value),
+                    style:{padding:"7px 9px",border:"1px solid "+C.border,
+                      borderRadius:7,fontSize:11,outline:"none"}})),
+                h("div",null,
+                  h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,
+                    letterSpacing:1,marginBottom:3}},"HANGGANG"),
+                  h("input",{type:"date",value:bfTo,onChange:e=>setBfTo(e.target.value),
+                    style:{padding:"7px 9px",border:"1px solid "+C.border,
+                      borderRadius:7,fontSize:11,outline:"none"}})),
+                h("button",{
+                  onClick:async()=>{
+                    const days=dateRange(bfFrom,bfTo);
+                    if(!days.length){showT("Pumili ng tamang range","warn");return;}
+                    if(days.length>120){showT("Sobrang haba — 120 araw ang max","warn");return;}
+                    if(!confirm(days.length+" araw × "+branches.length+" branch.\n"
+                      +"Tatagal ng ilang sandali. Ituloy?"))return;
+                    setBfBusy(true);setBfLog({total:days.length,done:0,written:0,traded:0});
+                    const ids=branches.map(b=>b.id);
+                    let written=0,traded=0,done=0;
+                    for(const d of days){
+                      const r=await rollupDateAllBranches(db,d,ids,
+                        (companySettings&&companySettings.vatMode)||"vat",user.name);
+                      written+=r.written;traded+=r.traded;done++;
+                      setBfLog({total:days.length,done:done,written:written,traded:traded});
+                    }
+                    setBfBusy(false);
+                    showT("Backfill tapos · "+written+" record ("+traded+" may benta)","ok");
+                  },
+                  disabled:bfBusy||!bfFrom,
+                  style:{padding:"9px 16px",borderRadius:8,border:"none",
+                    background:(bfBusy||!bfFrom)?"#ccc":C.primary,color:"#fff",
+                    fontWeight:800,fontSize:11,
+                    cursor:(bfBusy||!bfFrom)?"not-allowed":"pointer"}},
+                  bfBusy?"Ginagawa...":"▶ Simulan"),
+                [["7 araw",7],["30 araw",30],["90 araw",90]].map(([lbl,n])=>
+                  h("button",{key:lbl,onClick:()=>{
+                      const t=new Date();const f=new Date();f.setDate(f.getDate()-n);
+                      setBfFrom(f.toISOString().slice(0,10));
+                      setBfTo(t.toISOString().slice(0,10));
+                    },
+                    style:{padding:"7px 11px",borderRadius:20,fontSize:10,cursor:"pointer",
+                      border:"1px solid "+C.border,background:"#fff",color:C.text}},lbl))
+              ),
+              bfLog&&h("div",{style:{marginTop:11,background:C.bg,borderRadius:8,
+                padding:"9px 11px"}},
+                h("div",{style:{height:6,background:"#e0e0e0",borderRadius:4,
+                  overflow:"hidden",marginBottom:6}},
+                  h("div",{style:{height:"100%",width:(bfLog.done/bfLog.total*100)+"%",
+                    background:C.primary,transition:"width .2s"}})),
+                h("div",{style:{fontSize:10,color:C.text}},
+                  bfLog.done+" / "+bfLog.total+" araw  ·  "+
+                  bfLog.written+" record na naisulat  ·  "+
+                  bfLog.traded+" araw na may benta")
+              )
             )
           );
         })(),
