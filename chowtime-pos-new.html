@@ -169,9 +169,9 @@ const BRANCHES = [
 
 const ROLES = {
   owner:     {label:"Owner / Admin",    emoji:"\u{1F451}", color:"#C8151B",
-    nav:["dashboard","branches","pos","orders","all_orders","analytics","z_reading","cash_count","expenses","cash_monitor","inventory","inv_log","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","payroll","kiosk","settings","printer"]},
+    nav:["dashboard","branches","pos","orders","all_orders","analytics","z_reading","reports","cash_count","expenses","cash_monitor","inventory","inv_log","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","payroll","kiosk","settings","printer"]},
   manager:   {label:"Branch Manager",   emoji:"\u{1F3EA}", color:"#007AFF",
-    nav:["branch_dash","pos","orders","analytics","z_reading","cash_count","expenses","inventory","inv_log","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","bom_mgmt","payroll","kiosk","branch_settings","printer"]},
+    nav:["branch_dash","pos","orders","analytics","z_reading","reports","cash_count","expenses","inventory","inv_log","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","bom_mgmt","payroll","kiosk","branch_settings","printer"]},
   cashier:   {label:"Cashier",          emoji:"\u{1F4B3}", color:"#34C759",
     nav:["pos","orders","x_reading","z_reading","cash_count","expenses","inventory","ca_request","loan_request","kiosk","void_request"]},
   crew:      {label:"Crew / Kitchen",   emoji:"\u{1F9D1}\u{200D}\u{1F373}", color:"#FF9500",
@@ -188,7 +188,7 @@ const NAV_GROUPS = [
   {id:"sales", icon:"\u{1F6D2}", label:"POS & Sales",
    pages:["pos","orders","all_orders","kitchen","void_request","void_requests",
           "cash_count","cash_monitor","cash_in_out","z_reading","x_reading",
-          "sales_report","analytics"]},
+          "reports","sales_report","analytics"]},
   {id:"stock", icon:"\u{1F4E6}", label:"Inventory",
    pages:["inventory","inv_log","stock_order","stock_receive","po_monitor",
           "bom_mgmt","commissary","comm_inv","comm_orders","comm_dr"]},
@@ -209,6 +209,7 @@ const NAV_META = {
   all_orders:  {icon:"📋",label:"All Orders"},
   sales_report:{icon:"💰",label:"Sales Report"},
   z_reading:   {icon:"📄",label:"Z-Reading"},
+  reports:     {icon:"🗂️",label:"Reports"},
   x_reading:   {icon:"📃",label:"X-Reading"},
   expenses:    {icon:"💸",label:"Expenses"},
   cash_monitor:{icon:"💵",label:"Cash Monitor"},
@@ -8763,7 +8764,10 @@ function App(){
   const [bfTo,setBfTo]=useState(localDate());
   const [bfBusy,setBfBusy]=useState(false);
   const [bfLog,setBfLog]=useState(null);
-  const [zHist,setZHist]=useState([]);                   // saved daily_sales
+  const [zHist,setZHist]=useState([]);                   // saved daily_sales (this branch)
+  const [zHistAll,setZHistAll]=useState([]);             // every branch, for Reports
+  const [repSrch,setRepSrch]=useState("");
+  const [repMonth,setRepMonth]=useState("");
   const [zSel,setZSel]=useState("");                     // "" = live reading
   const [notifs,setNotifs]=useState([]);                 // addressed to this branch
   const [showNotifs,setShowNotifs]=useState(false);
@@ -8878,14 +8882,20 @@ function App(){
       unsubs.push(onSnapshot(cq,snap=>setCashLog(snap.docs.map(d=>({...d.data(),_docId:d.id}))),()=>{}));
     }catch(e){}
 
-    // Saved daily rollups for this branch, newest first.
+    // Saved daily rollups. Branch staff only ever need their own; the owner
+    // and commissary need every branch for the Reports archive, so load the
+    // wider set once instead of one subscription per branch.
+    const wideRollups=(user.role==="owner"||user.role==="commissary");
     try{
       unsubs.push(onSnapshot(
-        query(collection(db,"daily_sales"),where("branch","==",bId),limit(120)),
+        wideRollups
+          ? query(collection(db,"daily_sales"),limit(800))
+          : query(collection(db,"daily_sales"),where("branch","==",bId),limit(200)),
         snap=>{
           const rows=snap.docs.map(d=>({...d.data(),_docId:d.id}));
           rows.sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")));
-          setZHist(rows);
+          setZHistAll(rows);
+          setZHist(rows.filter(r=>r.branch===bId));
         },()=>{}));
     }catch(e){}
 
@@ -9696,9 +9706,15 @@ function App(){
   };
 
   // ── Z-READING DATA ───────────────────────────────────────
-  const buildZ=(bid)=>{
-    const bo=orders.filter(o=>o.branch===bid);
-    const bc=cashLog.filter(c=>c.branch===bid);
+  const buildZ=(bid,forDate)=>{
+    const d=forDate||localDate();
+    const sameDay=(x)=>{
+      if(x.date)return x.date===d;
+      const t=x.timestamp&&x.timestamp.toDate?x.timestamp.toDate():null;
+      return t?localDate(t)===d:false;
+    };
+    const bo=orders.filter(o=>o.branch===bid&&sameDay(o));
+    const bc=cashLog.filter(c=>c.branch===bid&&sameDay(c));
     const voided=bo.filter(o=>o.status==="void"||o.status==="partial-void");
     const live=bo.filter(o=>o.status!=="void");
     const gross=live.reduce((s,o)=>s+(o.subtotal||0),0);
@@ -11046,11 +11062,136 @@ function App(){
           );
         })(),
 
+        // ══ REPORTS ARCHIVE ══
+        page==="reports"&&(()=>{
+          const mine=(user.role==="owner"||user.role==="commissary")
+            ? zHistAll : zHistAll.filter(r=>r.branch===branchId);
+          const months=[...new Set(mine.map(r=>(r.date||"").slice(0,7)))].sort().reverse();
+          const rows=mine
+            .filter(r=>!repMonth||(r.date||"").slice(0,7)===repMonth)
+            .filter(r=>!repSrch||(r.date||"").includes(repSrch)
+              ||String(r.branch||"").toLowerCase().includes(repSrch.toLowerCase()))
+            .sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")));
+          const bName=(id)=>(branches.find(b=>b.id===id)||{}).full||id;
+
+          // One row per day, exactly the figures the Z-Reading shows.
+          const CSV=[
+            ["Date","Branch","Gross","Discounts","Voids","VoidAmt","Net",
+             "VATable","VAT","VATExempt","Txns","DineIn","Takeout",
+             "CashSales","GCash","FoodPanda","GrabFood",
+             "Opening","CashIn","CashOut","CashOnHand","SIFrom","SITo","ClosedBy"]
+          ];
+          const toCSV=(list)=>{
+            const out=CSV.slice();
+            list.forEach(r=>out.push([r.date,bName(r.branch),r.gross,r.discounts,
+              r.voidCount,r.voidAmt,r.net,r.vatableSales,r.vatAmount,r.vatExempt,
+              r.txns,r.dineIn,r.takeout,r.cashSales,r.gcash,r.foodpanda,r.grabfood,
+              r.opening,r.cashIn,r.cashOut,r.cashOnHand,r.siFrom,r.siTo,r.closedBy]
+              .map(v=>{
+                const t=(v===undefined||v===null)?"":String(v);
+                return /[",\n]/.test(t)?'"'+t.replace(/"/g,'""')+'"':t;
+              }).join(",")));
+            return out.join("\n");
+          };
+          const download=(name,text)=>{
+            try{
+              const blob=new Blob([text],{type:"text/csv;charset=utf-8;"});
+              const url=URL.createObjectURL(blob);
+              const a=document.createElement("a");
+              a.href=url; a.download=name; document.body.appendChild(a); a.click();
+              document.body.removeChild(a); URL.revokeObjectURL(url);
+              showT(name+" na-download ✓");
+            }catch(e){ showT("Download failed","err"); }
+          };
+
+          return h("div",null,
+            h(SectionHeader,{title:"🗂️ Reports — Saved Daily Records"}),
+
+            h("div",{style:{display:"flex",gap:8,marginBottom:12,alignItems:"center",
+              flexWrap:"wrap"}},
+              h("input",{value:repSrch,onChange:e=>setRepSrch(e.target.value),
+                placeholder:"🔍 Hanapin ang petsa o branch...",
+                style:{flex:1,minWidth:170,padding:"8px 11px",
+                  border:"1px solid "+C.border,borderRadius:8,fontSize:11,outline:"none"}}),
+              h("select",{value:repMonth,onChange:e=>setRepMonth(e.target.value),
+                style:{padding:"8px 11px",border:"1px solid "+(repMonth?C.primary:C.border),
+                  borderRadius:8,fontSize:11,outline:"none",cursor:"pointer",
+                  background:repMonth?"#FFF0F0":"#fff",
+                  color:repMonth?C.primary:C.text,fontWeight:repMonth?700:400}},
+                h("option",{value:""},"Lahat ng buwan ("+mine.length+")"),
+                months.map(m=>h("option",{key:m,value:m},m+
+                  " ("+mine.filter(r=>(r.date||"").slice(0,7)===m).length+")"))),
+              h("button",{onClick:()=>download(
+                  "chowtime-daily-"+(repMonth||"lahat")+".csv",toCSV(rows)),
+                disabled:!rows.length,
+                style:{padding:"8px 14px",borderRadius:8,border:"none",
+                  background:rows.length?"#2E7D32":"#ccc",color:"#fff",
+                  fontWeight:800,fontSize:11,
+                  cursor:rows.length?"pointer":"not-allowed"}},
+                "⬇ Download CSV ("+rows.length+")")
+            ),
+
+            rows.length===0
+              ? h("div",{style:{background:"#fff",border:"1px dashed "+C.border,
+                  borderRadius:12,padding:"36px 20px",textAlign:"center"}},
+                  h("div",{style:{fontSize:34,marginBottom:9}},"🗂️"),
+                  h("div",{style:{fontSize:13,fontWeight:800,marginBottom:5}},
+                    "Wala pang naka-save na araw"),
+                  h("div",{style:{fontSize:11,color:C.muted,lineHeight:1.6}},
+                    "Bumubuo ng record ang Close Day at ang Backfill sa Z-Reading page."))
+              : h("div",{style:{background:"#fff",borderRadius:12,
+                  border:"1px solid "+C.border,overflow:"hidden"}},
+                  h("div",{style:{display:"grid",
+                    gridTemplateColumns:"96px 1fr 90px 60px 90px 130px",gap:8,
+                    padding:"9px 14px",background:"#fafafa",
+                    borderBottom:"1px solid "+C.border}},
+                    ["PETSA","BRANCH","NET","TXNS","CASH ON HAND",""].map(hh=>
+                      h("div",{key:hh,style:{fontSize:8,fontWeight:700,
+                        color:C.muted,letterSpacing:1}},hh))),
+                  rows.slice(0,200).map(r=>h("div",{key:r.branch+"_"+r.date,
+                    style:{display:"grid",
+                      gridTemplateColumns:"96px 1fr 90px 60px 90px 130px",gap:8,
+                      padding:"9px 14px",borderBottom:"1px solid #f5f5f5",
+                      alignItems:"center"}},
+                    h("div",{style:{fontSize:11,fontWeight:700}},r.date),
+                    h("div",null,
+                      h("div",{style:{fontSize:11}},bName(r.branch)),
+                      h("div",{style:{fontSize:8,color:C.muted}},
+                        "12:00 AM – 11:59 PM"+(r.backfilled?" · backfill":"")+
+                        (r.closedBy?" · "+r.closedBy:""))),
+                    h("div",{style:{fontSize:11,fontWeight:800,textAlign:"right"}},
+                      "₱"+peso(r.net)),
+                    h("div",{style:{fontSize:11,textAlign:"right"}},r.txns||0),
+                    h("div",{style:{fontSize:11,textAlign:"right",color:C.info}},
+                      "₱"+peso(r.cashOnHand)),
+                    h("div",{style:{display:"flex",gap:5,justifyContent:"flex-end"}},
+                      h("button",{onClick:()=>{setZSel(r.date);setPage("z_reading");},
+                        style:{padding:"5px 9px",borderRadius:6,fontSize:9,
+                          border:"1px solid "+C.border,background:"#fff",
+                          cursor:"pointer",fontWeight:700}},"Buksan"),
+                      h("button",{onClick:()=>download(
+                          "z-"+r.branch+"-"+r.date+".csv",toCSV([r])),
+                        style:{padding:"5px 9px",borderRadius:6,fontSize:9,
+                          border:"1px solid "+C.border,background:"#fff",
+                          cursor:"pointer"}},"⬇")
+                    )
+                  )),
+                  rows.length>200&&h("div",{style:{padding:"10px 14px",fontSize:10,
+                    color:C.muted,textAlign:"center"}},
+                    "Ipinapakita ang unang 200 sa "+rows.length+" — gamitin ang buwan na filter")
+                )
+          );
+        })(),
+
         // ══ Z/X READING ══
         (page==="z_reading"||page==="x_reading")&&(()=>{
           const isZ=page==="z_reading";
-          const live=buildZ(branchId);
+          const live=buildZ(branchId,zSel||localDate());
           const saved=zSel?zHist.find(x=>x.date===zSel):null;
+          // a chosen day with no saved rollup is still readable from the live
+          // orders if they are within the subscription window; only fall back
+          // to an empty state when there is genuinely nothing
+          const noData=!!zSel&&!saved&&(live.txns||0)===0;
           // A saved rollup stores cashOnHand; buildZ calls the same figure
           // totalCash. Map it so one renderer serves both.
           // buildZ and the rollup name two figures differently. Map them here
@@ -11086,8 +11227,10 @@ function App(){
                   color:zSel?C.primary:C.text,fontWeight:zSel?700:400}}),
               // A date input cannot grey out days without data, so say so
               // plainly rather than showing an empty reading.
-              zSel&&!saved&&h("span",{style:{fontSize:10,color:C.danger,fontWeight:700}},
-                "Walang record sa "+zSel),
+              zSel&&!saved&&h("span",{style:{fontSize:10,
+                color:noData?C.danger:C.muted,fontWeight:700}},
+                noData?("Walang transaksyon sa "+zSel)
+                     :("Hindi pa naka-save ang "+zSel+" — live pa ang bilang")),
               // jump straight to the days that actually traded
               zHist.filter(r=>(r.txns||0)>0).slice(0,4).map(r=>
                 h("button",{key:r.date,onClick:()=>setZSel(r.date),
