@@ -1496,6 +1496,63 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
   const [catFilter,setCat]   = useState("");
   const [onlyPicked,setOnlyPicked] = useState(false);
 
+  // Reusable order templates. At 2-3 orders a month the same basket repeats,
+  // so rebuilding it from an empty catalogue every time is the real cost.
+  const [batches,setBatches]   = useState([]);
+  const [batchLabel,setLabel]  = useState("");
+  const [savingBatch,setSaveB] = useState(false);
+  const loadBatches = async()=>{
+    try{
+      const snap=await getDocs(query(collection(db,"order_batches"),
+        where("branch","==",branchId)));
+      setBatches(snap.docs.map(d=>({...d.data(),_docId:d.id})));
+    }catch(e){ setBatches([]); }
+  };
+  useEffect(()=>{ if(branchId)loadBatches(); },[branchId]);
+
+  const saveBatch = async()=>{
+    const label=(batchLabel||"").trim();
+    if(!label){showT("Lagyan ng pangalan ang batch","warn");return;}
+    if(!ordered.length){showT("Walang napiling item","warn");return;}
+    setSaveB(true);
+    try{
+      await addDoc(collection(db,"order_batches"),{
+        branch:branchId,label:label,
+        // store base-unit quantities; pack display is derived at render time
+        items:ordered.map(i=>({id:i.id,name:i.name,qty:i.orderQty,note:i.note||""})),
+        createdBy:user.name,at:serverTimestamp(),
+        date:new Date().toISOString().slice(0,10)
+      });
+      setLabel(""); await loadBatches();
+      showT(label+" na-save \u2713");
+    }catch(e){
+      console.error("saveBatch:",e);
+      showT("Save failed: "+String(e&&e.message||e).slice(0,60),"err");
+    }
+    setSaveB(false);
+  };
+
+  const applyBatch = (b)=>{
+    const want={};
+    (b.items||[]).forEach(i=>{want[i.id]={qty:i.qty||0,note:i.note||""};});
+    let missing=0;
+    setItems(rows=>rows.map(r=>{
+      if(!want[r.id])return {...r,orderQty:0,note:""};
+      return {...r,orderQty:want[r.id].qty,note:want[r.id].note};
+    }));
+    // an item can be dropped from Main's catalogue after a batch was saved
+    (b.items||[]).forEach(i=>{ if(!items.some(r=>r.id===i.id))missing++; });
+    showT(b.label+" na-load"+(missing?" ("+missing+" item wala na sa katalogo)":" \u2713"),
+      missing?"warn":"ok");
+  };
+
+  const deleteBatch = async(b)=>{
+    if(!confirm("Burahin ang batch na \""+b.label+"\"?"))return;
+    try{ await deleteDoc(doc(db,"order_batches",b._docId)); await loadBatches();
+         showT("Batch deleted","warn"); }
+    catch(e){ showT("Delete failed","err"); }
+  };
+
   // Category counts come from the WHOLE catalogue, not the filtered view —
   // the number next to a category has to say how many are in it, not how
   // many survive the current search.
@@ -1636,6 +1693,43 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
           "Showing "+visible.length+" of "+items.length+" item/s")
       ),
 
+      // Saved batches
+      h("div",{style:{padding:"9px 20px",borderBottom:"1px solid #eee",
+        background:"#FFFDF7"}},
+        h("div",{style:{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}},
+          h("span",{style:{fontSize:9,fontWeight:800,color:"#E65100",letterSpacing:1}},
+            "SAVED BATCHES"),
+          batches.length===0
+            ? h("span",{style:{fontSize:10,color:C.muted}},
+                "Wala pa \u2014 pumili ng items, pangalanan, tapos i-save")
+            : batches.map(b=>h("span",{key:b._docId,
+                style:{display:"inline-flex",alignItems:"center",gap:5,
+                  border:"1px solid "+C.border,borderRadius:20,
+                  background:"#fff",padding:"3px 5px 3px 10px"}},
+                h("button",{onClick:()=>applyBatch(b),
+                  style:{border:"none",background:"none",cursor:"pointer",
+                    fontSize:10,fontWeight:700,color:C.text,padding:0}},
+                  b.label+" ("+((b.items||[]).length)+")"),
+                h("button",{onClick:()=>deleteBatch(b),
+                  style:{border:"none",background:"none",cursor:"pointer",
+                    color:C.muted,fontSize:11,lineHeight:1,padding:"0 2px"}},"\u00D7")
+              ))
+        ),
+        h("div",{style:{display:"flex",gap:6,marginTop:7,alignItems:"center",flexWrap:"wrap"}},
+          h("input",{value:batchLabel,onChange:e=>setLabel(e.target.value),
+            onKeyDown:e=>{if(e.key==="Enter")saveBatch();},
+            placeholder:"Pangalan ng batch (hal. Buwanang Frozen)",
+            style:{flex:1,minWidth:180,padding:"6px 10px",border:"1px solid "+C.border,
+              borderRadius:8,fontSize:11,outline:"none"}}),
+          h("button",{onClick:saveBatch,disabled:savingBatch||!ordered.length,
+            style:{padding:"6px 13px",borderRadius:8,border:"none",
+              background:(savingBatch||!ordered.length)?"#ddd":"#E65100",
+              color:"#fff",fontWeight:800,fontSize:10,
+              cursor:(savingBatch||!ordered.length)?"not-allowed":"pointer"}},
+            savingBatch?"...":"\uD83D\uDCBE I-save ang "+ordered.length+" item")
+        )
+      ),
+
       h("div",{style:{flex:1,overflowY:"auto",padding:"0"}},
         // Table header
         h("div",{style:{display:"grid",gridTemplateColumns:"1fr 80px 80px 1fr",
@@ -1668,13 +1762,14 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
             const sz=packSizeOf(item)||1;
             const step=(d)=>setItems(p=>p.map((x,i)=>i===idx
               ?{...x,orderQty:Math.max(0,(x.orderQty||0)+d*sz)}:x));
-            const shown=sz>1?((item.orderQty||0)/sz):(item.orderQty||0);
+            const shownNum=sz>1?((item.orderQty||0)/sz):(item.orderQty||0);
+            const shown=shownNum?String(shownNum):"";
             return h("div",null,
               h("div",{style:{display:"flex",alignItems:"center",gap:4}},
                 h("button",{onClick:()=>step(-1),
                   style:{width:22,height:22,borderRadius:5,border:"1px solid "+C.border,
                     background:"#fff",cursor:"pointer",fontSize:13,fontWeight:700,flexShrink:0}},"−"),
-                h("input",{type:"number",min:0,value:shown,
+                h("input",{type:"number",onFocus:e=>e.target.select(),min:0,value:shown,
                   onChange:e=>{
                     const v=parseFloat(e.target.value)||0;
                     setItems(p=>p.map((x,i)=>i===idx?{...x,orderQty:Math.max(0,v*sz)}:x));
@@ -2017,12 +2112,13 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
               const pu=i.packUnit||"pack";
               const step=(d)=>setActualQtys(p=>({...p,
                 [i.id]:Math.max(0,(p[i.id]??i.qty)+d*sz)}));
-              const shown=sz>1?(Math.round((actual/sz)*1000)/1000):actual;
+              const shownNum=sz>1?(Math.round((actual/sz)*1000)/1000):actual;
+              const shown=shownNum?String(shownNum):"";
               return h("div",{style:{display:"flex",alignItems:"center",gap:4,flexWrap:"wrap"}},
                 h("button",{onClick:()=>step(-1),
                   style:{width:20,height:20,borderRadius:4,border:"1px solid "+C.border,
                     background:"#fff",cursor:"pointer",fontSize:12,fontWeight:700}},"−"),
-                h("input",{type:"number",min:0,value:shown,
+                h("input",{type:"number",onFocus:e=>e.target.select(),min:0,value:shown,
                   onChange:e=>{
                     const v=parseFloat(e.target.value)||0;
                     setActualQtys(p=>({...p,[i.id]:Math.max(0,v*sz)}));
@@ -2042,7 +2138,7 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
             // Price — always per BASE unit
             h("div",{style:{display:"flex",alignItems:"center",gap:3,flexWrap:"wrap"}},
               h("span",{style:{fontSize:10,color:C.muted}},"₱"),
-              h("input",{type:"number",min:0,step:"0.01",value:price||"",
+              h("input",{type:"number",onFocus:e=>e.target.select(),min:0,step:"0.01",value:price||"",
                 onChange:e=>setPrices(p=>({...p,[i.id]:parseFloat(e.target.value)||0})),
                 placeholder:"0.00",
                 style:{width:65,padding:"5px",border:"1px solid "+C.border,borderRadius:6,
@@ -2566,7 +2662,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
               h("div",{style:{display:"flex",alignItems:"center",gap:6}},
                 h("button",{onClick:()=>setCounts(p=>({...p,[d.value]:Math.max(0,(p[d.value]||0)-1)})),
                   style:{width:28,height:28,borderRadius:7,border:"1px solid "+C.border,background:"#fff",cursor:"pointer",fontSize:15,fontWeight:700}},"−"),
-                h("input",{type:"number",min:0,value:counts[d.value]||0,
+                h("input",{type:"number",onFocus:e=>e.target.select(),min:0,value:counts[d.value]||0,
                   onChange:e=>setCounts(p=>({...p,[d.value]:parseInt(e.target.value)||0})),
                   style:{width:52,textAlign:"center",padding:"4px",border:"1px solid "+C.border,borderRadius:6,fontSize:13,fontWeight:700,outline:"none"}}),
                 h("button",{onClick:()=>setCounts(p=>({...p,[d.value]:(p[d.value]||0)+1})),
@@ -2593,7 +2689,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
               h("div",{style:{display:"flex",alignItems:"center",gap:6}},
                 h("button",{onClick:()=>setCounts(p=>({...p,[d.value]:Math.max(0,(p[d.value]||0)-1)})),
                   style:{width:28,height:28,borderRadius:7,border:"1px solid "+C.border,background:"#fff",cursor:"pointer",fontSize:15,fontWeight:700}},"−"),
-                h("input",{type:"number",min:0,value:counts[d.value]||0,
+                h("input",{type:"number",onFocus:e=>e.target.select(),min:0,value:counts[d.value]||0,
                   onChange:e=>setCounts(p=>({...p,[d.value]:parseInt(e.target.value)||0})),
                   style:{width:52,textAlign:"center",padding:"4px",border:"1px solid "+C.border,borderRadius:6,fontSize:13,fontWeight:700,outline:"none"}}),
                 h("button",{onClick:()=>setCounts(p=>({...p,[d.value]:(p[d.value]||0)+1})),
@@ -2653,7 +2749,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
               placeholder:"Description",
               style:{flex:1,minWidth:0,padding:"8px",border:"1px solid "+C.border,
                 borderRadius:7,fontSize:11,outline:"none"}}),
-            h("input",{type:"number",value:cashEntry.amount,
+            h("input",{type:"number",onFocus:e=>e.target.select(),value:cashEntry.amount,
               onChange:e=>setCashEntry(p=>({...p,amount:e.target.value})),
               onKeyDown:e=>{if(e.key==="Enter")addCashEntry();},
               placeholder:"0.00",
@@ -2723,7 +2819,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
           h("div",{style:{fontSize:10,color:C.muted,marginTop:2,marginBottom:10}},"Enter amount to be remitted/deposited. The rest stays in the cash box as tomorrow's opening fund."),
           h("div",{style:{marginBottom:8}},
             h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"REMITTANCE AMOUNT (₱)"),
-            h("input",{type:"number",value:remit,onChange:e=>setRemit(e.target.value),placeholder:"0.00",
+            h("input",{type:"number",onFocus:e=>e.target.select(),value:remit,onChange:e=>setRemit(e.target.value),placeholder:"0.00",
               style:{width:"100%",padding:"10px 12px",border:"2px solid "+C.warning,borderRadius:9,fontSize:16,fontWeight:700,outline:"none",boxSizing:"border-box",color:C.warning}})
           ),
           h("div",{style:{background:"#F3E5F5",borderRadius:9,padding:"10px 13px",display:"flex",justifyContent:"space-between",alignItems:"center"}},
@@ -2852,7 +2948,7 @@ function CALoanPage({user,branchId,curBranch,db,hrisDB,showT,mode,hrisEmps=[]}){
           // Amount
           h("div",{style:{marginBottom:11}},
             h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,marginBottom:5,letterSpacing:1}},"AMOUNT REQUESTED (₱)"),
-            h("input",{type:"number",value:amount,onChange:e=>setAmount(e.target.value),
+            h("input",{type:"number",onFocus:e=>e.target.select(),value:amount,onChange:e=>setAmount(e.target.value),
               placeholder:"0.00",
               style:{width:"100%",padding:"12px",border:`2px solid ${isCA?C.primary:"#1565C0"}`,
                 borderRadius:9,fontSize:20,fontWeight:700,outline:"none",
@@ -3423,7 +3519,7 @@ function MenuEditor({menuItems,setMenuItems,db,user,showT}){
             // Base price
             h("div",{style:{marginBottom:10}},
               h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"RETAIL PRICE (₱) *"),
-              h("input",{type:"number",value:item.basePrice||"",onChange:e=>setField("basePrice",parseFloat(e.target.value)||0),
+              h("input",{type:"number",onFocus:e=>e.target.select(),value:item.basePrice||"",onChange:e=>setField("basePrice",parseFloat(e.target.value)||0),
                 placeholder:"0",
                 style:{width:"100%",padding:"9px",border:`1px solid ${item.basePrice>0?C.border:C.danger}`,borderRadius:7,fontSize:16,fontWeight:700,outline:"none",boxSizing:"border-box",color:C.primary}})
             ),
@@ -3431,7 +3527,7 @@ function MenuEditor({menuItems,setMenuItems,db,user,showT}){
             h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}},
               h("div",null,
                 h("div",{style:{fontSize:9,fontWeight:700,color:"#E65100",marginBottom:4,letterSpacing:1}},"FRANCHISEE PRICE (₱)"),
-                h("input",{type:"number",value:item.franchiseePrice||"",
+                h("input",{type:"number",onFocus:e=>e.target.select(),value:item.franchiseePrice||"",
                   onChange:e=>setField("franchiseePrice",parseFloat(e.target.value)||0),
                   placeholder:"Optional",
                   style:{width:"100%",padding:"9px",border:"1px solid #FFE0B2",borderRadius:7,
@@ -3439,7 +3535,7 @@ function MenuEditor({menuItems,setMenuItems,db,user,showT}){
               ),
               h("div",null,
                 h("div",{style:{fontSize:9,fontWeight:700,color:"#6A1B9A",marginBottom:4,letterSpacing:1}},"WHOLESALE PRICE (₱)"),
-                h("input",{type:"number",value:item.wholesalePrice||"",
+                h("input",{type:"number",onFocus:e=>e.target.select(),value:item.wholesalePrice||"",
                   onChange:e=>setField("wholesalePrice",parseFloat(e.target.value)||0),
                   placeholder:"Optional",
                   style:{width:"100%",padding:"9px",border:"1px solid #E1BEE7",borderRadius:7,
@@ -3515,7 +3611,7 @@ function MenuEditor({menuItems,setMenuItems,db,user,showT}){
                 style:{flex:2,padding:"7px 9px",border:"1px solid "+C.border,borderRadius:6,fontSize:11,outline:"none"}}),
               h("div",{style:{display:"flex",alignItems:"center",gap:4,flexShrink:0}},
                 h("span",{style:{fontSize:11,color:C.muted}},"₱+"),
-                h("input",{type:"number",value:v.priceAdd||"",onChange:e=>setVariant(v.id,"priceAdd",parseFloat(e.target.value)||0),
+                h("input",{type:"number",onFocus:e=>e.target.select(),value:v.priceAdd||"",onChange:e=>setVariant(v.id,"priceAdd",parseFloat(e.target.value)||0),
                   placeholder:"0",
                   style:{width:65,padding:"7px",border:"1px solid "+C.border,borderRadius:6,fontSize:11,outline:"none",textAlign:"center"}})
               ),
@@ -3595,7 +3691,7 @@ function MenuEditor({menuItems,setMenuItems,db,user,showT}){
                     style:{flex:1,padding:"6px 8px",border:"1px solid "+C.border,borderRadius:6,fontSize:11,outline:"none"}}),
                   h("div",{style:{display:"flex",alignItems:"center",gap:3,flexShrink:0}},
                     h("span",{style:{fontSize:10,color:C.muted}},"₱+"),
-                    h("input",{type:"number",value:ch.priceAdd||"",onChange:e=>setChoice(opt.id,ch.id,"priceAdd",parseFloat(e.target.value)||0),
+                    h("input",{type:"number",onFocus:e=>e.target.select(),value:ch.priceAdd||"",onChange:e=>setChoice(opt.id,ch.id,"priceAdd",parseFloat(e.target.value)||0),
                       placeholder:"0",
                       style:{width:55,padding:"6px",border:"1px solid "+C.border,borderRadius:6,fontSize:11,outline:"none",textAlign:"center"}})
                   ),
@@ -3647,7 +3743,7 @@ function MenuEditor({menuItems,setMenuItems,db,user,showT}){
                 ),
                 h("div",null,
                   h("div",{style:{fontSize:8,color:C.muted,marginBottom:3}},"ADD-ON PRICE (₱)"),
-                  h("input",{type:"number",value:p.priceAdd||"",onChange:e=>setPromo(p.id,"priceAdd",parseFloat(e.target.value)||0),
+                  h("input",{type:"number",onFocus:e=>e.target.select(),value:p.priceAdd||"",onChange:e=>setPromo(p.id,"priceAdd",parseFloat(e.target.value)||0),
                     placeholder:"0 = FREE",
                     style:{width:"100%",padding:"6px",border:"1px solid "+C.border,borderRadius:6,fontSize:11,outline:"none",boxSizing:"border-box"}})
                 )
@@ -3800,7 +3896,7 @@ function BranchMenuPage({menuItems,setMenuItems,branchId,curBranch,user,db,showT
         h("input",{value:newExItem.name,onChange:e=>setNewExItem(p=>({...p,name:e.target.value})),
           placeholder:"Item name",
           style:{padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:12,outline:"none"}}),
-        h("input",{type:"number",value:newExItem.basePrice,
+        h("input",{type:"number",onFocus:e=>e.target.select(),value:newExItem.basePrice,
           onChange:e=>setNewExItem(p=>({...p,basePrice:e.target.value})),
           placeholder:"Price",
           style:{padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:12,outline:"none"}}),
@@ -3895,7 +3991,7 @@ function BranchMenuPage({menuItems,setMenuItems,branchId,curBranch,user,db,showT
           // Branch price (editable)
           h("div",{style:{display:"flex",gap:4,alignItems:"center"}},
             h("span",{style:{color:C.muted,fontSize:11}},"₱"),
-            h("input",{type:"number",
+            h("input",{type:"number",onFocus:e=>e.target.select(),
               value:price||"",
               onChange:e=>{savePrice(item,e.target.value);},
               style:{width:70,padding:"5px 6px",
@@ -4126,7 +4222,7 @@ function IngredientsPage({db,user,showT}){
               h("div",{style:{marginBottom:10}},
                 h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,
                   letterSpacing:1,marginBottom:4}},"COST PER UNIT (₱) *"),
-                h("input",{type:"number",min:0,step:"0.01",
+                h("input",{type:"number",onFocus:e=>e.target.select(),min:0,step:"0.01",
                   value:editing.cost||"",
                   onChange:e=>setEditing(p=>({...p,cost:parseFloat(e.target.value)||0})),
                   placeholder:"0.00",
@@ -4439,7 +4535,7 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
           h("option",{value:""},"— Select —"),
           ingredients.map(x=>h("option",{key:x.id,value:x.id},x.name+(x.unit?" ("+x.unit+")":"")))
         ),
-        h("input",{type:"number",min:0,step:"0.01",
+        h("input",{type:"number",onFocus:e=>e.target.select(),min:0,step:"0.01",
           defaultValue:row.qty||"",key:"qty-"+i+"-"+row.ingId,
           onBlur:e=>{const u=[...rows];u[i]={...u[i],qty:parseFloat(e.target.value)||0};setRows(u);},
           style:{padding:"5px",border:"1px solid "+C.border,borderRadius:6,fontSize:10,outline:"none",textAlign:"center",width:"100%"}}),
@@ -4453,12 +4549,12 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
             onBlur:e=>{const u=[...rows];u[i]={...u[i],convUnit:e.target.value};setRows(u);},
             style:{width:26,padding:"2px",border:"1px solid "+C.border,borderRadius:4,fontSize:9,outline:"none",textAlign:"center"}}),
           h("span",{style:{fontSize:8,color:C.muted}},"="),
-          h("input",{type:"number",min:1,defaultValue:row.convFactor||"",key:"cvf-"+i+"-"+row.ingId,placeholder:"1",
+          h("input",{type:"number",onFocus:e=>e.target.select(),min:1,defaultValue:row.convFactor||"",key:"cvf-"+i+"-"+row.ingId,placeholder:"1",
             onBlur:e=>{const u=[...rows];u[i]={...u[i],convFactor:parseFloat(e.target.value)||1};setRows(u);},
             style:{width:22,padding:"2px",border:"1px solid "+C.border,borderRadius:4,fontSize:9,outline:"none",textAlign:"center"}})
         ),
         h("div",{style:{display:"flex",alignItems:"center",gap:2}},
-          h("input",{type:"number",min:0,max:999,defaultValue:row.markup||"",key:"mkp-"+i+"-"+row.ingId,placeholder:"0",
+          h("input",{type:"number",onFocus:e=>e.target.select(),min:0,max:999,defaultValue:row.markup||"",key:"mkp-"+i+"-"+row.ingId,placeholder:"0",
             onBlur:e=>{const u=[...rows];u[i]={...u[i],markup:parseFloat(e.target.value)||0};setRows(u);},
             style:{width:32,padding:"3px",border:"1px solid "+C.border,borderRadius:5,fontSize:10,outline:"none",textAlign:"center"}}),
           h("span",{style:{fontSize:9,color:C.muted}},"%")
@@ -4879,7 +4975,7 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
             background:"#FFFDE7",display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}},
             h("span",{style:{fontSize:10,fontWeight:700,flex:1,minWidth:150}},
               "Required picks kada item"),
-            h("input",{type:"number",min:0,max:10,
+            h("input",{type:"number",onFocus:e=>e.target.select(),min:0,max:10,
               value:(typeof (liveGroup||{}).perItem==="number"?liveGroup.perItem:0),
               onChange:async e=>{
                 const v=Math.max(0,Math.min(10,parseInt(e.target.value,10)||0));
@@ -4909,7 +5005,7 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
                 borderRadius:7,fontSize:11,outline:"none"}}),
             h("div",{style:{display:"flex",alignItems:"center",gap:4}},
               h("span",{style:{fontSize:11,color:C.muted,fontWeight:700}},"₱+"),
-              h("input",{type:"number",min:0,step:"0.5",
+              h("input",{type:"number",onFocus:e=>e.target.select(),min:0,step:"0.5",
                 value:newChoicePrice,
                 onChange:e=>setNewChoicePrice(e.target.value),
                 placeholder:"0",
@@ -4953,7 +5049,7 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
                               borderRadius:7,fontSize:12,outline:"none"}}),
                           h("div",{style:{display:"flex",alignItems:"center",gap:3}},
                             h("span",{style:{fontSize:11,color:C.muted}},"+₱"),
-                            h("input",{type:"number",value:editChPrice,
+                            h("input",{type:"number",onFocus:e=>e.target.select(),value:editChPrice,
                               onChange:e=>setEditChPrice(e.target.value),
                               onKeyDown:e=>{
                                 if(e.key==="Enter"){e.preventDefault();saveChoiceEdit(ch);}
@@ -6300,7 +6396,7 @@ function StockEditModal({item,db,user,branchId,showT,onClose,boms=[]}){
             byPack&&h("div",{style:{display:"flex",gap:6,alignItems:"center"}},
               h("div",{style:{fontSize:10,color:"#666",flex:1}},
                 "Tirang "+baseUnitOf(item)+" (hindi buong "+packUnitOf(item)+")"),
-              h("input",{type:"number",min:0,value:looseVal,
+              h("input",{type:"number",onFocus:e=>e.target.select(),min:0,value:looseVal,
                 onChange:function(e){setLooseVal(e.target.value);},
                 placeholder:"0",
                 style:{width:74,padding:"6px 8px",border:"1px solid #ddd",
@@ -6411,13 +6507,13 @@ function StockEditModal({item,db,user,branchId,showT,onClose,boms=[]}){
         h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}},
           h("div",null,
             h("div",{style:{fontSize:9,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},"SELL PRICE — BRANCH PAYS (₱/"+(details.unit||"pc")+")"),
-            h("input",{type:"number",value:details.price,
+            h("input",{type:"number",onFocus:e=>e.target.select(),value:details.price,
               onChange:e=>setDetails(p=>({...p,price:e.target.value})),
               style:{width:"100%",padding:"8px",border:"1px solid #ddd",borderRadius:7,fontSize:13,fontWeight:700,outline:"none",boxSizing:"border-box",color:"#1565C0"}})
           ),
           h("div",null,
             h("div",{style:{fontSize:9,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},"COST — USED BY BOM (₱/"+(details.unit||"pc")+")"),
-            h("input",{type:"number",value:details.cost,
+            h("input",{type:"number",onFocus:e=>e.target.select(),value:details.cost,
               onChange:e=>setDetails(p=>({...p,cost:e.target.value})),
               style:{width:"100%",padding:"8px",border:"1px solid #ddd",borderRadius:7,fontSize:13,fontWeight:700,outline:"none",boxSizing:"border-box",color:"#C62828"}})
           )
@@ -6427,7 +6523,7 @@ function StockEditModal({item,db,user,branchId,showT,onClose,boms=[]}){
             display:"flex",justifyContent:"space-between"}},
             h("span",null,"MIN STOCK (Alert Threshold)"),
             h("span",{style:{color:"#1565C0"}},"sa "+(details.unit||"pc"))),
-          h("input",{type:"number",value:details.minStock,
+          h("input",{type:"number",onFocus:e=>e.target.select(),value:details.minStock,
             onChange:e=>setDetails(p=>({...p,minStock:e.target.value})),
             style:{width:"100%",padding:"8px",border:"1px solid #ddd",borderRadius:7,fontSize:12,outline:"none",boxSizing:"border-box"}}),
           // minStock is compared straight against stock, which is in the base
@@ -6441,7 +6537,7 @@ function StockEditModal({item,db,user,branchId,showT,onClose,boms=[]}){
             h("div",{style:{display:"flex",gap:6,alignItems:"center"}},
               h("span",{style:{fontSize:10,color:"#555",flex:1}},
                 "O ilagay sa "+(details.packUnit||"pack")+":"),
-              h("input",{type:"number",min:0,placeholder:"hal. 10",
+              h("input",{type:"number",onFocus:e=>e.target.select(),min:0,placeholder:"hal. 10",
                 onChange:e=>{
                   const p2=parseFloat(e.target.value);
                   if(!isNaN(p2))setDetails(p=>({...p,minStock:String(p2*(Number(p.packSize)||1))}));
@@ -6468,7 +6564,7 @@ function StockEditModal({item,db,user,branchId,showT,onClose,boms=[]}){
             h("div",null,
               h("div",{style:{fontSize:9,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},
                 "ILAN KADA PACK"),
-              h("input",{type:"number",min:0,value:details.packSize||"",
+              h("input",{type:"number",onFocus:e=>e.target.select(),min:0,value:details.packSize||"",
                 onChange:e=>setDetails(p=>({...p,packSize:e.target.value})),
                 placeholder:"hal. 30",
                 style:{width:"100%",padding:"8px",border:"1px solid #ddd",
@@ -6618,7 +6714,7 @@ function ReceiveItemsModal({po,db,user,showT,branchId,onClose}){
           h("div",{style:{display:"flex",alignItems:"center",gap:3}},
             h("button",{onClick:function(){setReceived(function(p){var r={};Object.assign(r,p);r[i.id]=Math.max(0,(p[i.id]!=null?p[i.id]:drQty)-1);return r;});},
               style:{width:20,height:20,borderRadius:4,border:"1px solid #ddd",background:"#fff",cursor:"pointer",fontSize:12}},"-"),
-            h("input",{type:"number",min:0,
+            h("input",{type:"number",onFocus:e=>e.target.select(),min:0,
               value:(received[i.id]!=null?received[i.id]:drQty),
               onChange:function(e){var v=parseFloat(e.target.value)||0;setReceived(function(p){var r={};Object.assign(r,p);r[i.id]=v;return r;});},
               style:{width:36,textAlign:"center",padding:"2px",
@@ -6762,7 +6858,7 @@ function PaymentModal({po,db,user,showT,onClose}){
       h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}},
         h("div",null,
           h("div",{style:{fontSize:9,color:C.muted,marginBottom:3}},"AMOUNT (₱)"),
-          h("input",{type:"number",value:amount,onChange:e=>setAmount(e.target.value),
+          h("input",{type:"number",onFocus:e=>e.target.select(),value:amount,onChange:e=>setAmount(e.target.value),
             placeholder:"0.00",
             style:{width:"100%",padding:"9px",border:"2px solid "+C.success,
               borderRadius:8,fontSize:15,fontWeight:700,outline:"none",
@@ -7086,7 +7182,7 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
             h("button",{onClick:()=>setActual(p=>({...p,[i.id]:Math.max(0,(p[i.id]!=null?p[i.id]:i.qty)-1)})),
               style:{width:20,height:20,borderRadius:4,border:"1px solid #ddd",
                 background:"#fff",cursor:"pointer",fontSize:12}},"-"),
-            h("input",{type:"number",min:0,
+            h("input",{type:"number",onFocus:e=>e.target.select(),min:0,
               value:actualQtys[i.id]!=null?actualQtys[i.id]:i.qty,
               onChange:e=>setActual(p=>({...p,[i.id]:parseFloat(e.target.value)||0})),
               style:{width:38,textAlign:"center",padding:"3px",border:"1px solid #ddd",
@@ -7101,7 +7197,7 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
           // Price
           h("div",{style:{display:"flex",alignItems:"center",gap:3}},
             h("span",{style:{fontSize:10,color:"#888"}},"₱"),
-            h("input",{type:"number",min:0,step:"0.01",
+            h("input",{type:"number",onFocus:e=>e.target.select(),min:0,step:"0.01",
               value:prices[i.id]||"",
               onChange:e=>setPrices(p=>({...p,[i.id]:parseFloat(e.target.value)||0})),
               placeholder:"0.00",
@@ -8089,13 +8185,13 @@ function PayrollPage({db,hrisDB,user,showT,branches,branchId,staff,advances}){
                   ri.emoji+" "+ri.label))
             ),
             // Daily rate input
-            h("input",{type:"number",value:s.dailyRate||"",
+            h("input",{type:"number",onFocus:e=>e.target.select(),value:s.dailyRate||"",
               onChange:e=>{(async()=>{try{await updateDoc(doc(db,"staff_accounts",s.id),{dailyRate:parseInt(e.target.value)||0});}catch(ex){}})();},
               placeholder:"₱/day",
               style:{width:"100%",padding:"4px 6px",border:"1px solid "+C.border,
                 borderRadius:6,fontSize:11,textAlign:"center"}}),
             // Days worked input
-            h("input",{type:"number",value:s.daysWorked||"",
+            h("input",{type:"number",onFocus:e=>e.target.select(),value:s.daysWorked||"",
               onChange:e=>{(async()=>{try{await updateDoc(doc(db,"staff_accounts",s.id),{daysWorked:parseInt(e.target.value)||0});}catch(ex){}})();},
               placeholder:"days",
               style:{width:"100%",padding:"4px 6px",border:"1px solid "+C.border,
@@ -8316,7 +8412,7 @@ function NewInventoryItemForm({db,user,branchId,showT,onClose,invBranch}){
         h("div",null,
           h("div",{style:{fontSize:9,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},
             "ILAN KADA PACK"),
-          h("input",{type:"number",min:0,value:form.packSize||"",
+          h("input",{type:"number",onFocus:e=>e.target.select(),min:0,value:form.packSize||"",
             onChange:e=>setForm(p=>({...p,packSize:e.target.value})),
             placeholder:"hal. 30",
             style:{width:"100%",padding:"8px",border:"1px solid #ddd",
@@ -9715,7 +9811,7 @@ function App(){
           ),
           // Custom % input
           chkDisc.custom&&h("div",{style:{display:"flex",gap:6,alignItems:"center",marginTop:5}},
-            h("input",{type:"number",min:0,max:100,value:chkDiscPct,
+            h("input",{type:"number",onFocus:e=>e.target.select(),min:0,max:100,value:chkDiscPct,
               onChange:e=>setChkDiscPct(e.target.value),placeholder:"e.g. 15",
               style:{flex:1,padding:"8px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:11,outline:"none",boxSizing:"border-box"}}),
             h("span",{style:{fontSize:13,fontWeight:900,color:C.primary}},"%")
@@ -9786,7 +9882,7 @@ function App(){
               "₱"+amt
             ))
           ),
-          h("input",{type:"number",
+          h("input",{type:"number",onFocus:e=>e.target.select(),
             id:"cash-tendered-input",
             value:chkCash||"",
             onChange:e=>setChkCash(e.target.value),
@@ -10780,7 +10876,7 @@ function App(){
               h("div",{style:{display:"grid",gap:8}},
                 h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"CATEGORY"),h("select",{value:newExp.cat,onChange:e=>setNewExp(p=>({...p,cat:e.target.value})),style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none"}},EXPENSE_CATS.map(c=>h("option",{key:c},c)))),
                 h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"DESCRIPTION"),h("input",{value:newExp.desc,onChange:e=>setNewExp(p=>({...p,desc:e.target.value})),placeholder:"Description",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box"}})),
-                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"AMOUNT (₱)"),h("input",{type:"number",value:newExp.amount,onChange:e=>setNewExp(p=>({...p,amount:e.target.value})),placeholder:"0.00",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:14,fontWeight:700,outline:"none",boxSizing:"border-box"}})),
+                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"AMOUNT (₱)"),h("input",{type:"number",onFocus:e=>e.target.select(),value:newExp.amount,onChange:e=>setNewExp(p=>({...p,amount:e.target.value})),placeholder:"0.00",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:14,fontWeight:700,outline:"none",boxSizing:"border-box"}})),
                 h("button",{onClick:async()=>{
                   if(!newExp.desc||!newExp.amount){showT("Fill all fields","warn");return;}
                   await addDoc(collection(db,"expenses"),{branch:branchId,cat:newExp.cat,desc:newExp.desc,amount:parseFloat(newExp.amount),date:new Date().toISOString().slice(0,10),by:user.name,status:user.role==="owner"?"approved":"pending",timestamp:serverTimestamp()});
@@ -10835,7 +10931,7 @@ function App(){
                     padding:"5px 8px",marginTop:5,fontWeight:700}},
                     "✓ Ituturing itong Opening Fund sa Z-Reading at Cash Count")
                 ),
-                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"AMOUNT (₱)"),h("input",{type:"number",value:newCash.amount,onChange:e=>setNewCash(p=>({...p,amount:e.target.value})),placeholder:"0.00",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:14,fontWeight:700,outline:"none",boxSizing:"border-box"}})),
+                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"AMOUNT (₱)"),h("input",{type:"number",onFocus:e=>e.target.select(),value:newCash.amount,onChange:e=>setNewCash(p=>({...p,amount:e.target.value})),placeholder:"0.00",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:14,fontWeight:700,outline:"none",boxSizing:"border-box"}})),
                 h("button",{onClick:async()=>{
                   if(!newCash.desc||!newCash.amount){showT("Fill all fields","warn");return;}
                   const now=new Date();
@@ -10868,7 +10964,7 @@ function App(){
               h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:13}},h("b",null,"Cash Advance Request"),h("button",{onClick:()=>setModal(null),style:{background:"none",border:"none",fontSize:17,cursor:"pointer"}},"×")),
               h("div",{style:{display:"grid",gap:8}},
                 h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"STAFF NAME"),h("input",{value:newAdv.staff,onChange:e=>setNewAdv(p=>({...p,staff:e.target.value})),placeholder:"Name",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box"}})),
-                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"AMOUNT (₱)"),h("input",{type:"number",value:newAdv.amount,onChange:e=>setNewAdv(p=>({...p,amount:e.target.value})),placeholder:"0.00",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:14,fontWeight:700,outline:"none",boxSizing:"border-box"}})),
+                h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"AMOUNT (₱)"),h("input",{type:"number",onFocus:e=>e.target.select(),value:newAdv.amount,onChange:e=>setNewAdv(p=>({...p,amount:e.target.value})),placeholder:"0.00",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:14,fontWeight:700,outline:"none",boxSizing:"border-box"}})),
                 h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"REASON"),h("input",{value:newAdv.reason,onChange:e=>setNewAdv(p=>({...p,reason:e.target.value})),placeholder:"e.g. Medical",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box"}})),
                 h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"DEDUCTION DATE"),h("input",{type:"date",value:newAdv.deductDate,onChange:e=>setNewAdv(p=>({...p,deductDate:e.target.value})),style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box"}})),
                 h("button",{onClick:async()=>{
@@ -11044,7 +11140,7 @@ function App(){
                   style:{padding:"4px 10px",background:"#FFEBEE",border:"1px solid #FFCDD2",
                     borderRadius:6,color:C.danger,fontSize:10,fontWeight:700,cursor:"pointer"}},
                   "🗑️"),
-                h("input",{type:"number",placeholder:"+/-",
+                h("input",{type:"number",onFocus:e=>e.target.select(),placeholder:"+/-",
                   style:{width:44,padding:"4px",border:"1px solid "+C.border,
                     borderRadius:6,fontSize:10,textAlign:"center",outline:"none"},
                   onKeyDown:async function(e){
