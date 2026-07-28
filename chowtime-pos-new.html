@@ -6107,10 +6107,36 @@ function StockEditModal({item,db,user,branchId,showT,onClose,boms=[]}){
             byPack&&h("div",{style:{fontSize:10,color:"#1565C0",fontWeight:700,marginTop:5}},
               (Math.abs(rawVal)||0)+" "+packUnitOf(item)+
               ((parseFloat(looseVal)||0)?" + "+looseVal+" "+baseUnitOf(item):"")+
-              " = "+numVal.toLocaleString("en-PH")+" "+baseUnitOf(item))
+              " = "+numVal.toLocaleString("en-PH")+" "+baseUnitOf(item)),
+            // The loose box is for the remainder. A value >= packSize means
+            // whole packs were typed there, which reads as a mistake even
+            // though the arithmetic still comes out right.
+            byPack&&(parseFloat(looseVal)||0)>=packSz&&h("div",{
+              style:{background:"#FFF8E1",border:"1px solid #FFE082",borderRadius:7,
+                padding:"6px 8px",marginTop:6,display:"flex",gap:8,alignItems:"center",
+                flexWrap:"wrap"}},
+              h("div",{style:{flex:1,minWidth:150,fontSize:9,color:"#E65100",fontWeight:700}},
+                (parseFloat(looseVal)||0)+" "+baseUnitOf(item)+" ay "+
+                Math.floor((parseFloat(looseVal)||0)/packSz)+" buong "+packUnitOf(item)+
+                " na. Pareho ang kalalabasan, pero mas malinaw kung nasa tamang box."),
+              h("button",{onClick:function(){
+                  const lv=parseFloat(looseVal)||0;
+                  const carry=Math.floor(lv/packSz);
+                  const rest=lv-carry*packSz;
+                  setDisplay(String((Math.abs(rawVal)||0)+carry));
+                  setLooseVal(rest?String(rest):"");
+                },
+                style:{padding:"4px 10px",borderRadius:6,border:"none",background:"#E65100",
+                  color:"#fff",fontSize:9,fontWeight:800,cursor:"pointer"}},
+                "Ayusin")
+            )
           ),
-          h("div",{style:{fontSize:30,fontWeight:900,color:"#1565C0",minHeight:40,letterSpacing:2}},
-            display||"0"),
+          h("div",{style:{fontSize:30,fontWeight:900,color:"#1565C0",minHeight:40,
+            letterSpacing:2,display:"flex",alignItems:"baseline",justifyContent:"flex-end",gap:6}},
+            h("span",null,display||"0"),
+            h("span",{style:{fontSize:13,fontWeight:700,opacity:.65}},
+              (packSz&&byPack)?packUnitOf(item):baseUnitOf(item))
+          ),
           display&&h("div",{style:{fontSize:11,color:"#666",marginTop:4,
             borderTop:"1px solid #ddd",paddingTop:4,textAlign:"left"}},
             "New stock → ",
