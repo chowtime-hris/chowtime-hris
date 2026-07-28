@@ -4622,6 +4622,7 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
         const newTotal = (order?.total||0) - (req.voidAmount||0);
         await updateDoc(doc(db,"orders",req.orderId),{
           status:"partial-void",
+          originalTotal:(order&&order.originalTotal)||(order&&order.total)||0,
           total:Math.max(0,newTotal),
           voidedItems:req.voidedItems,
           voidedBy:user.name,
@@ -4629,9 +4630,13 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
           voidedAt:serverTimestamp()
         });
       } else {
-        // Full void
+        // Full void — status alone was not enough: every sales sum reads
+        // o.total without checking status, so the money never came off.
+        const ord0 = orders.find(o=>o.id===req.orderId);
         await updateDoc(doc(db,"orders",req.orderId),{
           status:"void",
+          originalTotal:(ord0&&ord0.total)||req.voidAmount||0,
+          total:0,
           voidedBy:user.name,
           voidReason:req.reason,
           voidedAt:serverTimestamp()
@@ -4714,14 +4719,19 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
       try{
         const voidAmt = req.voidAmount||(req.voidedItems||[]).reduce((s,i)=>
           s+(Number(i.lineTotal)||((Number(i.unitPrice)||0)*(i.qty||1))),0);
+        const now=new Date();
         await addDoc(collection(db,"cash_log"),{
           branch:req.branch,
-          type:"void_refund",
-          amount:-voidAmt,
+          type:"out",                       // so Cash Monitor actually totals it
+          subType:"void_refund",
+          amount:voidAmt,                   // positive: money leaving the drawer
+          desc:"Void refund — Order #"+req.orderId,
           orderId:req.orderId,
           reason:"Void approved: "+(req.reason||""),
           by:user.name,
-          date:new Date().toISOString().slice(0,10),
+          time:now.toLocaleTimeString("en-PH",{hour:"2-digit",minute:"2-digit"}),
+          date:now.toISOString().slice(0,10),
+          timestamp:serverTimestamp(),      // required by the orderBy query
           at:serverTimestamp()
         });
       }catch(e){console.warn("Payment reversal log failed",e);}
@@ -5344,6 +5354,8 @@ function StockEditModal({item,db,user,branchId,showT,onClose,boms=[]}){
     price:item.price||0,
     cost:item.cost||0,
     minStock:item.minStock||10,
+    packUnit:item.packUnit||"",
+    packSize:item.packSize||"",
   });
 
   var current=item.stock||0;
@@ -5416,6 +5428,8 @@ function StockEditModal({item,db,user,branchId,showT,onClose,boms=[]}){
         name:details.name,
         unit:details.unit,
         cat:details.cat,
+        packUnit:details.packUnit||"",
+        packSize:parseFloat(details.packSize)||0,
         price:parseFloat(details.price)||0,
         cost:parseFloat(details.cost)||0,
         minStock:parseFloat(details.minStock)||10,
@@ -5653,6 +5667,45 @@ function StockEditModal({item,db,user,branchId,showT,onClose,boms=[]}){
           h("input",{type:"number",value:details.minStock,
             onChange:e=>setDetails(p=>({...p,minStock:e.target.value})),
             style:{width:"100%",padding:"8px",border:"1px solid #ddd",borderRadius:7,fontSize:12,outline:"none",boxSizing:"border-box"}})
+        ),
+        // Pack detail — enables pack counting on the Adjust Stock tab
+        h("div",{style:{background:"#FFFDE7",border:"1px solid #FFE082",borderRadius:8,
+          padding:"9px 10px",marginBottom:12}},
+          h("div",{style:{fontSize:9,fontWeight:800,color:"#E65100",letterSpacing:1,marginBottom:6}},
+            "PACK DETAIL (optional)"),
+          h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
+            h("div",null,
+              h("div",{style:{fontSize:9,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},"PACK UNIT"),
+              h("select",{value:details.packUnit||"",
+                onChange:e=>setDetails(p=>({...p,packUnit:e.target.value})),
+                style:{width:"100%",padding:"8px",border:"1px solid #ddd",borderRadius:7,fontSize:12,outline:"none"}},
+                h("option",{value:""},"— wala —"),
+                UNITS.map(u=>h("option",{key:u,value:u},u)))
+            ),
+            h("div",null,
+              h("div",{style:{fontSize:9,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},
+                "ILAN KADA PACK"),
+              h("input",{type:"number",min:0,value:details.packSize||"",
+                onChange:e=>setDetails(p=>({...p,packSize:e.target.value})),
+                placeholder:"hal. 30",
+                style:{width:"100%",padding:"8px",border:"1px solid #ddd",
+                  borderRadius:7,fontSize:12,outline:"none",boxSizing:"border-box"}})
+            )
+          ),
+          h("div",{style:{fontSize:9,color:"#888",marginTop:5}},
+            (Number(details.packSize)>1&&details.packUnit)
+              ? ("1 "+details.packUnit+" = "+details.packSize+" "+(details.unit||"pc")
+                 +". Lalabas ang pack toggle sa Adjust Stock.")
+              : "Iwanang blangko kung iisa lang ang unit."),
+          // Changing the base unit silently reinterprets every existing count.
+          details.unit!==(item.unit||"pc")&&h("div",{style:{background:"#FFEBEE",
+            border:"1px solid #FFCDD2",borderRadius:7,padding:"7px 9px",marginTop:7}},
+            h("div",{style:{fontSize:10,fontWeight:800,color:"#C62828"}},
+              "⚠️ Binabago mo ang UNIT: "+(item.unit||"pc")+" → "+details.unit),
+            h("div",{style:{fontSize:9,color:"#C62828",marginTop:2}},
+              "Ang stock na "+(item.stock||0)+" ay mababasa na ngayon bilang "+
+              (item.stock||0)+" "+details.unit+". Hindi ito kusang kinoconvert — "+
+              "i-set mo ang tamang bilang sa Adjust Stock pagkatapos mag-save."))
         ),
         // Margin preview
         details.price>0&&h("div",{style:{background:"#E8F5E9",borderRadius:8,
@@ -10029,7 +10082,7 @@ function App(){
           h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:12}},
             h(Stat,{label:"Gross Sales",value:"₱"+orders.reduce((s,o)=>s+(o.subtotal||0),0).toFixed(2),icon:"💰",color:C.primary}),
             h(Stat,{label:"Total Discounts",value:"₱"+orders.reduce((s,o)=>s+(o.discAmt||0),0).toFixed(2),icon:"🏷️",color:C.danger}),
-            h(Stat,{label:"Net Sales",value:"₱"+orders.reduce((s,o)=>s+(o.total||0),0).toFixed(2),icon:"📈",color:C.success})
+            h(Stat,{label:"Net Sales",value:"₱"+orders.filter(o=>o.status!=="void"&&o.status!=="cancelled").reduce((s,o)=>s+(o.total||0),0).toFixed(2),icon:"📈",color:C.success})
           ),
           h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
             h("div",{style:{background:"#fff",borderRadius:12,padding:"13px 15px",border:"1px solid "+C.border}},
