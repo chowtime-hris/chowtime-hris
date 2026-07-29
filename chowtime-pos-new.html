@@ -133,6 +133,26 @@ const fbApp = initializeApp(firebaseConfig);
 const db    = getFirestore(fbApp);
 const auth  = getAuth(fbApp);
 
+// createUserWithEmailAndPassword() signs the CALLER in as the newly created
+// user — that is how the Firebase client SDK behaves. Creating a cashier
+// account would therefore kick the manager out of their own session and leave
+// the tablet logged in as the new cashier, mid-shift.
+// A second app instance gets its own auth state, so the primary session is
+// untouched. This is the standard workaround when there is no server.
+const authApp2 = initializeApp(firebaseConfig, "acct-maker");
+const auth2    = getAuth(authApp2);
+
+// Create a login without disturbing whoever is signed in.
+async function createLoginAccount(email,password){
+  try{
+    await createUserWithEmailAndPassword(auth2,email,password);
+    try{ await signOut(auth2); }catch(e){}
+    return {ok:true};
+  }catch(e){
+    return {ok:false,code:e.code,message:e.message};
+  }
+}
+
 // HRIS Firebase (Realtime Database)
 const hrisConfig = {
   apiKey:      "AIzaSyB8PlWl-qfmAn2GDdrJ1Y5pZQs4RAjhTo4",
@@ -8766,6 +8786,8 @@ function App(){
   const [bfLog,setBfLog]=useState(null);
   const [zHist,setZHist]=useState([]);                   // saved daily_sales (this branch)
   const [zHistAll,setZHistAll]=useState([]);             // every branch, for Reports
+  const [expMonth,setExpMonth]=useState("");             // "" = all months
+  const [expCat,setExpCat]=useState("");
   const [ordDate,setOrdDate]=useState("");               // "" = today, "all" = no filter
   const [repSrch,setRepSrch]=useState("");
   const [repMonth,setRepMonth]=useState("");
@@ -8787,7 +8809,7 @@ function App(){
   const [isOnline,setIsOnline]=useState(navigator.onLine);
   const [hrisReady,setHrisReady]=useState(false);
   const [dbReady,setDbReady]=useState(false);
-  const [newExp,setNewExp]=useState({cat:"Utilities",desc:"",amount:""});
+  const [newExp,setNewExp]=useState({cat:"Utilities",desc:"",amount:"",date:""});
   const [newCash,setNewCash]=useState({type:"in",desc:"",amount:""});
   const [newAdv,setNewAdv]=useState({staff:"",amount:"",reason:"",deductDate:""});
   const [newStaff,setNewStaff]=useState({name:"",role:"cashier",branch:"ct-wsfp",email:"",password:""});
@@ -11469,15 +11491,90 @@ function App(){
         })(),
 
         // ══ EXPENSES ══
-        page==="expenses"&&h("div",null,
+        page==="expenses"&&(()=>{
+          const mine=expenses.filter(e=>user.role==="owner"||e.branch===branchId);
+          const months=[...new Set(mine.map(e=>String(e.date||"").slice(0,7)))]
+            .filter(Boolean).sort().reverse();
+          const rows=mine
+            .filter(e=>!expMonth||String(e.date||"").slice(0,7)===expMonth)
+            .filter(e=>!expCat||e.cat===expCat)
+            .sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")));
+          const total=rows.reduce((s2,e)=>s2+(Number(e.amount)||0),0);
+          const byCat={};
+          rows.forEach(e=>{byCat[e.cat||"Others"]=(byCat[e.cat||"Others"]||0)+(Number(e.amount)||0);});
+          const bName=(id)=>(branches.find(b=>b.id===id)||{}).full||id;
+
+          const dlCSV=()=>{
+            try{
+              const head=["Date","Branch","Category","Description","Amount",
+                          "Status","EnteredBy","EnteredOn"];
+              const esc=(v)=>{const t=(v===undefined||v===null)?"":String(v);
+                return /[",\n]/.test(t)?'"'+t.replace(/"/g,'""')+'"':t;};
+              const lines=[head.join(",")].concat(rows.map(e=>
+                [e.date,bName(e.branch),e.cat,e.desc,e.amount,e.status,e.by,
+                 e.enteredOn||""].map(esc).join(",")));
+              // a total row so the file reconciles without a formula
+              lines.push(["","","","TOTAL",total.toFixed(2),"","",""].map(esc).join(","));
+              const blob=new Blob([lines.join("\n")],{type:"text/csv;charset=utf-8;"});
+              const url=URL.createObjectURL(blob);
+              const a=document.createElement("a");
+              a.href=url; a.download="chowtime-expenses-"+(expMonth||"lahat")+".csv";
+              document.body.appendChild(a); a.click(); document.body.removeChild(a);
+              URL.revokeObjectURL(url);
+              showT(rows.length+" expense na-download ✓");
+            }catch(e){ showT("Download failed","err"); }
+          };
+
+          return h("div",null,
           h(SectionHeader,{title:"Expenses",action:()=>setModal("add_exp"),actionLabel:"Add Expense"}),
+
+          h("div",{style:{display:"flex",gap:8,marginBottom:12,alignItems:"center",
+            flexWrap:"wrap"}},
+            h("select",{value:expMonth,onChange:e=>setExpMonth(e.target.value),
+              style:{padding:"8px 11px",borderRadius:8,fontSize:11,outline:"none",
+                cursor:"pointer",border:"1px solid "+(expMonth?C.primary:C.border),
+                background:expMonth?"#FFF0F0":"#fff",
+                color:expMonth?C.primary:C.text,fontWeight:expMonth?700:400}},
+              h("option",{value:""},"Lahat ng buwan ("+mine.length+")"),
+              months.map(m=>h("option",{key:m,value:m},m+
+                " ("+mine.filter(e=>String(e.date||"").slice(0,7)===m).length+")"))),
+            h("select",{value:expCat,onChange:e=>setExpCat(e.target.value),
+              style:{padding:"8px 11px",borderRadius:8,fontSize:11,outline:"none",
+                cursor:"pointer",border:"1px solid "+(expCat?C.primary:C.border),
+                background:expCat?"#FFF0F0":"#fff",
+                color:expCat?C.primary:C.text,fontWeight:expCat?700:400}},
+              h("option",{value:""},"Lahat ng kategorya"),
+              EXPENSE_CATS.map(c=>h("option",{key:c,value:c},c))),
+            h("button",{onClick:dlCSV,disabled:!rows.length,
+              style:{padding:"8px 14px",borderRadius:8,border:"none",
+                background:rows.length?"#2E7D32":"#ccc",color:"#fff",
+                fontWeight:800,fontSize:11,
+                cursor:rows.length?"pointer":"not-allowed"}},
+              "⬇ Download CSV ("+rows.length+")"),
+            h("div",{style:{marginLeft:"auto",fontSize:13,fontWeight:900,color:C.danger}},
+              "₱"+peso(total))
+          ),
+
+          Object.keys(byCat).length>1&&h("div",{style:{display:"flex",gap:6,
+            marginBottom:12,flexWrap:"wrap"}},
+            Object.keys(byCat).sort((a,b)=>byCat[b]-byCat[a]).map(c=>
+              h("button",{key:c,onClick:()=>setExpCat(expCat===c?"":c),
+                style:{padding:"5px 10px",borderRadius:20,fontSize:10,cursor:"pointer",
+                  fontWeight:expCat===c?800:500,
+                  border:"1px solid "+(expCat===c?C.primary:C.border),
+                  background:expCat===c?"#FFF0F0":"#fff",
+                  color:expCat===c?C.primary:C.text}},
+                c+" · ₱"+peso(byCat[c])))
+          ),
           h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:12}},
             h(Stat,{label:"Total",value:"₱"+expenses.filter(e=>user.role==="owner"||e.branch===branchId).reduce((s,e)=>s+(e.amount||0),0).toLocaleString(),icon:"💸",color:C.danger}),
             h(Stat,{label:"Approved",value:expenses.filter(e=>e.status==="approved"&&(user.role==="owner"||e.branch===branchId)).length,icon:"✅",color:C.success}),
             h(Stat,{label:"Pending",value:expenses.filter(e=>e.status==="pending"&&(user.role==="owner"||e.branch===branchId)).length,icon:"⏳",color:C.warning})
           ),
           h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
-            expenses.filter(e=>user.role==="owner"||e.branch===branchId).map(e=>h("div",{key:e._docId||e.id,style:{display:"flex",alignItems:"center",gap:9,padding:"10px 14px",borderBottom:"1px solid #f9f9f9"}},
+            rows.length===0&&h("div",{style:{padding:"32px",textAlign:"center",
+              color:C.muted,fontSize:12}},"Walang gastos sa piniling filter"),
+            rows.map(e=>h("div",{key:e._docId||e.id,style:{display:"flex",alignItems:"center",gap:9,padding:"10px 14px",borderBottom:"1px solid #f9f9f9"}},
               h("div",{style:{width:32,height:32,background:"#FFEBEE",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}},"💸"),
               h("div",{style:{flex:1}},
                 h("div",{style:{fontSize:11,fontWeight:700}},e.desc),
@@ -11498,18 +11595,34 @@ function App(){
             h("div",{style:{background:"#fff",width:360,borderRadius:14,padding:"18px",boxShadow:"0 20px 60px rgba(0,0,0,.3)"}},
               h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:14}},h("b",null,"Add Expense"),h("button",{onClick:()=>setModal(null),style:{background:"none",border:"none",fontSize:17,cursor:"pointer"}},"×")),
               h("div",{style:{display:"grid",gap:8}},
+                h("div",null,
+                  h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"PETSA NG GASTOS"),
+                  h("input",{type:"date",value:newExp.date||localDate(),
+                    max:localDate(),
+                    onChange:e=>setNewExp(p=>({...p,date:e.target.value})),
+                    style:{width:"100%",padding:"8px",border:"1px solid "+C.border,
+                      borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box"}}),
+                  (newExp.date&&newExp.date!==localDate())&&h("div",{style:{fontSize:9,
+                    color:"#E65100",fontWeight:700,marginTop:3}},
+                    "Ilalagay sa "+newExp.date+", hindi ngayong araw")),
                 h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"CATEGORY"),h("select",{value:newExp.cat,onChange:e=>setNewExp(p=>({...p,cat:e.target.value})),style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none"}},EXPENSE_CATS.map(c=>h("option",{key:c},c)))),
                 h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"DESCRIPTION"),h("input",{value:newExp.desc,onChange:e=>setNewExp(p=>({...p,desc:e.target.value})),placeholder:"Description",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none",boxSizing:"border-box"}})),
                 h("div",null,h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"AMOUNT (₱)"),h("input",{type:"number",onFocus:e=>e.target.select(),value:newExp.amount,onChange:e=>setNewExp(p=>({...p,amount:e.target.value})),placeholder:"0.00",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:14,fontWeight:700,outline:"none",boxSizing:"border-box"}})),
                 h("button",{onClick:async()=>{
                   if(!newExp.desc||!newExp.amount){showT("Fill all fields","warn");return;}
-                  await addDoc(collection(db,"expenses"),{branch:branchId,cat:newExp.cat,desc:newExp.desc,amount:parseFloat(newExp.amount),date:localDate(),by:user.name,status:user.role==="owner"?"approved":"pending",timestamp:serverTimestamp()});
-                  setNewExp({cat:"Utilities",desc:"",amount:""});setModal(null);showT("Expense recorded!");
+                  await addDoc(collection(db,"expenses"),{branch:branchId,cat:newExp.cat,
+                    desc:newExp.desc,amount:parseFloat(newExp.amount),
+                    date:newExp.date||localDate(),
+                    enteredOn:localDate(),   // keep when it was keyed in, for audit
+                    by:user.name,status:user.role==="owner"?"approved":"pending",
+                    timestamp:serverTimestamp()});
+                  setNewExp({cat:"Utilities",desc:"",amount:"",date:""});setModal(null);showT("Expense recorded!");
                 },style:{padding:"10px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:8,color:"#fff",fontWeight:700,cursor:"pointer"}},"Save Expense")
               )
             )
           )
-        ),
+          );
+        })(),
 
         // ══ CASH IN/OUT ══
         page==="cash_in_out"&&h("div",null,
@@ -12358,7 +12471,8 @@ function App(){
                         var pw=editingStaff.password||"";
                         if(!pw||pw.length<6){showT("Enter password (min 6 chars)","warn");return;}
                         try{
-                          await createUserWithEmailAndPassword(auth,editingStaff.email,pw);
+                          const _r=await createLoginAccount(editingStaff.email,pw);
+                          if(!_r.ok)throw Object.assign(new Error(_r.message),{code:_r.code});
                           showT("✅ Login account created for "+editingStaff.name+"!","ok");
                         }catch(e){
                           if(e.code==="auth/email-already-in-use"){
@@ -12732,7 +12846,8 @@ function App(){
                         var tempPw=editingStaff.password||"";
                           if(!tempPw||tempPw.length<6){showT("Enter password (min 6 chars)","warn");return;}
                         try{
-                          await createUserWithEmailAndPassword(auth,editingStaff.email,tempPw);
+                          const _r=await createLoginAccount(editingStaff.email,tempPw);
+                          if(!_r.ok)throw Object.assign(new Error(_r.message),{code:_r.code});
                           showT("✅ Login account created! Password: "+tempPw,"ok");
                         }catch(e){
                           if(e.code==="auth/email-already-in-use"){
@@ -12753,14 +12868,21 @@ function App(){
                         try{
                           if(editingStaff._isNew){
                             await addDoc(collection(db,"staff_accounts"),{
-                              name:editingStaff.name,role:editingStaff.role,
+                              name:editingStaff.name,
+                              // clamp: a branch manager can only ever create
+                              // staff roles, never another manager or owner
+                              role:["cashier","crew","stockclerk"].includes(editingStaff.role)
+                                ?editingStaff.role:"crew",
                               branch:branchId,email:editingStaff.email||"",
                               createdAt:serverTimestamp(),createdBy:user.name
                             });
                             showT(editingStaff.name+" added ✓");
                           } else {
                             await updateDoc(doc(db,"staff_accounts",editingStaff.id),{
-                              name:editingStaff.name,role:editingStaff.role,
+                              name:editingStaff.name,
+                              role:["cashier","crew","stockclerk"].includes(editingStaff.role)
+                                ?editingStaff.role:"crew",
+                              branch:branchId,   // cannot be moved to another branch
                               email:editingStaff.email||"",
                               updatedAt:serverTimestamp(),
                               updatedBy:user.name
