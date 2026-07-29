@@ -8786,6 +8786,7 @@ function App(){
   const [bfLog,setBfLog]=useState(null);
   const [zHist,setZHist]=useState([]);                   // saved daily_sales (this branch)
   const [zHistAll,setZHistAll]=useState([]);             // every branch, for Reports
+  const [editBr,setEditBr]=useState(null);               // branch being added/edited
   const [expMonth,setExpMonth]=useState("");             // "" = all months
   const [expCat,setExpCat]=useState("");
   const [ordDate,setOrdDate]=useState("");               // "" = today, "all" = no filter
@@ -10813,10 +10814,17 @@ function App(){
 
         // ══ BRANCHES ══
         page==="branches"&&h("div",null,
-          h(SectionHeader,{title:"Stores / Branches"}),
+          h(SectionHeader,{title:"Stores / Branches",
+            action:(user.role==="owner")
+              ?()=>setEditBr({_isNew:true,id:"",name:"",full:"",loc:"",status:"open"})
+              :undefined,
+            actionLabel:"+ Add Branch"}),
           h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10}},
             branches.map(b=>{
-              const bOrds=orders.filter(o=>o.branch===b.id);
+              const _t=localDate();
+              const bOrds=orders.filter(o=>o.branch===b.id
+                &&o.status!=="void"&&o.status!=="cancelled"
+                &&((o.date||"")===_t));
               const bSales=bOrds.reduce((s,o)=>s+(o.total||0),0);
               return h("div",{key:b.id,style:{background:"#fff",borderRadius:12,padding:"14px",border:"1px solid "+C.border}},
                 h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:10}},
@@ -10835,9 +10843,152 @@ function App(){
                     h("div",{style:{fontSize:7,color:C.info,fontWeight:700,marginBottom:1}},"ORDERS"),
                     h("div",{style:{fontSize:14,fontWeight:900}},bOrds.length)
                   )
+                ),
+                user.role==="owner"&&h("div",{style:{display:"flex",gap:6}},
+                  h("button",{onClick:()=>setEditBr(Object.assign({},b)),
+                    style:{flex:1,padding:"6px",borderRadius:7,fontSize:10,cursor:"pointer",
+                      border:"1px solid "+C.border,background:"#fff",fontWeight:700}},
+                    "✏️ Edit"),
+                  h("button",{
+                    onClick:async()=>{
+                      const used=orders.filter(o=>o.branch===b.id).length;
+                      if(used){
+                        showT("Hindi mabubura — may "+used+" order na naka-tag dito","err");
+                        return;
+                      }
+                      if(!confirm("Burahin ang "+b.full+"?\nMawawala siya sa lahat ng listahan."))return;
+                      try{
+                        await setDoc(doc(db,"settings","branches"),
+                          {branches:branches.filter(x=>x.id!==b.id)},{merge:true});
+                        showT(b.full+" na-delete","warn");
+                      }catch(e){showT("Delete failed","err");}
+                    },
+                    style:{padding:"6px 10px",borderRadius:7,fontSize:10,cursor:"pointer",
+                      border:"1px solid "+C.border,background:"#fff",color:C.danger}},
+                    "🗑")
                 )
               );
             })
+          )
+        ),
+
+        // Branch add / edit
+        editBr&&h("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",
+          display:"flex",alignItems:"center",justifyContent:"center",zIndex:900,padding:16},
+          onClick:e=>e.target===e.currentTarget&&setEditBr(null)},
+          h("div",{style:{background:"#fff",width:380,borderRadius:14,padding:"18px"}},
+            h("div",{style:{fontSize:14,fontWeight:800,marginBottom:14}},
+              editBr._isNew?"➕ Bagong Branch":"✏️ I-edit ang Branch"),
+            h("div",{style:{display:"grid",gap:9}},
+              [["id","BRANCH ID (hal. ct-wsfp)",!!editBr._isNew],
+               ["name","SHORT CODE (hal. CT-WSFP)",true],
+               ["full","BUONG PANGALAN",true],
+               ["loc","LOKASYON",true]].map(([k,lbl,editable])=>
+                h("div",{key:k},
+                  h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,
+                    letterSpacing:1,marginBottom:3}},lbl),
+                  h("input",{value:editBr[k]||"",disabled:!editable,
+                    onChange:e=>setEditBr(p=>Object.assign({},p,
+                      {[k]:k==="id"?e.target.value.toLowerCase().replace(/[^a-z0-9-]/g,""):e.target.value})),
+                    style:{width:"100%",padding:"8px",borderRadius:7,fontSize:11,
+                      outline:"none",boxSizing:"border-box",
+                      border:"1px solid "+C.border,
+                      background:editable?"#fff":"#f5f5f5",
+                      color:editable?C.text:C.muted}}),
+                  k==="id"&&!editBr._isNew&&h("div",{style:{fontSize:9,color:C.muted,marginTop:2}},
+                    "Hindi mababago — naka-tag na ang orders at inventory dito"))),
+              editBr._isNew&&h("div",{style:{background:"#FFFDE7",
+                border:"1px solid #FFE082",borderRadius:9,padding:"10px 11px"}},
+                h("div",{style:{fontSize:9,fontWeight:800,color:"#E65100",
+                  letterSpacing:1,marginBottom:3}},"BRANCH MANAGER ACCOUNT"),
+                h("div",{style:{fontSize:9,color:C.muted,marginBottom:8,lineHeight:1.5}},
+                  "Optional — pero kung walang manager account, walang makakapasok "+
+                  "sa branch na ito. Siya na ang gagawa ng cashier accounts niya."),
+                [["mgrName","PANGALAN","text","hal. Andrea Cruz"],
+                 ["mgrEmail","EMAIL","email","manager@chowtime.com"],
+                 ["mgrPw","TEMP PASSWORD (min 6)","text","ipapalit niya mamaya"]].map(([k,lbl,tp,ph])=>
+                  h("div",{key:k,style:{marginBottom:6}},
+                    h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,
+                      letterSpacing:1,marginBottom:3}},lbl),
+                    h("input",{type:tp,value:editBr[k]||"",placeholder:ph,
+                      onChange:e=>setEditBr(p=>Object.assign({},p,{[k]:e.target.value})),
+                      style:{width:"100%",padding:"7px",borderRadius:7,fontSize:11,
+                        outline:"none",boxSizing:"border-box",
+                        border:"1px solid "+C.border}})))
+              ),
+              h("div",null,
+                h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,
+                  letterSpacing:1,marginBottom:3}},"STATUS"),
+                h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}},
+                  ["open","closed"].map(st=>h("button",{key:st,
+                    onClick:()=>setEditBr(p=>Object.assign({},p,{status:st})),
+                    style:{padding:"8px",borderRadius:7,fontSize:11,cursor:"pointer",
+                      fontWeight:(editBr.status||"open")===st?800:500,
+                      border:"2px solid "+((editBr.status||"open")===st?C.primary:C.border),
+                      background:(editBr.status||"open")===st?"#FFF0F0":"#fff",
+                      color:(editBr.status||"open")===st?C.primary:C.text}},
+                    st==="open"?"Bukas":"Sarado")))
+              )
+            ),
+            h("div",{style:{display:"flex",gap:8,marginTop:16}},
+              h("button",{onClick:()=>setEditBr(null),
+                style:{flex:1,padding:"10px",borderRadius:9,border:"1px solid "+C.border,
+                  background:"#fff",fontSize:12,cursor:"pointer"}},"Cancel"),
+              h("button",{
+                onClick:async()=>{
+                  const b=editBr;
+                  if(!b.id||!b.full){showT("Kailangan ang ID at buong pangalan","warn");return;}
+                  if(b._isNew&&branches.some(x=>x.id===b.id)){
+                    showT("Ginagamit na ang ID na "+b.id,"err");return;
+                  }
+                  const clean={id:b.id,name:b.name||b.id.toUpperCase(),
+                    full:b.full,loc:b.loc||"",status:b.status||"open"};
+                  const next=b._isNew
+                    ? branches.concat([clean])
+                    : branches.map(x=>x.id===b.id?clean:x);
+                  try{
+                    await setDoc(doc(db,"settings","branches"),{branches:next},{merge:true});
+                  }catch(e){
+                    console.error("branch save:",e);
+                    showT("Save failed: "+String(e&&e.message||e).slice(0,60),"err");
+                    return;
+                  }
+
+                  // Manager account is a separate concern: the branch is saved
+                  // either way, so a failed account never loses the branch.
+                  let note="";
+                  if(b._isNew&&(b.mgrEmail||"").trim()){
+                    const pw=(b.mgrPw||"").trim();
+                    if(pw.length<6){
+                      note=" — hindi nagawa ang account (kulang ang password)";
+                    }else{
+                      try{
+                        await addDoc(collection(db,"staff_accounts"),{
+                          name:(b.mgrName||"").trim()||clean.full+" Manager",
+                          role:"manager",branch:clean.id,
+                          email:(b.mgrEmail||"").trim(),
+                          createdAt:serverTimestamp(),createdBy:user.name});
+                        const r=await createLoginAccount((b.mgrEmail||"").trim(),pw);
+                        note=r.ok
+                          ? " · manager account handa na"
+                          : (r.code==="auth/email-already-in-use"
+                              ? " · may login na ang email na yan, naka-link na"
+                              : " — hindi nagawa ang login: "+String(r.message||"").slice(0,40));
+                      }catch(e2){
+                        console.error("manager account:",e2);
+                        note=" — hindi nagawa ang manager account";
+                      }
+                    }
+                  }
+                  setEditBr(null);
+                  showT(clean.full+(b._isNew?" naidagdag ✓":" na-update ✓")+note,
+                    note.indexOf("hindi")>=0?"warn":"ok");
+                },
+                style:{flex:2,padding:"10px",borderRadius:9,border:"none",
+                  background:C.primary,color:"#fff",fontWeight:800,fontSize:12,
+                  cursor:"pointer"}},
+                "💾 Save")
+            )
           )
         ),
 
