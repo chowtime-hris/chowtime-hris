@@ -6085,13 +6085,14 @@ function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inve
   filtOrders.forEach(o=>{
     const p=o.payMethod||"cash";
     if(!payMap[p])payMap[p]={method:p,count:0,total:0};
-    payMap[p].count++; payMap[p].total+=(o.subtotal||0);
+    payMap[p].count++; payMap[p].total+=(Number(o.total)||0);
   });
   const payList=Object.values(payMap).sort((a,b)=>b.total-a.total);
 
   // Branch breakdown (owner)
   const branchMap={};
-  orders.filter(o=>o.status!=="voided").forEach(o=>{
+  orders.filter(o=>o.status!=="voided"&&o.status!=="void"&&o.status!=="cancelled"
+    &&inPeriod(o.date||"")).forEach(o=>{
     const b=o.branch||"unknown";
     if(!branchMap[b])branchMap[b]={branch:b,count:0,total:0};
     branchMap[b].count++; branchMap[b].total+=(o.subtotal||0);
@@ -6099,7 +6100,12 @@ function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inve
   const branchList=Object.values(branchMap).sort((a,b)=>b.total-a.total);
 
   // PO/Purchasing breakdown
-  const poPaid=advances.filter(a=>a._type==="po"&&a.paymentStatus==="Paid");
+  const _poDate=(a)=>a.date||a.paidDate||a.createdDate||"";
+  const _canSeeAll=(user.role==="owner"||user.role==="commissary");
+  const poAll=advances.filter(a=>a._type==="po"
+    &&(_canSeeAll||a.branch===branchId)
+    &&inPeriod(_poDate(a)));
+  const poPaid=poAll.filter(a=>a.paymentStatus==="Paid");
   const poTotal=poPaid.reduce((s,a)=>s+(a.totalAmount||0),0);
 
   // Inventory value
@@ -6325,7 +6331,9 @@ function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inve
       h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
         h("div",{style:{padding:"10px 16px",borderBottom:"1px solid "+C.border,
           fontSize:12,fontWeight:800}},"Recent PO Transactions"),
-        advances.filter(a=>a._type==="po"&&a.paymentStatus==="Paid")
+        poPaid
+          .slice()
+          .sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")))
           .slice(0,10)
           .map(po=>h("div",{key:po._docId,
             style:{display:"grid",gridTemplateColumns:"1fr 120px 100px 80px",
