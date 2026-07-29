@@ -12239,19 +12239,21 @@ function App(){
                     c+" ("+inventory.filter(i=>(i.cat||"Other")===c).length+")")));
               })(),
               (function(){
-                const hasBOM=(id)=>{
-                  const d=posBoms[id]||{};
-                  return Object.keys(d).some(k=>Array.isArray(d[k])&&d[k].length);
-                };
+                const usedIngs=new Set();
+                Object.values(posBoms||{}).forEach(docv=>{
+                  Object.values(docv||{}).forEach(rows=>{
+                    if(Array.isArray(rows))rows.forEach(r=>{if(r&&r.ingId)usedIngs.add(r.ingId);});
+                  });
+                });
                 const counts={
                   low:inventory.filter(i=>(i.stock||0)<=(i.minStock||0)).length,
                   zero:inventory.filter(i=>(i.stock||0)===0).length,
-                  nobom:inventory.filter(i=>!hasBOM(i.id)).length,
+                  unused:inventory.filter(i=>!usedIngs.has(i.id)).length,
                   noprice:inventory.filter(i=>!(Number(i.price)||0)).length
                 };
                 return [["low","⚠️ Low stock",C.danger],
                         ["zero","0️⃣ Ubos",C.muted],
-                        ["nobom","🧪 Walang BOM","#E65100"],
+                        ["unused","🔗 Walang recipe","#E65100"],
                         ["noprice","₱ Walang presyo","#E65100"]]
                   .filter(([k])=>counts[k]>0)
                   .map(([k,lbl,col])=>h("button",{key:k,
@@ -12286,17 +12288,20 @@ function App(){
             ),
             (function(){
               const q=(invSrch||"").toLowerCase();
-              const hasBOM=(id)=>{
-                const d=posBoms[id]||{};
-                return Object.keys(d).some(k=>Array.isArray(d[k])&&d[k].length);
-              };
+              // ingredients referenced by ANY recipe row
+              const usedIngs=new Set();
+              Object.values(posBoms||{}).forEach(docv=>{
+                Object.values(docv||{}).forEach(rows=>{
+                  if(Array.isArray(rows))rows.forEach(r=>{if(r&&r.ingId)usedIngs.add(r.ingId);});
+                });
+              });
               return inventory.filter(i=>{
                 if(q&&!(i.name||"").toLowerCase().includes(q)
                   &&!(i.cat||"").toLowerCase().includes(q))return false;
                 if(invCat&&(i.cat||"Other")!==invCat)return false;
                 if(invFlag==="low"&&!((i.stock||0)<=(i.minStock||0)))return false;
                 if(invFlag==="zero"&&(i.stock||0)!==0)return false;
-                if(invFlag==="nobom"&&hasBOM(i.id))return false;
+                if(invFlag==="unused"&&usedIngs.has(i.id))return false;
                 if(invFlag==="noprice"&&(Number(i.price)||0)>0)return false;
                 return true;
               });
