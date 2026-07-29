@@ -6007,7 +6007,8 @@ function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inve
   };
 
   const filtOrders = orders.filter(o=>{
-    if(o.status==="voided"||o.status==="void")return false;
+    if(o.status==="voided"||o.status==="void"||o.status==="cancelled")return false;
+    if(o.branch!==branchId)return false;
     return inPeriod(o.date||"");
   });
 
@@ -6027,9 +6028,14 @@ function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inve
   },[branchId]);
 
   const periodRolls=rollups.filter(r=>inPeriod(r.date)&&r.date!==today);
-  // today is never in the rollups yet, so take it live and add the saved days
+  // Days already rolled up come from the saved record; every other day in the
+  // period still comes from live orders. Using rollups as an either/or meant a
+  // day with sales but no rollup vanished from the totals entirely.
+  const rollDates=new Set(periodRolls.map(r=>r.date));
+  const liveRest=filtOrders.filter(o=>!rollDates.has(o.date||""));
   const todayOrders=orders.filter(o=>(o.date||"")===today
-    &&o.status!=="void"&&o.status!=="voided");
+    &&o.branch===branchId
+    &&o.status!=="void"&&o.status!=="voided"&&o.status!=="cancelled");
   const useRollups=period!=="today"&&periodRolls.length>0;
 
   const liveGross=(list)=>list.reduce((s2,o)=>s2+(o.subtotal||0),0);
@@ -6037,16 +6043,16 @@ function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inve
   const rollSum=(k)=>periodRolls.reduce((s2,r)=>s2+(Number(r[k])||0),0);
 
   const gross   = useRollups
-    ? rollSum("gross")+liveGross(todayOrders)
+    ? rollSum("gross")+liveGross(liveRest)
     : liveGross(filtOrders);
   const discAmt = useRollups
-    ? rollSum("discounts")+liveDisc(todayOrders)
+    ? rollSum("discounts")+liveDisc(liveRest)
     : liveDisc(filtOrders);
   const netSales= gross-discAmt;
   const vatable = netSales/1.12;
   const vat     = netSales-vatable;
   const txnCount= useRollups
-    ? rollSum("txns")+todayOrders.length
+    ? rollSum("txns")+liveRest.length
     : filtOrders.length;
   const avgTxn  = txnCount>0?gross/txnCount:0;
   const daysCovered=useRollups?(periodRolls.length+(todayOrders.length?1:0)):0;
@@ -6063,7 +6069,7 @@ function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inve
     // rollups keep the top 20 per day; revenue per item is not stored, so
     // quantities are exact and revenue is only shown for the live day
     periodRolls.forEach(r=>(r.topItems||[]).forEach(t=>addItem(t.name,"",t.qty,0)));
-    todayOrders.forEach(o=>(o.items||[]).forEach(i=>
+    liveRest.forEach(o=>(o.items||[]).forEach(i=>
       addItem(i.name,i.cat||i.category,i.qty||1,i.lineTotal||0)));
   }else{
     filtOrders.forEach(o=>(o.items||[]).forEach(i=>
@@ -6090,6 +6096,7 @@ function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inve
   const payList=Object.values(payMap).sort((a,b)=>b.total-a.total);
 
   // Branch breakdown (owner)
+  // deliberately NOT branch-filtered: this tab exists to compare branches
   const branchMap={};
   orders.filter(o=>o.status!=="voided"&&o.status!=="void"&&o.status!=="cancelled"
     &&inPeriod(o.date||"")).forEach(o=>{
