@@ -11284,8 +11284,9 @@ function App(){
                     background:zSel===r.date?"#FFF0F0":"#fff",
                     color:zSel===r.date?C.primary:C.text}},
                   r.date.slice(5)+" · ₱"+peso(r.net))),
-              isSaved&&h("span",{style:{fontSize:9,color:C.muted}},
-                "Naka-save "+(saved.backfilled?"(backfill)":"")+" ni "+(saved.closedBy||"?"))
+              // The red header already states saved-vs-live and who closed it,
+              // and it is inside the reading itself so it survives printing.
+              // A second copy beside the date chips said nothing new.
             ),
             h(SectionHeader,{title:isZ?"Z-Reading (End of Day)":"X-Reading (Current)"}),
             h("div",{style:{background:`linear-gradient(135deg,${C.primary},${C.dark})`,borderRadius:13,padding:"16px 18px",marginBottom:13,display:"flex",justifyContent:"space-between",alignItems:"center"}},
