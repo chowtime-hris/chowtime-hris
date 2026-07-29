@@ -189,7 +189,7 @@ const BRANCHES = [
 
 const ROLES = {
   owner:     {label:"Owner / Admin",    emoji:"\u{1F451}", color:"#C8151B",
-    nav:["dashboard","branches","pos","orders","all_orders","analytics","z_reading","reports","cash_count","expenses","cash_monitor","inventory","inv_log","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","payroll","kiosk","settings","printer"]},
+    nav:["dashboard","branches","subs","pos","orders","all_orders","analytics","z_reading","reports","cash_count","expenses","cash_monitor","inventory","inv_log","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","payroll","kiosk","settings","printer"]},
   manager:   {label:"Branch Manager",   emoji:"\u{1F3EA}", color:"#007AFF",
     nav:["branch_dash","pos","orders","analytics","z_reading","reports","cash_count","expenses","inventory","inv_log","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","bom_mgmt","payroll","kiosk","branch_settings","printer"]},
   cashier:   {label:"Cashier",          emoji:"\u{1F4B3}", color:"#34C759",
@@ -220,7 +220,7 @@ const NAV_GROUPS = [
   {id:"money", icon:"\u{1F4B8}", label:"Expenses",
    pages:["expenses"]},
   {id:"setup", icon:"\u2699\uFE0F", label:"Settings",
-   pages:["branches","settings","branch_settings","printer"]},
+   pages:["branches","subs","settings","branch_settings","printer"]},
 ];
 
 const NAV_META = {
@@ -230,6 +230,7 @@ const NAV_META = {
   sales_report:{icon:"💰",label:"Sales Report"},
   z_reading:   {icon:"📄",label:"Z-Reading"},
   reports:     {icon:"🗂️",label:"Reports"},
+  subs:        {icon:"💳",label:"Subscriptions"},
   x_reading:   {icon:"📃",label:"X-Reading"},
   expenses:    {icon:"💸",label:"Expenses"},
   cash_monitor:{icon:"💵",label:"Cash Monitor"},
@@ -5329,6 +5330,49 @@ function BranchSettingsPage({branchId,curBranch,user,db,showT}){
   );
 }
 
+// ─── SUBSCRIPTION ─────────────────────────────────────────
+// One doc per branch: subscriptions/<branchId>. The billing anniversary is the
+// FIRST payment date, not the 1st of the month — a branch that starts on the
+// 5th is always due on the 5th.
+// Verification is manual: a browser app on the Spark plan has no server to
+// receive a GCash webhook, so the owner confirms each payment by reference.
+function addMonths(iso,n){
+  const [y,m,d]=String(iso||"").split("-").map(Number);
+  if(!y)return iso;
+  const dt=new Date(y,(m-1)+n,d);
+  // clamp to end of month: Jan 31 + 1 month must not roll into March
+  if(dt.getDate()!==d)dt.setDate(0);
+  return localDate(dt);
+}
+function daysBetween(fromISO,toISO){
+  const a=new Date(fromISO+"T00:00:00"), b=new Date(toISO+"T00:00:00");
+  if(isNaN(a)||isNaN(b))return 0;
+  return Math.round((b-a)/86400000);
+}
+const TRIAL_DAYS=5;   // deployment + setup window for a brand-new branch
+
+// Order of authority: a paid period always wins; otherwise the setup trial;
+// otherwise treat as active. A missing record must never strand a branch that
+// has always paid.
+function subState(sub){
+  const today=localDate();
+  if(sub&&sub.paidUntil){
+    const left=daysBetween(today,sub.paidUntil);
+    return {ok:left>=0,days:left,unknown:false,mode:"paid",until:sub.paidUntil};
+  }
+  if(sub&&sub.trialUntil){
+    const left=daysBetween(today,sub.trialUntil);
+    return {ok:left>=0,days:left,unknown:false,mode:"trial",until:sub.trialUntil};
+  }
+  return {ok:true,days:null,unknown:true,mode:"none"};
+}
+function addDays(iso,n){
+  const d=new Date(String(iso||localDate())+"T00:00:00");
+  if(isNaN(d))return iso;
+  d.setDate(d.getDate()+n);
+  return localDate(d);
+}
+
 // ─── DAILY SALES ROLLUP ───────────────────────────────────
 // Every report today is computed live from a capped orders subscription
 // (limit 300), so history scrolls out of reach within days. One document per
@@ -8801,6 +8845,7 @@ function App(){
   const [bfLog,setBfLog]=useState(null);
   const [zHist,setZHist]=useState([]);                   // saved daily_sales (this branch)
   const [zHistAll,setZHistAll]=useState([]);             // every branch, for Reports
+  const [subs,setSubs]=useState([]);                     // subscriptions, all branches
   const [editBr,setEditBr]=useState(null);               // branch being added/edited
   const [expMonth,setExpMonth]=useState("");             // "" = all months
   const [expCat,setExpCat]=useState("");
@@ -8831,6 +8876,8 @@ function App(){
   const [newStaff,setNewStaff]=useState({name:"",role:"cashier",branch:"ct-wsfp",email:"",password:""});
 
   const [invSrch,setInvSrch]=useState("");
+  const [invCat,setInvCat]=useState("");
+  const [invFlag,setInvFlag]=useState("");   // low | zero | nobom | noprice
   const [ordCounter,setOrdCounter]=useState(1);
 
   const showT=(m,t="ok")=>setToast({msg:m,type:t});
@@ -8919,6 +8966,14 @@ function App(){
         ?query(collection(db,"cash_log"),orderBy("timestamp","desc"),limit(100))
         :query(collection(db,"cash_log"),where("branch","==",bId),orderBy("timestamp","desc"),limit(50));
       unsubs.push(onSnapshot(cq,snap=>setCashLog(snap.docs.map(d=>({...d.data(),_docId:d.id}))),()=>{}));
+    }catch(e){}
+
+    // Subscriptions. Everyone loads the full set: it is eight small documents,
+    // and the owner needs all of them to run the collections page.
+    try{
+      unsubs.push(onSnapshot(collection(db,"subscriptions"),
+        snap=>setSubs(snap.docs.map(d=>({...d.data(),_docId:d.id}))),
+        ()=>{}));
     }catch(e){}
 
     // Saved daily rollups. Branch staff only ever need their own; the owner
@@ -10441,6 +10496,45 @@ function App(){
   };
 
   // ── MAIN LAYOUT ──────────────────────────────────────────
+  // ── SUBSCRIPTION GATE ────────────────────────────────────
+  const mySub=subs.find(x=>x.branch===branchId);
+  const subS=subState(mySub);
+  // The owner and commissary are never locked out — they are the ones who
+  // confirm payments, so locking them would make the system unrecoverable.
+  const subLocked=!subS.ok&&!(user.role==="owner"||user.role==="commissary");
+
+  if(subLocked){
+    return h("div",{style:{minHeight:"100vh",background:"linear-gradient(160deg,#2b0a0c,#160406)",
+      display:"flex",alignItems:"center",justifyContent:"center",padding:20,
+      fontFamily:"'Segoe UI',system-ui,sans-serif"}},
+      h("div",{style:{background:"#fff",borderRadius:18,maxWidth:420,width:"100%",
+        padding:"30px 26px",textAlign:"center"}},
+        h("div",{style:{fontSize:46,marginBottom:12}},"🔒"),
+        h("div",{style:{fontSize:19,fontWeight:900,marginBottom:6}},
+          subS.mode==="trial"?"Tapos na ang setup period"
+                             :"Naka-suspend ang subscription"),
+        h("div",{style:{fontSize:12,color:C.muted,lineHeight:1.6,marginBottom:16}},
+          curBranch.full+" · natapos noong "+(subS.until||"—"),
+          h("br"),
+          Math.abs(subS.days||0)+" araw nang lampas"),
+        h("div",{style:{background:C.bg,borderRadius:12,padding:"14px",
+          textAlign:"left",marginBottom:16}},
+          h("div",{style:{fontSize:9,fontWeight:800,color:C.muted,
+            letterSpacing:1,marginBottom:7}},"PARA MAKABALIK"),
+          h("div",{style:{fontSize:11,lineHeight:1.8,color:C.text}},
+            "1. Magbayad sa GCash o bank",h("br"),
+            "2. Ipadala ang reference number sa main office",h("br"),
+            "3. Ico-confirm ito ng owner at bubukas agad")),
+        (mySub&&mySub.gcashNumber)&&h("div",{style:{fontSize:12,fontWeight:800,
+          marginBottom:14}},"GCash: "+mySub.gcashNumber),
+        h("button",{onClick:handleSignOut,
+          style:{width:"100%",padding:"12px",borderRadius:10,border:"none",
+            background:C.primary,color:"#fff",fontWeight:800,fontSize:13,
+            cursor:"pointer"}},"Sign Out")
+      )
+    );
+  }
+
   return h("div",{style:{display:"flex",height:"100vh",background:C.bg,fontFamily:"'Segoe UI',system-ui,sans-serif",overflow:"hidden"}},
 
     // SIDEBAR
@@ -10663,7 +10757,32 @@ function App(){
           )
         ),
 
-        h("div",{key:page,style:{flex:1,display:"flex",flexDirection:"column"}},
+        // 3-day countdown. Sits in the shell so it shows on every page, not
+      // just the dashboard — the crew should not have to go looking for it.
+      (!subS.unknown&&subS.days!==null&&subS.days<=3)&&h("div",{
+        style:{padding:"9px 20px",display:"flex",gap:10,alignItems:"center",
+          flexWrap:"wrap",
+          background:subS.days<=1?"#FFEBEE":"#FFF8E1",
+          borderBottom:"1px solid "+(subS.days<=1?"#FFCDD2":"#FFE082")}},
+        h("span",{style:{fontSize:15}},subS.days<=1?"🔴":"⏳"),
+        h("div",{style:{flex:1,minWidth:200}},
+          h("div",{style:{fontSize:12,fontWeight:900,
+            color:subS.days<=1?"#C62828":"#E65100"}},
+            subS.mode==="trial"
+              ? (subS.days<=0?"Huling araw ng setup period"
+                 :(subS.days+" araw na lang ang setup period"))
+              : (subS.days<=0?"Huling araw ng subscription"
+                 :(subS.days+" araw na lang ang subscription"))),
+          h("div",{style:{fontSize:10,color:C.muted,marginTop:1}},
+            "Hanggang "+subS.until+" · "+
+            (subS.mode==="trial"
+              ? "magbayad ng unang buwan bago matapos"
+              : "magbayad para hindi maputol ang POS"))),
+        (mySub&&mySub.gcashNumber)&&h("span",{style:{fontSize:11,fontWeight:800,
+          color:C.text}},"GCash: "+mySub.gcashNumber)
+      ),
+
+      h("div",{key:page,style:{flex:1,display:"flex",flexDirection:"column"}},
 
         // ══ DASHBOARD (Owner) ══
         page==="dashboard"&&h("div",null,
@@ -10918,10 +11037,13 @@ function App(){
                   letterSpacing:1,marginBottom:3}},"BRANCH MANAGER ACCOUNT"),
                 h("div",{style:{fontSize:9,color:C.muted,marginBottom:8,lineHeight:1.5}},
                   "Optional — pero kung walang manager account, walang makakapasok "+
-                  "sa branch na ito. Siya na ang gagawa ng cashier accounts niya."),
+                  "sa branch na ito. Siya na ang gagawa ng cashier accounts niya. "+
+                  "May "+TRIAL_DAYS+" araw na setup period bago magsimula ang bayad."),
                 [["mgrName","PANGALAN","text","hal. Andrea Cruz"],
                  ["mgrEmail","EMAIL","email","manager@chowtime.com"],
-                 ["mgrPw","TEMP PASSWORD (min 6)","text","ipapalit niya mamaya"]].map(([k,lbl,tp,ph])=>
+                 ["mgrPw","TEMP PASSWORD (min 6)","text","ipapalit niya mamaya"],
+                 ["subAmount","BUWANANG BAYAD (₱)","number","hal. 1500"],
+                 ["gcashNumber","GCASH NUMBER","text","0917-xxx-xxxx"]].map(([k,lbl,tp,ph])=>
                   h("div",{key:k,style:{marginBottom:6}},
                     h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,
                       letterSpacing:1,marginBottom:3}},lbl),
@@ -10967,6 +11089,22 @@ function App(){
                     console.error("branch save:",e);
                     showT("Save failed: "+String(e&&e.message||e).slice(0,60),"err");
                     return;
+                  }
+
+                  // Every new branch starts with a setup window so it can be
+                  // deployed and configured before billing begins.
+                  if(b._isNew){
+                    try{
+                      await setDoc(doc(db,"subscriptions",clean.id),{
+                        branch:clean.id,
+                        trialUntil:addDays(localDate(),TRIAL_DAYS),
+                        trialDays:TRIAL_DAYS,
+                        amount:Number(b.subAmount)||0,
+                        gcashNumber:(b.gcashNumber||"").trim(),
+                        status:"trial",
+                        createdAt:serverTimestamp(),createdBy:user.name
+                      },{merge:true});
+                    }catch(e3){console.warn("subscription seed:",e3);}
                   }
 
                   // Manager account is a separate concern: the branch is saved
@@ -11291,6 +11429,129 @@ function App(){
             )),
             orders.length===0&&h("div",{style:{textAlign:"center",padding:"30px",color:C.muted,fontSize:12}},"Loading from Firebase...")
           )
+          );
+        })(),
+
+        // ══ SUBSCRIPTIONS ══
+        page==="subs"&&(user.role==="owner"||user.role==="commissary")&&(()=>{
+          const rows=branches.map(b=>{
+            const sub=subs.find(x=>x.branch===b.id)||null;
+            return {b:b,sub:sub,st:subState(sub)};
+          }).sort((x,y)=>{
+            const dx=x.st.days===null?9999:x.st.days;
+            const dy=y.st.days===null?9999:y.st.days;
+            return dx-dy;   // most urgent first
+          });
+          const due=rows.filter(r=>!r.st.unknown&&r.st.days!==null&&r.st.days<=3);
+          const expired=rows.filter(r=>!r.st.ok);
+
+          const confirmPay=async(r)=>{
+            const ref=prompt("Reference number ng bayad para sa "+r.b.full+":","");
+            if(ref===null)return;
+            if(!ref.trim()){showT("Kailangan ang reference number","warn");return;}
+            const amt=Number((r.sub&&r.sub.amount)||0);
+            const today=localDate();
+            // Extend from the current expiry when still active, so paying
+            // early never shortens the period. Restart from today when
+            // already lapsed, so a late payment gives a full month.
+            const base=(r.sub&&r.sub.paidUntil&&daysBetween(today,r.sub.paidUntil)>=0)
+              ? r.sub.paidUntil : today;
+            const next=addMonths(base,1);
+            try{
+              await setDoc(doc(db,"subscriptions",r.b.id),{
+                branch:r.b.id,
+                startDate:(r.sub&&r.sub.startDate)||today,
+                paidUntil:next,status:"active",
+                amount:amt,
+                gcashNumber:(r.sub&&r.sub.gcashNumber)||"",
+                lastPaymentAt:today,lastRef:ref.trim(),
+                confirmedBy:user.name,confirmedAt:serverTimestamp()
+              },{merge:true});
+              await addDoc(collection(db,"subscription_payments"),{
+                branch:r.b.id,branchName:r.b.full,amount:amt,ref:ref.trim(),
+                paidOn:today,coversUntil:next,
+                confirmedBy:user.name,at:serverTimestamp()});
+              await notify(db,{to:r.b.id,type:"info",
+                title:"Nakumpirma ang bayad",
+                message:"Aktibo hanggang "+next,page:"dashboard",
+                ref:ref.trim(),by:user.name});
+              showT(r.b.full+" aktibo hanggang "+next+" ✓");
+            }catch(e){
+              console.error("confirm payment:",e);
+              showT("Failed: "+String(e&&e.message||e).slice(0,60),"err");
+            }
+          };
+
+          return h("div",null,
+            h(SectionHeader,{title:"💳 Subscriptions"}),
+
+            h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",
+              gap:10,marginBottom:14}},
+              h(Stat,{label:"Aktibo",value:rows.filter(r=>r.st.ok).length,
+                icon:"✅",color:C.success}),
+              h(Stat,{label:"Malapit nang matapos",value:due.length,
+                sub:"3 araw o mas kaunti",icon:"⏳",color:C.warning}),
+              h(Stat,{label:"Naka-suspend",value:expired.length,
+                icon:"🔒",color:C.danger})
+            ),
+
+            h("div",{style:{background:"#fff",borderRadius:12,
+              border:"1px solid "+C.border,overflow:"hidden"}},
+              h("div",{style:{display:"grid",
+                gridTemplateColumns:"1fr 110px 100px 90px 150px",gap:8,
+                padding:"9px 14px",background:"#fafafa",
+                borderBottom:"1px solid "+C.border}},
+                ["BRANCH","STATUS","HANGGANG","BAYAD",""].map(hh=>
+                  h("div",{key:hh,style:{fontSize:8,fontWeight:700,
+                    color:C.muted,letterSpacing:1}},hh))),
+              rows.map(r=>{
+                const st=r.st;
+                const col=st.unknown?C.muted:(!st.ok?C.danger
+                  :(st.days<=3?C.warning:C.success));
+                const label=st.unknown?"walang record"
+                  :(!st.ok?"suspended"
+                    :(st.mode==="trial"?"setup ("+st.days+"d)":st.days+" araw"));
+                return h("div",{key:r.b.id,style:{display:"grid",
+                  gridTemplateColumns:"1fr 110px 100px 90px 150px",gap:8,
+                  padding:"10px 14px",borderBottom:"1px solid #f5f5f5",
+                  alignItems:"center"}},
+                  h("div",null,
+                    h("div",{style:{fontSize:11,fontWeight:700}},r.b.full),
+                    h("div",{style:{fontSize:8,color:C.muted}},
+                      (r.sub&&r.sub.lastRef)?("huling ref: "+r.sub.lastRef):"wala pang bayad")),
+                  h("span",{style:{fontSize:10,fontWeight:800,color:col}},label),
+                  h("div",{style:{fontSize:10}},st.until||"—"),
+                  h("div",{style:{fontSize:10,textAlign:"right"}},
+                    (r.sub&&r.sub.amount)?"₱"+peso(r.sub.amount):"—"),
+                  h("div",{style:{display:"flex",gap:5,justifyContent:"flex-end"}},
+                    h("button",{onClick:()=>confirmPay(r),
+                      style:{padding:"6px 11px",borderRadius:7,border:"none",
+                        background:"#2E7D32",color:"#fff",fontSize:10,
+                        fontWeight:800,cursor:"pointer"}},"✓ Confirm Bayad"),
+                    h("button",{
+                      onClick:async()=>{
+                        const d=prompt("Palawigin hanggang (YYYY-MM-DD):",
+                          st.until||localDate());
+                        if(!d)return;
+                        try{
+                          await setDoc(doc(db,"subscriptions",r.b.id),
+                            {branch:r.b.id,paidUntil:d,status:"active",
+                             overrideBy:user.name,overrideAt:serverTimestamp()},
+                            {merge:true});
+                          showT(r.b.full+" hanggang "+d);
+                        }catch(e){showT("Failed","err");}
+                      },
+                      style:{padding:"6px 9px",borderRadius:7,fontSize:10,
+                        border:"1px solid "+C.border,background:"#fff",
+                        cursor:"pointer"}},"✎")
+                  )
+                );
+              })
+            ),
+            h("div",{style:{fontSize:9,color:C.muted,marginTop:10,lineHeight:1.6}},
+              "Ang ✓ Confirm Bayad ay nagdadagdag ng isang buwan. Kung aktibo pa, "+
+              "idinadagdag sa kasalukuyang expiry — hindi nasasayang ang maagang bayad. "+
+              "Kung lampas na, magsisimula sa araw na ito. Ang ✎ ay manual override.")
           );
         })(),
 
@@ -11964,8 +12225,49 @@ function App(){
               h("h2",{style:{margin:0,fontSize:17,fontWeight:800}},(user.role==="owner"||user.role==="commissary")?"Commissary Inventory":"Branch Inventory — "+curBranch.name),
               h("div",{style:{fontSize:10,color:C.muted,marginTop:2}},(user.role==="owner"||user.role==="commissary")?"Master stock at commissary":"Freezer stock at "+curBranch.full)
             ),
-            h("div",{style:{display:"flex",gap:7}},
+            h("div",{style:{display:"flex",gap:7,flexWrap:"wrap",alignItems:"center"}},
               h("div",{style:{position:"relative"}},h("span",{style:{position:"absolute",left:8,top:"50%",transform:"translateY(-50%)",fontSize:11,color:C.muted}},"🔍"),h("input",{value:invSrch,onChange:e=>setInvSrch(e.target.value),placeholder:"Search...",style:{padding:"7px 9px 7px 26px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none",width:150}})),
+              (function(){
+                const cats=[...new Set(inventory.map(i=>i.cat||"Other"))].sort();
+                return h("select",{value:invCat,onChange:e=>setInvCat(e.target.value),
+                  style:{padding:"7px 10px",borderRadius:7,fontSize:11,outline:"none",
+                    cursor:"pointer",border:"1px solid "+(invCat?C.primary:C.border),
+                    background:invCat?"#FFF0F0":"#fff",
+                    color:invCat?C.primary:C.text,fontWeight:invCat?700:400}},
+                  h("option",{value:""},"Lahat ng kategorya ("+inventory.length+")"),
+                  cats.map(c=>h("option",{key:c,value:c},
+                    c+" ("+inventory.filter(i=>(i.cat||"Other")===c).length+")")));
+              })(),
+              (function(){
+                const hasBOM=(id)=>{
+                  const d=posBoms[id]||{};
+                  return Object.keys(d).some(k=>Array.isArray(d[k])&&d[k].length);
+                };
+                const counts={
+                  low:inventory.filter(i=>(i.stock||0)<=(i.minStock||0)).length,
+                  zero:inventory.filter(i=>(i.stock||0)===0).length,
+                  nobom:inventory.filter(i=>!hasBOM(i.id)).length,
+                  noprice:inventory.filter(i=>!(Number(i.price)||0)).length
+                };
+                return [["low","⚠️ Low stock",C.danger],
+                        ["zero","0️⃣ Ubos",C.muted],
+                        ["nobom","🧪 Walang BOM","#E65100"],
+                        ["noprice","₱ Walang presyo","#E65100"]]
+                  .filter(([k])=>counts[k]>0)
+                  .map(([k,lbl,col])=>h("button",{key:k,
+                    onClick:()=>setInvFlag(invFlag===k?"":k),
+                    style:{padding:"7px 11px",borderRadius:20,fontSize:10,
+                      cursor:"pointer",fontWeight:invFlag===k?800:600,
+                      border:"1px solid "+(invFlag===k?col:C.border),
+                      background:invFlag===k?"#FFF0F0":"#fff",
+                      color:invFlag===k?col:C.text}},
+                    lbl+" ("+counts[k]+")"));
+              })(),
+              (invSrch||invCat||invFlag)&&h("button",{
+                onClick:()=>{setInvSrch("");setInvCat("");setInvFlag("");},
+                style:{padding:"7px 10px",borderRadius:7,fontSize:10,cursor:"pointer",
+                  border:"none",background:"none",color:C.muted,
+                  textDecoration:"underline"}},"Clear"),
               h("button",{onClick:()=>showT("Import — coming soon","info"),style:{padding:"7px 12px",background:"#fff",border:"1px solid "+C.border,borderRadius:7,fontSize:11,cursor:"pointer"}},"⬆️ Import"),
               h("button",{
   onClick:()=>setModal("new_inv_item"),
@@ -11982,7 +12284,23 @@ function App(){
             h("div",{style:{display:"grid",gridTemplateColumns:"2fr 90px 80px 80px 80px 70px 110px",padding:"8px 14px",borderBottom:"1px solid #f0f0f0",background:"#f9f9f9"}},
               ["Name","In Stock","Price","Cost","Margin","Cat","Action"].map(h2=>h("div",{key:h2,style:{fontSize:8,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:.5}},h2))
             ),
-            inventory.filter(i=>(i.name||"").toLowerCase().includes(invSrch.toLowerCase())).map(item=>{
+            (function(){
+              const q=(invSrch||"").toLowerCase();
+              const hasBOM=(id)=>{
+                const d=posBoms[id]||{};
+                return Object.keys(d).some(k=>Array.isArray(d[k])&&d[k].length);
+              };
+              return inventory.filter(i=>{
+                if(q&&!(i.name||"").toLowerCase().includes(q)
+                  &&!(i.cat||"").toLowerCase().includes(q))return false;
+                if(invCat&&(i.cat||"Other")!==invCat)return false;
+                if(invFlag==="low"&&!((i.stock||0)<=(i.minStock||0)))return false;
+                if(invFlag==="zero"&&(i.stock||0)!==0)return false;
+                if(invFlag==="nobom"&&hasBOM(i.id))return false;
+                if(invFlag==="noprice"&&(Number(i.price)||0)>0)return false;
+                return true;
+              });
+            })().map(item=>{
               const low=(item.stock||0)<(item.minStock||0);
               return h("div",{key:item.id,style:{display:"grid",gridTemplateColumns:"2fr 90px 80px 80px 80px 70px 110px",padding:"9px 14px",borderBottom:"1px solid #f9f9f9",alignItems:"center",background:low?"#FFF8F8":"#fff"}},
                 h("div",{style:{fontWeight:600,fontSize:11,display:"flex",alignItems:"center",gap:5}},low&&h("span",null,"⚠️"),item.name),
