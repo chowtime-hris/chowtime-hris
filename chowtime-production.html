@@ -80,6 +80,16 @@ tbody tr:hover{background:#fbf6ea;}
 .badge-conn{font-size:10px;padding:3px 8px;border-radius:12px;font-weight:700;}
 .badge-conn.on{background:#2f7a4f33;color:#c9e8d3;}
 .badge-conn.off{background:#a5333e33;color:#f5c6ca;}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;}
+.cal-dow{text-align:center;font-size:10px;font-weight:700;color:#8a7a5a;text-transform:uppercase;padding:4px 0;}
+.cal-cell{min-height:52px;border:1px solid var(--line);border-radius:6px;padding:4px;cursor:pointer;background:#fffdf9;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:2px;}
+.cal-cell:hover{border-color:var(--gold);}
+.cal-cell.empty-cell{background:transparent;border:none;cursor:default;}
+.cal-cell.has-data{background:#f8edd0;border-color:var(--gold);}
+.cal-cell.selected{outline:2px solid var(--maroon);border-color:var(--maroon);}
+.cal-cell .cal-daynum{font-size:12px;font-weight:700;}
+.cal-cell .cal-mark{font-size:9px;color:var(--maroon);font-weight:700;text-align:center;line-height:1.2;}
+@media(max-width:640px){.cal-cell{min-height:40px;}.cal-cell .cal-mark{font-size:8px;}}
 </style>
 </head>
 <body>
@@ -148,8 +158,15 @@ function saveState(key, val){
   state[key] = val;
   persistLocalState();
   if(USE_FIREBASE && DB){
-    DB.ref('chowtimeProduction/'+key).set(val || {});
+    return DB.ref('chowtimeProduction/'+key).set(val || {})
+      .then(()=>'synced')
+      .catch(err=>{
+        console.error('Cloud save failed for', key, err);
+        alert('Warning: this was saved on THIS DEVICE only — it could NOT reach the cloud database (error: '+err.message+'). It will not show up on other devices until this is fixed. Check the internet connection and try saving again.');
+        return 'failed';
+      });
   }
+  return Promise.resolve('offline');
 }
 // Use this instead of multiple saveState() calls in a row when several sections change together
 // (e.g. renaming a product code touches staff rates + production history + the product list at
@@ -160,8 +177,15 @@ function saveStateMulti(updates){
   Object.keys(updates).forEach(k=>{ state[k]=updates[k]; });
   persistLocalState();
   if(USE_FIREBASE && DB){
-    DB.ref('chowtimeProduction').update(updates);
+    return DB.ref('chowtimeProduction').update(updates)
+      .then(()=>'synced')
+      .catch(err=>{
+        console.error('Cloud save failed', err);
+        alert('Warning: this was saved on THIS DEVICE only — it could NOT reach the cloud database (error: '+err.message+'). It will not show up on other devices until this is fixed.');
+        return 'failed';
+      });
   }
+  return Promise.resolve('offline');
 }
 function initFirebase(cfgStr, fromSaved){
   try{
@@ -170,9 +194,22 @@ function initFirebase(cfgStr, fromSaved){
     firebase.initializeApp(cfg);
     DB = firebase.database();
     USE_FIREBASE = true;
-    document.getElementById('connBadge').textContent = 'Connected (synced)';
-    document.getElementById('connBadge').className = 'badge-conn on';
     try{ localStorage.setItem(LS_CFG_KEY, cfgStr); }catch(e){}
+
+    // Keep the badge honest: this checks Firebase's actual live connection state, not just
+    // whether we successfully called initFirebase once. If the network drops, the badge
+    // updates within seconds — so anyone can glance at it before assuming a save went through.
+    DB.ref('.info/connected').on('value', snap=>{
+      const badge = document.getElementById('connBadge');
+      if(!badge) return;
+      if(snap.val()===true){
+        badge.textContent = 'Connected (synced)';
+        badge.className = 'badge-conn on';
+      } else {
+        badge.textContent = 'Offline (local)';
+        badge.className = 'badge-conn off';
+      }
+    });
 
     // Reconcile once before listening live: if the cloud copy is empty (or missing whole
     // sections) but this device already has local data, push the local copy up FIRST so a
@@ -300,13 +337,14 @@ if(SUPERVISOR_MODE){
 const ALL_TABS = [
   {tab:'dashboard', label:'Dashboard'},
   {tab:'entry', label:'Production Entry'},
+  {tab:'log', label:'Production Log'},
   {tab:'staff', label:'Staff & Rates'},
   {tab:'materials', label:'Materials & Side Jobs'},
   {tab:'loans', label:'Deductions'},
   {tab:'payslip', label:'Payslip'},
   {tab:'settings', label:'Settings'}
 ];
-const SUPERVISOR_ALLOWED_TABS = ['entry','materials'];
+const SUPERVISOR_ALLOWED_TABS = ['entry','materials','log'];
 const VISIBLE_TABS = SUPERVISOR_MODE ? ALL_TABS.filter(t=>SUPERVISOR_ALLOWED_TABS.includes(t.tab)) : ALL_TABS;
 let activeTab = SUPERVISOR_MODE ? 'entry' : 'dashboard';
 function renderNav(){
@@ -331,6 +369,7 @@ function render(){
   main.innerHTML='';
   if(activeTab==='dashboard') renderDashboard(main);
   if(activeTab==='entry') renderEntry(main);
+  if(activeTab==='log') renderLog(main);
   if(activeTab==='staff') renderStaff(main);
   if(activeTab==='materials') renderMaterials(main);
   if(activeTab==='loans') renderLoans(main);
@@ -600,10 +639,156 @@ function renderEntry(main){
       return;
     }
     state.production[entryDate] = collectDayData();
-    saveState('production', state.production);
-    alert('Saved production for '+entryDate);
+    const btn = document.getElementById('saveEntryBtn');
+    btn.disabled = true; btn.textContent = 'Saving...';
+    saveState('production', state.production).then(result=>{
+      btn.disabled = false;
+      if(result==='synced'){
+        alert('✓ Saved and synced — this entry for '+entryDate+' is now visible on all connected devices.');
+      } else if(result==='offline'){
+        alert('⚠ Saved on THIS DEVICE ONLY (not connected to the cloud right now). This entry for '+entryDate+' will NOT appear anywhere else until this device reconnects.');
+      }
+      // 'failed' case already alerts inside saveState itself
+      render();
+    });
+  };
+}
+
+/* ---------- PRODUCTION LOG (CALENDAR) ---------- */
+let logMonth = todayISO().slice(0,7); // "YYYY-MM"
+let logSelectedDate = todayISO();
+function dayHasData(dateISO){
+  const day = state.production[dateISO];
+  if(!day) return false;
+  const hasQty = day.products && Object.values(day.products).some(p=>Number(p.qty)>0);
+  const hasCa = day.ca && Object.values(day.ca).some(v=>Number(v)>0);
+  return hasQty || hasCa;
+}
+function renderLog(main){
+  const [y,m] = logMonth.split('-').map(Number);
+  const firstOfMonth = new Date(y, m-1, 1);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const startWeekday = firstOfMonth.getDay(); // 0=Sun
+  const monthLabel = firstOfMonth.toLocaleString('en-US',{month:'long',year:'numeric'});
+  const staffList = activeStaffList();
+
+  const cells = [];
+  for(let i=0;i<startWeekday;i++) cells.push(null);
+  for(let d=1; d<=daysInMonth; d++) cells.push(d);
+
+  main.innerHTML = `
+  <div class="card">
+    <h2>Production Log — calendar</h2>
+    <div class="msg info">Days highlighted in gold have production data saved. Tap any day to see what was entered, without paging through them one at a time.</div>
+    <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:10px">
+      <button class="btn ghost sm" id="logPrevBtn">← Prev</button>
+      <strong style="color:var(--maroon);font-size:15px">${monthLabel}</strong>
+      <button class="btn ghost sm" id="logNextBtn">Next →</button>
+    </div>
+    <div class="cal-grid">
+      ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d=>`<div class="cal-dow">${d}</div>`).join('')}
+      ${cells.map(d=>{
+        if(d===null) return `<div class="cal-cell empty-cell"></div>`;
+        const dateISO = `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+        const has = dayHasData(dateISO);
+        const isSel = dateISO===logSelectedDate;
+        return `<div class="cal-cell ${has?'has-data':''} ${isSel?'selected':''}" data-date="${dateISO}">
+          <div class="cal-daynum">${d}</div>
+          ${has?'<div class="cal-mark">● logged</div>':''}
+        </div>`;
+      }).join('')}
+    </div>
+  </div>
+
+  <div class="card" id="logDetailCard"></div>
+  `;
+
+  document.getElementById('logPrevBtn').onclick = ()=>{
+    const prev = new Date(y, m-2, 1);
+    logMonth = `${prev.getFullYear()}-${String(prev.getMonth()+1).padStart(2,'0')}`;
     render();
   };
+  document.getElementById('logNextBtn').onclick = ()=>{
+    const next = new Date(y, m, 1);
+    logMonth = `${next.getFullYear()}-${String(next.getMonth()+1).padStart(2,'0')}`;
+    render();
+  };
+  document.querySelectorAll('.cal-cell[data-date]').forEach(c=>{
+    c.onclick = ()=>{ logSelectedDate = c.dataset.date; render(); };
+  });
+
+  renderLogDetail();
+
+  function renderLogDetail(){
+    const detailCard = document.getElementById('logDetailCard');
+    const day = state.production[logSelectedDate];
+    const cutoffLbl = cutoffLabel(cutoffKeyFor(logSelectedDate));
+    if(!day || !dayHasData(logSelectedDate)){
+      detailCard.innerHTML = `<h2>${logSelectedDate} <span style="font-weight:400;font-size:12px;color:#8a7a5a">(${cutoffLbl})</span></h2>
+        <div class="empty">No production entry saved for this date.</div>`;
+      return;
+    }
+    const presentIds = Object.keys(day.attendance||{}).filter(id=>day.attendance[id]);
+    const presentNames = presentIds.map(id=> state.staff[id]?state.staff[id].name : '(removed staff)');
+    const rows = state.products.map(p=>{
+      const pd = (day.products||{})[p.code];
+      if(!pd || !Number(pd.qty)) return null;
+      const creditedNames = (pd.staff||[]).map(id=> state.staff[id]?state.staff[id].name : '(removed)');
+      return {label:p.label, qty:pd.qty, credited:creditedNames};
+    }).filter(Boolean);
+    const caRows = Object.entries(day.ca||{}).filter(([,v])=>Number(v)>0).map(([sid,v])=>({
+      name: state.staff[sid]?state.staff[sid].name:'(removed)', amount:v
+    }));
+
+    let staffIncomeRows = '';
+    if(!SUPERVISOR_MODE){
+      staffIncomeRows = activeStaffList().map(s=>{
+        const income = dailyIncomeForStaff(day, s.id);
+        if(income<=0) return null;
+        return `<tr><td>${s.name}</td><td>₱${fmt(income)}</td></tr>`;
+      }).filter(Boolean).join('');
+    }
+
+    detailCard.innerHTML = `
+      <h2>${logSelectedDate} <span style="font-weight:400;font-size:12px;color:#8a7a5a">(${cutoffLbl})</span></h2>
+      <div class="grid cols-2">
+        <div>
+          <label>Present that day</label>
+          <div style="font-size:13px;padding:6px 0">${presentNames.length? presentNames.join(', ') : '—'}</div>
+        </div>
+        <div>
+          <label>Batches logged</label>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Item</th><th>Qty</th><th>Credited to</th></tr></thead>
+            <tbody>
+              ${rows.length? rows.map(r=>`<tr><td>${r.label}</td><td>${fmt(r.qty)}</td><td style="font-size:11px">${r.credited.join(', ')}</td></tr>`).join('') : '<tr><td colspan="3" class="empty">No batches logged</td></tr>'}
+            </tbody>
+          </table></div>
+        </div>
+      </div>
+      ${caRows.length?`
+      <label style="margin-top:12px;display:block">Cash advance that day</label>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Staff</th><th>Amount</th></tr></thead>
+        <tbody>${caRows.map(r=>`<tr><td>${r.name}</td><td>₱${fmt(r.amount)}</td></tr>`).join('')}</tbody>
+      </table></div>` : ''}
+      ${!SUPERVISOR_MODE && staffIncomeRows ? `
+      <label style="margin-top:12px;display:block">Computed income that day</label>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Staff</th><th>Income</th></tr></thead>
+        <tbody>${staffIncomeRows}</tbody>
+      </table></div>` : ''}
+      <div class="foot-actions">
+        <button class="btn gold" id="logEditBtn">Edit this date in Production Entry</button>
+      </div>
+    `;
+    document.getElementById('logEditBtn').onclick = ()=>{
+      entryDate = logSelectedDate;
+      activeTab = 'entry';
+      renderNav();
+      render();
+    };
+  }
 }
 
 /* ---------- STAFF & RATES ---------- */
