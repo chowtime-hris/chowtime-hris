@@ -13418,7 +13418,9 @@ function App(){
             ))
           ),
 
-          h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1.4fr",gap:12}},
+          h("div",{style:{display:"grid",gap:12,
+              gridTemplateColumns:(typeof window!=="undefined"&&window.innerWidth<820)
+                ?"1fr":"minmax(240px,1fr) minmax(320px,1.4fr)"}},
             // Staff list with filters
             h("div",null,
               h("div",{style:{background:"#fff",borderRadius:12,
@@ -13484,6 +13486,8 @@ function App(){
                             branches.find(b=>b.id===s.branch)?.name||s.branch)
                         )
                       ),
+                      !isOwnerRole&&h("span",{style:{fontSize:9,color:C.muted,
+                        marginRight:8,whiteSpace:"nowrap"}},"✏️ edit"),
                       !isOwnerRole&&h("button",{
                         onClick:e=>{e.stopPropagation();
                           if(confirm("Delete "+s.name+"?"))
@@ -13913,7 +13917,9 @@ function App(){
             h(Stat,{label:"Stock Clerks",value:staff.filter(s=>s.branch===branchId&&s.role==="stockclerk").length,icon:"📦",color:"#AF52DE"})
           ),
 
-          h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1.4fr",gap:12}},
+          h("div",{style:{display:"grid",gap:12,
+              gridTemplateColumns:(typeof window!=="undefined"&&window.innerWidth<820)
+                ?"1fr":"minmax(240px,1fr) minmax(320px,1.4fr)"}},
             // Staff list - own branch only
             h("div",null,
               h("div",{style:{background:"#fff",borderRadius:12,
