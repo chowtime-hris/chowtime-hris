@@ -4328,7 +4328,7 @@ function IngredientsPage({db,user,showT}){
               h("div",{style:{marginBottom:10}},
                 h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,
                   letterSpacing:1,marginBottom:4}},"COST PER UNIT (₱) *"),
-                h("input",{type:"number",onFocus:e=>e.target.select(),min:0,step:"0.01",
+                h("input",{type:"number",onFocus:e=>e.target.select(),min:0,step:"0.0001",
                   value:editing.cost||"",
                   onChange:e=>setEditing(p=>({...p,cost:parseFloat(e.target.value)||0})),
                   placeholder:"0.00",
@@ -9402,6 +9402,7 @@ function App(){
 
   const [invSrch,setInvSrch]=useState("");
   const [staffRole,setStaffRole]=useState("");   // Users page role filter
+  const [invValMode,setInvValMode]=useState("cost");   // cost | retail
   const [invCat,setInvCat]=useState("");
   const [invFlag,setInvFlag]=useState("");   // low | zero | nobom | noprice
   const [ordCounter,setOrdCounter]=useState(1);
@@ -12950,7 +12951,39 @@ function App(){
           h("div",{style:{display:"flex",gap:9,marginBottom:12}},
             h(Stat,{label:"Total Items",value:inventory.length,icon:"📦",color:C.info}),
             h(Stat,{label:"Low Stock",value:inventory.filter(i=>(i.stock||0)<(i.minStock||0)).length,sub:"Below min level",icon:"⚠️",color:C.danger}),
-            h(Stat,{label:"Inv. Value",value:"₱"+inventory.reduce((s,i)=>s+(i.stock||0)*(i.cost||0),0).toLocaleString("en-PH",{minimumFractionDigits:2,maximumFractionDigits:2}),icon:"💰",color:C.success})
+            (function(){
+              const src=invView?invViewData:inventory;
+              const atCost  =src.reduce((a,i)=>a+(Number(i.stock)||0)*(Number(i.cost)||0),0);
+              const atRetail=src.reduce((a,i)=>a+(Number(i.stock)||0)*(Number(i.price)||0),0);
+              const retail=invValMode==="retail";
+              const noPrice=src.filter(i=>(Number(i.stock)||0)>0
+                &&!(Number(retail?i.price:i.cost)||0)).length;
+              return h("div",{style:{flex:1,minWidth:0}},
+                h(Stat,{
+                  label:retail?"Inv. Value — Benta":"Inv. Value — Puhunan",
+                  value:"₱"+peso(retail?atRetail:atCost),
+                  sub:retail?("Puhunan ₱"+peso(atCost)):("Benta ₱"+peso(atRetail)),
+                  icon:retail?"🏷️":"💰",
+                  color:retail?C.info:C.success}),
+                h("div",{style:{display:"flex",gap:4,marginTop:5}},
+                  [["cost","💰 Puhunan"],["retail","🏷️ Benta"]].map(([m,lbl])=>
+                    h("button",{key:m,onClick:()=>setInvValMode(m),
+                      style:{flex:1,padding:"4px",borderRadius:6,fontSize:9,
+                        cursor:"pointer",fontWeight:invValMode===m?800:500,
+                        border:"1px solid "+(invValMode===m?
+                          (m==="retail"?C.info:C.success):C.border),
+                        background:invValMode===m?
+                          ((m==="retail"?C.info:C.success)+"18"):"#fff",
+                        color:invValMode===m?
+                          (m==="retail"?C.info:C.success):C.muted}},lbl))),
+                // a stocked item with no price silently counts as zero, which
+                // makes the total look smaller than it is
+                noPrice>0&&h("div",{style:{fontSize:8,color:"#E65100",
+                  marginTop:4,fontWeight:700}},
+                  noPrice+" item/s may stock pero walang "
+                    +(retail?"presyo":"cost")+" — hindi kasama")
+              );
+            })()
           ),
           h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
             h("div",{style:{display:"grid",gridTemplateColumns:"2fr 90px 80px 80px 80px 70px 110px",padding:"8px 14px",borderBottom:"1px solid #f0f0f0",background:"#f9f9f9"}},
