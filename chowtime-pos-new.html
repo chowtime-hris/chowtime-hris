@@ -2458,14 +2458,16 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
   // Load today's existing count + history from Firebase
   useEffect(()=>{
     if(!branchId)return;
+    // no orderBy: that would need a composite index this project does not
+    // have, and the failure is silent — the history simply never loads
     const q = query(
       collection(db,"cash_counts"),
       where("branch","==",branchId),
-      orderBy("date","desc"),
-      limit(30)
+      limit(120)
     );
     const unsub = onSnapshot(q, snap=>{
-      const all = snap.docs.map(d=>({...d.data(),_docId:d.id}));
+      const all = snap.docs.map(d=>({...d.data(),_docId:d.id}))
+        .sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")));
       setHistory(all);
       // Load today's count if exists
       const todayCount = all.find(c=>c.date===today);
@@ -2964,16 +2966,20 @@ function CALoanPage({user,branchId,curBranch,db,hrisDB,showT,mode,hrisEmps=[]}){
 
   // Load my requests from POS Firestore
   useEffect(()=>{
+    // one equality filter only; the rest is done in memory so no composite
+    // index is required
     const q = query(
       collection(db,"hris_requests"),
       where("staffName","==",user.name),
-      where("type","==",isCA?"Cash Advance":"Cash Loan"),
-      orderBy("timestamp","desc"),
-      limit(20)
+      limit(80)
     );
+    const want=isCA?"Cash Advance":"Cash Loan";
     const unsub = onSnapshot(q, snap=>{
-      setMyReqs(snap.docs.map(d=>({...d.data(),_docId:d.id})));
-    }, ()=>{});
+      setMyReqs(snap.docs.map(d=>({...d.data(),_docId:d.id}))
+        .filter(r=>r.type===want)
+        .sort((a,b)=>((b.timestamp&&b.timestamp.seconds)||0)
+                    -((a.timestamp&&a.timestamp.seconds)||0)));
+    }, (err)=>{ console.error("hris_requests:",err); });
     return()=>unsub();
   },[user.name, isCA]);
 
@@ -3296,7 +3302,7 @@ function HRISBranchPage({user,branchId,curBranch,db,hrisDB,showT}){
 
   useEffect(()=>{
     const q = query(collection(db,"hris_requests"),
-      where("branch","==",branchId),orderBy("timestamp","desc"),limit(50));
+      where("branch","==",branchId),limit(50));
     const unsub = onSnapshot(q, snap=>{
       setTeamReqs(snap.docs.map(d=>({...d.data(),_docId:d.id})));
     }, ()=>{});
@@ -6014,15 +6020,28 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
   const [tab,setTab]               = useState(isManager?"pending":"new");
 
   useEffect(()=>{
+    // where + orderBy on different fields needs a Firestore composite index.
+    // Without it the query fails outright, and the old empty error handler
+    // swallowed that — the bell fired but this list stayed blank forever.
+    // A single equality filter needs no index; sort in memory instead.
     const q = query(
       collection(db,"void_requests"),
       where("branch","==",branchId),
-      orderBy("timestamp","desc"),
-      limit(50)
+      limit(100)
     );
     const unsub = onSnapshot(q,snap=>{
-      setVoidReqs(snap.docs.map(d=>({...d.data(),_docId:d.id})));
-    },()=>{});
+      const rows=snap.docs.map(d=>({...d.data(),_docId:d.id}));
+      rows.sort((a,b)=>{
+        const ta=(a.timestamp&&a.timestamp.seconds)||0;
+        const tb=(b.timestamp&&b.timestamp.seconds)||0;
+        if(tb!==ta)return tb-ta;
+        return String(b.date||"").localeCompare(String(a.date||""));
+      });
+      setVoidReqs(rows);
+    },(err)=>{
+      console.error("void_requests query failed:",err);
+      showT("Could not load void requests: "+String(err&&err.message||err).slice(0,60),"err");
+    });
     return()=>unsub();
   },[branchId]);
 
@@ -9437,7 +9456,7 @@ function App(){
     try{
       const eq=isOwner
         ?query(collection(db,"expenses"),orderBy("timestamp","desc"),limit(100))
-        :query(collection(db,"expenses"),where("branch","==",bId),orderBy("timestamp","desc"),limit(50));
+        :query(collection(db,"expenses"),where("branch","==",bId),limit(200));
       unsubs.push(onSnapshot(eq,snap=>setExpenses(snap.docs.map(d=>({...d.data(),_docId:d.id}))),()=>{}));
     }catch(e){}
 
@@ -9445,7 +9464,7 @@ function App(){
     try{
       const cq=isOwner
         ?query(collection(db,"cash_log"),orderBy("timestamp","desc"),limit(100))
-        :query(collection(db,"cash_log"),where("branch","==",bId),orderBy("timestamp","desc"),limit(50));
+        :query(collection(db,"cash_log"),where("branch","==",bId),limit(200));
       unsubs.push(onSnapshot(cq,snap=>setCashLog(snap.docs.map(d=>({...d.data(),_docId:d.id}))),()=>{}));
     }catch(e){}
 
