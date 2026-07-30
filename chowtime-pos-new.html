@@ -11539,8 +11539,21 @@ function App(){
                   h("div",{style:{fontSize:8,fontWeight:700,color:C.muted,
                     letterSpacing:1,marginBottom:3}},lbl),
                   h("input",{value:editBr[k]||"",disabled:!editable,
-                    onChange:e=>setEditBr(p=>Object.assign({},p,
-                      {[k]:k==="id"?e.target.value.toLowerCase().replace(/[^a-z0-9-]/g,""):e.target.value})),
+                    onChange:e=>setEditBr(p=>{
+                      const v=e.target.value;
+                      if(k==="id")
+                        return Object.assign({},p,
+                          {id:v.toLowerCase().replace(/[^a-z0-9-]/g,""),_idTouched:true});
+                      const nx=Object.assign({},p,{[k]:v});
+                      // suggest an id from the name until the owner edits it
+                      if(k==="full"&&p._isNew&&!p._idTouched){
+                        nx.id="ct-"+v.toLowerCase()
+                          .replace(/^chowtime\s*/,"")
+                          .replace(/[^a-z0-9]+/g,"")
+                          .slice(0,10);
+                      }
+                      return nx;
+                    }),
                     style:{width:"100%",padding:"8px",borderRadius:7,fontSize:11,
                       outline:"none",boxSizing:"border-box",
                       border:"1px solid "+C.border,
@@ -11592,6 +11605,11 @@ function App(){
                 onClick:async()=>{
                   const b=editBr;
                   if(!b.id||!b.full){showT("ID and full name are required","warn");return;}
+                  const mgrMail=(b.mgrEmail||"").trim();
+                  if(mgrMail&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mgrMail)){
+                    showT("Check the manager email — that address is not valid","warn");
+                    return;
+                  }
                   if(b._isNew&&branches.some(x=>x.id===b.id)){
                     showT("ID already in use: "+b.id,"err");return;
                   }
@@ -13330,7 +13348,34 @@ function App(){
         // ══ USER MGMT ══
         page==="user_mgmt"&&h("div",null,
           h(SectionHeader,{title:"👥 User Management",
-            action:()=>setEditingStaff({_isNew:true,name:"",role:"cashier",branch:branchId==="all"?(branches[0]?.id||"ct-wsfp"):branchId,pin:"1234",email:""}),actionLabel:"+ Add User"}),
+            action:()=>setEditingStaff({_isNew:true,name:"",role:"cashier",
+              branch:"",   // no default — the owner must choose deliberately
+              pin:"1234",email:""}),actionLabel:"+ Add User"}),
+
+          // Add a user straight into a branch. Picking the branch inside the
+          // form is the step that gets forgotten — and the owner's own
+          // branchId is ct-main, so a forgotten pick silently lands there.
+          h("div",{style:{background:"#fff",border:"1px solid "+C.border,
+            borderRadius:10,padding:"11px 13px",marginBottom:12}},
+            h("div",{style:{fontSize:9,fontWeight:800,color:C.muted,
+              letterSpacing:1,marginBottom:7}},"ADD USER TO"),
+            h("div",{style:{display:"flex",gap:6,flexWrap:"wrap"}},
+              branches.map(b=>{
+                const n=staff.filter(x=>x.branch===b.id).length;
+                return h("button",{key:b.id,
+                  onClick:()=>setEditingStaff({_isNew:true,name:"",
+                    role:b.id==="ct-main"?"cashier":"manager",
+                    branch:b.id,pin:"1234",email:""}),
+                  style:{padding:"7px 12px",borderRadius:8,cursor:"pointer",
+                    border:"1px solid "+C.border,background:"#fff",
+                    fontSize:11,fontWeight:700,display:"flex",gap:6,
+                    alignItems:"center"}},
+                  h("span",null,(b.id==="ct-main"?"🏭 ":"🏪 ")+(b.full||b.id)),
+                  h("span",{style:{fontSize:9,color:C.muted,fontWeight:600}},
+                    "+"+(n?" "+n:"")));
+              })
+            )
+          ),
 
           // Role legend
           h("div",{style:{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}},
@@ -13377,6 +13422,12 @@ function App(){
                 h("div",{style:{overflowY:"auto",maxHeight:"65vh"}},
                   staff.filter(s=>!invSrch||s.role===invSrch)
                   .sort((a,b)=>{
+                    // branch first, then seniority — so the list reads in the
+                    // same order as the Add buttons above it
+                    const bi=(x)=>{const k=branches.findIndex(v=>v.id===x.branch);
+                      return k<0?99:k;};
+                    const d=bi(a)-bi(b);
+                    if(d)return d;
                     const order={owner:0,manager:1,commissary:2,cashier:3,stockclerk:4,crew:5};
                     return (order[a.role]||9)-(order[b.role]||9);
                   })
@@ -13496,6 +13547,23 @@ function App(){
                           b.name||b.id))
                       )
                     ),
+                    // MAIN is the commissary AND sells directly, so a cashier
+                    // there is legitimate — but assigning a branch role to it by
+                    // accident means that account reads and writes MAIN's stock.
+                    // Say so plainly rather than blocking it.
+                    !editingStaff.branch&&h("div",{style:{background:"#FFF3E0",
+                      border:"1px solid #FFCC80",borderRadius:8,padding:"9px 12px",
+                      marginBottom:10,fontSize:10,color:"#E65100",fontWeight:700}},
+                      "⚠️ Pick a branch — this account cannot be saved without one"),
+                    (editingStaff.branch==="ct-main"&&editingStaff.role!=="owner"
+                      &&editingStaff.role!=="commissary")&&h("div",{
+                      style:{background:"#E3F2FD",border:"1px solid #90CAF9",
+                        borderRadius:8,padding:"9px 12px",marginBottom:10,
+                        fontSize:10,color:"#1565C0",lineHeight:1.5}},
+                      h("b",null,"This account is on MAIN."),
+                      " It will use MAIN's own inventory, not a branch's. "+
+                      "Correct only if this person works at the commissary."),
+
                     // Access summary
                     h("div",{style:{background:"#f9f9f9",borderRadius:8,
                       padding:"10px 12px",marginBottom:12,fontSize:10,color:C.muted}},
@@ -13545,6 +13613,7 @@ function App(){
                     h("button",{
                       onClick:async()=>{
                         if(!editingStaff.name){showT("Enter name","warn");return;}
+                        if(!editingStaff.branch){showT("Pick a branch first","warn");return;}
                         try{
                           if(editingStaff._isNew){
                             await addDoc(collection(db,"staff_accounts"),{
@@ -13632,6 +13701,7 @@ function App(){
               h("button",{
                 onClick:async()=>{
                   if(!editingStaff.name.trim()){showT("Enter name","warn");return;}
+                        if(!editingStaff.branch){showT("Pick a branch first","warn");return;}
                   try{
                     // Update Firestore
                     await updateDoc(doc(db,"staff_accounts",editingStaff.id||editingStaff.uid),{
@@ -13921,6 +13991,7 @@ function App(){
                     h("button",{
                       onClick:async()=>{
                         if(!editingStaff.name){showT("Enter name","warn");return;}
+                        if(!editingStaff.branch){showT("Pick a branch first","warn");return;}
                         try{
                           if(editingStaff._isNew){
                             await addDoc(collection(db,"staff_accounts"),{
