@@ -153,6 +153,9 @@ const auth2    = getAuth(authApp2);
 // Create a login without disturbing whoever is signed in.
 async function createLoginAccount(email,password){
   try{
+    // normalise here as well: whatever the caller passes, the auth account and
+    // the staff record must end up with the same string
+    email=String(email||"").trim().toLowerCase();
     await createUserWithEmailAndPassword(auth2,email,password);
     try{ await signOut(auth2); }catch(e){}
     return {ok:true};
@@ -9553,6 +9556,10 @@ function App(){
         setLoginLoading(false); // Auth succeeded - stop loading spinner
         try{
           // Look up profile in Firestore staff_accounts by email
+          // Records written before emails were normalised may hold a
+          // different case, and an equality query will never match those.
+          // Pull the branch's records and compare case-insensitively, then
+          // repair the stored value so the fast path works next time.
           const q = query(
             collection(db,"staff_accounts"),
             where("email","==",fbUser.email)
@@ -9575,6 +9582,26 @@ function App(){
             return;
           }
         }catch(e){ console.warn("Firestore profile:",e.message); }
+
+        // Case-insensitive rescue for records written before normalisation.
+        try{
+          const all = await getDocs(collection(db,"staff_accounts"));
+          const want = String(fbUser.email||"").trim().toLowerCase();
+          const hit = all.docs.find(d=>
+            String((d.data()||{}).email||"").trim().toLowerCase()===want);
+          if(hit){
+            const profile = hit.data();
+            // rewrite it lowercase so the indexed query matches from now on
+            try{ await updateDoc(doc(db,"staff_accounts",hit.id),
+                   {email:want,uid:fbUser.uid}); }catch(e2){}
+            setUser({...profile, email:want, uid:fbUser.uid});
+            setPage(ROLES[profile.role]?.nav[0]||"dashboard");
+            setLoginErr("");
+            setAuthLoading(false);
+            return;
+          }
+        }catch(e){ console.warn("case-insensitive lookup:",e.message); }
+
         // Fallback 1: match email in local INIT_STAFF
         const found = INIT_STAFF.find(s=>s.email===fbUser.email);
         if(found){
@@ -11622,7 +11649,7 @@ function App(){
                 onClick:async()=>{
                   const b=editBr;
                   if(!b.id||!b.full){showT("ID and full name are required","warn");return;}
-                  const mgrMail=(b.mgrEmail||"").trim();
+                  const mgrMail=(b.mgrEmail||"").trim().toLowerCase();
                   if(mgrMail&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mgrMail)){
                     showT("Check the manager email — that address is not valid","warn");
                     return;
@@ -11675,7 +11702,7 @@ function App(){
                         await addDoc(collection(db,"staff_accounts"),{
                           name:(b.mgrName||"").trim()||clean.full+" Manager",
                           role:"manager",branch:clean.id,
-                          email:(b.mgrEmail||"").trim(),
+                          email:(b.mgrEmail||"").trim().toLowerCase(),
                           createdAt:serverTimestamp(),createdBy:user.name});
                         const r=await createLoginAccount((b.mgrEmail||"").trim(),pw);
                         note=r.ok
@@ -13679,7 +13706,7 @@ function App(){
                               name:editingStaff.name,
                               role:editingStaff.role,
                               branch:editingStaff.branch||branchId,
-                              email:editingStaff.email||"",
+                              email:(editingStaff.email||"").trim().toLowerCase(),
                               pin:editingStaff.pin||"1234",
                               createdAt:serverTimestamp(),
                               createdBy:user.name
@@ -13689,7 +13716,7 @@ function App(){
                               name:editingStaff.name,
                               role:editingStaff.role,
                               branch:editingStaff.branch,
-                              email:editingStaff.email||"",
+                              email:(editingStaff.email||"").trim().toLowerCase(),
                               updatedAt:serverTimestamp(),
                               updatedBy:user.name
                             });
@@ -14061,7 +14088,7 @@ function App(){
                               // staff roles, never another manager or owner
                               role:["cashier","crew","stockclerk"].includes(editingStaff.role)
                                 ?editingStaff.role:"crew",
-                              branch:branchId,email:editingStaff.email||"",
+                              branch:branchId,email:(editingStaff.email||"").trim().toLowerCase(),
                               createdAt:serverTimestamp(),createdBy:user.name
                             });
                             showT(editingStaff.name+" added ✓");
@@ -14071,7 +14098,7 @@ function App(){
                               role:["cashier","crew","stockclerk"].includes(editingStaff.role)
                                 ?editingStaff.role:"crew",
                               branch:branchId,   // cannot be moved to another branch
-                              email:editingStaff.email||"",
+                              email:(editingStaff.email||"").trim().toLowerCase(),
                               updatedAt:serverTimestamp(),
                               updatedBy:user.name
                             });
