@@ -1937,7 +1937,9 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
     const hasDisc = delivered.some(i=>i.discrepancy!==0);
     try{
       await updateDoc(doc(db,"advances",po._docId),{
-        status:"approved", deliveryDate, drNum,
+        status:"approved",
+        deliveryStatus:"Dispatched",   // goods have left Main
+        deliveryDate, drNum,
         deliveredItems:delivered,
         totalAmount:totalAmt,
         hasDiscrepancy:hasDisc,
@@ -6972,7 +6974,9 @@ function ReceiveItemsModal({po,db,user,showT,branchId,onClose}){
       }));
       if(hasDisc){
         await updateDoc(doc(db,"advances",po._docId),{
-          status:"discrepancy",receivedItems:finalItems,
+          status:"discrepancy",
+          deliveryStatus:"Short",   // arrived, but not in full
+          receivedItems:finalItems,
           receivedBy:user.name,receivedAt:serverTimestamp(),
           discrepancyItems:discItems.map(i=>({
             ...i,drQty:(i.actualQty!=null?i.actualQty:(i.qty||0)),
@@ -6984,7 +6988,9 @@ function ReceiveItemsModal({po,db,user,showT,branchId,onClose}){
         showT("Discrepancy reported — awaiting Main approval","warn");
       } else {
         await updateDoc(doc(db,"advances",po._docId),{
-          status:"completed",receivedItems:finalItems,
+          status:"completed",
+          deliveryStatus:"Delivered",
+          receivedItems:finalItems,
           receivedBy:user.name,receivedAt:serverTimestamp()
         });
         showT("Items received — PO Completed");
@@ -13532,7 +13538,27 @@ function App(){
                       h("span",{style:{fontSize:9,padding:"2px 8px",background:stColor,
                         color:"#fff",borderRadius:10,fontWeight:700}},stLabel)
                     ),
-                    h("div",{style:{fontSize:9,color:C.muted,marginTop:2}},
+                    // Three independent dimensions. One badge cannot say
+                    // "delivered but unpaid", which is the state that matters
+                    // most when chasing collections.
+                    h("div",{style:{display:"flex",gap:5,marginTop:4,flexWrap:"wrap"}},
+                      (function(){
+                        const dv=po.deliveryStatus||"Pending";
+                        const dm={Pending:["#9E9E9E","⏸ Not dispatched"],
+                                  Dispatched:["#1565C0","🚚 In transit"],
+                                  Delivered:["#2E7D32","📦 Delivered"],
+                                  Short:["#C62828","⚠️ Short delivery"]}[dv]
+                                 ||["#9E9E9E",dv];
+                        const pv=po.paymentStatus||"Unpaid";
+                        const pm=pv==="Paid"?["#2E7D32","💰 Paid"]
+                                            :["#E65100","💸 Unpaid"];
+                        return [dm,pm].map((x,ix)=>h("span",{key:ix,
+                          style:{fontSize:8,fontWeight:800,padding:"2px 7px",
+                            borderRadius:10,background:x[0]+"1A",color:x[0],
+                            border:"1px solid "+x[0]+"44"}},x[1]));
+                      })()
+                    ),
+                    h("div",{style:{fontSize:9,color:C.muted,marginTop:3}},
                       po.date+(po.deliveryDate?" · DR Date: "+po.deliveryDate:"")+
                       (po.vatType?" · "+po.vatType.toUpperCase():""))
                   ),
