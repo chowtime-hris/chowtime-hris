@@ -1,0 +1,18 @@
+{
+  "name": "Chowtime POS",
+  "short_name": "Chowtime",
+  "start_url": "./chowtime-pos-new.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#160406",
+  "theme_color": "#C8151B",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

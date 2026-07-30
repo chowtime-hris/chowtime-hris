@@ -3,7 +3,15 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Chowtime POS v5.0 [20260721-075357]</title>
+<title>Chowtime POS — 20260730-103900</title>
+<meta name="theme-color" content="#C8151B"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-title" content="Chowtime"/>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
+<link rel="manifest" href="chowtime.webmanifest"/>
+<!-- BUILD:20260730-103900 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -5614,6 +5622,24 @@ function renderDRDoc(po,cs){
     setTimeout(()=>w.print(),500);
 }
 
+// ─── BUILD / UPDATE CHECK ────────────────────
+// GitHub Pages caches hard, so a branch can run an old copy for hours.
+// Without a visible stamp a bug report cannot be tied to a version.
+const BUILD = "20260730-103900";
+
+// Re-fetch this file with the cache bypassed and read its BUILD marker.
+// The marker travels in the HTML, so no server is involved.
+async function checkForUpdate(){
+  try{
+    const r = await fetch(location.pathname + "?v=" + Date.now(), {cache:"no-store"});
+    if(!r.ok) return null;
+    const txt = await r.text();
+    const m = /BUILD:([0-9-]{15})/.exec(txt);
+    if(!m) return null;
+    return (m[1] !== BUILD) ? m[1] : null;
+  }catch(e){ return null; }
+}
+
 // ─── SUBSCRIPTION ─────────────────────────────────────────
 // One doc per branch: subscriptions/<branchId>. The billing anniversary is the
 // FIRST payment date, not the 1st of the month — a branch that starts on the
@@ -9268,6 +9294,7 @@ function App(){
   const [bfLog,setBfLog]=useState(null);
   const [zHist,setZHist]=useState([]);                   // saved daily_sales (this branch)
   const [zHistAll,setZHistAll]=useState([]);             // every branch, for Reports
+  const [newBuild,setNewBuild]=useState(null);           // a newer build is live
   const [subs,setSubs]=useState([]);                     // subscriptions, all branches
   const [openDisc,setOpenDisc]=useState({});             // expanded discrepancy reports
   const [editBr,setEditBr]=useState(null);               // branch being added/edited
@@ -9932,6 +9959,19 @@ function App(){
     return()=>clearTimeout(t);
   },[dayTick]);
 
+  // Check on mount and every 30 minutes. A tablet that stays open all day
+  // would otherwise never notice a deploy.
+  useEffect(()=>{
+    let alive=true;
+    const run=async()=>{
+      const b=await checkForUpdate();
+      if(alive&&b)setNewBuild(b);
+    };
+    run();
+    const t=setInterval(run,30*60*1000);
+    return()=>{alive=false;clearInterval(t);};
+  },[]);
+
   // ── HOLD / PARK A TRANSACTION ────────────────────────────
   // Keeps the whole checkout context, not just the cart, so resuming lands the
   // cashier exactly where they left off (discount scope, take-out picks, etc).
@@ -10399,7 +10439,7 @@ function App(){
         )
       ),
       h("div",{style:{textAlign:"center",marginTop:20,color:"rgba(255,255,255,.12)",fontSize:9}},
-        "ChowTime POS v5.0 · Build 20260721-0648 · Firebase Auth"
+        "Chowtime POS · "+BUILD
       )
     );
   }
@@ -11196,7 +11236,29 @@ function App(){
           )
         ),
 
-        // 3-day countdown. Sits in the shell so it shows on every page, not
+        // A stale tab keeps running old code and reporting fixed bugs. One tap
+      // reloads with the cache bypassed.
+      newBuild&&h("div",{style:{padding:"9px 20px",display:"flex",gap:10,
+        alignItems:"center",flexWrap:"wrap",background:"#E3F2FD",
+        borderBottom:"1px solid #90CAF9"}},
+        h("span",{style:{fontSize:15}},"⬆️"),
+        h("div",{style:{flex:1,minWidth:200}},
+          h("div",{style:{fontSize:12,fontWeight:900,color:"#1565C0"}},
+            "New version available"),
+          h("div",{style:{fontSize:10,color:C.muted,marginTop:1}},
+            "Running "+BUILD+" · latest is "+newBuild)),
+        h("button",{
+          onClick:()=>{ location.replace(location.pathname+"?v="+Date.now()); },
+          style:{padding:"7px 14px",borderRadius:8,border:"none",
+            background:"#1565C0",color:"#fff",fontWeight:800,fontSize:11,
+            cursor:"pointer"}},"Reload now"),
+        h("button",{onClick:()=>setNewBuild(null),
+          style:{padding:"7px 10px",borderRadius:8,border:"none",
+            background:"none",color:C.muted,fontSize:10,cursor:"pointer"}},
+          "Later")
+      ),
+
+      // 3-day countdown. Sits in the shell so it shows on every page, not
       // just the dashboard — the crew should not have to go looking for it.
       (!subS.unknown&&subS.days!==null&&subS.days<=3)&&h("div",{
         style:{padding:"9px 20px",display:"flex",gap:10,alignItems:"center",
