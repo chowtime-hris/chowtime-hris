@@ -7382,7 +7382,8 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
       .cat-total{background:#f0f0f0;}
       .grand-total{background:#e8e8e8;font-weight:900;}
       .sigs{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin:20px 0;}
-      .sig-box{text-align:center;padding-top:36px;border-top:1px solid #333;font-size:10px;}
+      .sig-box{text-align:center;padding-top:36px;border-top:1px solid #333;font-size:10px;position:relative;}
+      .sig-name{position:absolute;left:0;right:0;top:14px;font-size:11px;font-weight:700;color:#111;}
       .payment-section{border:1px solid #ddd;border-radius:8px;padding:12px 16px;
         display:flex;justify-content:space-between;align- items:center;}
       .pay-label{font-size:9px;font-weight:700;color:#888;letter-spacing:1px;margin-bottom:6px;}
@@ -7437,9 +7438,9 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
 
     <!-- SIGNATURES -->
     <div class="sigs">
-      <div class="sig-box">Prepared by</div>
-      <div class="sig-box">Approved by</div>
-      <div class="sig-box">Delivered by</div>
+      <div class="sig-box">${cs2.drPreparedBy?`<div class="sig-name">${cs2.drPreparedBy}</div>`:""}Prepared by</div>
+      <div class="sig-box">${cs2.drApprovedBy?`<div class="sig-name">${cs2.drApprovedBy}</div>`:""}Approved by</div>
+      <div class="sig-box">${cs2.drDeliveredBy?`<div class="sig-name">${cs2.drDeliveredBy}</div>`:""}Delivered by</div>
       <div class="sig-box">Received by</div>
     </div>
 
@@ -7609,7 +7610,7 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
 }
 
 // ─── PRINT DR HELPER ────────────────────────────────────
-function printPODR(po){
+function printPODR(po,cs){
   const w=window.open("","_blank","width=800,height=900");
   const  items=po.deliveredItems||po. items||[];
   const grouped={};
@@ -7650,8 +7651,13 @@ function printPODR(po){
     "<td colspan='5' style='text-align:right'>GRAND TOTAL</td>"+
     "<td>"+"₱"+peso(grand)+"</td></tr></table>"+
     "<div style='margin-top:30px;display:grid;grid-template-columns:repeat(4,1fr);gap:20px'>"+
-    ["Prepared by","Approved by","Delivered by","Received by"].map(function(s){
-      return "<div style='text-align:center;border-top:1px solid #000;padding-top:4px'>"+s+"</div>";
+    [["Prepared by",(cs||{}).drPreparedBy],
+     ["Approved by",(cs||{}).drApprovedBy],
+     ["Delivered by",(cs||{}).drDeliveredBy],
+     ["Received by",""]].map(function(pair){
+      return "<div style='text-align:center'>"+
+        "<div style='height:26px;font-size:11px;font-weight:700'>"+(pair[1]||"")+"</div>"+
+        "<div style='border-top:1px solid #000;padding-top:4px'>"+pair[0]+"</div></div>";
     }).join("")+"</div></body></html>";
   w.document.write(html);
   w.document.close();
@@ -7981,6 +7987,23 @@ function SettingsPage({db,user,showT,branches,companySettings,setCompanySettings
         h("button",{onClick:()=>save("Company info saved"),
           style:{marginTop:10,padding:"9px 20px",background:C.primary,border:"none",borderRadius:8,color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}},
           "💾 Save Company Info")
+      ),
+      h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,
+        padding:"16px",marginBottom:14}},
+        h("div",{style:{fontSize:12,fontWeight:800,marginBottom:4,color:"#E65100"}},
+          "✍️ Delivery Receipt Signatories"),
+        h("div",{style:{fontSize:10,color:C.muted,marginBottom:10,lineHeight:1.5}},
+          "Printed above the signature lines on every DR. Leave blank to print an "+
+          "empty line. \"Received by\" is always left blank — the branch signs that "+
+          "one on arrival."),
+        h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}},
+          F("drPreparedBy","Prepared by"),
+          F("drApprovedBy","Approved by"),
+          F("drDeliveredBy","Delivered by")),
+        h("button",{onClick:()=>save("DR signatories saved"),
+          style:{marginTop:10,padding:"9px 20px",background:"#E65100",border:"none",
+            borderRadius:8,color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}},
+          "💾 Save Signatories")
       ),
       h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,padding:"16px"}},
         h("div",{style:{fontSize:12,fontWeight:800,marginBottom:10,color:"#1565C0"}},"💳 Bank Details"),
@@ -13702,7 +13725,7 @@ function App(){
 
                   // Print DR if available
                   (po.drNum||po.deliveredItems)&&h("button",{
-                    onClick:()=>printPODR(po),
+                    onClick:()=>printPODR(po,companySettings),
                     style:{padding:"8px 14px",background:"#fff",
                       border:"1px solid "+C.border,borderRadius:8,
                       fontSize:11,fontWeight:700,cursor:"pointer"}},
@@ -14012,7 +14035,7 @@ function App(){
 
                   // Print DR
                   po.deliveredItems&&h("button",{
-                    onClick:()=>printPODR(po),
+                    onClick:()=>printPODR(po,companySettings),
                     style:{padding:"7px 12px",background:"#fff",
                       border:"1px solid "+C.border,borderRadius:8,
                       fontSize:11,fontWeight:700,cursor:"pointer"}},
