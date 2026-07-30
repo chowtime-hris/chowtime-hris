@@ -5417,6 +5417,201 @@ function poMargin(po){
           pct:rev>0?((rev-cost)/rev*100):0};
 }
 
+function renderDRDoc(po,cs){
+  // one document per DR number, whoever prints it and whenever
+  const items=(po&&(po.deliveredItems||po.items))||[];
+  const actualQtys={}; const prices={};
+  items.forEach(function(i){
+    actualQtys[i.id]=(i.actualQty!=null?i.actualQty:i.qty);
+    prices[i.id]=Number(i.price)||0;
+  });
+  const total=items.reduce(function(a,i){
+    return a+(((i.actualQty!=null?i.actualQty:i.qty)||0)*(Number(i.price)||0));},0);
+  const deliveryDate=(po&&(po.deliveryDate||po.date))||"";
+
+    const w=window.open("","_blank","width=800,height=900");
+    // Group  items by category
+    const cats={};
+     items.forEach(i=>{
+      const cat=i.cat||i.category||"Others";
+      if(!cats[cat])cats[cat]=[];
+      const aq=actualQtys[i.id]!=null?actualQtys[i.id]:i.qty;
+      const p=prices[i.id]||0;
+      cats[cat].push({...i,aq,p,lineTotal:aq*p});
+    });
+    let  itemNo=1;
+    let tableRows="";
+    Object.keys(cats).forEach(cat=>{
+      const catItems=cats[cat];
+      const catTotal=catItems.reduce((s,i)=>s+i.lineTotal,0);
+      const catQty=catItems.reduce((s,i)=>s+i.aq,0);
+      const catPk=catItems.reduce((s,i)=>{
+        const sz=Number(i.packSize)||0;
+        return s+(sz>1?(i.aq/sz):0);
+      },0);
+      catItems.forEach(i=>{
+        const sz=Number(i.packSize)||0;
+        const pu=i.packUnit||"";
+        // no pack size configured -> leave the pack columns blank rather than
+        // printing a misleading "1 pack"
+        const perPk = sz>1 ? (sz+" "+(i.unit||"")) : "—";
+        const totPk = sz>1 ? (Math.round((i.aq/sz)*1000)/1000)+" "+pu : "—";
+        tableRows+=`<tr>
+          <td>${ itemNo++}</td>
+          <td style="color:#888;font-size:10px">${i.id||""}</td>
+          <td>${cat}</td>
+          <td>${i.name}</td>
+          <td>${perPk}</td>
+          <td class="b">${totPk}</td>
+          <td class="b">${i.aq} ${i.unit||""}</td>
+          <td class="r">₱${i.p.toFixed(2)}</td>
+          <td class="r">₱${i.lineTotal.toFixed(2)}</td>
+          <td>—</td>
+        </tr>`;
+      });
+      tableRows+=`<tr class="cat-total">
+        <td colspan="3"></td>
+        <td class="b">Total ${cat}</td>
+        <td></td>
+        <td class="b">${catPk?(Math.round(catPk*1000)/1000)+" pk":"—"}</td>
+        <td class="b">${catQty}</td>
+        <td></td>
+        <td class="r b">₱${catTotal.toFixed(2)}</td>
+        <td></td>
+      </tr>`;
+    });
+    const grandPcs= items.reduce((s,i)=>
+      s+(actualQtys[i.id]!=null?actualQtys[i.id]:i.qty),0);
+    const grandPk = items.reduce((s,i)=>{
+      const sz=Number(i.packSize)||0;
+      const aq=actualQtys[i.id]!=null?actualQtys[i.id]:i.qty;
+      return s+(sz>1?(aq/sz):0);
+    },0);
+    tableRows+=`<tr class="grand-total">
+      <td colspan="3"></td>
+      <td class="b">TOTAL</td>
+      <td></td>
+      <td class="b">${grandPk?(Math.round(grandPk*1000)/1000)+" pk":"—"}</td>
+      <td class="b">${grandPcs} pcs</td>
+      <td></td>
+      <td class="r b">₱${total.toFixed(2)}</td>
+      <td></td>
+    </tr>`;
+
+    const drNum="DR-"+po.poNum;
+    const branchInfo=po.branchName||po.branch;
+    const cs2=cs||{name:"CHOWTIME FAST-FOOD CHAIN",email:"",address:"",
+      bankName:"BPI",bankAccount:"Chowtime Fast Food Chain",bankNumber:"",bankQR:""};
+
+    w.document.write(`<!DOCTYPE html><html><head><title>${drNum}</title>
+    <style>
+      *{margin:0;padding:0;box-sizing:border-box;}
+      body{font-family:Arial,sans-serif;font-size:11px;padding:24px;color:#222;}
+      .header{display:flex;justify-content:space-between;align- items:flex-start;margin-bottom:16px;}
+      .logo-area{display:flex;align- items:center;gap:12px;}
+      .logo{width:52px;height:52px;background:#C8151B;border-radius:10px;
+        display:flex;align- items:center;justify-content:center;
+        color:#fff;font-weight:900;font-size:20px;flex-shrink:0;}
+      .dr-title{font-size:20px;font-weight:900;color:#C8151B;}
+      .dr-sub{font-size:11px;color:#888;margin-top:2px;}
+      .qr-box{text-align:center;}
+      .qr-box img{width:80px;height:80px;object-fit:contain;}
+      .to-from{display:grid;grid-template-columns:1fr 1fr;gap:0;
+        border:1px solid #ddd;border-radius:8px;overflow:hidden;margin-bottom:14px;}
+      .to-box{padding:10px 14px;border-right:1px solid #ddd;}
+      .from-box{padding:10px 14px;background:#f9f9f9;}
+      .box-label{font-size:9px;font-weight:700;color:#888;letter-spacing:1px;margin-bottom:4px;}
+      .box-name{font-size:13px;font-weight:800;margin-bottom:4px;}
+      .box-detail{font-size:10px;color:#555;line-height:1.6;}
+      table{width:100%;border-collapse:collapse;margin-bottom:14px;}
+      th{background:#f5f5f5;padding:6px 8px;text-align:left;
+        border:1px solid #ddd;font-size:10px;font-weight:700;}
+      td{padding:5px 8px;border:1px solid #eee;font-size:11px;}
+      .r{text-align:right;} .b{font-weight:700;}
+      .cat-total{background:#f0f0f0;}
+      .grand-total{background:#e8e8e8;font-weight:900;}
+      .sigs{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin:20px 0;}
+      .sig-box{text-align:center;padding-top:36px;border-top:1px solid #333;font-size:10px;position:relative;}
+      .sig-name{position:absolute;left:0;right:0;top:14px;font-size:11px;font-weight:700;color:#111;}
+      .payment-section{border:1px solid #ddd;border-radius:8px;padding:12px 16px;
+        display:flex;justify-content:space-between;align- items:center;}
+      .pay-label{font-size:9px;font-weight:700;color:#888;letter-spacing:1px;margin-bottom:6px;}
+      .pay-detail{font-size:11px;line-height:1.8;}
+      .footer{margin-top:12px;font-size:9px;color:#aaa;text-align:center;}
+      @media print{body{padding:12px;}}
+    </style></head><body>
+
+    <!-- HEADER -->
+    <div class="header">
+      <div class="logo-area">
+        <div class="logo">CT</div>
+        <div>
+          <div class="dr-title">Delivery Receipt – ${po.poNum}</div>
+          <div class="dr-sub">Delivery date: ${deliveryDate}</div>
+        </div>
+      </div>
+      ${cs2.bankQR?`<div class="qr-box"><img src="${cs2.bankQR}" alt="QR"/><div style="font-size:9px;color:#888;margin-top:2px">Scan to Pay</div></div>`:""}
+    </div>
+
+    <!-- TO / FROM -->
+    <div class="to-from">
+      <div class="to-box">
+        <div class="box-label">To</div>
+        <div class="box-name">${branchInfo}</div>
+        <div class="box-detail">
+          Client PO Number: ${po.poNum}<br>
+          Sales Invoice Number: ${drNum}
+        </div>
+      </div>
+      <div class="from-box">
+        <div class="box-label">From</div>
+        <div class="box-name">${cs2.name}</div>
+        <div class="box-detail">
+          ${cs2.phone?"Phone: "+cs2.phone+"<br>":""}
+          ${cs2.email?"Email: "+cs2.email+"<br>":""}
+          ${cs2.address?"Address: "+cs2.address:""}
+        </div>
+      </div>
+    </div>
+
+    <!-- LINE ITEMS -->
+    <div style="font-size:10px;font-weight:700;color:#C8151B;margin-bottom:6px;">Line  items</div>
+    <table>
+      <tr>
+        <th>Item No.</th><th>SKU</th><th>Category</th><th>Description</th>
+        <th>Qty / PK</th><th>Total PK</th><th>Total PCS</th>
+        <th class="r">Unit Price</th><th class="r">Total Price</th><th>Remarks</th>
+      </tr>
+      ${tableRows}
+    </table>
+
+    <!-- SIGNATURES -->
+    <div class="sigs">
+      <div class="sig-box">${cs2.drPreparedBy?`<div class="sig-name">${cs2.drPreparedBy}</div>`:""}Prepared by</div>
+      <div class="sig-box">${cs2.drApprovedBy?`<div class="sig-name">${cs2.drApprovedBy}</div>`:""}Approved by</div>
+      <div class="sig-box">${cs2.drDeliveredBy?`<div class="sig-name">${cs2.drDeliveredBy}</div>`:""}Delivered by</div>
+      <div class="sig-box">Received by</div>
+    </div>
+
+    <!-- PAYMENT METHOD -->
+    <div class="payment-section">
+      <div>
+        <div class="pay-label">PAYMENT METHOD</div>
+        <div class="pay-detail">
+          Bank Name: <b>${cs2.bankName}</b><br>
+          Bank Account Name: <b>${cs2.bankAccount}</b><br>
+          Bank Account Number: <b>${cs2.bankNumber}</b>
+        </div>
+      </div>
+      ${cs2.bankQR?`<img src="${cs2.bankQR}" style="width:80px;height:80px;object-fit:contain;">`:""}
+    </div>
+
+    <div class="footer">Powered by Chowtime POS v5.0</div>
+    </body></html>`);
+    w.document.close();
+    setTimeout(()=>w.print(),500);
+}
+
 // ─── SUBSCRIPTION ─────────────────────────────────────────
 // One doc per branch: subscriptions/<branchId>. The billing anniversary is the
 // FIRST payment date, not the 1st of the month — a branch that starts on the
@@ -7570,7 +7765,7 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
           +(shortAtMain.length>2?" +"+(shortAtMain.length-2):""),"warn");
       }
       showT("DR issued ✓ — "+po.poNum+" now PROCESSING · "+moved+" item/s deducted");
-      printDR(companySettings);
+      renderDRDoc(Object.assign({},po,{deliveredItems:delivered,deliveryDate:deliveryDate}),companySettings);
       onClose();
     }catch(e){showT("Error issuing DR","err");console.error(e);}
     setSaving(false);
@@ -13728,7 +13923,8 @@ function App(){
               const stLabel={
                 received_by_main:"⏳ Pending at Main",processing:"⚙️ Processing",
                 approved:"⚙️ Processing",
-                paid:"📥 Ready to Receive",discrepancy:"⚠️ Discrepancy",completed:"✅ Completed"
+                paid:"📥 Ready to Receive",discrepancy:"⚠️ Discrepancy",completed:"✅ Completed",
+                cancelled:"✕ Cancelled"
               }[st]||st;
               const total=poValue(po);
               const paid=(po.payments||[]).reduce((s,p)=>s+(p.amount||0),0);
@@ -13852,7 +14048,7 @@ function App(){
 
                   // Print DR if available
                   (po.drNum||po.deliveredItems)&&h("button",{
-                    onClick:()=>printPODR(po,companySettings),
+                    onClick:()=>renderDRDoc(po,companySettings),
                     style:{padding:"8px 14px",background:"#fff",
                       border:"1px solid "+C.border,borderRadius:8,
                       fontSize:11,fontWeight:700,cursor:"pointer"}},
@@ -14092,6 +14288,81 @@ function App(){
                       fontSize:11,fontWeight:700,cursor:"pointer"}},
                     balance<=0?"💰 View Payments":"💰 Record Payment"),
 
+                  // Main-side cancel. Only the branch could cancel before, and
+                  // only pre-processing — so a PO Main could not fulfil had no
+                  // way out. Once the DR is issued Main's stock is already
+                  // deducted, so cancelling has to put it back.
+                  (st==="received_by_main"||st==="processing"||st==="approved")
+                    &&h("button",{
+                    onClick:async()=>{
+                      const shipped=(st==="processing"||st==="approved");
+                      const why=prompt(
+                        "Reason for cancelling "+po.poNum+
+                        (shipped?"\n\nThe DR was already issued — Main's stock will be restored."
+                                :""),"");
+                      if(why===null)return;
+                      if(!why.trim()){showT("A reason is required","warn");return;}
+                      try{
+                        // re-read: the branch may have confirmed receipt while
+                        // this card was on screen
+                        const live=await getDoc(doc(db,"advances",po._docId));
+                        const nowSt=live.exists()?(live.data().status||""):"";
+                        if(nowSt==="completed"||nowSt==="discrepancy"){
+                          showT("Already received by the branch — void it instead","err");
+                          return;
+                        }
+                        let back=0;
+                        if(live.exists()&&live.data().stockIssued){
+                          for(const it of (live.data().deliveredItems||[])){
+                            if(!it.id||!(it.actualQty>0))continue;
+                            try{
+                              let prev=null;
+                              try{
+                                const ds=await getDoc(doc(db,"inventory",it.id));
+                                if(ds.exists())prev=Number(ds.data().stock)||0;
+                              }catch(e1){}
+                              await updateDoc(doc(db,"inventory",it.id),{
+                                stock:increment(it.actualQty||0),
+                                lastRestocked:serverTimestamp()
+                              });
+                              back++;
+                              await addDoc(collection(db,"inventory_log"),{
+                                itemId:it.id,itemName:it.name||it.id,unit:it.unit||"",
+                                type:"add",amount:(it.actualQty||0),
+                                prevStock:prev,
+                                newStock:prev==null?null:Math.round((prev+(it.actualQty||0))*1000)/1000,
+                                desc:"Restored from cancelled "+(po.poNum||""),
+                                source:"TRANSFER",ref:po.poNum||"",
+                                branch:"ct-main",by:user.name,
+                                date:localDate(),timestamp:serverTimestamp()
+                              });
+                            }catch(e2){console.warn("restore failed",it.id,e2);}
+                          }
+                        }
+                        await updateDoc(doc(db,"advances",po._docId),{
+                          status:"cancelled",
+                          deliveryStatus:"Cancelled",
+                          cancelReason:why.trim(),
+                          cancelledBy:user.name,
+                          cancelledAt:serverTimestamp(),
+                          stockIssued:false,
+                          stockRestored:back
+                        });
+                        await notify(db,{to:po.branch,type:"discrepancy",
+                          title:po.poNum+" cancelled by Main",
+                          message:why.trim(),
+                          page:"stock_order",ref:po.poNum,by:user.name});
+                        showT(po.poNum+" cancelled"+(back?" · "+back+" item/s returned to Main":""),"warn");
+                      }catch(e){
+                        console.error("cancel PO:",e);
+                        showT("Cancel failed: "+String(e&&e.message||e).slice(0,60),"err");
+                      }
+                    },
+                    style:{padding:"7px 12px",background:"#fff",
+                      border:"1px solid "+C.danger,borderRadius:8,color:C.danger,
+                      fontSize:11,fontWeight:700,cursor:"pointer"}},
+                    "✕ Cancel PO"),
+
                   // DISCREPANCY → Approve
                   st==="discrepancy"&&h("button",{
                     onClick:async()=>{
@@ -14162,7 +14433,7 @@ function App(){
 
                   // Print DR
                   po.deliveredItems&&h("button",{
-                    onClick:()=>printPODR(po,companySettings),
+                    onClick:()=>renderDRDoc(po,companySettings),
                     style:{padding:"7px 12px",background:"#fff",
                       border:"1px solid "+C.border,borderRadius:8,
                       fontSize:11,fontWeight:700,cursor:"pointer"}},
