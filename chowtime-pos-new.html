@@ -9341,6 +9341,7 @@ function App(){
   const [newStaff,setNewStaff]=useState({name:"",role:"cashier",branch:"ct-wsfp",email:"",password:""});
 
   const [invSrch,setInvSrch]=useState("");
+  const [staffRole,setStaffRole]=useState("");   // Users page role filter
   const [invCat,setInvCat]=useState("");
   const [invFlag,setInvFlag]=useState("");   // low | zero | nobom | noprice
   const [ordCounter,setOrdCounter]=useState(1);
@@ -11505,7 +11506,7 @@ function App(){
             action:(user.role==="owner")
               ?()=>setEditBr({_isNew:true,id:"",name:"",full:"",loc:"",status:"open"})
               :undefined,
-            actionLabel:"+ Add Branch"}),
+            actionLabel:"Add Branch"}),
           h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10}},
             branches.map(b=>{
               const _t=localDate();
@@ -13394,7 +13395,7 @@ function App(){
           h(SectionHeader,{title:"👥 User Management",
             action:()=>setEditingStaff({_isNew:true,name:"",role:"cashier",
               branch:"",   // no default — the owner must choose deliberately
-              pin:"1234",email:""}),actionLabel:"+ Add User"}),
+              pin:"1234",email:""}),actionLabel:"Add User"}),
 
           // Add a user straight into a branch. Picking the branch inside the
           // form is the step that gets forgotten — and the owner's own
@@ -13458,11 +13459,11 @@ function App(){
                     alignSelf:"center"}},"Staff"),
                   ["All","owner","manager","cashier","crew","stockclerk","commissary"].map(r=>
                     h("button",{key:r,
-                      onClick:()=>setInvSrch(r==="All"?"":r),
+                      onClick:()=>setStaffRole(r==="All"?"":r),
                       style:{padding:"3px 10px",borderRadius:12,fontSize:9,
                         cursor:"pointer",border:"none",fontWeight:600,
-                        background:(invSrch||"All")===r?C.primary:"#eee",
-                        color:(invSrch||"All")===r?"#fff":C.muted}},
+                        background:(staffRole||"All")===r?C.primary:"#eee",
+                        color:(staffRole||"All")===r?"#fff":C.muted}},
                       r==="All"?"All":ROLES[r]?.label||r))
                 ),
                 h("div",{style:{overflowY:"auto",maxHeight:"65vh"}},
@@ -13477,7 +13478,7 @@ function App(){
                     if(branchRole&&s.branch!=="ct-main")return false;
                     return true;
                   })
-                  .filter(s=>!invSrch||s.role===invSrch)
+                  .filter(s=>!staffRole||s.role===staffRole)
                   .sort((a,b)=>{
                     // branch first, then seniority — so the list reads in the
                     // same order as the Add buttons above it
@@ -14152,7 +14153,7 @@ function App(){
 
         page==="stock_order"&&h("div",null,
           h(SectionHeader,{title:"📦 Order Stocks from Commissary",
-            action:()=>setModal("new_po"),actionLabel:"+ New Order"}),
+            action:()=>setModal("new_po"),actionLabel:"New Order"}),
 
           // Stats
           h("div",{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}},
