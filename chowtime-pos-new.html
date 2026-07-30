@@ -9197,9 +9197,17 @@ function App(){
     const bId=(user.branch==="all"||user.branch==="comm")?"ct-main":user.branch;
     const q=query(collection(db,"menu_overrides"),where("branch","==",bId));
     const unsub=onSnapshot(q,snap=>{
-      const ov={};
-      snap.docs.forEach(d=>{const dd=d.data();ov[dd. itemId]={avail:dd.avail,price:dd.price};});
+      const ov={}, ex=[];
+      snap.docs.forEach(d=>{
+        const dd={...d.data(),_docId:d.id};
+        // menu_overrides holds two different things: per-item overrides AND
+        // branch-exclusive items. The POS only unpacked the first, so an
+        // exclusive item could be created and saved but never sold.
+        if(dd.isExclusive)ex.push(dd);
+        else ov[dd.itemId]={avail:dd.avail,price:dd.price};
+      });
       setBranchOverrides(ov);
+      setBranchExclusives(ex);
     },()=>{});
     return()=>unsub();
   },[user?.branch]);
@@ -13525,9 +13533,6 @@ function App(){
               const total=po.totalAmount||0;
               const paid=(po.payments||[]).reduce((s,p)=>s+(p.amount||0),0);
               const bal=(total||0)-paid;
-              // paymentStatus is a flag; it cannot say when they paid, how much,
-              // or against which reference. The payments array can.
-              const payRows=(po.payments||[]).slice().reverse();
 
               return h("div",{key:po._docId,
                 style:{background:"#fff",borderRadius:12,
@@ -13763,18 +13768,18 @@ function App(){
                       fontSize:11,fontWeight:700,cursor:"pointer"}},
                     "⚙️ Process & Issue DR"),
 
-                  // Payment history
-                  payRows.length>0&&h("div",{style:{width:"100%",
+                  // Payment history — uses this block's own totalPaid/balance
+                  ((po.payments||[]).length>0)&&h("div",{style:{width:"100%",
                     background:C.bg,borderRadius:8,padding:"8px 10px",marginBottom:8}},
                     h("div",{style:{display:"flex",justifyContent:"space-between",
                       alignItems:"center",marginBottom:5}},
                       h("span",{style:{fontSize:8,fontWeight:800,color:C.muted,
-                        letterSpacing:1}},"PAYMENTS ("+payRows.length+")"),
+                        letterSpacing:1}},"PAYMENTS ("+(po.payments||[]).length+")"),
                       h("span",{style:{fontSize:10,fontWeight:900,
-                        color:bal<=0?C.success:C.danger}},
-                        bal<=0?"FULLY PAID":"Balance ₱"+peso(bal))
+                        color:(balance||0)<=0?C.success:C.danger}},
+                        (balance||0)<=0?"FULLY PAID":"Balance ₱"+peso(balance))
                     ),
-                    payRows.map((p,pi)=>h("div",{key:pi,
+                    (po.payments||[]).slice().reverse().map((p,pi)=>h("div",{key:pi,
                       style:{display:"flex",justifyContent:"space-between",
                         fontSize:9,marginBottom:2}},
                       h("span",{style:{color:C.muted}},
