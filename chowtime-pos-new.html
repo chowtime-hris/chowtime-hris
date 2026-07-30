@@ -1937,7 +1937,7 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
     const hasDisc = delivered.some(i=>i.discrepancy!==0);
     try{
       await updateDoc(doc(db,"advances",po._docId),{
-        status:"approved",
+        status:"processing",           // the label map and payment button key off this
         deliveryStatus:"Dispatched",   // goods have left Main
         deliveryDate, drNum,
         deliveredItems:delivered,
@@ -13519,10 +13519,15 @@ function App(){
               }[st]||C.muted;
               const stLabel={
                 received_by_main:"⏳ Pending at Main",processing:"⚙️ Processing",
+                approved:"⚙️ Processing",
                 paid:"📥 Ready to Receive",discrepancy:"⚠️ Discrepancy",completed:"✅ Completed"
               }[st]||st;
               const total=po.totalAmount||0;
               const paid=(po.payments||[]).reduce((s,p)=>s+(p.amount||0),0);
+              const bal=(total||0)-paid;
+              // paymentStatus is a flag; it cannot say when they paid, how much,
+              // or against which reference. The payments array can.
+              const payRows=(po.payments||[]).slice().reverse();
 
               return h("div",{key:po._docId,
                 style:{background:"#fff",borderRadius:12,
@@ -13658,9 +13663,9 @@ function App(){
         page==="stock_receive"&&h("div",null,
           h(SectionHeader,{title:"Receive Stocks — Check DR vs PO"}),
           h("div",{style:{background:"#FFF8E1",border:"1px solid #FFE082",borderRadius:10,padding:"10px 14px",marginBottom:13,fontSize:11,color:"#795548"}},"⚖️ Check actual delivered quantities against your PO. Flag any discrepancy before confirming receipt."),
-          advances.filter(a=>a._type==="po"&&a.branch===branchId&&a.status==="approved").length===0
+          advances.filter(a=>a._type==="po"&&a.branch===branchId&&(a.status==="approved"||a.status==="processing")).length===0
             ?h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,padding:"30px",textAlign:"center",color:C.muted,fontSize:12}},"No pending deliveries. Orders for delivery will appear here.")
-            :advances.filter(a=>a._type==="po"&&a.branch===branchId&&a.status==="approved").map(po=>
+            :advances.filter(a=>a._type==="po"&&a.branch===branchId&&(a.status==="approved"||a.status==="processing")).map(po=>
               h(DRCheckForm,{key:po._docId,po,db,branchId,user,showT,INIT_INVENTORY,setAdvances,advances})
             )
         ),
@@ -13758,8 +13763,31 @@ function App(){
                       fontSize:11,fontWeight:700,cursor:"pointer"}},
                     "⚙️ Process & Issue DR"),
 
+                  // Payment history
+                  payRows.length>0&&h("div",{style:{width:"100%",
+                    background:C.bg,borderRadius:8,padding:"8px 10px",marginBottom:8}},
+                    h("div",{style:{display:"flex",justifyContent:"space-between",
+                      alignItems:"center",marginBottom:5}},
+                      h("span",{style:{fontSize:8,fontWeight:800,color:C.muted,
+                        letterSpacing:1}},"PAYMENTS ("+payRows.length+")"),
+                      h("span",{style:{fontSize:10,fontWeight:900,
+                        color:bal<=0?C.success:C.danger}},
+                        bal<=0?"FULLY PAID":"Balance ₱"+peso(bal))
+                    ),
+                    payRows.map((p,pi)=>h("div",{key:pi,
+                      style:{display:"flex",justifyContent:"space-between",
+                        fontSize:9,marginBottom:2}},
+                      h("span",{style:{color:C.muted}},
+                        (p.at?String(p.at).slice(0,10):"")+
+                        (p.method?" · "+p.method:"")+
+                        (p.ref?" · "+p.ref:"")+
+                        (p.by?" · "+p.by:"")),
+                      h("span",{style:{fontWeight:800}},"₱"+peso(p.amount))
+                    ))
+                  ),
+
                   // PROCESSING → Record Payment
-                  (st==="processing"||st==="paid")&&h("button",{
+                  (st==="processing"||st==="approved"||st==="paid")&&h("button",{
                     onClick:()=>setModal("payment_"+po._docId),
                     style:{padding:"7px 14px",background:C.success,
                       border:"none",borderRadius:8,color:"#fff",
@@ -13863,9 +13891,9 @@ function App(){
         page==="comm_dr"&&h("div",null,
           h(SectionHeader,{title:"Issue Delivery Receipt (DR)"}),
           h("div",{style:{background:"#E8F5E9",border:"1px solid #A5D6A7",borderRadius:10,padding:"10px 14px",marginBottom:13,fontSize:11,color:"#1B5E20"}},"🚚 Approve a branch PO, set the delivery date, enter actual quantities delivered, then issue the DR."),
-          advances.filter(a=>a._type==="po"&&(a.status==="pending"||a.status==="approved")).length===0
+          advances.filter(a=>a._type==="po"&&(a.status==="pending"||a.status==="approved"||a.status==="processing")).length===0
             ?h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,padding:"30px",textAlign:"center",color:C.muted,fontSize:12}},"No pending branch orders.")
-            :advances.filter(a=>a._type==="po"&&(a.status==="pending"||a.status==="approved")).map(po=>
+            :advances.filter(a=>a._type==="po"&&(a.status==="pending"||a.status==="approved"||a.status==="processing")).map(po=>
               h(DRIssueForm,{key:po._docId,po,db,user,showT,INIT_INVENTORY,advances,setAdvances})
             )
         ),
