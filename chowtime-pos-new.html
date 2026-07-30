@@ -201,13 +201,13 @@ const ROLES = {
   manager:   {label:"Branch Manager",   emoji:"\u{1F3EA}", color:"#007AFF",
     nav:["branch_dash","pos","orders","analytics","z_reading","reports","cash_count","expenses","inventory","inv_log","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","bom_mgmt","payroll","kiosk","branch_settings","printer"]},
   cashier:   {label:"Cashier",          emoji:"\u{1F4B3}", color:"#34C759",
-    nav:["pos","orders","x_reading","z_reading","cash_count","expenses","inventory","ca_request","loan_request","kiosk","void_request"]},
+    nav:["pos","orders","x_reading","printer","z_reading","cash_count","expenses","inventory","ca_request","loan_request","kiosk","void_request"]},
   crew:      {label:"Crew / Kitchen",   emoji:"\u{1F9D1}\u{200D}\u{1F373}", color:"#FF9500",
     nav:["kitchen","ca_request","loan_request","kiosk","pos","orders"]},
   stockclerk:{label:"Stock Clerk",      emoji:"\u{1F4E6}", color:"#AF52DE",
     nav:["inventory","inv_log","stock_order","stock_receive","ca_request","loan_request","kiosk","pos","orders","expenses"]},
   commissary:{label:"Commissary Staff", emoji:"\u{1F3ED}", color:"#32ADE6",
-    nav:["comm_dash","comm_inv","comm_orders","comm_dr"]},
+    nav:["comm_dash","comm_inv","comm_orders","comm_dr","printer"]},
 };
 
 // Sidebar grouping. Any page not listed here stays top-level, so adding a new
@@ -9203,7 +9203,12 @@ function NewInventoryItemForm({db,user,branchId,showT,onClose,invBranch}){
 function App(){
   // Auth
   const [user,setUser]=useState(null);
-  const [branches,setBranches]=useState(BRANCHES);
+  // Start with MAIN only. MAIN is structural: it is the commissary and the
+  // owner's branchId. It keeps its OWN stock in "inventory" as the supplier to
+  // every branch — nothing is shared; each branch keeps its own book in
+  // "inventory_<branchId>". Every other store is created by the owner in
+  // Branches, and the saved list replaces this once settings/branches loads.
+  const [branches,setBranches]=useState([BRANCHES[0]]);
   const [branchOverrides,setBranchOverrides]=useState({});
   const [branchExclusives,setBranchExclusives]=useState([]);
   const [branchPerms,setBranchPerms]=useState({});
@@ -9294,6 +9299,8 @@ function App(){
   const [bfLog,setBfLog]=useState(null);
   const [zHist,setZHist]=useState([]);                   // saved daily_sales (this branch)
   const [zHistAll,setZHistAll]=useState([]);             // every branch, for Reports
+  const [invView,setInvView]=useState("");               // "" = Main; else a branch id
+  const [invViewData,setInvViewData]=useState([]);        // that branch's stock
   const [newBuild,setNewBuild]=useState(null);           // a newer build is live
   const [subs,setSubs]=useState([]);                     // subscriptions, all branches
   const [openDisc,setOpenDisc]=useState({});             // expanded discrepancy reports
@@ -9529,14 +9536,6 @@ function App(){
           setInventory( items);
         },()=>{}));
     }catch(e){}
-    // Also load branch inventories for owner (for PO monitoring)
-    if(isCommOrOwner){
-      try{
-        // Load WSFP branch inventory separately for comparison
-        unsubs.push(onSnapshot(collection(db,"inventory_"+bId),
-          snap=>{/* branch inv loaded separately if needed */},()=>{}));
-      }catch(e){}
-    }
 
     return()=>unsubs.forEach(u=>u());
   },[user]);
@@ -9640,7 +9639,13 @@ function App(){
   useEffect(()=>{
     try{
       const unsub=onSnapshot(doc(db,"settings","branches"),snap=>{
-        if(snap.exists()&&snap.data().branches)setBranches(snap.data().branches);
+        // settings/branches is the only source of truth — the owner creates
+        // and deletes stores there. The hardcoded BRANCHES list is a first-run
+        // bootstrap only; re-adding from it would resurrect stores the owner
+        // deliberately removed.
+        if(snap.exists()&&Array.isArray(snap.data().branches)){
+          setBranches(snap.data().branches);
+        }
       },()=>{});
       return()=>unsub();
     }catch(e){}
@@ -9958,6 +9963,17 @@ function App(){
     const t=setTimeout(()=>setDayTick(localDate()),Math.max(1000,ms));
     return()=>clearTimeout(t);
   },[dayTick]);
+
+  // The owner is hardwired to Main's inventory, so a branch's stock could not
+  // be inspected at all. Load it on demand when a branch is selected.
+  useEffect(()=>{
+    if(!invView){ setInvViewData([]); return; }
+    let alive=true;
+    const unsub=onSnapshot(collection(db,"inventory_"+invView),
+      snap=>{ if(alive)setInvViewData(snap.docs.map(d=>({...d.data(),id:d.id}))); },
+      ()=>{ if(alive)setInvViewData([]); });
+    return()=>{alive=false;unsub();};
+  },[invView]);
 
   // Check on mount and every 30 minutes. A tablet that stays open all day
   // would otherwise never notice a deploy.
@@ -12731,17 +12747,30 @@ function App(){
               h("div",{style:{fontSize:10,color:C.muted,marginTop:2}},(user.role==="owner"||user.role==="commissary")?"Master stock at commissary":"Freezer stock at "+curBranch.full)
             ),
             h("div",{style:{display:"flex",gap:7,flexWrap:"wrap",alignItems:"center"}},
+              // Which book am I looking at. Without this the owner sees Main's
+              // stock on every branch and has no way to inspect a branch at all.
+              (user.role==="owner"||user.role==="commissary")&&h("select",{
+                value:invView,onChange:e=>setInvView(e.target.value),
+                style:{padding:"7px 10px",borderRadius:7,fontSize:11,outline:"none",
+                  cursor:"pointer",fontWeight:800,
+                  border:"1px solid "+(invView?"#1565C0":C.primary),
+                  background:invView?"#E3F2FD":"#FFF0F0",
+                  color:invView?"#1565C0":C.primary}},
+                h("option",{value:""},"🏭 MAIN (commissary)"),
+                branches.filter(b=>b.id!=="ct-main").map(b=>
+                  h("option",{key:b.id,value:b.id},"🏪 "+b.full))),
               h("div",{style:{position:"relative"}},h("span",{style:{position:"absolute",left:8,top:"50%",transform:"translateY(-50%)",fontSize:11,color:C.muted}},"🔍"),h("input",{value:invSrch,onChange:e=>setInvSrch(e.target.value),placeholder:"Search...",style:{padding:"7px 9px 7px 26px",border:"1px solid "+C.border,borderRadius:7,fontSize:11,outline:"none",width:150}})),
               (function(){
-                const cats=[...new Set(inventory.map(i=>i.cat||"Other"))].sort();
+                const catSrc=invView?invViewData:inventory;
+                const cats=[...new Set(catSrc.map(i=>i.cat||"Other"))].sort();
                 return h("select",{value:invCat,onChange:e=>setInvCat(e.target.value),
                   style:{padding:"7px 10px",borderRadius:7,fontSize:11,outline:"none",
                     cursor:"pointer",border:"1px solid "+(invCat?C.primary:C.border),
                     background:invCat?"#FFF0F0":"#fff",
                     color:invCat?C.primary:C.text,fontWeight:invCat?700:400}},
-                  h("option",{value:""},"All categories ("+inventory.length+")"),
+                  h("option",{value:""},"All categories ("+catSrc.length+")"),
                   cats.map(c=>h("option",{key:c,value:c},
-                    c+" ("+inventory.filter(i=>(i.cat||"Other")===c).length+")")));
+                    c+" ("+catSrc.filter(i=>(i.cat||"Other")===c).length+")")));
               })(),
               (function(){
                 const usedIngs=new Set();
@@ -12750,11 +12779,12 @@ function App(){
                     if(Array.isArray(rows))rows.forEach(r=>{if(r&&r.ingId)usedIngs.add(r.ingId);});
                   });
                 });
+                const base=invView?invViewData:inventory;
                 const counts={
-                  low:inventory.filter(i=>(i.stock||0)<=(i.minStock||0)).length,
-                  zero:inventory.filter(i=>(i.stock||0)===0).length,
-                  unused:inventory.filter(i=>!usedIngs.has(i.id)).length,
-                  noprice:inventory.filter(i=>!(Number(i.price)||0)).length
+                  low:base.filter(i=>(i.stock||0)<=(i.minStock||0)).length,
+                  zero:base.filter(i=>(i.stock||0)===0).length,
+                  unused:base.filter(i=>!usedIngs.has(i.id)).length,
+                  noprice:base.filter(i=>!(Number(i.price)||0)).length
                 };
                 return [["low","⚠️ Low stock",C.danger],
                         ["zero","0️⃣ Out of stock",C.muted],
@@ -12791,7 +12821,7 @@ function App(){
             h("div",{style:{display:"grid",gridTemplateColumns:"2fr 90px 80px 80px 80px 70px 110px",padding:"8px 14px",borderBottom:"1px solid #f0f0f0",background:"#f9f9f9"}},
               ["Name","In Stock","Price","Cost","Margin","Cat","Action"].map(h2=>h("div",{key:h2,style:{fontSize:8,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:.5}},h2))
             ),
-            inventory.length===0&&h("div",{style:{background:"#fff",
+            (invView?invViewData:inventory).length===0&&h("div",{style:{background:"#fff",
               border:"1px dashed "+C.border,borderRadius:12,
               padding:"34px 20px",textAlign:"center"}},
               h("div",{style:{fontSize:34,marginBottom:9}},"📦"),
@@ -12807,6 +12837,20 @@ function App(){
                   cursor:"pointer"}},
                 "📦 Go to Order Stocks")
             ),
+            invView&&h("div",{style:{background:"#E3F2FD",border:"1px solid #90CAF9",
+              borderRadius:9,padding:"10px 13px",marginBottom:11,
+              display:"flex",gap:9,alignItems:"center",flexWrap:"wrap"}},
+              h("span",{style:{fontSize:15}},"👁"),
+              h("div",{style:{flex:1,minWidth:200}},
+                h("div",{style:{fontSize:11,fontWeight:800,color:"#1565C0"}},
+                  "Viewing "+((branches.find(b=>b.id===invView)||{}).full||invView)+" — read only"),
+                h("div",{style:{fontSize:10,color:C.muted,marginTop:1}},
+                  invViewData.length+" item/s · adjustments must be made by that branch")),
+              h("button",{onClick:()=>setInvView(""),
+                style:{padding:"6px 12px",borderRadius:7,border:"none",
+                  background:"#1565C0",color:"#fff",fontSize:10,fontWeight:800,
+                  cursor:"pointer"}},"Back to MAIN")
+            ),
             (function(){
               const q=(invSrch||"").toLowerCase();
               // ingredients referenced by ANY recipe row
@@ -12816,7 +12860,9 @@ function App(){
                   if(Array.isArray(rows))rows.forEach(r=>{if(r&&r.ingId)usedIngs.add(r.ingId);});
                 });
               });
-              return inventory.filter(i=>{
+              // read the selected book, not always Main's
+              const src=invView?invViewData:inventory;
+              return src.filter(i=>{
                 if(q&&!(i.name||"").toLowerCase().includes(q)
                   &&!(i.cat||"").toLowerCase().includes(q))return false;
                 if(invCat&&(i.cat||"Other")!==invCat)return false;
@@ -12839,7 +12885,7 @@ function App(){
                 h("div",{style:{fontSize:10,color:C.success,fontWeight:700}},( item.margin||0)+"%"),
                 h("div",{style:{fontSize:10,color:C.muted}}, item.cat||""),
                 h("div",{style:{display:"flex",gap:5,alignItems:"center"}},
-                h("button",{onClick:()=>setModal("stock_edit_"+( item.id|| item.name)),
+                h("button",{onClick:invView?(()=>showT("Read only — switch back to MAIN to adjust","warn")):()=>setModal("stock_edit_"+( item.id|| item.name)),
                   style:{padding:"4px 10px",background:"#1565C0",border:"none",
                     borderRadius:6,color:"#fff",fontSize:10,fontWeight:700,cursor:"pointer"}},
                   "✏️ Edit"),
