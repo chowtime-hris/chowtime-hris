@@ -1674,7 +1674,11 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
         message:ordered.length+"  item/s requested"+(deliveryReq?" · wants "+deliveryReq:""),
         page:"po_monitor",ref:soNum,by:user.name});
       showT(soNum+" submitted to Commissary ✓");
-    }catch(e){showT("Saved offline","warn");}
+    }catch(e){
+      console.error("PO submit failed:",e);
+      showT("Order NOT saved: "+String(e&&e.message||e).slice(0,70),"err");
+      return;   // keep the form open so the work is not lost
+    }
     onClose();
   };
 
@@ -6050,6 +6054,16 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
     if(!reason.trim()){showT("Enter reason for void","warn");return;}
     const voidedItems = (selOrder. items||[]).filter((_,i)=>selItems[i]!==false);
     if(!voidedItems.length){showT("Select at least 1  item to void","warn");return;}
+    const already=(voidRequests||[]).find(r=>
+      String(r.orderId)===String(selOrder.id)&&r.status==="pending");
+    if(already){
+      showT("A void request for "+selOrder.id+" is already waiting for approval","warn");
+      return;
+    }
+    if(selOrder.status==="void"){
+      showT(selOrder.id+" is already voided","warn");
+      return;
+    }
     const isPartial = voidedItems.length < (selOrder. items||[]).length;
     // order  items store lineTotal/unitPrice — there is no `price` field,
     // so the old formula always produced 0.
@@ -6100,6 +6114,18 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
 
   const approveVoid = async(req)=>{
     try{
+      // Re-check the order itself: a second request for the same order, or a
+      // double tap, would otherwise restock and reverse the cash twice.
+      const tgt=(orders||[]).find(o=>String(o.id)===String(req.orderId));
+      if(tgt&&(tgt.status==="void"||tgt.status==="partial-void")){
+        await updateDoc(doc(db,"void_requests",req._docId),{
+          status:"rejected",rejectedBy:"system",
+          rejectReason:"Order was already voided",
+          rejectedAt:serverTimestamp()
+        });
+        showT(req.orderId+" was already voided — request closed","warn");
+        return;
+      }
       await notify(db,{to:req.branch||branchId,type:"void",
         title:"Void approved — "+req.orderId,
         message:"₱"+peso(req.voidAmount)+" reversed by "+user.name,
@@ -10360,9 +10386,11 @@ function App(){
       btKickIfConnected(ord,companySettings);
       showT("Order "+id+" placed! ✓");
     }catch(e){
-      showT("Saved offline — will sync","warn");
-      setCurOrd(ord);setModal("receipt");
-      setCart([]);setCartOpen(false);
+      console.error("placeOrder failed:",e);
+      showT("ORDER NOT SAVED: "+String(e&&e.message||e).slice(0,60)
+        +" — do not hand over the receipt","err");
+      // keep the cart intact so the cashier can retry rather than re-key it
+      return;
     }
   };
 
