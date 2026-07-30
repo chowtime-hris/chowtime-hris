@@ -1603,6 +1603,7 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
       branchName:branches.find(b=>b.id===branchId)?.full||branchId,
        items:ordered.map(i=>({id:i.id,name:i.name,unit:i.unit,qty:i.orderQty,
         note:i.note||"",price:Number(i.price)||0,
+        cost:Number(i.cost)||0,   // Main's cost at order time, for margin
         packUnit:i.packUnit||"",packSize:Number(i.packSize)||0})),
       date:today,
       deliveryRequested:deliveryReq,
@@ -5359,6 +5360,32 @@ function BranchSettingsPage({branchId,curBranch,user,db,showT}){
   );
 }
 
+// totalAmount is only written when the DR is issued, so every incoming PO
+// showed P0.00 — Main could not see the value of what was being requested.
+// The branch's own lines carry the agreed price, so the estimate is available
+// from the moment the PO is submitted. Confirmed amount always wins.
+function poValue(po){
+  const t=Number(po&&po.totalAmount)||0;
+  if(t>0)return t;
+  return ((po&&po.items)||[]).reduce((s,i)=>
+    s+((Number(i.qty)||0)*(Number(i.price)||0)),0);
+}
+function poIsEstimate(po){ return !(Number(po&&po.totalAmount)>0); }
+
+// What the transfer actually earns the commissary. Uses the DR lines once
+// issued (actualQty is what really shipped), otherwise the requested lines.
+function poCost(po){
+  const src=((po&&po.deliveredItems)||(po&&po.items)||[]);
+  return src.reduce((s,i)=>
+    s+(((Number(i.actualQty)!=null&&i.actualQty!==undefined)
+        ?Number(i.actualQty):Number(i.qty))||0)*(Number(i.cost)||0),0);
+}
+function poMargin(po){
+  const rev=poValue(po), cost=poCost(po);
+  return {rev:rev,cost:cost,margin:rev-cost,
+          pct:rev>0?((rev-cost)/rev*100):0};
+}
+
 // ─── SUBSCRIPTION ─────────────────────────────────────────
 // One doc per branch: subscriptions/<branchId>. The billing anniversary is the
 // FIRST payment date, not the 1st of the month — a branch that starts on the
@@ -6180,7 +6207,7 @@ function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inve
     &&(_canSeeAll||a.branch===branchId)
     &&inPeriod(_poDate(a)));
   const poPaid=poAll.filter(a=>a.paymentStatus==="Paid");
-  const poTotal=poPaid.reduce((s,a)=>s+(a.totalAmount||0),0);
+  const poTotal=poPaid.reduce((s,a)=>s+poValue(a),0);
 
   // Inventory value
   const invValue=inventory.reduce((s,i)=>s+(i.cost||0)*(i.stock||0),0);
@@ -6391,7 +6418,7 @@ function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inve
           h("div",{style:{fontSize:10,color:C.muted,marginBottom:4}},"PENDING COLLECTIONS"),
           h("div",{style:{fontSize:22,fontWeight:900,color:C.warning}},
             "₱"+advances.filter(a=>a._type==="po"&&a.status==="processing")
-              .reduce((s,a)=>s+(a.totalAmount||0),0).toLocaleString()),
+              .reduce((s,a)=>s+poValue(a),0).toLocaleString()),
           h("div",{style:{fontSize:10,color:C.muted}},"Awaiting payment")
         ),
         h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,padding:"16px"}},
@@ -7090,7 +7117,7 @@ function PaymentModal({po,db,user,showT,onClose}){
 
   const payments=po.payments||[];
   const totalPaid=payments.reduce((s,p)=>s+(p.amount||0),0);
-  const grandTotal=po.totalAmount||0;
+  const grandTotal=poValue(po);
   const balance=grandTotal-totalPaid;
   const newPaid=totalPaid+(parseFloat(amount)||0);
   const newBalance=grandTotal-newPaid;
@@ -10844,7 +10871,7 @@ function App(){
               sub:"Online now",icon:"🏪",color:C.info}),
             h(Stat,{label:"PO Collections",
               value:"₱"+advances.filter(a=>a._type==="po"&&a.paymentStatus==="Paid")
-                .reduce((s,a)=>s+(a.totalAmount||0),0).toLocaleString(),
+                .reduce((s,a)=>s+poValue(a),0).toLocaleString(),
               sub:"Commissary payments received",icon:"💰",color:C.success})
           ),
 
@@ -10872,7 +10899,7 @@ function App(){
                 h("div",{style:{fontSize:22,fontWeight:900}},
                   "₱"+advances.filter(a=>a._type==="po"&&
                     (a.paidAt?.seconds||0)*1000>Date.now()-86400000)
-                    .reduce((s,a)=>s+(a.totalAmount||0),0).toLocaleString()),
+                    .reduce((s,a)=>s+poValue(a),0).toLocaleString()),
                 h("div",{style:{fontSize:9,opacity:.6}},
                   advances.filter(a=>a._type==="po"&&a.paymentStatus==="Paid").length+" POs paid")
               ),
@@ -12719,7 +12746,7 @@ function App(){
                 value:"₱"+advances.filter(function(a){
                   return a._type==="po"&&a.paymentStatus==="Paid"&&
                     (a.date||"").slice(0,7)===localDate().slice(0,7);
-                }).reduce(function(s,a){return s+(a.totalAmount||0);},0).toLocaleString(),
+                }).reduce(function(s,a){return s+poValue(a);},0).toLocaleString(),
                 icon:"📊",color:C.primary})
             ),
             // Urgent POs needing action
@@ -13530,7 +13557,7 @@ function App(){
                 approved:"⚙️ Processing",
                 paid:"📥 Ready to Receive",discrepancy:"⚠️ Discrepancy",completed:"✅ Completed"
               }[st]||st;
-              const total=po.totalAmount||0;
+              const total=poValue(po);
               const paid=(po.payments||[]).reduce((s,p)=>s+(p.amount||0),0);
               const bal=(total||0)-paid;
 
@@ -13711,7 +13738,7 @@ function App(){
               const stLabel={received_by_main:"📥 New PO",processing:"⚙️ Processing",
                 paid:"✅ Paid",discrepancy:"⚠️ Discrepancy",completed:"✓ Completed"}[st]||st;
               const totalPaid=(po.payments||[]).reduce((s,p)=>s+(p.amount||0),0);
-              const balance=(po.totalAmount||0)-totalPaid;
+              const balance=poValue(po)-totalPaid;
 
               return h("div",{key:po._docId,
                 style:{background:"#fff",borderRadius:12,
@@ -13734,7 +13761,9 @@ function App(){
                   ),
                   h("div",{style:{textAlign:"right"}},
                     h("div",{style:{fontSize:15,fontWeight:900,color:stColor}},
-                      "₱"+peso(po.totalAmount||0)),
+                      "₱"+peso(poValue(po))),
+                    poIsEstimate(po)&&h("div",{style:{fontSize:8,color:C.muted}},
+                      "estimate"),
                     totalPaid>0&&h("div",{style:{fontSize:9,
                       color:balance<=0?C.success:C.warning}},
                       "Paid: ₱"+peso(totalPaid)+
@@ -13767,6 +13796,34 @@ function App(){
                       border:"none",borderRadius:8,color:"#fff",
                       fontSize:11,fontWeight:700,cursor:"pointer"}},
                     "⚙️ Process & Issue DR"),
+
+                  // Margin — owner only. po_monitor is already owner-gated in
+                  // the nav, but the check stays explicit: this is Main's
+                  // markup and no branch account should ever read it.
+                  (user.role==="owner"||user.role==="commissary")&&(function(){
+                    const m=poMargin(po);
+                    if(m.rev<=0)return null;
+                    const bad=m.cost<=0;
+                    return h("div",{style:{width:"100%",background:"#F1F8E9",
+                      border:"1px solid #C5E1A5",borderRadius:8,
+                      padding:"8px 10px",marginBottom:8}},
+                      h("div",{style:{fontSize:8,fontWeight:800,color:"#33691E",
+                        letterSpacing:1,marginBottom:5}},"MARGIN"),
+                      [["Gross sales","₱"+peso(m.rev),C.text],
+                       ["Direct cost","₱"+peso(m.cost),C.muted],
+                       ["Gross profit","₱"+peso(m.margin),
+                        m.margin>=0?"#2E7D32":C.danger],
+                       ["Margin %",m.pct.toFixed(2)+"%",
+                        m.pct>=0?"#2E7D32":C.danger]].map(([l,v,col])=>
+                        h("div",{key:l,style:{display:"flex",
+                          justifyContent:"space-between",fontSize:10,marginBottom:1}},
+                          h("span",{style:{color:C.muted}},l),
+                          h("span",{style:{fontWeight:800,color:col}},v))),
+                      bad&&h("div",{style:{fontSize:9,color:"#E65100",
+                        fontWeight:700,marginTop:4}},
+                        "No cost on the items — margin reads as 100%")
+                    );
+                  })(),
 
                   // Payment history — uses this block's own totalPaid/balance
                   ((po.payments||[]).length>0)&&h("div",{style:{width:"100%",
