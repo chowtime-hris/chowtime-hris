@@ -200,7 +200,7 @@ const BRANCHES = [
 
 const ROLES = {
   owner:     {label:"Owner / Admin",    emoji:"\u{1F451}", color:"#C8151B",
-    nav:["dashboard","branches","subs","pos","orders","all_orders","analytics","z_reading","reports","cash_count","expenses","cash_monitor","inventory","inv_log","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","payroll","kiosk","settings","printer"]},
+    nav:["dashboard","branches","subs","pos","orders","void_requests","all_orders","analytics","z_reading","reports","cash_count","expenses","cash_monitor","inventory","inv_log","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","payroll","kiosk","settings","printer"]},
   manager:   {label:"Branch Manager",   emoji:"\u{1F3EA}", color:"#007AFF",
     nav:["branch_dash","pos","orders","analytics","z_reading","reports","cash_count","expenses","inventory","inv_log","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","bom_mgmt","payroll","kiosk","branch_settings","printer"]},
   cashier:   {label:"Cashier",          emoji:"\u{1F4B3}", color:"#34C759",
@@ -6053,6 +6053,13 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
         timestamp:serverTimestamp(),
         date:localDate()
       });
+      // the bell existed; this path never wrote to it, so a pending request
+      // sat in Firestore with nothing telling the manager
+      await notify(db,{to:branchId,type:"void",
+        title:"Void request — "+selOrder.id,
+        message:(isPartial?"Partial":"Full")+" void · ₱"+peso(voidAmt)
+          +" · by "+user.name+" · "+reason,
+        page:"void_requests",ref:String(selOrder.id||""),by:user.name});
       showT((isPartial?"Partial":"Full")+" void request submitted ✓");
       setSelOrder(null);setSelItems({});setReason("");setTab("history");
     }catch(e){showT("Error submitting","err");}
@@ -6074,6 +6081,10 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
 
   const approveVoid = async(req)=>{
     try{
+      await notify(db,{to:req.branch||branchId,type:"void",
+        title:"Void approved — "+req.orderId,
+        message:"₱"+peso(req.voidAmount)+" reversed by "+user.name,
+        page:"void_request",ref:String(req.orderId||""),by:user.name});
       await updateDoc(doc(db,"void_requests",req._docId),{
         status:"approved",approvedBy:user.name,approvedAt:serverTimestamp()
       });
@@ -6096,6 +6107,10 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
   };
 
   const rejectVoid = async(req)=>{
+    await notify(db,{to:req.branch||branchId,type:"void",
+      title:"Void rejected — "+req.orderId,
+      message:"Rejected by "+user.name,
+      page:"void_request",ref:String(req.orderId||""),by:user.name});
     await updateDoc(doc(db,"void_requests",req._docId),{
       status:"rejected",
       rejectedBy:user.name,
