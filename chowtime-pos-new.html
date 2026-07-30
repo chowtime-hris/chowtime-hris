@@ -975,15 +975,15 @@ function printZ(zd,branchName,cashier){
   </head><body>
   <div class="c"><b>Z-READING REPORT</b><br>CHOWTIME - ${branchName}<br>${d}<br>Cashier: ${cashier}</div>
   <div class="hr"></div>
-  <div class="row"><span>Opening Fund:</span><span>P${(zd.opening||0).toFixed(2)}</span></div>
-  <div class="row"><span>Gross Sales:</span><span>P${(zd.gross||0).toFixed(2)}</span></div>
-  <div class="row"><span>Discounts:</span><span>-P${(zd.discounts||0).toFixed(2)}</span></div>
-  <div class="row"><span>Voids (${zd.voidCount||0}):</span><span>-P${(zd.voidAmt||0).toFixed(2)}</span></div>
-  <div class="row"><span>Net Sales:</span><span>P${(zd.net||0).toFixed(2)}</span></div>
-  <div class="row"><span>Cash In:</span><span>P${(zd.cashIn||0).toFixed(2)}</span></div>
-  <div class="row"><span>Cash Out:</span><span>-P${(zd.cashOut||0).toFixed(2)}</span></div>
+  <div class="row"><span>Opening Fund:</span><span>P${peso((zd.opening||0))}</span></div>
+  <div class="row"><span>Gross Sales:</span><span>P${peso((zd.gross||0))}</span></div>
+  <div class="row"><span>Discounts:</span><span>-P${peso((zd.discounts||0))}</span></div>
+  <div class="row"><span>Voids (${zd.voidCount||0}):</span><span>-P${peso((zd.voidAmt||0))}</span></div>
+  <div class="row"><span>Net Sales:</span><span>P${peso((zd.net||0))}</span></div>
+  <div class="row"><span>Cash In:</span><span>P${peso((zd.cashIn||0))}</span></div>
+  <div class="row"><span>Cash Out:</span><span>-P${peso((zd.cashOut||0))}</span></div>
   <div class="hr"></div>
-  <div class="row b"><span>CASH ON HAND:</span><span>P${(zd.totalCash||0).toFixed(2)}</span></div>
+  <div class="row b"><span>CASH ON HAND:</span><span>P${peso((zd.totalCash||0))}</span></div>
   <div class="hr"></div>
   <div class="row"><span>Transactions:</span><span>${zd.txns||0}</span></div>
   <div class="row"><span>Dine-in:</span><span>${zd.dineIn||0}</span></div>
@@ -1014,7 +1014,9 @@ function buildEscPosZ(zd,branchName,cashier,cs,paperSize,isZ){
     return T(l+" ".repeat(pad)+r+"\n");
   }
   var parts=[], a=function(v){parts.push(v instanceof Uint8Array?v:B(v));};
-  var n=function(v){return (Number(v)||0).toFixed(2);};
+  // thermal too: row() pads from actual string length, so commas do not
+  // break the column alignment
+  var n=function(v){return peso(v);};
 
   a([ESC,0x40]);
   a([ESC,0x61,0x01]);
@@ -2040,12 +2042,12 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
         <td>${i.name}</td>
         <td class="r">${i.qty} ${i.unit}</td>
         <td class="r">${actualQtys[i.id]??i.qty} ${i.unit}</td>
-        <td class="r">₱${(prices[i.id]||0).toFixed(2)}</td>
-        <td class="r">₱${((actualQtys[i.id]??i.qty)*(prices[i.id]||0)).toFixed(2)}</td>
+        <td class="r">₱${peso((prices[i.id]||0))}</td>
+        <td class="r">₱${peso(((actualQtys[i.id]??i.qty)*(prices[i.id]||0)))}</td>
       </tr>`).join("")}
     </table>
     <div class="hr"></div>
-    <div class="b r">GROSS TOTAL: ₱${gross.toFixed(2)}</div>
+    <div class="b r">GROSS TOTAL: ₱${peso(gross)}</div>
     <div class="hr"></div>
     <div>Payment Status: UNPAID</div>
     <div>Delivery Status: PENDING</div>
@@ -2586,23 +2588,23 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
     <div class="hr"></div>
     <div class="b">DENOMINATION BREAKDOWN:</div>
     ${DENOMS.map(d=>(counts[d.value]||0)>0?
-      `<div class="row"><span>${d.label} x ${counts[d.value]}</span><span>P${((counts[d.value]||0)*d.value).toFixed(2)}</span></div>`:""
+      `<div class="row"><span>${d.label} x ${counts[d.value]}</span><span>P${peso(((counts[d.value]||0)*d.value))}</span></div>`:""
     ).join("")}
     <div class="hr"></div>
-    <div class="row"><span>Bills Total:</span><span>P${billsTotal.toFixed(2)}</span></div>
-    <div class="row"><span>Coins Total:</span><span>P${coinsTotal.toFixed(2)}</span></div>
-    <div class="row b"><span>TOTAL CASH:</span><span>P${totalCash.toFixed(2)}</span></div>
+    <div class="row"><span>Bills Total:</span><span>P${peso(billsTotal)}</span></div>
+    <div class="row"><span>Coins Total:</span><span>P${peso(coinsTotal)}</span></div>
+    <div class="row b"><span>TOTAL CASH:</span><span>P${peso(totalCash)}</span></div>
     <div class="hr"></div>
-    <div class="row"><span>Opening Fund:</span><span>P${openingFund.toFixed(2)}</span></div>
-    <div class="row"><span>Today's Sales:</span><span>P${todaySales.toFixed(2)}</span></div>
-    <div class="row"><span>Cash In:</span><span>P${cashIn.toFixed(2)}</span></div>
-    <div class="row"><span>Cash Out:</span><span>-P${cashOut.toFixed(2)}</span></div>
-    <div class="row"><span>Expected:</span><span>P${expectedCash.toFixed(2)}</span></div>
-    <div class="row ${variance!==0?'b':''}"><span>Variance:</span><span>${variance>=0?"+":""}P${variance.toFixed(2)}</span></div>
+    <div class="row"><span>Opening Fund:</span><span>P${peso(openingFund)}</span></div>
+    <div class="row"><span>Today's Sales:</span><span>P${peso(todaySales)}</span></div>
+    <div class="row"><span>Cash In:</span><span>P${peso(cashIn)}</span></div>
+    <div class="row"><span>Cash Out:</span><span>-P${peso(cashOut)}</span></div>
+    <div class="row"><span>Expected:</span><span>P${peso(expectedCash)}</span></div>
+    <div class="row ${variance!==0?'b':''}"><span>Variance:</span><span>${variance>=0?"+":""}P${peso(variance)}</span></div>
     ${isClosing?`<div class="hr"></div>
-    <div class="row"><span>Total Cash:</span><span>P${totalCash.toFixed(2)}</span></div>
-    <div class="row"><span>Remittance:</span><span>-P${remittanceAmt.toFixed(2)}</span></div>
-    <div class="row b"><span>CLOSING BALANCE:</span><span>P${closingBalance.toFixed(2)}</span></div>
+    <div class="row"><span>Total Cash:</span><span>P${peso(totalCash)}</span></div>
+    <div class="row"><span>Remittance:</span><span>-P${peso(remittanceAmt)}</span></div>
+    <div class="row b"><span>CLOSING BALANCE:</span><span>P${peso(closingBalance)}</span></div>
     <div style="font-size:9px;margin-top:4px">(This amount stays in cash box as tomorrow's opening fund)</div>`:""}
     <div class="hr"></div>
     ${countNote?`<div>Notes: ${countNote}</div><div class="hr"></div>`:""}
@@ -5464,8 +5466,8 @@ function renderDRDoc(po,cs){
           <td>${perPk}</td>
           <td class="b">${totPk}</td>
           <td class="b">${i.aq} ${i.unit||""}</td>
-          <td class="r">₱${i.p.toFixed(2)}</td>
-          <td class="r">₱${i.lineTotal.toFixed(2)}</td>
+          <td class="r">₱${peso(i.p)}</td>
+          <td class="r">₱${peso(i.lineTotal)}</td>
           <td>—</td>
         </tr>`;
       });
@@ -5476,7 +5478,7 @@ function renderDRDoc(po,cs){
         <td class="b">${catPk?(Math.round(catPk*1000)/1000)+" pk":"—"}</td>
         <td class="b">${catQty}</td>
         <td></td>
-        <td class="r b">₱${catTotal.toFixed(2)}</td>
+        <td class="r b">₱${peso(catTotal)}</td>
         <td></td>
       </tr>`;
     });
@@ -5494,7 +5496,7 @@ function renderDRDoc(po,cs){
       <td class="b">${grandPk?(Math.round(grandPk*1000)/1000)+" pk":"—"}</td>
       <td class="b">${grandPcs} pcs</td>
       <td></td>
-      <td class="r b">₱${total.toFixed(2)}</td>
+      <td class="r b">₱${peso(total)}</td>
       <td></td>
     </tr>`;
 
@@ -6228,7 +6230,7 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
                 background:selOrder&&reason&&voidedItems.length?C.danger:"#ddd",
                 border:"none",borderRadius:9,color:"#fff",
                 fontWeight:800,fontSize:13,cursor:selOrder&&reason?"pointer":"not-allowed"}},
-              submitting?"Submitting...":`📤 ${voidedItems.length<(selOrder?. items?.length||0)?"Partial ":""}Void Request (₱${voidAmt.toFixed(2)})`)
+              submitting?"Submitting...":`📤 ${voidedItems.length<(selOrder?. items?.length||0)?"Partial ":""}Void Request (₱${peso(voidAmt)})`)
           )
         )
       )
@@ -7543,8 +7545,8 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
           <td>${perPk}</td>
           <td class="b">${totPk}</td>
           <td class="b">${i.aq} ${i.unit||""}</td>
-          <td class="r">₱${i.p.toFixed(2)}</td>
-          <td class="r">₱${i.lineTotal.toFixed(2)}</td>
+          <td class="r">₱${peso(i.p)}</td>
+          <td class="r">₱${peso(i.lineTotal)}</td>
           <td>—</td>
         </tr>`;
       });
@@ -7555,7 +7557,7 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
         <td class="b">${catPk?(Math.round(catPk*1000)/1000)+" pk":"—"}</td>
         <td class="b">${catQty}</td>
         <td></td>
-        <td class="r b">₱${catTotal.toFixed(2)}</td>
+        <td class="r b">₱${peso(catTotal)}</td>
         <td></td>
       </tr>`;
     });
@@ -7573,7 +7575,7 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
       <td class="b">${grandPk?(Math.round(grandPk*1000)/1000)+" pk":"—"}</td>
       <td class="b">${grandPcs} pcs</td>
       <td></td>
-      <td class="r b">₱${total.toFixed(2)}</td>
+      <td class="r b">₱${peso(total)}</td>
       <td></td>
     </tr>`;
 
