@@ -5427,7 +5427,7 @@ function poMargin(po){
           pct:rev>0?((rev-cost)/rev*100):0};
 }
 
-function renderDRDoc(po,cs){
+function renderDRDoc(po,cs,brs){
   // one document per DR number, whoever prints it and whenever
   const items=(po&&(po.deliveredItems||po.items))||[];
   const actualQtys={}; const prices={};
@@ -5510,6 +5510,9 @@ function renderDRDoc(po,cs){
 
     const drNum="DR-"+po.poNum;
     const branchInfo=po.branchName||po.branch;
+  // the delivery address belongs on the paper the driver carries
+  const brRec=((brs||[]).find(b=>b&&b.id===po.branch))||{};
+  const brAddr=brRec.loc||"";
     const cs2=cs||{name:"CHOWTIME FAST-FOOD CHAIN",email:"",address:"",
       bankName:"BPI",bankAccount:"Chowtime Fast Food Chain",bankNumber:"",bankQR:""};
 
@@ -5569,6 +5572,7 @@ function renderDRDoc(po,cs){
         <div class="box-label">To</div>
         <div class="box-name">${branchInfo}</div>
         <div class="box-detail">
+          ${brAddr?brAddr+"<br>":""}
           Client PO Number: ${po.poNum}<br>
           Sales Invoice Number: ${drNum}
         </div>
@@ -7793,7 +7797,7 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
           +(shortAtMain.length>2?" +"+(shortAtMain.length-2):""),"warn");
       }
       showT("DR issued ✓ — "+po.poNum+" now PROCESSING · "+moved+" item/s deducted");
-      renderDRDoc(Object.assign({},po,{deliveredItems:delivered,deliveryDate:deliveryDate}),companySettings);
+      renderDRDoc(Object.assign({},po,{deliveredItems:delivered,deliveryDate:deliveryDate}),companySettings,branches);
       onClose();
     }catch(e){showT("Error issuing DR","err");console.error(e);}
     setSaving(false);
@@ -11481,7 +11485,15 @@ function App(){
                 h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:10}},
                   h("div",null,
                     h("div",{style:{fontWeight:900,fontSize:12}},b.full),
-                    h("div",{style:{fontSize:9,color:C.muted,marginTop:1}},b.loc)
+                    h("div",{style:{fontSize:9,color:C.muted,marginTop:1}},
+                      b.loc||"",
+                      b.loc&&h("a",{
+                        href:"https://www.google.com/maps/search/?api=1&query="
+                          +encodeURIComponent(b.loc),
+                        target:"_blank",rel:"noopener",
+                        onClick:e=>e.stopPropagation(),
+                        style:{marginLeft:6,color:"#1565C0",fontSize:9,
+                          textDecoration:"none",fontWeight:700}},"📍 Map"))
                   ),
                   h(Badge,{label:b.status||"open",color:b.status==="closed"?C.muted:C.success})
                 ),
@@ -13420,7 +13432,18 @@ function App(){
                       r==="All"?"All":ROLES[r]?.label||r))
                 ),
                 h("div",{style:{overflowY:"auto",maxHeight:"65vh"}},
-                  staff.filter(s=>!invSrch||s.role===invSrch)
+                  staff
+                  // The owner creates MANAGER accounts; each manager creates
+                  // their own cashiers and crew. Listing those here invites the
+                  // owner to edit them and quietly undoes the delegation.
+                  // MAIN is the exception — it is the owner's own store, so its
+                  // staff stay visible.
+                  .filter(s=>{
+                    const branchRole=["cashier","crew","stockclerk"].includes(s.role);
+                    if(branchRole&&s.branch!=="ct-main")return false;
+                    return true;
+                  })
+                  .filter(s=>!invSrch||s.role===invSrch)
                   .sort((a,b)=>{
                     // branch first, then seniority — so the list reads in the
                     // same order as the Add buttons above it
@@ -13520,7 +13543,14 @@ function App(){
                           fontSize:11,color:C.danger,fontWeight:700}},
                           "👑 Owner/Admin — Role cannot be changed")
                       : h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}},
-                          ["manager","cashier","crew","stockclerk","commissary"].map(r=>{
+                          // For a branch the owner only ever creates the
+                          // manager — that manager then creates their own
+                          // cashiers and crew. MAIN is the owner's own store,
+                          // so it keeps the full set.
+                          ((editingStaff.branch&&editingStaff.branch!=="ct-main")
+                            ? ["manager"]
+                            : ["manager","cashier","crew","stockclerk","commissary"]
+                          ).map(r=>{
                             const ri=ROLES[r]||{};
                             return h("button",{key:r,
                               onClick:()=>setEditingStaff(p=>({...p,role:r})),
@@ -13539,7 +13569,11 @@ function App(){
                       h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:6}},"BRANCH"),
                       h("div",{style:{display:"flex",gap:5,flexWrap:"wrap"}},
                         branches.map(b=>h("button",{key:b.id,
-                          onClick:()=>setEditingStaff(p=>({...p,branch:b.id})),
+                          onClick:()=>setEditingStaff(p=>Object.assign({},p,
+                            {branch:b.id,
+                             // a branch can only hold a manager, so snap the
+                             // role across rather than leaving an invalid pair
+                             role:(b.id!=="ct-main"&&p.role!=="owner")?"manager":p.role})),
                           style:{padding:"5px 10px",borderRadius:20,fontSize:10,
                             cursor:"pointer",border:"none",fontWeight:600,
                             background:editingStaff.branch===b.id?C.primary:"#eee",
@@ -13547,6 +13581,14 @@ function App(){
                           b.name||b.id))
                       )
                     ),
+                    (editingStaff.branch&&editingStaff.branch!=="ct-main")&&h("div",{
+                      style:{background:"#F1F8E9",border:"1px solid #C5E1A5",
+                        borderRadius:8,padding:"9px 12px",marginBottom:10,
+                        fontSize:10,color:"#33691E",lineHeight:1.5}},
+                      h("b",null,"Branch accounts: manager only."),
+                      " The manager creates their own cashiers and crew from "+
+                      "My Branch Staff."),
+
                     // MAIN is the commissary AND sells directly, so a cashier
                     // there is legitimate — but assigning a branch role to it by
                     // accident means that account reads and writes MAIN's stock.
@@ -14229,7 +14271,7 @@ function App(){
 
                   // Print DR if available
                   (po.drNum||po.deliveredItems)&&h("button",{
-                    onClick:()=>renderDRDoc(po,companySettings),
+                    onClick:()=>renderDRDoc(po,companySettings,branches),
                     style:{padding:"8px 14px",background:"#fff",
                       border:"1px solid "+C.border,borderRadius:8,
                       fontSize:11,fontWeight:700,cursor:"pointer"}},
@@ -14614,7 +14656,7 @@ function App(){
 
                   // Print DR
                   po.deliveredItems&&h("button",{
-                    onClick:()=>renderDRDoc(po,companySettings),
+                    onClick:()=>renderDRDoc(po,companySettings,branches),
                     style:{padding:"7px 12px",background:"#fff",
                       border:"1px solid "+C.border,borderRadius:8,
                       fontSize:11,fontWeight:700,cursor:"pointer"}},
