@@ -9563,6 +9563,11 @@ function App(){
           const snap = await Promise.race([snapPromise,timeoutPromise]);
           if(!snap.empty){
             const profile = snap.docs[0].data();
+            // remember which auth account this record belongs to
+            if(!profile.uid){
+              try{ await updateDoc(doc(db,"staff_accounts",snap.docs[0].id),
+                     {uid:fbUser.uid}); }catch(e2){}
+            }
             setUser({...profile, uid:fbUser.uid, email:fbUser.email});
             setPage(ROLES[profile.role]?.nav[0]||"dashboard");
             setLoginErr("");
@@ -13529,7 +13534,7 @@ function App(){
                     ),
                     h("div",{style:{marginBottom:10}},
                       h("div",{style:{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:4}},"LOGIN EMAIL (Firebase Auth)"),
-                      h("input",{value:editingStaff.email||"",
+                      h("input",{disabled:!editingStaff._isNew,value:editingStaff.email||"",
                         onChange:e=>setEditingStaff(p=>({...p,email:e.target.value})),
                         placeholder:"e.g. cffc.wsfp.cashier@gmail.com",
                         style:{width:"100%",padding:"8px",border:"1px solid "+C.border,
@@ -13650,6 +13655,14 @@ function App(){
                         background:"#1565C0",border:"none",borderRadius:9,
                         color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}},
                       "🔑 Create Login Account"),
+
+                    !editingStaff._isNew&&h("div",{style:{background:"#FFF3E0",
+                      border:"1px solid #FFCC80",borderRadius:8,padding:"9px 12px",
+                      marginBottom:10,fontSize:10,color:"#E65100",lineHeight:1.5}},
+                      h("b",null,"The login email cannot be changed here."),
+                      " Sign-in matches the Firebase account, so editing it would "+
+                      "lock this person out. To move them to a new address, create "+
+                      "a new account and delete this one."),
 
                     // Save button
                     h("button",{
