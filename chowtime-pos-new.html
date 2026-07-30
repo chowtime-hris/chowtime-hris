@@ -9982,8 +9982,15 @@ function App(){
     const short=[];
     Object.keys(need).forEach(id=>{
       const have=stockOf(id);
-      if(have===null)return;
-      if(have<need[id].amt)short.push(Object.assign({},need[id],{have:have,id:id}));
+      // A BOM row naming an ingredient this branch has no record for used to
+      // be skipped as "untracked". For a branch that has genuinely received
+      // nothing that meant every ingredient was skipped and every sale went
+      // through against zero stock. No record means none on hand.
+      const onHand=(have===null)?0:have;
+      if(onHand<need[id].amt){
+        short.push(Object.assign({},need[id],
+          {have:onHand,id:id,notCarried:have===null}));
+      }
     });
     return short;
   };
@@ -10518,11 +10525,14 @@ function App(){
               short.map(x=>h("div",{key:x.id,style:{fontSize:10,marginBottom:2}},
                 h("b",null,x.name),
                 h("span",{style:{color:C.muted}},
-                  "  kailangan "+(Math.round(x.amt*1000)/1000)+" "+x.unit
-                  +" · meron "+(Math.round(x.have*1000)/1000)+" "+x.unit)
+                  x.notCarried
+                    ? ("  not carried by this branch yet — needs "
+                       +(Math.round(x.amt*1000)/1000)+" "+x.unit)
+                    : ("  needs "+(Math.round(x.amt*1000)/1000)+" "+x.unit
+                       +" · on hand "+(Math.round(x.have*1000)/1000)+" "+x.unit))
               )),
               h("div",{style:{fontSize:9,color:C.muted,marginTop:5}},
-                "Lower the qty, remove the item, or receive stock first.")
+                "Lower the qty, remove the item, or receive the delivery first.")
             );
           })(),
           h("div",{style:{fontSize:9,fontWeight:800,color:C.muted,letterSpacing:1,marginBottom:6}},"ORDER SUMMARY"),
@@ -13518,7 +13528,19 @@ function App(){
                         marginRight:8,whiteSpace:"nowrap"}},"✏️ edit"),
                       !isOwnerRole&&h("button",{
                         onClick:e=>{e.stopPropagation();
-                          if(confirm("Delete "+s.name+"?"))
+                          // deleting the record you are signed in with locks
+                          // you out of your own system
+                          if(s.email&&user.email&&
+                             String(s.email).toLowerCase()===String(user.email).toLowerCase()){
+                            showT("You cannot delete the account you are signed in with","err");
+                            return;
+                          }
+                          if(confirm("Delete "+s.name+"?\n\n"
+                            +"They lose access immediately.\n"
+                            +"The Firebase login stays, so this email cannot be "
+                            +"given to a different person — but re-adding the same "
+                            +"person with this email works, and their old password "
+                            +"still applies."))
                             deleteDoc(doc(db,"staff_accounts",s.id))
                               .then(()=>showT(s.name+" deleted"));},
                         style:{background:"none",border:"none",
@@ -13982,7 +14004,15 @@ function App(){
                             borderRadius:8,padding:"1px 6px",fontWeight:700}},ri.label))
                       ),
                       h("button",{onClick:e=>{e.stopPropagation();
-                        if(confirm("Remove "+s.name+" from branch?"))
+                        if(s.email&&user.email&&
+                           String(s.email).toLowerCase()===String(user.email).toLowerCase()){
+                          showT("You cannot remove your own account","err");
+                          return;
+                        }
+                        if(confirm("Remove "+s.name+" from branch?\n\n"
+                          +"They lose access immediately. Their login stays in "
+                          +"Firebase, so adding them back with the same email "
+                          +"keeps their old password."))
                           deleteDoc(doc(db,"staff_accounts",s.id))
                             .then(()=>showT(s.name+" removed"));},
                         style:{background:"none",border:"none",
