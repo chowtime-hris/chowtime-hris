@@ -1491,10 +1491,26 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
   // Generate branch-sequential PO number on mount
   useEffect(()=>{
     if(!branchId||!advances)return;
-    const branchPOs = advances.filter(a=>a._type==="po"&&a.branch===branchId);
-    const nextNum = branchPOs.length+1;
     const branchCode = branchId.toUpperCase().replace("CT-","");
-    setSoNum(branchCode+"-PO-"+String(nextNum).padStart(4,"0"));
+    let alive=true;
+    (async()=>{
+      let highest=0;
+      try{
+        const snap=await getDocs(query(collection(db,"advances"),
+          where("branch","==",branchId)));
+        snap.docs.forEach(d=>{
+          const a=d.data();
+          if(a._type!=="po")return;
+          const m=/-PO-(\d+)$/.exec(String(a.poNum||""));
+          if(m)highest=Math.max(highest,parseInt(m[1],10)||0);
+        });
+      }catch(e){
+        // fall back to the capped list rather than block the form
+        highest=advances.filter(a=>a._type==="po"&&a.branch===branchId).length;
+      }
+      if(alive)setSoNum(branchCode+"-PO-"+String(highest+1).padStart(4,"0"));
+    })();
+    return()=>{alive=false;};
   },[branchId,advances.length]);
 
   // Rebuild the rows once Main's catalogue arrives, preserving any quantities
@@ -1988,6 +2004,10 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
         message:delivered.length+"  item/s · P"+(Number(totalAmt)||0).toFixed(2)
           +(deliveryDate?" · arriving "+deliveryDate:""),
         page:"stock_order",ref:po.poNum||drNum,by:user.name});
+      if(shortAtMain.length){
+        showT("Not deducted (Main is short): "+shortAtMain.slice(0,2).join(" · ")
+          +(shortAtMain.length>2?" +"+(shortAtMain.length-2):""),"warn");
+      }
       showT(drNum+" issued ✓ · "+moved+"  item/s deducted from main");
     }catch(e){showT("Error issuing DR","err");console.error(e);}
   };
@@ -2227,6 +2247,17 @@ function DRCheckForm({po,db,branchId,user,showT,INIT_INVENTORY,setAdvances,advan
   const [expanded,setExpanded]=useState(true);
 
   const confirmReceipt=async()=>{
+    // Re-read before applying. A double tap, or two tablets in the same
+    // stockroom, would otherwise add the delivery to branch stock twice —
+    // and there is no way to tell that apart from a real second delivery.
+    try{
+      const live=await getDoc(doc(db,"advances",po._docId));
+      const st=live.exists()?(live.data().status||""):"";
+      if(st==="completed"||st==="discrepancy"){
+        showT("Already received — refresh to see the record","warn");
+        onClose(); return;
+      }
+    }catch(e0){}
     const received=(po.deliveredItems||po. items||[]).map(i=>{
       // expected = what the DR says was issued (fall back to what was ordered)
       const expected = (i.actualQty!=null) ? i.actualQty : i.qty;
@@ -7478,6 +7509,7 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
       const hasDisc = delivered.some(i=>i.discrepancy!==0);
       await updateDoc(doc(db,"advances",po._docId),{
         status:"processing",
+        deliveryStatus:"Dispatched",
         drNum:"DR-"+po.poNum,
         deliveredItems:delivered,
         totalAmount:total,
@@ -7487,7 +7519,57 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
         issuedBy:user.name,
         issuedAt:serverTimestamp()
       });
-      showT("DR issued ✓ — "+po.poNum+" now PROCESSING");
+
+      // This is the second DR path. The other one deducts Main's stock, sets
+      // deliveryStatus and notifies the branch — this one did none of the
+      // three, so goods left Main's book untouched and the branch was never
+      // told. Everything below mirrors that path.
+      let moved=0; const shortAtMain=[];
+      if(!po.stockIssued){
+        for(const it of delivered){
+          if(!it.id||!(it.actualQty>0))continue;
+          try{
+            let prev=null;
+            try{
+              const ds=await getDoc(doc(db,"inventory",it.id));
+              if(ds.exists())prev=Number(ds.data().stock)||0;
+            }catch(e1){}
+            if(prev!=null&&prev<(it.actualQty||0)){
+              shortAtMain.push((it.name||it.id)+": has "+prev+", needed "+it.actualQty);
+              continue;
+            }
+            await updateDoc(doc(db,"inventory",it.id),{
+              stock:increment(-(it.actualQty||0)),
+              lastIssued:serverTimestamp()
+            });
+            moved++;
+            await addDoc(collection(db,"inventory_log"),{
+              itemId:it.id,itemName:it.name||it.id,unit:it.unit||"",
+              type:"deduct",amount:-(it.actualQty||0),
+              prevStock:prev,
+              newStock:prev==null?null:Math.round((prev-(it.actualQty||0))*1000)/1000,
+              desc:"Issued from Main: "+(it.actualQty||0)+" "+(it.unit||"")+
+                " to "+(po.branchName||po.branch),
+              source:"TRANSFER",ref:po.poNum||"",
+              branch:"ct-main",by:user.name,
+              date:localDate(),timestamp:serverTimestamp()
+            });
+          }catch(e2){console.warn("main deduct failed",it.id,e2);}
+        }
+        try{ await updateDoc(doc(db,"advances",po._docId),{stockIssued:true}); }catch(e3){}
+      }
+
+      await notify(db,{to:po.branch,type:"dr_issued",
+        title:"DR-"+po.poNum+" dispatched",
+        message:delivered.length+" item/s · ₱"+peso(total)
+          +(deliveryDate?" · arriving "+deliveryDate:""),
+        page:"stock_order",ref:po.poNum,by:user.name});
+
+      if(shortAtMain.length){
+        showT("Not deducted (Main is short): "+shortAtMain.slice(0,2).join(" · ")
+          +(shortAtMain.length>2?" +"+(shortAtMain.length-2):""),"warn");
+      }
+      showT("DR issued ✓ — "+po.poNum+" now PROCESSING · "+moved+" item/s deducted");
       printDR(companySettings);
       onClose();
     }catch(e){showT("Error issuing DR","err");console.error(e);}
