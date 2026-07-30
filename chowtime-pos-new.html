@@ -7298,13 +7298,25 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
       const catItems=cats[cat];
       const catTotal=catItems.reduce((s,i)=>s+i.lineTotal,0);
       const catQty=catItems.reduce((s,i)=>s+i.aq,0);
+      const catPk=catItems.reduce((s,i)=>{
+        const sz=Number(i.packSize)||0;
+        return s+(sz>1?(i.aq/sz):0);
+      },0);
       catItems.forEach(i=>{
+        const sz=Number(i.packSize)||0;
+        const pu=i.packUnit||"";
+        // no pack size configured -> leave the pack columns blank rather than
+        // printing a misleading "1 pack"
+        const perPk = sz>1 ? (sz+" "+(i.unit||"")) : "—";
+        const totPk = sz>1 ? (Math.round((i.aq/sz)*1000)/1000)+" "+pu : "—";
         tableRows+=`<tr>
           <td>${ itemNo++}</td>
           <td style="color:#888;font-size:10px">${i.id||""}</td>
           <td>${cat}</td>
           <td>${i.name}</td>
-          <td>${i.aq} ${i.unit||""}</td>
+          <td>${perPk}</td>
+          <td class="b">${totPk}</td>
+          <td class="b">${i.aq} ${i.unit||""}</td>
           <td class="r">₱${i.p.toFixed(2)}</td>
           <td class="r">₱${i.lineTotal.toFixed(2)}</td>
           <td>—</td>
@@ -7313,16 +7325,25 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
       tableRows+=`<tr class="cat-total">
         <td colspan="3"></td>
         <td class="b">Total ${cat}</td>
+        <td class="b">${catPk?(Math.round(catPk*1000)/1000):"—"}</td>
         <td class="b">${catQty}</td>
         <td></td>
         <td class="r b">₱${catTotal.toFixed(2)}</td>
         <td></td>
       </tr>`;
     });
+    const grandPcs= items.reduce((s,i)=>
+      s+(actualQtys[i.id]!=null?actualQtys[i.id]:i.qty),0);
+    const grandPk = items.reduce((s,i)=>{
+      const sz=Number(i.packSize)||0;
+      const aq=actualQtys[i.id]!=null?actualQtys[i.id]:i.qty;
+      return s+(sz>1?(aq/sz):0);
+    },0);
     tableRows+=`<tr class="grand-total">
       <td colspan="3"></td>
-      <td class="b">Total Quantity</td>
-      <td class="b">${ items.reduce((s,i)=>s+(actualQtys[i.id]!=null?actualQtys[i.id]:i.qty),0)}</td>
+      <td class="b">TOTAL</td>
+      <td class="b">${grandPk?(Math.round(grandPk*1000)/1000)+" pk":"—"}</td>
+      <td class="b">${grandPcs} pcs</td>
       <td></td>
       <td class="r b">₱${total.toFixed(2)}</td>
       <td></td>
@@ -7408,7 +7429,8 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
     <table>
       <tr>
         <th>Item No.</th><th>SKU</th><th>Category</th><th>Description</th>
-        <th>Quantity</th><th class="r">Unit Price</th><th class="r">Total Price</th><th>Remarks</th>
+        <th>Qty / PK</th><th>Total PK</th><th>Total PCS</th>
+        <th class="r">Unit Price</th><th class="r">Total Price</th><th>Remarks</th>
       </tr>
       ${tableRows}
     </table>
@@ -8900,6 +8922,7 @@ function App(){
   const [zHist,setZHist]=useState([]);                   // saved daily_sales (this branch)
   const [zHistAll,setZHistAll]=useState([]);             // every branch, for Reports
   const [subs,setSubs]=useState([]);                     // subscriptions, all branches
+  const [openDisc,setOpenDisc]=useState({});             // expanded discrepancy reports
   const [editBr,setEditBr]=useState(null);               // branch being added/edited
   const [expMonth,setExpMonth]=useState("");             // "" = all months
   const [expCat,setExpCat]=useState("");
@@ -13796,6 +13819,69 @@ function App(){
                       border:"none",borderRadius:8,color:"#fff",
                       fontSize:11,fontWeight:700,cursor:"pointer"}},
                     "⚙️ Process & Issue DR"),
+
+                  // Discrepancy report
+                  ((po.discrepancyItems||[]).length>0)&&(function(){
+                    const rows=po.discrepancyItems||[];
+                    const open=!!openDisc[po._docId];
+                    const short=rows.filter(r=>(Number(r.diff)||0)<0).length;
+                    const over =rows.filter(r=>(Number(r.diff)||0)>0).length;
+                    return h("div",{style:{width:"100%",background:"#FFF3E0",
+                      border:"1px solid #FFCC80",borderRadius:8,
+                      padding:"8px 10px",marginBottom:8}},
+                      h("button",{
+                        onClick:()=>setOpenDisc(p=>Object.assign({},p,
+                          {[po._docId]:!open})),
+                        style:{width:"100%",display:"flex",alignItems:"center",
+                          gap:8,background:"none",border:"none",cursor:"pointer",
+                          padding:0,textAlign:"left"}},
+                        h("span",{style:{fontSize:12}},"⚠️"),
+                        h("div",{style:{flex:1}},
+                          h("div",{style:{fontSize:10,fontWeight:800,color:"#E65100"}},
+                            "DISCREPANCY REPORT — "+rows.length+" line"+(rows.length>1?"s":"")),
+                          h("div",{style:{fontSize:9,color:C.muted,marginTop:1}},
+                            (short?short+" short":"")+
+                            (short&&over?" · ":"")+
+                            (over?over+" over":"")+
+                            (po.discrepancyStatus==="pending_approval"
+                              ?"  ·  awaiting Main approval":""))),
+                        h("span",{style:{fontSize:9,color:C.muted,
+                          transform:open?"rotate(90deg)":"none"}},"▶")
+                      ),
+                      open&&h("div",{style:{marginTop:8,background:"#fff",
+                        borderRadius:7,overflow:"hidden"}},
+                        h("div",{style:{display:"grid",
+                          gridTemplateColumns:"1fr 58px 58px 58px 1fr",gap:6,
+                          padding:"6px 9px",background:"#fafafa"}},
+                          ["ITEM","ORDERED","DR","RECEIVED","REMARK"].map(hh=>
+                            h("div",{key:hh,style:{fontSize:7,fontWeight:700,
+                              color:C.muted,letterSpacing:1}},hh))),
+                        rows.map((r,ri)=>{
+                          const d=Number(r.diff)||0;
+                          return h("div",{key:ri,style:{display:"grid",
+                            gridTemplateColumns:"1fr 58px 58px 58px 1fr",gap:6,
+                            padding:"6px 9px",borderTop:"1px solid #f5f5f5",
+                            alignItems:"center"}},
+                            h("div",{style:{fontSize:10,fontWeight:600}},
+                              r.name||r.id),
+                            h("div",{style:{fontSize:10,textAlign:"right",
+                              color:C.muted}},Number(r.qty)||0),
+                            h("div",{style:{fontSize:10,textAlign:"right",
+                              color:C.muted}},Number(r.drQty)||0),
+                            h("div",{style:{fontSize:10,textAlign:"right",
+                              fontWeight:800,color:d<0?C.danger:d>0?C.info:C.text}},
+                              (Number(r.receivedQty)||0)+
+                              (d!==0?" ("+(d>0?"+":"")+d+")":"")),
+                            h("div",{style:{fontSize:9,color:C.muted}},
+                              r.remark||"—")
+                          );
+                        })
+                      ),
+                      open&&po.discrepancyNotes&&h("div",{style:{fontSize:9,
+                        color:C.muted,marginTop:6,fontStyle:"italic"}},
+                        "Note: "+po.discrepancyNotes)
+                    );
+                  })(),
 
                   // Margin — owner only. po_monitor is already owner-gated in
                   // the nav, but the check stays explicit: this is Main's
