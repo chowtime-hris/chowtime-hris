@@ -5657,6 +5657,75 @@ async function checkForUpdate(){
   }catch(e){ return null; }
 }
 
+// One-time recovery: POs received before the receive path wrote to inventory
+// closed as completed with the goods never credited. This reads receivedItems
+// off the PO and posts them, guarded by stockPosted so it cannot double up.
+async function postReceivedToStock(db,po,byName){
+  const res={added:0,adopted:0,skipped:0,errors:[]};
+  if(!po||po.stockPosted){res.skipped=1;return res;}
+  const invBr=po.branch||"";
+  if(!invBr){res.errors.push("no branch on PO");return res;}
+  const isMain=(invBr==="ct-main"||invBr==="main");
+  const invCol=isMain?"inventory":"inventory_"+invBr;
+  const logCol=isMain?"inventory_log":"inventory_log_"+invBr;
+  const items=(po.receivedItems||po.deliveredItems||po.items||[]);
+
+  for(const it of items){
+    // receivedQty is what actually arrived; fall back through the DR and the
+    // original request so an older record still posts something sensible
+    const qty=Number(it.receivedQty!=null?it.receivedQty
+              :(it.actualQty!=null?it.actualQty:it.qty))||0;
+    if(!it.id||qty<=0)continue;
+    try{
+      const ref=doc(db,invCol,it.id);
+      const cur=await getDoc(ref);
+      let prev=null;
+      if(!cur.exists()){
+        let meta={};
+        try{
+          const m=await getDoc(doc(db,"inventory",it.id));
+          if(m.exists())meta=m.data();
+        }catch(e0){}
+        await setDoc(ref,Object.assign({},meta,{
+          id:it.id,
+          name:meta.name||it.name||it.id,
+          unit:meta.unit||it.unit||"pc",
+          cat:meta.cat||"Other",
+          packUnit:meta.packUnit||it.packUnit||"",
+          packSize:Number(meta.packSize||it.packSize)||0,
+          cost:Number(meta.cost)||0,
+          price:Number(meta.price)||0,
+          minStock:Number(meta.minStock)||0,
+          branch:invBr,stock:qty,
+          adoptedFrom:"main",adoptedAt:serverTimestamp(),
+          lastRestocked:serverTimestamp()
+        }),{merge:true});
+        prev=0; res.adopted++;
+      }else{
+        prev=Number(cur.data().stock)||0;
+        await updateDoc(ref,{stock:increment(qty),lastRestocked:serverTimestamp()});
+      }
+      res.added++;
+      await addDoc(collection(db,logCol),{
+        itemId:it.id,itemName:it.name||it.id,unit:it.unit||"",
+        type:"add",amount:qty,
+        prevStock:prev,newStock:Math.round((prev+qty)*1000)/1000,
+        desc:"Posted from received "+(po.drNum||po.poNum||"")+" (recovery)",
+        source:"TRANSFER",ref:po.poNum||"",
+        branch:invBr,by:byName||"recovery",
+        date:localDate(),timestamp:serverTimestamp()
+      });
+    }catch(e){ res.errors.push((it.name||it.id)+": "+String(e&&e.message||e)); }
+  }
+
+  if(res.added){
+    try{ await updateDoc(doc(db,"advances",po._docId),
+           {stockPosted:true,stockPostedAt:serverTimestamp(),
+            stockPostedBy:byName||"recovery"}); }catch(e){}
+  }
+  return res;
+}
+
 // ─── SUBSCRIPTION ─────────────────────────────────────────
 // One doc per branch: subscriptions/<branchId>. The billing anniversary is the
 // FIRST payment date, not the 1st of the month — a branch that starts on the
@@ -7320,9 +7389,67 @@ function ReceiveItemsModal({po,db,user,showT,branchId,onClose}){
         receivedQty:(received[i.id]!=null?received[i.id]:(i.actualQty!=null?i.actualQty:(i.qty||0))),
         remark:remarks[i.id]||""
       }));
+      // This modal only ever updated the PO status. The inventory logic lives
+      // in DRCheckForm, whose page is in nobody's nav — so goods were received,
+      // the PO closed, and the branch's stock never moved.
+      // Credit po.branch, not the signed-in branch: whoever confirms, the
+      // goods belong to the branch that ordered them.
+      const invBr=po.branch||branchId;
+      const invCol=(invBr==="ct-main"||invBr==="main")?"inventory":"inventory_"+invBr;
+      let adopted=0, added=0;
+      for(const it of finalItems){
+        const qty=Number(it.receivedQty)||0;
+        if(!it.id||qty<=0)continue;
+        try{
+          const ref=doc(db,invCol,it.id);
+          const cur=await getDoc(ref);
+          let prev=null;
+          if(!cur.exists()){
+            // first delivery of this item to this branch — adopt it from Main
+            let meta={};
+            try{
+              const m=await getDoc(doc(db,"inventory",it.id));
+              if(m.exists())meta=m.data();
+            }catch(e0){}
+            await setDoc(ref,Object.assign({},meta,{
+              id:it.id,
+              name:meta.name||it.name||it.id,
+              unit:meta.unit||it.unit||"pc",
+              cat:meta.cat||"Other",
+              packUnit:meta.packUnit||it.packUnit||"",
+              packSize:Number(meta.packSize||it.packSize)||0,
+              cost:Number(meta.cost)||0,
+              price:Number(meta.price)||0,
+              minStock:Number(meta.minStock)||0,
+              branch:invBr,stock:qty,
+              adoptedFrom:"main",adoptedAt:serverTimestamp(),
+              lastRestocked:serverTimestamp()
+            }),{merge:true});
+            prev=0; adopted++;
+          }else{
+            prev=Number(cur.data().stock)||0;
+            await updateDoc(ref,{stock:increment(qty),
+              lastRestocked:serverTimestamp()});
+          }
+          added++;
+          await addDoc(collection(db,
+            (invBr==="ct-main"||invBr==="main")?"inventory_log":"inventory_log_"+invBr),{
+            itemId:it.id,itemName:it.name||it.id,unit:it.unit||"",
+            type:"add",amount:qty,
+            prevStock:prev,newStock:Math.round((prev+qty)*1000)/1000,
+            desc:"Received from Main: "+qty+" "+(it.unit||"")
+              +" · "+(po.drNum||po.poNum||""),
+            source:"TRANSFER",ref:po.poNum||"",
+            branch:invBr,by:user.name,
+            date:localDate(),timestamp:serverTimestamp()
+          });
+        }catch(e2){console.error("receive into inventory failed",it.id,e2);}
+      }
+
       if(hasDisc){
         await updateDoc(doc(db,"advances",po._docId),{
           status:"discrepancy",
+          stockPosted:true,
           deliveryStatus:"Short",   // arrived, but not in full
           receivedItems:finalItems,
           receivedBy:user.name,receivedAt:serverTimestamp(),
@@ -7337,14 +7464,20 @@ function ReceiveItemsModal({po,db,user,showT,branchId,onClose}){
       } else {
         await updateDoc(doc(db,"advances",po._docId),{
           status:"completed",
+          stockPosted:true,
           deliveryStatus:"Delivered",
           receivedItems:finalItems,
           receivedBy:user.name,receivedAt:serverTimestamp()
         });
-        showT("Items received — PO Completed");
+        showT("Items received — PO Completed · "+added+" item/s into stock"
+          +(adopted?" ("+adopted+" new)":""));
       }
       onClose();
-    }catch(e){showT("Error","err");}
+    }catch(e){
+      console.error("confirmReceipt failed:",e);
+      showT("Receive failed: "+String(e&&e.message||e).slice(0,60),"err");
+      return;
+    }
     setSaving(false);
   };
 
@@ -14536,6 +14669,38 @@ function App(){
                     "+"+(po. items.length-3)+" more  items")
                 ),
 
+                // Same recovery on the branch side: a manager can fix their own
+                // stock without waiting for the owner to notice.
+                (po.status==="completed"||po.status==="discrepancy")
+                  &&!po.stockPosted&&((po.receivedItems||[]).length>0)
+                  &&h("div",{style:{margin:"0 16px 10px",background:"#FFF3E0",
+                    border:"1px solid #FFCC80",borderRadius:8,padding:"9px 11px",
+                    display:"flex",gap:9,alignItems:"center",flexWrap:"wrap"}},
+                  h("span",{style:{fontSize:14}},"📥"),
+                  h("div",{style:{flex:1,minWidth:180}},
+                    h("div",{style:{fontSize:10,fontWeight:800,color:"#E65100"}},
+                      "Received, but never added to stock"),
+                    h("div",{style:{fontSize:9,color:C.muted,marginTop:1}},
+                      (po.receivedItems||[]).length+" item/s on this DR")),
+                  h("button",{
+                    onClick:async()=>{
+                      if(!confirm("Add the received items of "+po.poNum
+                        +" into stock?\n\nRuns once — the PO is marked "
+                        +"afterwards so it cannot be posted twice."))return;
+                      const r=await postReceivedToStock(db,po,user.name);
+                      if(r.errors.length)
+                        showT("Posted "+r.added+", failed "+r.errors.length,"warn");
+                      else if(r.added)
+                        showT(r.added+" item/s added to stock"
+                          +(r.adopted?" ("+r.adopted+" new)":"")+" ✓");
+                      else showT("Nothing to post","warn");
+                    },
+                    style:{padding:"7px 13px",borderRadius:7,border:"none",
+                      background:"#E65100",color:"#fff",fontSize:10,
+                      fontWeight:800,cursor:"pointer"}},
+                    "Add to stock")
+                ),
+
                 // Actions for branch
                 h("div",{style:{padding:"8px 16px",borderTop:"1px solid #f5f5f5",
                   display:"flex",gap:7,flexWrap:"wrap"}},
@@ -14739,6 +14904,44 @@ function App(){
                         "Note: "+po.discrepancyNotes)
                     );
                   })(),
+
+                  // Recovery for POs received before the receive path wrote to
+                  // inventory. Shows only where the goods were never credited.
+                  (st==="completed"||st==="discrepancy")&&!po.stockPosted
+                    &&((po.receivedItems||[]).length>0)&&h("div",{
+                    style:{width:"100%",background:"#FFF3E0",
+                      border:"1px solid #FFCC80",borderRadius:8,
+                      padding:"9px 11px",marginBottom:8,display:"flex",
+                      gap:9,alignItems:"center",flexWrap:"wrap"}},
+                    h("span",{style:{fontSize:14}},"📥"),
+                    h("div",{style:{flex:1,minWidth:190}},
+                      h("div",{style:{fontSize:10,fontWeight:800,color:"#E65100"}},
+                        "Received, but never added to stock"),
+                      h("div",{style:{fontSize:9,color:C.muted,marginTop:1}},
+                        (po.receivedItems||[]).length+" item/s on this DR · "
+                        +"posts to "+(po.branchName||po.branch))),
+                    h("button",{
+                      onClick:async()=>{
+                        if(!confirm("Add the received items of "+po.poNum
+                          +" into "+(po.branchName||po.branch)+" stock?\n\n"
+                          +"Runs once — the PO is marked afterwards so it "
+                          +"cannot be posted twice."))return;
+                        const r=await postReceivedToStock(db,po,user.name);
+                        if(r.errors.length){
+                          showT("Posted "+r.added+", failed "+r.errors.length
+                            +": "+r.errors[0].slice(0,50),"warn");
+                        }else if(r.added){
+                          showT(r.added+" item/s added to stock"
+                            +(r.adopted?" ("+r.adopted+" new)":"")+" ✓");
+                        }else{
+                          showT("Nothing to post","warn");
+                        }
+                      },
+                      style:{padding:"7px 13px",borderRadius:7,border:"none",
+                        background:"#E65100",color:"#fff",fontSize:10,
+                        fontWeight:800,cursor:"pointer"}},
+                      "Add to stock")
+                  ),
 
                   // Margin — owner only. po_monitor is already owner-gated in
                   // the nav, but the check stays explicit: this is Main's
