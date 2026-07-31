@@ -256,9 +256,12 @@
 
   <div class="card" id="loginCard">
     <h2>Who's counting?</h2>
-    <p class="sub">Enter your 4-digit PIN.</p>
+    <p class="sub">Pick your name, then enter your 4-digit PIN.</p>
+    <label>Your name</label>
+    <select id="crewSelect" onchange="onCrewSelectChange()"><option value="">Select your name…</option></select>
     <div class="pindisplay" id="pindisplay"><span></span><span></span><span></span><span></span></div>
     <div class="pinpad" id="pinpad"></div>
+    <p class="hint" id="loginHint" style="text-align:center;"></p>
   </div>
 
   <div id="mainFlow" style="display:none;">
@@ -430,6 +433,7 @@
       </div>
       <table><thead><tr><th>Name</th><th>Shift</th><th>PIN</th><th></th></tr></thead><tbody id="crewTbody"></tbody></table>
       <div id="crewEmpty" class="empty">No crew added yet.</div>
+      <p class="hint" id="crewDupeWarning" style="color:var(--danger);"></p>
     </div>
   </div>
 
@@ -683,7 +687,23 @@ function enterCrew(){
   showMain('mainCrew');
   document.getElementById('dateLabel').textContent = new Date().toLocaleDateString('en-PH',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
   buildPinpad();
+  populateCrewSelect();
   refreshTodayStatus();
+}
+function populateCrewSelect(){
+  const sel = document.getElementById('crewSelect');
+  const ids = Object.keys(crewList).sort((a,b)=> (crewList[a].name||'').localeCompare(crewList[b].name||''));
+  if(!ids.length){
+    sel.innerHTML = '<option value="">No crew added yet — ask the owner</option>';
+    return;
+  }
+  sel.innerHTML = '<option value="">Select your name…</option>' +
+    ids.map(id=>`<option value="${id}">${escapeHtml(crewList[id].name)} (${escapeHtml(crewList[id].shift)})</option>`).join('');
+}
+function onCrewSelectChange(){
+  pinBuffer = '';
+  renderPinDisplay();
+  document.getElementById('loginHint').textContent = '';
 }
 
 function enterOwnerPinGate(){
@@ -1038,13 +1058,24 @@ function loadCrewTable(){
     tbody.innerHTML='';
     const keys = Object.keys(crewList);
     document.getElementById('crewEmpty').style.display = keys.length?'none':'block';
+    const pinCounts = {};
+    keys.forEach(id => { const p = crewList[id].pin; pinCounts[p] = (pinCounts[p]||0)+1; });
     keys.forEach(id=>{
       const c = crewList[id];
+      const dupe = pinCounts[c.pin] > 1;
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${escapeHtml(c.name)}</td><td>${escapeHtml(c.shift)}</td><td class="pin">${escapeHtml(c.pin)}</td>
+      tr.innerHTML = `<td>${escapeHtml(c.name)}</td><td>${escapeHtml(c.shift)}</td>
+        <td class="pin"${dupe?' style="color:var(--danger);"':''}>${escapeHtml(c.pin)}${dupe?' <small style="font-weight:400;">⚠ duplicate</small>':''}</td>
         <td class="item-actions"><button class="btn-danger" onclick="deleteCrew('${id}')">Delete</button></td>`;
       tbody.appendChild(tr);
     });
+    const dupePins = Object.keys(pinCounts).filter(p => pinCounts[p] > 1);
+    const warnEl = document.getElementById('crewDupeWarning');
+    if(warnEl){
+      warnEl.textContent = dupePins.length
+        ? `⚠ Duplicate PIN(s) in use: ${dupePins.join(', ')}. Crew still log in by name so counts stay correctly attributed, but give each person their own PIN.`
+        : '';
+    }
   });
 }
 function addCrew(){
@@ -1053,6 +1084,10 @@ function addCrew(){
   const pin = document.getElementById('crewPin').value.trim();
   if(!name){ toast('Enter crew name'); return; }
   if(!/^\d{4}$/.test(pin)){ toast('PIN must be exactly 4 digits'); return; }
+  const clash = Object.values(crewList).find(c => c.pin === pin);
+  if(clash){ toast(`PIN ${pin} is already used by ${clash.name} — pick another`); return; }
+  const nameClash = Object.values(crewList).find(c => (c.name||'').trim().toLowerCase() === name.toLowerCase());
+  if(nameClash && !confirm(`"${name}" already exists in this branch. Add anyway? Two crew with the same name are hard to tell apart on reports.`)) return;
   bref('crew').push().set({name, shift, pin, createdAt: Date.now()}).then(()=>{
     document.getElementById('crewName').value=''; document.getElementById('crewPin').value='';
     toast('Crew added');
@@ -1383,22 +1418,37 @@ function renderPinDisplay(){
   document.querySelectorAll('#pindisplay span').forEach((s,i)=> s.classList.toggle('filled', i<pinBuffer.length));
 }
 function tryLogin(){
-  const found = Object.entries(crewList).find(([id,c])=>c.pin===pinBuffer);
-  if(found){
-    currentCrew = {id: found[0], ...found[1]};
+  const hintEl = document.getElementById('loginHint');
+  const selectedId = document.getElementById('crewSelect').value;
+  if(!selectedId){
+    hintEl.style.color = 'var(--danger)';
+    hintEl.textContent = 'Pick your name from the list first.';
+    toast('Pick your name first');
+    pinBuffer = ''; renderPinDisplay();
+    return;
+  }
+  const c = crewList[selectedId];
+  if(c && c.pin === pinBuffer){
+    currentCrew = {id: selectedId, ...c};
+    hintEl.textContent = '';
     document.getElementById('loginCard').style.display='none';
     document.getElementById('mainFlow').style.display='block';
     document.getElementById('crewNameLabel').textContent = currentCrew.name;
     document.getElementById('crewShiftLabel').textContent = currentCrew.shift;
     renderCheckpoints();
   } else if(pinBuffer.length===4){
-    toast('PIN not recognized');
+    hintEl.style.color = 'var(--danger)';
+    hintEl.textContent = `Wrong PIN for ${c ? c.name : 'this crew'} — try again.`;
+    toast('Wrong PIN');
     setTimeout(()=>{ pinBuffer=''; renderPinDisplay(); }, 500);
   }
 }
 function logoutCrew(){
   currentCrew=null; pinBuffer=''; activeCheckpoint=null;
   renderPinDisplay();
+  populateCrewSelect();
+  document.getElementById('crewSelect').value = '';
+  document.getElementById('loginHint').textContent = '';
   document.getElementById('loginCard').style.display='block';
   document.getElementById('mainFlow').style.display='none';
   document.getElementById('countCard').style.display='none';
