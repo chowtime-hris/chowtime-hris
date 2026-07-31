@@ -9551,6 +9551,8 @@ function App(){
   const [batchMode,setBatchMode]=useState(false);      // inline edit on/off
   const [batchEdits,setBatchEdits]=useState({});       // {itemId:{field:value}}
   const [batchSaving,setBatchSaving]=useState(false);
+  const [batchStockMode,setBatchStockMode]=useState("set");  // set | add | deduct
+  const [batchReason,setBatchReason]=useState("Physical Count");
   const [invCat,setInvCat]=useState("");
   const [invFlag,setInvFlag]=useState("");   // low | zero | nobom | noprice
   const [ordCounter,setOrdCounter]=useState(1);
@@ -13173,13 +13175,37 @@ function App(){
                   h("div",{style:{fontSize:13,fontWeight:800,color:"#E65100"}},
                     n?(n+" item/s edited — not saved yet"):"Batch edit is on"),
                   h("div",{style:{fontSize:12,color:C.muted,marginTop:1}},
-                    "Edit cost, price, pack and min stock straight in the list. "+
-                    "Stock itself still goes through Adjust, so every movement "+
-                    "keeps its reason and log entry.")),
+                    "Edit cost, price, pack, min stock and stock straight in the "+
+                    "list. Every stock change still writes its own log entry.")),
+                h("div",{style:{width:"100%",display:"flex",gap:8,
+                  alignItems:"center",flexWrap:"wrap",marginTop:8,
+                  paddingTop:8,borderTop:"1px dashed "+C.border}},
+                  h("span",{style:{fontSize:11,fontWeight:800,color:C.muted,
+                    letterSpacing:1}},"STOCK"),
+                  [["set","= Set exact"],["add","+ Add"],["deduct","− Deduct"]]
+                    .map(([m,lbl])=>h("button",{key:m,
+                      onClick:()=>setBatchStockMode(m),
+                      style:{padding:"6px 11px",borderRadius:7,fontSize:12,
+                        cursor:"pointer",fontWeight:batchStockMode===m?800:500,
+                        border:"1px solid "+(batchStockMode===m?C.primary:C.border),
+                        background:batchStockMode===m?"#F3E9F7":"#fff",
+                        color:batchStockMode===m?C.primary:C.text}},lbl)),
+                  h("span",{style:{fontSize:11,fontWeight:800,color:C.muted,
+                    letterSpacing:1,marginLeft:6}},"REASON"),
+                  h("select",{value:batchReason,
+                    onChange:e=>setBatchReason(e.target.value),
+                    style:{padding:"6px 9px",borderRadius:7,fontSize:12,
+                      border:"1px solid "+C.border,outline:"none",cursor:"pointer"}},
+                    ["Physical Count","Received","Spoilage","Wastage",
+                     "Transfer","Correction","Other"].map(r=>
+                      h("option",{key:r,value:r},r)))
+                ),
+
                 h("button",{
                   onClick:async()=>{
                     const ids=Object.keys(batchEdits);
                     if(!ids.length){showT("Nothing changed","warn");return;}
+                    const skipped=[]; const stockLogs=[];
                     setBatchSaving(true);
                     try{
                       const col=invView?("inventory_"+invView):"inventory";
@@ -13192,6 +13218,26 @@ function App(){
                         if(e.packUnit!==undefined)patch.packUnit=String(e.packUnit||"");
                         if(e.packSize!==undefined)patch.packSize=Number(e.packSize)||0;
                         if(e.minStock!==undefined)patch.minStock=Number(e.minStock)||0;
+
+                        // Stock is not just another field: it needs a before,
+                        // an after and a reason, or the log stops explaining
+                        // where the count came from.
+                        let stockLog=null;
+                        if(e._stock!==undefined&&e._stock!==""){
+                          const srcRow=(invView?invViewData:inventory).find(x=>x.id===id)||{};
+                          const cur=Number(srcRow.stock)||0;
+                          const typed=Number(e._stock)||0;
+                          const next=batchStockMode==="set"?typed
+                            :batchStockMode==="add"?cur+typed:cur-typed;
+                          if(next<0){
+                            skipped.push((srcRow.name||id)+" would go below zero");
+                          }else{
+                            patch.stock=next;
+                            patch.lastUpdated=serverTimestamp();
+                            stockLog={id:id,name:srcRow.name||id,unit:srcRow.unit||"",
+                              prev:cur,next:next,delta:Math.round((next-cur)*1000)/1000};
+                          }
+                        }
                         // margin is derived, so recompute it rather than let it
                         // drift away from the two numbers it comes from
                         const src=(invView?invViewData:inventory).find(x=>x.id===id)||{};
@@ -13201,12 +13247,40 @@ function App(){
                         patch.updatedAt=serverTimestamp();
                         patch.updatedBy=user.name;
                         batch.update(doc(db,col,id),patch);
+                        if(stockLog)stockLogs.push(stockLog);
                         k++;
                         if(k%400===0){await batch.commit();batch=writeBatch(db);}
                       }
                       if(k%400)await batch.commit();
+
+                      // One log entry per item, same shape the Adjust modal
+                      // writes, so a batch count is indistinguishable from a
+                      // manual one when you read the log back.
+                      const logCol=invView?("inventory_log_"+invView):"inventory_log";
+                      for(const lg of stockLogs){
+                        try{
+                          await addDoc(collection(db,logCol),{
+                            itemId:lg.id,itemName:lg.name,unit:lg.unit,
+                            type:lg.delta>=0?"add":"deduct",amount:lg.delta,
+                            prevStock:lg.prev,newStock:lg.next,
+                            desc:batchReason+" (batch): "+lg.prev+" → "+lg.next
+                              +" "+(lg.unit||""),
+                            source:batchReason==="Received"?"TRANSFER":"ADJUST",
+                            ref:"",branch:invView||branchId,by:user.name,
+                            date:localDate(),timestamp:serverTimestamp()
+                          });
+                        }catch(e3){console.warn("batch log failed",lg.id,e3);}
+                      }
+
                       setBatchEdits({});
-                      showT(k+" item/s updated ✓");
+                      if(skipped.length){
+                        showT(k+" updated · "+skipped.length+" skipped: "
+                          +skipped[0].slice(0,44),"warn");
+                      }else{
+                        showT(k+" item/s updated"
+                          +(stockLogs.length?" · "+stockLogs.length+" stock change/s logged":"")
+                          +" ✓");
+                      }
                     }catch(e){
                       console.error("batch save:",e);
                       showT("Save failed: "+String(e&&e.message||e).slice(0,60),"err");
@@ -13284,6 +13358,41 @@ function App(){
                 h("div",null,
                   h("span",{style:{background:C.info,color:"#fff",fontSize:11,padding:"2px 7px",borderRadius:20,fontWeight:700}},( item.stock||0).toLocaleString()+" "+( item.unit||"")),
                   !batchMode&&packSizeOf( item)>0&&h("div",{style:{fontSize:11,color:C.muted,marginTop:2}},fmtPacks( item)),
+                  batchMode&&(function(){
+                    const ed=batchEdits[ item.id]||{};
+                    const cur=Number( item.stock)||0;
+                    const typed=ed._stock;
+                    const has=typed!==undefined&&typed!=="";
+                    const nextStock=!has?cur
+                      :(batchStockMode==="set"?(Number(typed)||0)
+                        :batchStockMode==="add"?cur+(Number(typed)||0)
+                        :cur-(Number(typed)||0));
+                    const setStock=(v)=>setBatchEdits(p=>{
+                      const c2=Object.assign({},p[ item.id]||{});
+                      if(v===""||v===undefined) delete c2._stock; else c2._stock=v;
+                      const n2=Object.assign({},p);
+                      if(Object.keys(c2).length) n2[ item.id]=c2; else delete n2[ item.id];
+                      return n2;
+                    });
+                    return h("div",{style:{marginTop:4}},
+                      h("input",{type:"number",min:0,step:"0.001",
+                        onFocus:e=>e.target.select(),
+                        placeholder:batchStockMode==="set"?"set to…"
+                          :batchStockMode==="add"?"add…":"deduct…",
+                        value:has?typed:"",
+                        onChange:e=>setStock(e.target.value),
+                        style:{width:"100%",padding:"4px 6px",fontSize:12,
+                          borderRadius:5,textAlign:"right",boxSizing:"border-box",
+                          border:"1px solid "+(has?C.primary:C.border),
+                          background:has?"#F3E9F7":"#fff"}}),
+                      // show the result before it is written, and flag a
+                      // deduction that would go below zero
+                      has&&h("div",{style:{fontSize:11,marginTop:2,fontWeight:700,
+                        color:nextStock<0?C.danger:C.primary}},
+                        cur+" → "+nextStock+" "+( item.unit||"")
+                        +(nextStock<0?"  below zero":""))
+                    );
+                  })(),
                   batchMode&&(function(){
                     const ed=batchEdits[ item.id]||{};
                     const val=(f)=>ed[f]!==undefined?ed[f]:( item[f]!==undefined? item[f]:"");
