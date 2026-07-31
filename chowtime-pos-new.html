@@ -5678,7 +5678,7 @@ async function postReceivedToStock(db,po,byName){
   if(!invBr){res.errors.push("no branch on PO");return res;}
   const isMain=(invBr==="ct-main"||invBr==="main");
   const invCol=isMain?"inventory":"inventory_"+invBr;
-  const logCol=isMain?"inventory_log":"inventory_log_"+invBr;
+  const logCol=logColFor(invBr);
   const items=(po.receivedItems||po.deliveredItems||po.items||[]);
 
   for(const it of items){
@@ -5736,6 +5736,12 @@ async function postReceivedToStock(db,po,byName){
   }
   return res;
 }
+
+// Which log collection a branch writes to. MAIN keeps the shared name; every
+// other branch gets its own. Defined once so a page cannot read one name while
+// a write uses another.
+const logColFor=(bid)=>(bid==="ct-main"||bid==="main")
+  ? "inventory_log" : "inventory_log_"+bid;
 
 // ─── SUBSCRIPTION ─────────────────────────────────────────
 // One doc per branch: subscriptions/<branchId>. The billing anniversary is the
@@ -6887,7 +6893,7 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
   if(! item)return null;
   var isOwner=user.role==="owner"||user.role==="commissary";
   var invCol=isOwner?"inventory":"inventory_"+branchId;
-  var logCol=isOwner?"inventory_log":"inventory_log_"+branchId;
+  var logCol=logColFor(isOwner?"main":branchId);
 
   var DEFAULT_CATS=["Frozen","Produce","Protein","Sauce","Dry Goods","Packaging","Beverage","Other"];
   var UNITS=["pc","kg","g","L","ml","pack","box","tray","sachet","EA","roll"];
@@ -6950,6 +6956,35 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
       return p+key;
     });
   };
+
+  // The combined log mixes every item together, so reading one item's story
+  // means scrolling past everyone else's. Load just this item's entries.
+  var [hist,setHist]=useState([]);
+  var [histLoading,setHistLoading]=useState(false);
+  useEffect(function(){
+    if(tab!=="history"||!item||!item.id)return;
+    var alive=true;
+    setHistLoading(true);
+    (async function(){
+      try{
+        var snap=await getDocs(query(collection(db,logCol),
+          where("itemId","==",item.id),limit(100)));
+        var rows=snap.docs.map(function(d){return Object.assign({},d.data(),{_id:d.id});});
+        var t=function(r){return (r.at&&r.at.seconds)||(r.timestamp&&r.timestamp.seconds)||0;};
+        rows.sort(function(a,b){
+          var d=t(b)-t(a);
+          if(d)return d;
+          return String(b.date||"").localeCompare(String(a.date||""));
+        });
+        if(alive)setHist(rows);
+      }catch(e){
+        console.error("item history:",e);
+        if(alive)setHist([]);
+      }
+      if(alive)setHistLoading(false);
+    })();
+    return function(){alive=false;};
+  },[tab,item&&item.id]);
 
   var saveStock=async function(){
     if(!display){showT("Enter amount","warn");return;}
@@ -7020,7 +7055,7 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
         }catch(e){console.warn("BOM sync:",e);}
       }
       // Log details edit
-      await addDoc(collection(db,isOwner?"inventory_log":"inventory_log_"+branchId),{
+      await addDoc(collection(db,logColFor(isOwner?"main":branchId)),{
          itemId: item.id, itemName:details.name,unit:details.unit,
         type:"edited",
         changes:{
@@ -7090,7 +7125,14 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
           background:"#fff",
           color:tab==="details"?"#1565C0":"#888",
           borderBottom:"3px solid "+(tab==="details"?"#1565C0":"transparent")}},
-        "✏️ Edit Details")
+        "✏️ Edit Details"),
+      h("button",{onClick:()=>setTab("history"),
+        style:{flex:1,padding:"10px",border:"none",cursor:"pointer",fontSize:14,
+          fontWeight:tab==="history"?800:400,
+          background:"#fff",
+          color:tab==="history"?"#1565C0":"#888",
+          borderBottom:"3px solid "+(tab==="history"?"#1565C0":"transparent")}},
+        "🕘 History")
     ),
 
     h("div",{style:{padding:"14px 16px"}},
@@ -7231,6 +7273,52 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
       ),
 
       // ── DETAILS TAB ──
+      tab==="history"&&h("div",null,
+        histLoading
+          ? h("div",{style:{textAlign:"center",padding:"30px",color:"#888",
+              fontSize:13}},"Loading...")
+          : hist.length===0
+            ? h("div",{style:{textAlign:"center",padding:"34px 18px"}},
+                h("div",{style:{fontSize:32,marginBottom:8}},"🕘"),
+                h("div",{style:{fontSize:14,fontWeight:800,marginBottom:4}},
+                  "No movements recorded"),
+                h("div",{style:{fontSize:12,color:"#888",lineHeight:1.6}},
+                  "Every adjustment, sale and delivery for this item will "+
+                  "appear here with its before and after."))
+            : h("div",null,
+                h("div",{style:{fontSize:12,color:"#888",marginBottom:9}},
+                  hist.length+" movement"+(hist.length>1?"s":"")+" · newest first"),
+                hist.map(function(l,li){
+                  var amt=Number(l.amount)||0;
+                  var up=amt>=0;
+                  var col=l.type==="set"?"#1565C0":(up?"#2E7D32":"#C62828");
+                  var when=(l.at&&l.at.toDate)?l.at.toDate()
+                          :((l.timestamp&&l.timestamp.toDate)?l.timestamp.toDate():null);
+                  return h("div",{key:l._id||li,
+                    style:{display:"flex",gap:10,padding:"10px 0",
+                      borderBottom:"1px solid #f2f2f2",alignItems:"flex-start"}},
+                    h("div",{style:{width:64,flexShrink:0,textAlign:"right",
+                      fontSize:14,fontWeight:900,color:col}},
+                      (l.type==="set"?"=":(up?"+":""))+amt),
+                    h("div",{style:{flex:1,minWidth:0}},
+                      h("div",{style:{fontSize:13,fontWeight:700}},
+                        (l.reason||l.desc||l.source||"Adjustment")),
+                      h("div",{style:{fontSize:12,color:"#888",marginTop:2}},
+                        // before -> after is the part that makes a log
+                        // auditable; without it you cannot tell what happened
+                        (l.prevStock!=null?l.prevStock:"?")+" → "
+                        +(l.newStock!=null?l.newStock:"?")+" "+(item.unit||"")),
+                      h("div",{style:{fontSize:11,color:"#aaa",marginTop:2}},
+                        (when?when.toLocaleString("en-PH",{month:"short",day:"numeric",
+                          hour:"2-digit",minute:"2-digit"}):(l.date||""))
+                        +(l.by?" · "+l.by:"")
+                        +(l.ref?" · "+l.ref:""))
+                    )
+                  );
+                })
+              )
+      ),
+
       tab==="details"&&h("div",null,
         h("div",{style:{marginBottom:10}},
           h("div",{style:{fontSize:12,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},"ITEM NAME"),
@@ -7444,7 +7532,7 @@ function ReceiveItemsModal({po,db,user,showT,branchId,onClose}){
           }
           added++;
           await addDoc(collection(db,
-            (invBr==="ct-main"||invBr==="main")?"inventory_log":"inventory_log_"+invBr),{
+            logColFor(invBr)),{
             itemId:it.id,itemName:it.name||it.id,unit:it.unit||"",
             type:"add",amount:qty,
             prevStock:prev,newStock:Math.round((prev+qty)*1000)/1000,
@@ -8843,9 +8931,10 @@ function InvLogPage({db,user,branchId,branches,showT}){
 
   useEffect(()=>{
     setLoading(true);
-    const col = selBranch==="main"||isOwner&&selBranch==="main"
-      ? "inventory_log"
-      : "inventory_log_"+selBranch;
+    // The owner's branchId is "ct-main", not the literal "main" this compared
+    // against — so the page read inventory_log_ct-main while every write went
+    // to inventory_log. Use the same rule as the rest of the app.
+    const col = logColFor(selBranch);
     try{
       // orderBy drops any document missing that field, and the log has been
       // written by several paths that used `timestamp` instead of `at` — those
@@ -9310,7 +9399,7 @@ function NewInventoryItemForm({db,user,branchId,showT,onClose,invBranch}){
         margin:parseFloat(form.price)>0?Math.round((parseFloat(form.price)-parseFloat(form.cost))/parseFloat(form.price)*100):0,
         createdAt:serverTimestamp(),createdBy:user.name
       });
-      const logC=isOwner?(invBranch==="main"?"inventory_log":"inventory_log_"+invBranch):"inventory_log_"+branchId;
+      const logC=logColFor(isOwner?(invBranch||"main"):branchId);
       await addDoc(collection(db,logC),{
          itemId:id, itemName:form.name,unit:form.unit,
         type:"created",amount:parseFloat(form.stock)||0,
@@ -9993,7 +10082,7 @@ function App(){
     try{
       const isOwner=user.role==="owner"||user.role==="commissary";
       const bid=isOwner?"ct-main":(user.branch==="all"?"ct-wsfp":user.branch);
-      const logCol=isOwner?"inventory_log":"inventory_log_"+bid;
+      const logCol=logColFor(isOwner?"main":bid);
       const q=query(collection(db,logCol),orderBy("at","desc"),limit(50));
       const unsub=onSnapshot(q,snap=>{
         setInvLog(snap.docs.map(d=>({...d.data(),_docId:d.id})));
@@ -10036,7 +10125,7 @@ function App(){
   // is filed under. Previously this keyed off role, so an owner's sale was
   // tagged WSFP but deducted from Main.
   const invColFor=(bid)=>(bid==="ct-main"||bid==="main")?"inventory":"inventory_"+bid;
-  const logColFor=(bid)=>(bid==="ct-main"||bid==="main")?"inventory_log":"inventory_log_"+bid;
+  // logColFor lives at module scope — see above
   // Get price based on type
   const getPriceByType=( item)=>{
     if(priceType==="franchisee"&& item.franchiseePrice) return  item.franchiseePrice;
@@ -13268,7 +13357,7 @@ function App(){
                       // One log entry per item, same shape the Adjust modal
                       // writes, so a batch count is indistinguishable from a
                       // manual one when you read the log back.
-                      const logCol=invView?("inventory_log_"+invView):"inventory_log";
+                      const logCol=logColFor(invView||"main");
                       for(const lg of stockLogs){
                         try{
                           await addDoc(collection(db,logCol),{
@@ -13498,7 +13587,7 @@ function App(){
                     const col=isOwner?"inventory":"inventory_"+branchId;
                     try{
                       // Log the deletion first
-                      const logCol2=isOwner?"inventory_log":"inventory_log_"+branchId;
+                      const logCol2=logColFor(isOwner?"main":branchId);
                       await addDoc(collection(db,logCol2),{
                          itemId: item.id,
                          itemName: item.name,
@@ -13527,7 +13616,7 @@ function App(){
                     if(!adj)return;
                     const isOwner=user.role==="owner"||user.role==="commissary";
                     const invCol=isOwner?"inventory":"inventory_"+branchId;
-                    const logCol=isOwner?"inventory_log":"inventory_log_"+branchId;
+                    const logCol=logColFor(isOwner?"main":branchId);
                     const newQ=Math.max(0,( item.stock||0)+adj);
                     try{
                       await updateDoc(doc(db,invCol, item.id),{
