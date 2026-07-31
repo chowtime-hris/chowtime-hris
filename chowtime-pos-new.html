@@ -9403,6 +9403,9 @@ function App(){
   const [invSrch,setInvSrch]=useState("");
   const [staffRole,setStaffRole]=useState("");   // Users page role filter
   const [invValMode,setInvValMode]=useState("cost");   // cost | retail
+  const [batchMode,setBatchMode]=useState(false);      // inline edit on/off
+  const [batchEdits,setBatchEdits]=useState({});       // {itemId:{field:value}}
+  const [batchSaving,setBatchSaving]=useState(false);
   const [invCat,setInvCat]=useState("");
   const [invFlag,setInvFlag]=useState("");   // low | zero | nobom | noprice
   const [ordCounter,setOrdCounter]=useState(1);
@@ -10068,6 +10071,10 @@ function App(){
     const t=setTimeout(()=>setDayTick(localDate()),Math.max(1000,ms));
     return()=>clearTimeout(t);
   },[dayTick]);
+
+// keep the legacy invBranch (used by the new-item form) in step with the
+  // selector, so an item is always created in the book being viewed
+  useEffect(()=>{ setInvBranch(invView||"main"); },[invView]);
 
   // The owner is hardwired to Main's inventory, so a branch's stock could not
   // be inspected at all. Load it on demand when a branch is selected.
@@ -12846,35 +12853,10 @@ function App(){
             );
           })(),
           // Branch selector for owner
-          (user.role==="owner"||user.role==="commissary")&&h("div",{
-            style:{display:"flex",gap:8,marginBottom:12,
-              background:"#fff",borderRadius:10,padding:"10px 14px",
-              border:"1px solid "+C.border,alignItems:"center"}},
-            h("div",{style:{fontSize:11,fontWeight:700,marginRight:4}},"📦 Viewing Inventory:"),
-            h("button",{onClick:async()=>{
-              setInvBranch("main");
-              const snap=await getDocs(collection(db,"inventory"));
-              setInventory(snap.docs.map(d=>({...d.data(),id:d.id})));
-              showT("Viewing Main/Commissary inventory");
-            },style:{padding:"6px 14px",borderRadius:20,border:"none",cursor:"pointer",
-              fontWeight:700,fontSize:11,
-              background:invBranch==="main"?C.primary:"#eee",
-              color:invBranch==="main"?"#fff":C.text}},
-              "🏭 Main/Commissary"),
-            ...branches.filter(b=>b.id!=="ct-main").map(b=>
-              h("button",{key:b.id,onClick:async()=>{
-                setInvBranch(b.id);
-                const snap=await getDocs(collection(db,"inventory_"+b.id));
-                const  items=snap.docs.map(d=>({...d.data(),id:d.id}));
-                setInventory( items.length>0? items:INIT_INVENTORY.map(i=>({...i,branch:b.id,stock:0})));
-                showT("Viewing "+b.name+" inventory");
-              },style:{padding:"6px 14px",borderRadius:20,border:"none",cursor:"pointer",
-                fontWeight:700,fontSize:11,
-                background:invBranch===b.id?C.primary:"#eee",
-                color:invBranch===b.id?"#fff":C.text}},
-                b.name||b.id)
-            )
-          ),
+          // An older branch switcher stood here. It wrote straight into the
+          // shared `inventory` state, so viewing a branch corrupted what every
+          // other page saw, and it fell back to the demo seed list. The
+          // read-only selector in the toolbar below replaces it.
           h("div",{style:{display:"grid",gridTemplateColumns:"1fr 270px",gap:12,alignItems:"start"}},
           h("div",null,
           h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:13}},
@@ -12936,6 +12918,17 @@ function App(){
                       color:invFlag===k?col:C.text}},
                     lbl+" ("+counts[k]+")"));
               })(),
+              // Editing 40 fields through 16 separate modals is the slow part
+              // of setting up a catalogue. Toggle the rows into inputs and
+              // write only what actually changed.
+              !invView&&h("button",{
+                onClick:()=>{ setBatchMode(v=>!v); setBatchEdits({}); },
+                style:{padding:"7px 12px",borderRadius:8,fontSize:11,
+                  cursor:"pointer",fontWeight:800,
+                  border:"1px solid "+(batchMode?"#E65100":C.border),
+                  background:batchMode?"#FFF3E0":"#fff",
+                  color:batchMode?"#E65100":C.text}},
+                batchMode?"✕ Exit batch edit":"✏️ Batch edit"),
               (invSrch||invCat||invFlag)&&h("button",{
                 onClick:()=>{setInvSrch("");setInvCat("");setInvFlag("");},
                 style:{padding:"7px 10px",borderRadius:7,fontSize:10,cursor:"pointer",
@@ -12989,6 +12982,70 @@ function App(){
             h("div",{style:{display:"grid",gridTemplateColumns:"2fr 90px 80px 80px 80px 70px 110px",padding:"8px 14px",borderBottom:"1px solid #f0f0f0",background:"#f9f9f9"}},
               ["Name","In Stock","Price","Cost","Margin","Cat","Action"].map(h2=>h("div",{key:h2,style:{fontSize:8,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:.5}},h2))
             ),
+            batchMode&&(function(){
+              const n=Object.keys(batchEdits).length;
+              return h("div",{style:{background:"#FFF3E0",
+                border:"1px solid #FFCC80",borderRadius:10,padding:"10px 13px",
+                marginBottom:10,display:"flex",gap:10,alignItems:"center",
+                flexWrap:"wrap"}},
+                h("span",{style:{fontSize:15}},"✏️"),
+                h("div",{style:{flex:1,minWidth:200}},
+                  h("div",{style:{fontSize:11,fontWeight:800,color:"#E65100"}},
+                    n?(n+" item/s edited — not saved yet"):"Batch edit is on"),
+                  h("div",{style:{fontSize:9,color:C.muted,marginTop:1}},
+                    "Edit cost, price, pack and min stock straight in the list. "+
+                    "Stock itself still goes through Adjust, so every movement "+
+                    "keeps its reason and log entry.")),
+                h("button",{
+                  onClick:async()=>{
+                    const ids=Object.keys(batchEdits);
+                    if(!ids.length){showT("Nothing changed","warn");return;}
+                    setBatchSaving(true);
+                    try{
+                      const col=invView?("inventory_"+invView):"inventory";
+                      let batch=writeBatch(db),k=0;
+                      for(const id of ids){
+                        const e=batchEdits[id]||{};
+                        const patch={};
+                        if(e.cost!==undefined)    patch.cost=Number(e.cost)||0;
+                        if(e.price!==undefined)   patch.price=Number(e.price)||0;
+                        if(e.packUnit!==undefined)patch.packUnit=String(e.packUnit||"");
+                        if(e.packSize!==undefined)patch.packSize=Number(e.packSize)||0;
+                        if(e.minStock!==undefined)patch.minStock=Number(e.minStock)||0;
+                        // margin is derived, so recompute it rather than let it
+                        // drift away from the two numbers it comes from
+                        const src=(invView?invViewData:inventory).find(x=>x.id===id)||{};
+                        const pc=patch.price!==undefined?patch.price:(Number(src.price)||0);
+                        const cs=patch.cost!==undefined ?patch.cost :(Number(src.cost)||0);
+                        patch.margin=pc>0?Math.round(((pc-cs)/pc)*100):0;
+                        patch.updatedAt=serverTimestamp();
+                        patch.updatedBy=user.name;
+                        batch.update(doc(db,col,id),patch);
+                        k++;
+                        if(k%400===0){await batch.commit();batch=writeBatch(db);}
+                      }
+                      if(k%400)await batch.commit();
+                      setBatchEdits({});
+                      showT(k+" item/s updated ✓");
+                    }catch(e){
+                      console.error("batch save:",e);
+                      showT("Save failed: "+String(e&&e.message||e).slice(0,60),"err");
+                    }
+                    setBatchSaving(false);
+                  },
+                  disabled:batchSaving||!n,
+                  style:{padding:"8px 16px",borderRadius:8,border:"none",
+                    background:(batchSaving||!n)?"#ccc":"#E65100",color:"#fff",
+                    fontWeight:800,fontSize:11,
+                    cursor:(batchSaving||!n)?"not-allowed":"pointer"}},
+                  batchSaving?"Saving...":("💾 Save all"+(n?" ("+n+")":""))),
+                n>0&&h("button",{onClick:()=>setBatchEdits({}),
+                  style:{padding:"8px 12px",borderRadius:8,border:"none",
+                    background:"none",color:C.muted,fontSize:10,cursor:"pointer"}},
+                  "Discard")
+              );
+            })(),
+
             (invView?invViewData:inventory).length===0&&h("div",{style:{background:"#fff",
               border:"1px dashed "+C.border,borderRadius:12,
               padding:"34px 20px",textAlign:"center"}},
@@ -13046,11 +13103,70 @@ function App(){
                 h("div",{style:{fontWeight:600,fontSize:11,display:"flex",alignItems:"center",gap:5}},low&&h("span",null,"⚠️"), item.name),
                 h("div",null,
                   h("span",{style:{background:C.info,color:"#fff",fontSize:8,padding:"2px 7px",borderRadius:20,fontWeight:700}},( item.stock||0).toLocaleString()+" "+( item.unit||"")),
-                  packSizeOf( item)>0&&h("div",{style:{fontSize:8,color:C.muted,marginTop:2}},fmtPacks( item))
+                  !batchMode&&packSizeOf( item)>0&&h("div",{style:{fontSize:8,color:C.muted,marginTop:2}},fmtPacks( item)),
+                  batchMode&&(function(){
+                    const ed=batchEdits[ item.id]||{};
+                    const val=(f)=>ed[f]!==undefined?ed[f]:( item[f]!==undefined? item[f]:"");
+                    const set=(f,v)=>setBatchEdits(p=>{
+                      const cur=Object.assign({},p[ item.id]||{});
+                      const orig= item[f]!==undefined? item[f]:"";
+                      if(String(v)===String(orig)) delete cur[f]; else cur[f]=v;
+                      const next=Object.assign({},p);
+                      if(Object.keys(cur).length) next[ item.id]=cur; else delete next[ item.id];
+                      return next;
+                    });
+                    const box=(f,ph,tp)=>h("input",{type:tp||"text",
+                      onFocus:e=>e.target.select(),placeholder:ph,
+                      value:val(f),onChange:e=>set(f,e.target.value),
+                      style:{width:"100%",padding:"3px 5px",fontSize:9,
+                        borderRadius:5,boxSizing:"border-box",
+                        border:"1px solid "+(ed[f]!==undefined?"#E65100":C.border),
+                        background:ed[f]!==undefined?"#FFF8E1":"#fff"}});
+                    return h("div",{style:{display:"grid",
+                      gridTemplateColumns:"1fr 1fr",gap:3,marginTop:3}},
+                      box("packUnit","pack unit"),
+                      box("packSize","per pack","number"));
+                  })()
                 ),
-                h("div",{style:{fontSize:10}},"₱"+peso( item.price||0)),
-                h("div",{style:{fontSize:10}},"₱"+peso( item.cost||0)),
-                h("div",{style:{fontSize:10,color:C.success,fontWeight:700}},( item.margin||0)+"%"),
+                // In batch mode these three cells become inputs. The edited
+                // value lives in batchEdits until Save, so nothing is written
+                // per keystroke and a mistake is discardable.
+                (function(){
+                  const ed=batchEdits[ item.id]||{};
+                  const val=(f)=>ed[f]!==undefined?ed[f]:( item[f]!==undefined? item[f]:"");
+                  const set=(f,v)=>setBatchEdits(p=>{
+                    const cur=Object.assign({},p[ item.id]||{});
+                    const orig= item[f]!==undefined? item[f]:"";
+                    if(String(v)===String(orig)) delete cur[f]; else cur[f]=v;
+                    const next=Object.assign({},p);
+                    if(Object.keys(cur).length) next[ item.id]=cur; else delete next[ item.id];
+                    return next;
+                  });
+                  const cell=(f,step)=>h("input",{type:"number",min:0,step:step||"0.01",
+                    onFocus:e=>e.target.select(),
+                    value:val(f),onChange:e=>set(f,e.target.value),
+                    style:{width:"100%",padding:"4px 6px",fontSize:10,
+                      borderRadius:5,textAlign:"right",boxSizing:"border-box",
+                      border:"1px solid "+(ed[f]!==undefined?"#E65100":C.border),
+                      background:ed[f]!==undefined?"#FFF8E1":"#fff"}});
+                  if(!batchMode){
+                    const pc=Number( item.price)||0, cs=Number( item.cost)||0;
+                    return [
+                      h("div",{key:"p",style:{fontSize:10}},"₱"+peso(pc)),
+                      h("div",{key:"c",style:{fontSize:10}},"₱"+peso(cs)),
+                      h("div",{key:"m",style:{fontSize:10,color:C.success,fontWeight:700}},
+                        ( item.margin||0)+"%")
+                    ];
+                  }
+                  const pc=Number(val("price"))||0, cs=Number(val("cost"))||0;
+                  const mg=pc>0?Math.round(((pc-cs)/pc)*100):0;
+                  return [
+                    h("div",{key:"p"},cell("price")),
+                    h("div",{key:"c"},cell("cost","0.0001")),
+                    h("div",{key:"m",style:{fontSize:10,fontWeight:700,
+                      color:mg<0?C.danger:C.success}},mg+"%")
+                  ];
+                })(),
                 h("div",{style:{fontSize:10,color:C.muted}}, item.cat||""),
                 h("div",{style:{display:"flex",gap:5,alignItems:"center"}},
                 h("button",{onClick:invView?(()=>showT("Read only — switch back to MAIN to adjust","warn")):()=>setModal("stock_edit_"+( item.id|| item.name)),
