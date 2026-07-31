@@ -177,8 +177,10 @@ try {
 } catch(e) { console.warn("HRIS DB:", e.message); }
 
 // ─── BRAND ───────────────────────────────────────────────
+const PUR="#6A1B9A";
 const C = {
   primary:"#C8151B",dark:"#9B0F14",sidebar:"#160406",
+  // single accent for the checkout: white surface, black text, purple highlight
   accent:"#FFC107",bg:"#F5F5F7",text:"#1C1C1E",
   muted:"#8E8E93",border:"#E5E5EA",
   success:"#34C759",warning:"#FF9500",
@@ -2318,7 +2320,7 @@ function DRCheckForm({po,db,branchId,user,showT,INIT_INVENTORY,setAdvances,advan
               packSize:Number(meta.packSize|| item.packSize)||0,
               cost:Number(meta.cost)||0,
               price:Number(meta.price)||0,
-              minStock:Number(meta.minStock)||0,
+              minStock:0,   // branch sets its own reorder point, not Main's
               branch:branchId,
               stock:Number( item.receivedQty)||0,
               adoptedFrom:"main",
@@ -5695,7 +5697,7 @@ async function postReceivedToStock(db,po,byName){
           packSize:Number(meta.packSize||it.packSize)||0,
           cost:Number(meta.cost)||0,
           price:Number(meta.price)||0,
-          minStock:Number(meta.minStock)||0,
+          minStock:0,   // branch sets its own reorder point, not Main's
           branch:invBr,stock:qty,
           adoptedFrom:"main",adoptedAt:serverTimestamp(),
           lastRestocked:serverTimestamp()
@@ -6896,7 +6898,7 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
     cat: item.cat||"Other",
     price: item.price||0,
     cost: item.cost||0,
-    minStock: item.minStock||10,
+    minStock: item.minStock||0,
     packUnit: item.packUnit||"",
     packSize: item.packSize||"",
   });
@@ -7420,7 +7422,7 @@ function ReceiveItemsModal({po,db,user,showT,branchId,onClose}){
               packSize:Number(meta.packSize||it.packSize)||0,
               cost:Number(meta.cost)||0,
               price:Number(meta.price)||0,
-              minStock:Number(meta.minStock)||0,
+              minStock:0,   // branch sets its own reorder point, not Main's
               branch:invBr,stock:qty,
               adoptedFrom:"main",adoptedAt:serverTimestamp(),
               lastRestocked:serverTimestamp()
@@ -9520,6 +9522,7 @@ function App(){
   const [chkTable,setChkTable]=useState("");
   const [chkType,setChkType]=useState("dine-in");
   const [chkPay,setChkPay]=useState("cash");
+  const [chkStep,setChkStep]=useState(1);   // 1 = type+payment, 2 = cash+extras
   const [chkCash,setChkCash]=useState("");
   // Modals & forms
   const [modal,setModal]=useState(null);
@@ -9899,7 +9902,7 @@ function App(){
   useEffect(()=>{
     if(!inventory.length||!user)return;
     const lowItems=inventory.filter(i=>{
-      const min=i.minStock||10;
+      const min=i.minStock||0;
       return (i.stock||0)<=min&&(i.stock||0)>=0;
     });
     if(lowItems.length>0){
@@ -10711,9 +10714,9 @@ function App(){
   // ── CHECKOUT MODAL ───────────────────────────────────────
   const CheckoutModal=()=>h("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:890},onClick:e=>e.target===e.currentTarget&&setModal(null)},
     h("div",{style:{background:"#fff",width:"100%",maxWidth:490,borderRadius:"20px 20px 0 0",maxHeight:"84vh",display:"flex",flexDirection:"column"}},
-      h("div",{style:{padding:"13px 18px 11px",borderBottom:"1px solid "+C.border,display:"flex",justifyContent:"space-between"}},
+      h("div",{style:{padding:"13px 18px 11px",borderBottom:"1px solid "+"#D0D0D0",display:"flex",justifyContent:"space-between"}},
         h("b",{style:{fontSize:14}},"💳 Checkout"),
-        h("button",{onClick:()=>setModal(null),style:{width:26,height:26,borderRadius:"50%",background:C.bg,border:"none",fontSize:16,cursor:"pointer"}},"×")
+        h("button",{onClick:()=>setModal(null),style:{width:26,height:26,borderRadius:"50%",background:"#F7F7F7",border:"none",fontSize:16,cursor:"pointer"}},"×")
       ),
       h("div",{style:{flex:1,overflowY:"auto",padding:"12px 18px"}},
         // Summary
@@ -10721,42 +10724,42 @@ function App(){
           (function(){
             const short=cartShort();
             if(!short.length)return null;
-            return h("div",{style:{background:"#FFEBEE",border:"2px solid "+C.danger,
+            return h("div",{style:{background:"#fff",border:"2px solid "+"#111",
               borderRadius:10,padding:"9px 11px",marginBottom:11}},
-              h("div",{style:{fontSize:11,fontWeight:900,color:C.danger,marginBottom:5}},
+              h("div",{style:{fontSize:11,fontWeight:900,color:"#111",marginBottom:5}},
                 "🚫 OUT OF STOCK — cannot proceed"),
-              short.map(x=>h("div",{key:x.id,style:{fontSize:10,marginBottom:2}},
+              short.map(x=>h("div",{key:x.id,style:{fontSize:13,marginBottom:2}},
                 h("b",null,x.name),
-                h("span",{style:{color:C.muted}},
+                h("span",{style:{color:"#555"}},
                   x.notCarried
                     ? ("  not carried by this branch yet — needs "
                        +(Math.round(x.amt*1000)/1000)+" "+x.unit)
                     : ("  needs "+(Math.round(x.amt*1000)/1000)+" "+x.unit
                        +" · on hand "+(Math.round(x.have*1000)/1000)+" "+x.unit))
               )),
-              h("div",{style:{fontSize:9,color:C.muted,marginTop:5}},
+              h("div",{style:{fontSize:12,color:"#555",marginTop:5}},
                 "Lower the qty, remove the item, or receive the delivery first.")
             );
           })(),
-          h("div",{style:{fontSize:9,fontWeight:800,color:C.muted,letterSpacing:1,marginBottom:6}},"ORDER SUMMARY"),
-          cart.map((i,idx)=>h("div",{key:idx,style:{display:"flex",gap:8,padding:"6px 0",borderBottom:"1px solid #f9f9f9",alignItems:"flex-start"}},
+          h("div",{style:{fontSize:12,fontWeight:800,color:"#555",letterSpacing:1,marginBottom:6}},"ORDER SUMMARY"),
+          cart.map((i,idx)=>h("div",{key:idx,style:{display:"flex",gap:8,padding:"6px 0",borderBottom:"1px solid #F0F0F0",alignItems:"flex-start"}},
             h("span",{style:{fontSize:15,flexShrink:0}},i.emoji),
             h("div",{style:{flex:1}},
-              h("div",{style:{fontSize:11,fontWeight:700}},i.qty+"x "+i.name,i.isBogo&&h("span",{style:{background:"#FF4B2B",color:"#fff",fontSize:8,padding:"1px 5px",borderRadius:20,marginLeft:4}},"BOGO")),
-              i.variant&&h("div",{style:{fontSize:9,color:C.muted}},"📦 "+i.variant),
-              i.options?.length>0&&h("div",{style:{fontSize:9,color:C.muted}},"✓ "+i.options.join(" · ")),
-              (i.freebies||[]).map((f,fi)=>h("div",{key:fi,style:{fontSize:9,color:"#2E7D32",fontWeight:700}},
+              h("div",{style:{fontSize:11,fontWeight:700}},i.qty+"x "+i.name,i.isBogo&&h("span",{style:{background:PUR,color:"#fff",fontSize:11,padding:"1px 5px",borderRadius:20,marginLeft:4}},"BOGO")),
+              i.variant&&h("div",{style:{fontSize:12,color:"#555"}},"📦 "+i.variant),
+              i.options?.length>0&&h("div",{style:{fontSize:12,color:"#555"}},"✓ "+i.options.join(" · ")),
+              (i.freebies||[]).map((f,fi)=>h("div",{key:fi,style:{fontSize:12,color:PUR,fontWeight:700}},
                 "▸ "+f.label+" ×"+f.qty,
-                (i.takeout&&(f.toQty||0)>0)&&h("span",{style:{color:"#E65100",fontWeight:900}},
+                (i.takeout&&(f.toQty||0)>0)&&h("span",{style:{color:PUR,fontWeight:900}},
                   (f.toQty>=(f.qty||0))?"  [T/O]":"  ["+f.toQty+" T/O]")
               )),
-              i.note&&h("div",{style:{fontSize:9,color:C.muted,fontStyle:"italic"}},'"'+i.note+'"')
+              i.note&&h("div",{style:{fontSize:12,color:"#555",fontStyle:"italic"}},'"'+i.note+'"')
             ),
             h("div",{style:{textAlign:"right",flexShrink:0}},
               h("div",{style:{fontSize:11,fontWeight:800,
-                color:priceType==="franchisee"?"#E65100":priceType==="wholesale"?"#6A1B9A":C.text}},
+                color:priceType==="franchisee"?PUR:priceType==="wholesale"?"#6A1B9A":"#111"}},
                 "₱"+peso((getPriceByType(i)*(i.qty||1)))),
-              h("div",{style:{fontSize:8,color:C.muted,textDecoration:"line-through",
+              h("div",{style:{fontSize:11,color:"#555",textDecoration:"line-through",
                 visibility:priceType!=="retail"?"visible":"hidden",height:priceType!=="retail"?"auto":"0px",overflow:"hidden"}},
                 "₱"+peso(i.lineTotal))
             )
@@ -10764,28 +10767,28 @@ function App(){
         ),
         // Order type
         h("div",{style:{marginBottom:10}},
-          h("div",{style:{fontSize:9,fontWeight:800,color:C.muted,letterSpacing:1,marginBottom:6}},"ORDER TYPE"),
+          h("div",{style:{fontSize:12,fontWeight:800,color:"#555",letterSpacing:1,marginBottom:6}},"ORDER TYPE"),
           h("div",{style:{display:"flex",gap:6}},
             [["dine-in","🪑 Dine-in"],["takeout","📦 Takeout"],["delivery","🛵 Delivery"]].map(([t,l])=>
-              h("button",{key:t,onClick:()=>{setChkType(t);setChkToTargets([]);},style:{flex:1,padding:"8px 0",borderRadius:9,border:`2px solid ${chkType===t?C.primary:C.border}`,background:chkType===t?"#FFF0F0":"#fff",color:chkType===t?C.primary:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}},l)
+              h("button",{key:t,onClick:()=>{setChkType(t);setChkToTargets([]);},style:{flex:1,padding:"8px 0",borderRadius:9,border:`2px solid ${chkType===t?PUR:"#D0D0D0"}`,background:chkType===t?"#F3E9F7":"#fff",color:chkType===t?PUR:"#555",fontWeight:700,fontSize:11,cursor:"pointer"}},l)
             )
           ),
           // Which lines are take-out
           cart.length>0&&h("div",{style:{marginTop:7}},
             h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5}},
               h("button",{onClick:()=>{setChkToMode("all");setChkToTargets([]);setChkToPicks({});},
-                style:{padding:"7px 9px",borderRadius:8,fontSize:10,fontWeight:600,cursor:"pointer",
-                  border:"2px solid "+(toAll?C.primary:C.border),
-                  background:toAll?"#FFF0F0":"#fff",color:toAll?C.primary:C.text}},
+                style:{padding:"7px 9px",borderRadius:8,fontSize:13,fontWeight:600,cursor:"pointer",
+                  border:"2px solid "+(toAll?PUR:"#D0D0D0"),
+                  background:toAll?"#F3E9F7":"#fff",color:toAll?PUR:"#111"}},
                 "All: "+(chkType==="dine-in"?"dine-in":"T/O")),
               h("button",{onClick:()=>setChkToMode("some"),
-                style:{padding:"7px 9px",borderRadius:8,fontSize:10,fontWeight:600,cursor:"pointer",
-                  border:"2px solid "+(!toAll?C.primary:C.border),
-                  background:!toAll?"#FFF0F0":"#fff",color:!toAll?C.primary:C.text}},
+                style:{padding:"7px 9px",borderRadius:8,fontSize:13,fontWeight:600,cursor:"pointer",
+                  border:"2px solid "+(!toAll?PUR:"#D0D0D0"),
+                  background:!toAll?"#F3E9F7":"#fff",color:!toAll?PUR:"#111"}},
                 "📦 Selected  items only")
             ),
-            !toAll&&h("div",{style:{background:C.bg,borderRadius:8,padding:"8px 9px",marginTop:5}},
-              h("div",{style:{fontSize:9,color:C.muted,marginBottom:6}},
+            !toAll&&h("div",{style:{background:"#F7F7F7",borderRadius:8,padding:"8px 9px",marginTop:5}},
+              h("div",{style:{fontSize:12,color:"#555",marginBottom:6}},
                 "Checked = T/O. Unchecked = dine-in."),
               cart.map(function(i){
                 const picks=i.freebies||[];
@@ -10800,14 +10803,14 @@ function App(){
                     return r;
                   });
                   return h("div",{key:i.cartId,
-                    style:{marginBottom:7,paddingBottom:6,borderBottom:"1px dashed "+C.border}},
+                    style:{marginBottom:7,paddingBottom:6,borderBottom:"1px dashed "+"#D0D0D0"}},
                     h("div",{style:{display:"flex",justifyContent:"space-between",gap:8}},
                       h("div",{style:{flex:1}},
-                        h("div",{style:{fontSize:10,fontWeight:700}},lineLabel(i)),
-                        i.variant&&h("div",{style:{fontSize:9,color:C.muted}},i.variant)
+                        h("div",{style:{fontSize:13,fontWeight:700}},lineLabel(i)),
+                        i.variant&&h("div",{style:{fontSize:12,color:"#555"}},i.variant)
                       ),
-                      h("span",{style:{fontSize:9,fontWeight:800,flexShrink:0,
-                        color:got===0?C.muted:(got===tot?"#E65100":"#1565C0")}},
+                      h("span",{style:{fontSize:12,fontWeight:800,flexShrink:0,
+                        color:got===0?"#555":(got===tot?PUR:PUR)}},
                         got===0?"🪑 dine-in":(got===tot?"📦 T/O":"⚡ "+got+"/"+tot+" T/O"))
                     ),
                     h("div",{style:{marginTop:5}},
@@ -10821,28 +10824,28 @@ function App(){
                               padding:"4px 2px 4px 10px",background:"none",border:"none",
                               cursor:"pointer",textAlign:"left"}},
                             h("div",{style:{width:15,height:15,borderRadius:4,flexShrink:0,
-                              border:"2px solid "+(on?"#E65100":C.border),
-                              background:on?"#E65100":"#fff",display:"flex",
+                              border:"2px solid "+(on?PUR:"#D0D0D0"),
+                              background:on?PUR:"#fff",display:"flex",
                               alignItems:"center",justifyContent:"center"}},
-                              on&&h("span",{style:{color:"#fff",fontSize:9,fontWeight:900}},"✓")),
-                            h("span",{style:{flex:1,fontSize:10,fontWeight:on?700:400}},"▸ "+f.label),
-                            h("span",{style:{fontSize:9,fontWeight:700,
-                              color:on?"#E65100":C.muted}},on?"T/O":"dine-in")
+                              on&&h("span",{style:{color:"#fff",fontSize:12,fontWeight:900}},"✓")),
+                            h("span",{style:{flex:1,fontSize:13,fontWeight:on?700:400}},"▸ "+f.label),
+                            h("span",{style:{fontSize:12,fontWeight:700,
+                              color:on?PUR:"#555"}},on?"T/O":"dine-in")
                           );
                         }
                         return h("div",{key:fi,
                           style:{display:"flex",gap:8,alignItems:"center",padding:"4px 2px 4px 10px"}},
-                          h("span",{style:{flex:1,fontSize:10}},"▸ "+f.label+" ×"+f.qty),
+                          h("span",{style:{flex:1,fontSize:13}},"▸ "+f.label+" ×"+f.qty),
                           h("div",{style:{display:"flex",alignItems:"center",gap:6}},
                             h("button",{onClick:()=>setP(fi,Math.max(0,n-1)),
                               style:{width:20,height:20,borderRadius:5,border:"none",
-                                background:n>0?"#E65100":"#eee",color:n>0?"#fff":"#bbb",
+                                background:n>0?PUR:"#eee",color:n>0?"#fff":"#bbb",
                                 fontSize:12,fontWeight:900,cursor:"pointer"}},"−"),
-                            h("span",{style:{minWidth:26,textAlign:"center",fontSize:9,
-                              fontWeight:800,color:n>0?"#E65100":C.muted}},n+"/"+f.qty),
+                            h("span",{style:{minWidth:26,textAlign:"center",fontSize:12,
+                              fontWeight:800,color:n>0?PUR:"#555"}},n+"/"+f.qty),
                             h("button",{onClick:()=>setP(fi,Math.min(f.qty,n+1)),
                               style:{width:20,height:20,borderRadius:5,border:"none",
-                                background:n<f.qty?"#E65100":"#eee",color:n<f.qty?"#fff":"#bbb",
+                                background:n<f.qty?PUR:"#eee",color:n<f.qty?"#fff":"#bbb",
                                 fontSize:12,fontWeight:900,cursor:"pointer"}},"+")
                           )
                         );
@@ -10857,21 +10860,21 @@ function App(){
                   style:{display:"flex",width:"100%",gap:8,alignItems:"center",
                     padding:"6px 2px",background:"none",border:"none",
                     cursor:"pointer",textAlign:"left",
-                    borderBottom:"1px dashed "+C.border}},
+                    borderBottom:"1px dashed "+"#D0D0D0"}},
                   h("div",{style:{width:16,height:16,borderRadius:4,flexShrink:0,
-                    border:"2px solid "+(on?"#E65100":C.border),background:on?"#E65100":"#fff",
+                    border:"2px solid "+(on?PUR:"#D0D0D0"),background:on?PUR:"#fff",
                     display:"flex",alignItems:"center",justifyContent:"center"}},
-                    on&&h("span",{style:{color:"#fff",fontSize:9,fontWeight:900}},"✓")),
+                    on&&h("span",{style:{color:"#fff",fontSize:12,fontWeight:900}},"✓")),
                   h("div",{style:{flex:1}},
-                    h("div",{style:{fontSize:10,fontWeight:on?700:400}},lineLabel(i)),
-                    lineSub(i)&&h("div",{style:{fontSize:9,color:C.muted}},lineSub(i))
+                    h("div",{style:{fontSize:13,fontWeight:on?700:400}},lineLabel(i)),
+                    lineSub(i)&&h("div",{style:{fontSize:12,color:"#555"}},lineSub(i))
                   ),
-                  h("span",{style:{fontSize:9,fontWeight:700,color:on?"#E65100":C.muted}},
+                  h("span",{style:{fontSize:12,fontWeight:700,color:on?PUR:"#555"}},
                     on?"📦 T/O":"🪑 dine-in")
                 );
               }),
-              h("div",{style:{fontSize:9,color:C.muted,marginTop:5,paddingTop:5,
-                borderTop:"1px dashed "+C.border,fontWeight:700}},
+              h("div",{style:{fontSize:12,color:"#555",marginTop:5,paddingTop:5,
+                borderTop:"1px dashed "+"#D0D0D0",fontWeight:700}},
                 "T/O total: "+toCount+" pcs")
             )
           )
@@ -10880,7 +10883,7 @@ function App(){
         h("div",{style:{marginBottom:user?.role==="owner"?10:0,
           overflow:"hidden",maxHeight:user?.role==="owner"?"100px":"0px",
           transition:"max-height .2s"}},
-          h("div",{style:{fontSize:9,fontWeight:800,color:C.muted,letterSpacing:1,marginBottom:6}},"PRICE TYPE"),
+          h("div",{style:{fontSize:12,fontWeight:800,color:"#555",letterSpacing:1,marginBottom:6}},"PRICE TYPE"),
           h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}},
             [
               {id:"retail",label:"Retail",sub:"Regular"},
@@ -10888,86 +10891,87 @@ function App(){
               {id:"wholesale",label:"Wholesale",sub:"Custom ₱"},
             ].map(pt=>h("button",{key:pt.id,onClick:()=>setPriceType(pt.id),
               style:{padding:"7px 4px",borderRadius:8,textAlign:"center",cursor:"pointer",border:"none",
-                background:priceType===pt.id?C.primary:"#f5f5f5",
-                color:priceType===pt.id?"#fff":C.text}},
-              h("div",{style:{fontSize:10,fontWeight:800}},pt.label),
-              h("div",{style:{fontSize:8,opacity:.7}},pt.sub)
+                background:priceType===pt.id?PUR:"#F7F7F7",
+                color:priceType===pt.id?"#fff":"#111"}},
+              h("div",{style:{fontSize:13,fontWeight:800}},pt.label),
+              h("div",{style:{fontSize:11,opacity:.7}},pt.sub)
             ))
           )
         ),
         // Payment method
         h("div",{style:{marginBottom:10}},
-          h("div",{style:{fontSize:9,fontWeight:800,color:C.muted,letterSpacing:1,marginBottom:6}},"PAYMENT METHOD"),
+          h("div",{style:{fontSize:12,fontWeight:800,color:"#555",letterSpacing:1,marginBottom:6}},"PAYMENT METHOD"),
           h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:5}},
             [
-              {id:"cash",     label:"Cash",          icon:"💵", color:"#2E7D32"},
-              {id:"gcash",    label:"GCash",         icon:"💙", color:"#0070FF"},
-              {id:"maya",     label:"Maya/PayMaya",  icon:"🟢", color:"#00C853"},
-              {id:"bank",     label:"Bank Transfer", icon:"🏦", color:"#1565C0"},
-              {id:"foodpanda",label:"FoodPanda",     icon:"🐼", color:"#D70F64"},
-              {id:"grabfood", label:"GrabFood",      icon:"🟢", color:"#00B14F"},
+              {id:"cash",     label:"Cash",          icon:"💵", color:PUR},
+              {id:"gcash",    label:"GCash",         icon:"💙", color:PUR},
+              {id:"maya",     label:"Maya/PayMaya",  icon:"🟢", color:PUR},
+              {id:"bank",     label:"Bank Transfer", icon:"🏦", color:PUR},
+              {id:"foodpanda",label:"FoodPanda",     icon:"🐼", color:PUR},
+              {id:"grabfood", label:"GrabFood",      icon:"🟢", color:PUR},
             ].map(pm=>h("button",{key:pm.id,onClick:()=>setChkPay(pm.id),
-              style:{padding:"8px 4px",borderRadius:8,border:`2px solid ${chkPay===pm.id?pm.color:C.border}`,
+              style:{padding:"8px 4px",borderRadius:8,border:`2px solid ${chkPay===pm.id?pm.color:"#D0D0D0"}`,
                 background:chkPay===pm.id?pm.color+"18":"#fff",
-                color:chkPay===pm.id?pm.color:C.muted,
-                fontWeight:chkPay===pm.id?800:500,fontSize:10,cursor:"pointer",
+                color:chkPay===pm.id?pm.color:"#555",
+                fontWeight:chkPay===pm.id?800:500,fontSize:13,cursor:"pointer",
                 display:"flex",flexDirection:"column",alignItems:"center",gap:2}},
               h("span",{style:{fontSize:16}},pm.icon),
               pm.label
             ))
           ),
           // Hide cash tendered for non-cash
-          chkPay!=="cash"&&h("div",{style:{marginTop:6,padding:"7px 11px",background:"#E3F2FD",borderRadius:8,fontSize:10,color:C.info,fontWeight:600}},
+          chkPay!=="cash"&&h("div",{style:{marginTop:6,padding:"7px 11px",background:"#F3E9F7",borderRadius:8,fontSize:13,color:PUR,fontWeight:600}},
             "📱 "+{gcash:"GCash",maya:"Maya/PayMaya",bank:"Bank Transfer",foodpanda:"FoodPanda",grabfood:"GrabFood"}[chkPay]+" — no change needed"
           )
         ),
+        // ── STEP 2 ───────────────────────────────────────────
         // Customer + table
-        h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}},
+        chkStep===2&&h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}},
           h("div",null,
-            h("div",{style:{fontSize:9,fontWeight:800,color:C.muted,letterSpacing:1,marginBottom:4}},"CUSTOMER"),
-            h("input",{value:chkCust,onChange:e=>setChkCust(e.target.value),placeholder:"Optional",style:{width:"100%",padding:"8px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:11,outline:"none",boxSizing:"border-box"}})
+            h("div",{style:{fontSize:12,fontWeight:800,color:"#555",letterSpacing:1,marginBottom:4}},"CUSTOMER"),
+            h("input",{value:chkCust,onChange:e=>setChkCust(e.target.value),placeholder:"Optional",style:{width:"100%",padding:"8px 10px",border:"1px solid "+"#D0D0D0",borderRadius:8,fontSize:11,outline:"none",boxSizing:"border-box"}})
           ),
           h("div",null,
-            h("div",{style:{fontSize:9,fontWeight:800,color:C.muted,letterSpacing:1,marginBottom:4}},chkType==="delivery"?"ADDRESS":"TABLE NO."),
-            h("input",{value:chkTable,onChange:e=>setChkTable(e.target.value),placeholder:"e.g. T3",style:{width:"100%",padding:"8px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:11,outline:"none",boxSizing:"border-box"}})
+            h("div",{style:{fontSize:12,fontWeight:800,color:"#555",letterSpacing:1,marginBottom:4}},chkType==="delivery"?"ADDRESS":"TABLE NO."),
+            h("input",{value:chkTable,onChange:e=>setChkTable(e.target.value),placeholder:"e.g. T3",style:{width:"100%",padding:"8px 10px",border:"1px solid "+"#D0D0D0",borderRadius:8,fontSize:11,outline:"none",boxSizing:"border-box"}})
           )
         ),
         // Discounts
-        h("div",{style:{marginBottom:10}},
-          h("div",{style:{fontSize:9,fontWeight:800,color:C.muted,letterSpacing:1,marginBottom:6}},"DISCOUNT"),
+        chkStep===2&&h("div",{style:{marginBottom:10}},
+          h("div",{style:{fontSize:12,fontWeight:800,color:"#555",letterSpacing:1,marginBottom:6}},"DISCOUNT"),
           h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5}},
             DISCS.map(d=>h("button",{key:d.id,onClick:()=>{setChkDisc(d);if(d.id==="none")setChkDiscTargets([]);},
-              style:{padding:"7px 9px",borderRadius:8,border:`2px solid ${chkDisc.id===d.id?C.primary:C.border}`,
-                background:chkDisc.id===d.id?"#FFF0F0":"#fff",color:chkDisc.id===d.id?C.primary:C.text,
-                fontWeight:600,fontSize:10,cursor:"pointer",textAlign:"left",display:"flex",justifyContent:"space-between"}},
+              style:{padding:"7px 9px",borderRadius:8,border:`2px solid ${chkDisc.id===d.id?PUR:"#D0D0D0"}`,
+                background:chkDisc.id===d.id?"#F3E9F7":"#fff",color:chkDisc.id===d.id?PUR:"#111",
+                fontWeight:600,fontSize:13,cursor:"pointer",textAlign:"left",display:"flex",justifyContent:"space-between"}},
               h("span",null,d.label),
-              d.rate>0&&h("span",{style:{color:C.muted,fontSize:9}},Math.round(d.rate*100)+"%")
+              d.rate>0&&h("span",{style:{color:"#555",fontSize:12}},Math.round(d.rate*100)+"%")
             ))
           ),
           // Custom % input
           chkDisc.custom&&h("div",{style:{display:"flex",gap:6,alignItems:"center",marginTop:5}},
             h("input",{type:"number",onFocus:e=>e.target.select(),min:0,max:100,value:chkDiscPct,
               onChange:e=>setChkDiscPct(e.target.value),placeholder:"e.g. 15",
-              style:{flex:1,padding:"8px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:11,outline:"none",boxSizing:"border-box"}}),
-            h("span",{style:{fontSize:13,fontWeight:900,color:C.primary}},"%")
+              style:{flex:1,padding:"8px 10px",border:"1px solid "+"#D0D0D0",borderRadius:8,fontSize:11,outline:"none",boxSizing:"border-box"}}),
+            h("span",{style:{fontSize:13,fontWeight:900,color:PUR}},"%")
           ),
           discRate>0&&h("input",{value:chkDiscId,onChange:e=>setChkDiscId(e.target.value),
             placeholder:chkDisc.label+" ID",
-            style:{width:"100%",padding:"8px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:11,outline:"none",boxSizing:"border-box",marginTop:5}}),
+            style:{width:"100%",padding:"8px 10px",border:"1px solid "+"#D0D0D0",borderRadius:8,fontSize:11,outline:"none",boxSizing:"border-box",marginTop:5}}),
           // Scope: whole order vs selected lines
           discRate>0&&h("div",{style:{marginTop:7}},
-            h("div",{style:{fontSize:9,fontWeight:800,color:C.muted,letterSpacing:1,marginBottom:5}},"APPLY TO"),
+            h("div",{style:{fontSize:12,fontWeight:800,color:"#555",letterSpacing:1,marginBottom:5}},"APPLY TO"),
             h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5}},
               h("button",{onClick:()=>setChkDiscTargets([]),
-                style:{padding:"7px 9px",borderRadius:8,fontSize:10,fontWeight:600,cursor:"pointer",
-                  border:"2px solid "+(discAll?C.primary:C.border),
-                  background:discAll?"#FFF0F0":"#fff",color:discAll?C.primary:C.text}},"Whole order"),
+                style:{padding:"7px 9px",borderRadius:8,fontSize:13,fontWeight:600,cursor:"pointer",
+                  border:"2px solid "+(discAll?PUR:"#D0D0D0"),
+                  background:discAll?"#F3E9F7":"#fff",color:discAll?PUR:"#111"}},"Whole order"),
               h("button",{onClick:()=>{if(discAll&&cart.length)setChkDiscTargets([cart[0].cartId]);},
-                style:{padding:"7px 9px",borderRadius:8,fontSize:10,fontWeight:600,cursor:"pointer",
-                  border:"2px solid "+(!discAll?C.primary:C.border),
-                  background:!discAll?"#FFF0F0":"#fff",color:!discAll?C.primary:C.text}},"Selected  items only")
+                style:{padding:"7px 9px",borderRadius:8,fontSize:13,fontWeight:600,cursor:"pointer",
+                  border:"2px solid "+(!discAll?PUR:"#D0D0D0"),
+                  background:!discAll?"#F3E9F7":"#fff",color:!discAll?PUR:"#111"}},"Selected  items only")
             ),
-            !discAll&&h("div",{style:{background:C.bg,borderRadius:8,padding:"7px 9px",marginTop:5}},
+            !discAll&&h("div",{style:{background:"#F7F7F7",borderRadius:8,padding:"7px 9px",marginTop:5}},
               cart.map(function(i){
                 const on=discTargets.includes(i.cartId);
                 return h("button",{key:i.cartId,
@@ -10975,30 +10979,30 @@ function App(){
                   style:{display:"flex",width:"100%",gap:8,alignItems:"center",padding:"5px 2px",
                     background:"none",border:"none",cursor:"pointer",textAlign:"left"}},
                   h("div",{style:{width:16,height:16,borderRadius:4,flexShrink:0,
-                    border:"2px solid "+(on?C.primary:C.border),background:on?C.primary:"#fff",
+                    border:"2px solid "+(on?PUR:"#D0D0D0"),background:on?PUR:"#fff",
                     display:"flex",alignItems:"center",justifyContent:"center"}},
-                    on&&h("span",{style:{color:"#fff",fontSize:9,fontWeight:900}},"✓")),
-                  h("span",{style:{flex:1,fontSize:10,fontWeight:on?700:400}},i.qty+"x "+i.name),
-                  h("span",{style:{fontSize:10,color:C.muted}},"₱"+peso(lineAmt(i)))
+                    on&&h("span",{style:{color:"#fff",fontSize:12,fontWeight:900}},"✓")),
+                  h("span",{style:{flex:1,fontSize:13,fontWeight:on?700:400}},i.qty+"x "+i.name),
+                  h("span",{style:{fontSize:13,color:"#555"}},"₱"+peso(lineAmt(i)))
                 );
               }),
-              h("div",{style:{fontSize:9,color:C.muted,marginTop:5,paddingTop:5,
-                borderTop:"1px dashed "+C.border}},
+              h("div",{style:{fontSize:12,color:"#555",marginTop:5,paddingTop:5,
+                borderTop:"1px dashed "+"#D0D0D0"}},
                 "Base ₱"+peso(chkDiscBase)+" × "+Math.round(discRate*100)+"% = -₱"+peso(chkDiscAmt))
             )
           )
         ),
         // Totals
-        h("div",{style:{background:C.bg,borderRadius:10,padding:"10px 13px",marginBottom:10}},
-          h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:2,color:C.muted}},h("span",null,"Subtotal"),h("span",null,"₱"+peso(chkSub))),
-          chkDiscAmt>0&&h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:2,color:C.danger}},
+        h("div",{style:{background:"#F7F7F7",borderRadius:10,padding:"10px 13px",marginBottom:10}},
+          h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:2,color:"#555"}},h("span",null,"Subtotal"),h("span",null,"₱"+peso(chkSub))),
+          chkDiscAmt>0&&h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:2,color:"#111"}},
             h("span",null,"Discount "+Math.round(discRate*100)+"%"+(discAll?"":" ("+discTargets.length+"  item"+(discTargets.length>1?"s":"")+")")),
             h("span",null,"-₱"+peso(chkDiscAmt))),
-          h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:14,fontWeight:900,color:C.primary,paddingTop:6,borderTop:"1px dashed "+C.border}},h("span",null,"TOTAL"),h("span",null,"₱"+peso(chkTotal)))
+          h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:14,fontWeight:900,color:PUR,paddingTop:6,borderTop:"1px dashed "+"#D0D0D0"}},h("span",null,"TOTAL"),h("span",null,"₱"+peso(chkTotal)))
         ),
         // Cash tendered — always rendered, hidden via display:none
-        h("div",{style:{display:chkPay==="cash"?"block":"none"}},
-          h("div",{style:{fontSize:9,fontWeight:800,color:C.muted,letterSpacing:1,marginBottom:5}},"CASH TENDERED"),
+        h("div",{style:{display:(chkStep===2&&chkPay==="cash")?"block":"none"}},
+          h("div",{style:{fontSize:12,fontWeight:800,color:"#555",letterSpacing:1,marginBottom:5}},"CASH TENDERED"),
           // Quick amount buttons
           h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:5,marginBottom:7}},
             [50,100,200,500,1000,Math.ceil((chkTotal||0)/50)*50]
@@ -11010,10 +11014,10 @@ function App(){
                 if(inp){inp.value=String(amt);}
               },
               style:{padding:"8px 4px",borderRadius:8,
-                border:`2px solid ${Number(chkCash)===amt?C.primary:C.border}`,
-                background:Number(chkCash)===amt?`${C.primary}15`:"#fff",
+                border:`2px solid ${Number(chkCash)===amt?PUR:"#D0D0D0"}`,
+                background:Number(chkCash)===amt?`${PUR}15`:"#fff",
                 cursor:"pointer",fontWeight:700,fontSize:13,
-                color:Number(chkCash)===amt?C.primary:C.text}},
+                color:Number(chkCash)===amt?PUR:"#111"}},
               "₱"+amt
             ))
           ),
@@ -11022,42 +11026,57 @@ function App(){
             value:chkCash||"",
             onChange:e=>setChkCash(e.target.value),
             placeholder:"Enter amount",
-            style:{width:"100%",padding:"10px 12px",border:"2px solid "+C.primary,
+            style:{width:"100%",padding:"10px 12px",border:"2px solid "+PUR,
               borderRadius:9,fontSize:15,fontWeight:700,outline:"none",
-              boxSizing:"border-box",color:C.primary}}),
-          h("div",{style:{marginTop:5,padding:"8px 12px",background:"#E8F5E9",borderRadius:8,
-            fontSize:13,fontWeight:800,color:C.success,
+              boxSizing:"border-box",color:PUR}}),
+          h("div",{style:{marginTop:5,padding:"8px 12px",background:"#F3E9F7",borderRadius:8,
+            fontSize:13,fontWeight:800,color:PUR,
             display:chkCash&&parseFloat(chkCash)>=chkTotal?"flex":"none",
             justifyContent:"space-between"}},
             h("span",null,"Change:"),
             h("span",null,"₱"+peso((parseFloat(chkCash||0)-chkTotal)))
           ),
-          h("div",{style:{marginTop:5,padding:"8px 12px",background:"#FFEBEE",borderRadius:8,
-            fontSize:12,color:C.danger,fontWeight:700,
+          h("div",{style:{marginTop:5,padding:"8px 12px",background:"#fff",borderRadius:8,
+            fontSize:12,color:"#111",fontWeight:700,
             display:chkCash&&parseFloat(chkCash)<chkTotal?"block":"none"}},
             "Short ₱"+peso((chkTotal-parseFloat(chkCash||0)))
           ),
-          h("div",{style:{marginTop:5,padding:"8px 12px",background:"#f5f5f5",borderRadius:8,
-            fontSize:11,color:C.muted,textAlign:"center"}},
+          h("div",{style:{marginTop:5,padding:"8px 12px",background:"#F7F7F7",borderRadius:8,
+            fontSize:11,color:"#555",textAlign:"center"}},
             "Tap outside input to see change/short")
         )
       ),
-      h("div",{style:{padding:"11px 18px 17px",borderTop:"1px solid "+C.border}},
-        // Exact amount button
-        h("button",{
+      h("div",{style:{padding:"11px 18px 17px",borderTop:"1px solid "+"#D0D0D0"}},
+        // Exact amount only matters once cash is on screen
+        chkStep===2&&chkPay==="cash"&&h("button",{
           onClick:()=>setChkCash(String(chkTotal.toFixed(2))),
-          style:{width:"100%",padding:"9px",marginBottom:8,
-            background:"#E3F2FD",border:"1px solid #90CAF9",
-            borderRadius:8,color:"#1565C0",
-            fontSize:12,fontWeight:700,cursor:"pointer"}},
-          "💵 Exact Amount — ₱"+peso(chkTotal)),
+          style:{width:"100%",padding:"12px",marginBottom:9,
+            background:"#fff",border:"2px solid "+PUR,
+            borderRadius:9,color:PUR,
+            fontSize:14,fontWeight:800,cursor:"pointer"}},
+          "Exact Amount — ₱"+peso(chkTotal)),
+
+        // Step 1 ends here: one big Next, nothing else competing with it
+        chkStep===1&&h("button",{
+          onClick:()=>setChkStep(2),
+          style:{width:"100%",padding:"15px",borderRadius:10,border:"none",
+            background:PUR,color:"#fff",fontSize:17,fontWeight:800,
+            cursor:"pointer",marginBottom:9}},
+          "Next →"),
+
+        chkStep===2&&h("button",{
+          onClick:()=>setChkStep(1),
+          style:{width:"100%",padding:"10px",marginBottom:9,
+            background:"#fff",border:"1px solid #D0D0D0",borderRadius:9,
+            color:"#111",fontSize:13,fontWeight:700,cursor:"pointer"}},
+          "← Back"),
 
         // Hold vs cancel — same row so the safe option is as easy to reach
-        h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}},
+        chkStep===1&&h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}},
           h("button",{
             onClick:()=>holdOrder(chkCust||chkTable),
-            style:{padding:"9px",background:"#FFF8E1",border:"1px solid #FFE082",
-              borderRadius:8,color:"#E65100",fontSize:12,fontWeight:700,cursor:"pointer"}},
+            style:{padding:"9px",background:"#fff",border:"1px solid #D0D0D0",
+              borderRadius:8,color:PUR,fontSize:12,fontWeight:700,cursor:"pointer"}},
             "⏸ Hold Order"),
           h("button",{
             onClick:()=>{
@@ -11066,8 +11085,8 @@ function App(){
               setModal(null);
               showT("Transaction cancelled","warn");
             },
-            style:{padding:"9px",background:"#FFEBEE",border:"1px solid #FFCDD2",
-              borderRadius:8,color:C.danger,fontSize:12,fontWeight:700,cursor:"pointer"}},
+            style:{padding:"9px",background:"#fff",border:"1px solid #D0D0D0",
+              borderRadius:8,color:"#111",fontSize:12,fontWeight:700,cursor:"pointer"}},
             "🚫 Cancel")
         ),
 
@@ -11089,7 +11108,7 @@ function App(){
             setTimeout(placeOrder,50);
           },
           style:{width:"100%",padding:"13px",opacity:cartShort().length?.5:1,
-            background:`linear-gradient(135deg,${C.primary},${C.dark})`,
+            background:`linear-gradient(135deg,${PUR},${C.dark})`,
             border:"none",borderRadius:10,color:"#fff",
             fontSize:14,fontWeight:800,cursor:"pointer"}},
           "✓ Confirm & Print Receipt"),
@@ -11326,7 +11345,7 @@ function App(){
             }
             if(p==="inventory"){
               cnt=inventory.filter(function(i){
-                return (i.stock||0)<=(i.minStock||10)&&(i.stock||0)>=0;}).length;
+                return (Number(i.minStock)||0)>0&&(i.stock||0)<=(Number(i.minStock)||0)&&(i.stock||0)>=0;}).length;
             }
             if(p==="po_monitor"){
               cnt=advances.filter(function(a){
@@ -12965,7 +12984,7 @@ function App(){
         page==="inventory"&&h("div",null,
           // Low stock alert banner
           (()=>{
-            const lowItems=inventory.filter(i=>(i.stock||0)<=(i.minStock||10)&&(i.stock||0)>=0);
+            const lowItems=inventory.filter(i=>(Number(i.minStock)||0)>0&&(i.stock||0)<=(Number(i.minStock)||0)&&(i.stock||0)>=0);
             return lowItems.length>0&&h("div",{style:{
               background:"linear-gradient(135deg,#E65100,#BF360C)",
               borderRadius:12,padding:"12px 16px",marginBottom:12,
@@ -13032,7 +13051,7 @@ function App(){
                 });
                 const base=invView?invViewData:inventory;
                 const counts={
-                  low:base.filter(i=>(i.stock||0)<=(i.minStock||0)).length,
+                  low:base.filter(i=>(Number(i.minStock)||0)>0&&(i.stock||0)<=(Number(i.minStock)||0)).length,
                   zero:base.filter(i=>(i.stock||0)===0).length,
                   unused:base.filter(i=>!usedIngs.has(i.id)).length,
                   noprice:base.filter(i=>!(Number(i.price)||0)).length
@@ -13076,7 +13095,7 @@ function App(){
           ),
           h("div",{style:{display:"flex",gap:9,marginBottom:12}},
             h(Stat,{label:"Total Items",value:inventory.length,icon:"📦",color:C.info}),
-            h(Stat,{label:"Low Stock",value:inventory.filter(i=>(i.stock||0)<(i.minStock||0)).length,sub:"Below min level",icon:"⚠️",color:C.danger}),
+            h(Stat,{label:"Low Stock",value:inventory.filter(i=>(Number(i.minStock)||0)>0&&(i.stock||0)<(Number(i.minStock)||0)).length,sub:"Below min level",icon:"⚠️",color:C.danger}),
             (function(){
               const src=invView?invViewData:inventory;
               const atCost  =src.reduce((a,i)=>a+(Number(i.stock)||0)*(Number(i.cost)||0),0);
@@ -13224,14 +13243,14 @@ function App(){
                 if(q&&!(i.name||"").toLowerCase().includes(q)
                   &&!(i.cat||"").toLowerCase().includes(q))return false;
                 if(invCat&&(i.cat||"Other")!==invCat)return false;
-                if(invFlag==="low"&&!((i.stock||0)<=(i.minStock||0)))return false;
+                if(invFlag==="low"&&!((Number(i.minStock)||0)>0&&(i.stock||0)<=(Number(i.minStock)||0)))return false;
                 if(invFlag==="zero"&&(i.stock||0)!==0)return false;
                 if(invFlag==="unused"&&usedIngs.has(i.id))return false;
                 if(invFlag==="noprice"&&(Number(i.price)||0)>0)return false;
                 return true;
               });
             })().map( item=>{
-              const low=( item.stock||0)<( item.minStock||0);
+              const low=(Number( item.minStock)||0)>0&&( item.stock||0)<(Number( item.minStock)||0);
               return h("div",{key: item.id,style:{display:"grid",gridTemplateColumns:"2fr 90px 80px 80px 80px 70px 110px",padding:"9px 14px",borderBottom:"1px solid #f9f9f9",alignItems:"center",background:low?"#FFF8F8":"#fff"}},
                 h("div",{style:{fontWeight:600,fontSize:11,display:"flex",alignItems:"center",gap:5}},low&&h("span",null,"⚠️"), item.name),
                 h("div",null,
@@ -15348,7 +15367,7 @@ function App(){
         h("div",{style:{padding:"10px 14px 16px",borderTop:"1px solid "+C.border,
           display:cart.length>0?"block":"none"}},
           h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:12,fontWeight:800,marginBottom:9}},h("span",null,"Subtotal"),h("span",null,"₱"+peso(cartTotal))),
-          h("button",{onClick:()=>{setCartOpen(false);setModal("checkout");},style:{width:"100%",padding:"12px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:10,color:"#fff",fontSize:12,fontWeight:800,cursor:"pointer"}},"Proceed to Checkout →")
+          h("button",{onClick:()=>{setCartOpen(false);setChkStep(1);setModal("checkout");},style:{width:"100%",padding:"12px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:10,color:"#fff",fontSize:12,fontWeight:800,cursor:"pointer"}},"Proceed to Checkout →")
         )
       )
     ),
