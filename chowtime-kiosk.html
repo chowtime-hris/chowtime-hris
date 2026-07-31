@@ -788,14 +788,30 @@ async function doAction(action){
   const timeDisp=now.toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
   const photo=snapPhoto();
 
-  // Write DTR
+  // Write DTR — prevent duplicate clock-in for same day
   const pKey=getPeriodKey(dateStr);
   if(pKey){
     const dKey=pKey+'__'+empId;
     if(!dtrData[dKey]) dtrData[dKey]={};
     if(!dtrData[dKey][dateStr]) dtrData[dKey][dateStr]={};
     const fmap={in:'in',out:'out',bstart:'bstart',bend:'bend'};
-    dtrData[dKey][dateStr][fmap[action]]=timeStr;
+    const field = fmap[action];
+
+    // ── Duplicate prevention ──────────────────────────────────
+    // If already clocked in today and trying to clock in again — block it
+    if(action==='in' && dtrData[dKey][dateStr]['in']){
+      const existingTime = dtrData[dKey][dateStr]['in'];
+      showToast(`⚠️ Already clocked in at ${existingTime}. Tap Clock Out instead.`);
+      return;
+    }
+    // If already clocked out today and trying to clock out again — block it
+    if(action==='out' && dtrData[dKey][dateStr]['out']){
+      const existingTime = dtrData[dKey][dateStr]['out'];
+      showToast(`⚠️ Already clocked out at ${existingTime}.`);
+      return;
+    }
+
+    dtrData[dKey][dateStr][field]=timeStr;
     lsSet('dtrData',dtrData);
   }
 
