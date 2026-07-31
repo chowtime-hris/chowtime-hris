@@ -5725,7 +5725,7 @@ async function postReceivedToStock(db,po,byName){
         source:"TRANSFER",ref:po.poNum||"",
         branch:invBr,by:byName||"recovery",
         date:localDate(),timestamp:serverTimestamp()
-      });
+      ,at:serverTimestamp()});
     }catch(e){ res.errors.push((it.name||it.id)+": "+String(e&&e.message||e)); }
   }
 
@@ -7987,7 +7987,7 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
               source:"TRANSFER",ref:po.poNum||"",
               branch:"ct-main",by:user.name,
               date:localDate(),timestamp:serverTimestamp()
-            });
+            ,at:serverTimestamp()});
           }catch(e2){console.warn("main deduct failed",it.id,e2);}
         }
         try{ await updateDoc(doc(db,"advances",po._docId),{stockIssued:true}); }catch(e3){}
@@ -8847,15 +8847,27 @@ function InvLogPage({db,user,branchId,branches,showT}){
       ? "inventory_log"
       : "inventory_log_"+selBranch;
     try{
+      // orderBy drops any document missing that field, and the log has been
+      // written by several paths that used `timestamp` instead of `at` — those
+      // entries existed but never appeared. Read plainly, sort in memory.
       const q = query(
         collection(db,col),
-        orderBy("at","desc"),
-        limit(200)
+        limit(300)
       );
       const unsub = onSnapshot(q, snap=>{
-        setLogs(snap.docs.map(d=>({...d.data(),_id:d.id})));
+        const rows=snap.docs.map(d=>({...d.data(),_id:d.id}));
+        const t=(r)=>((r.at&&r.at.seconds)||(r.timestamp&&r.timestamp.seconds)||0);
+        rows.sort((a,b)=>{
+          const d=t(b)-t(a);
+          if(d)return d;
+          return String(b.date||"").localeCompare(String(a.date||""));
+        });
+        setLogs(rows);
         setLoading(false);
-      },()=>setLoading(false));
+      },(err)=>{
+        console.error("inventory log query failed:",err);
+        setLoading(false);
+      });
       return()=>unsub();
     }catch(e){setLoading(false);}
   },[selBranch]);
@@ -13268,7 +13280,7 @@ function App(){
                             source:batchReason==="Received"?"TRANSFER":"ADJUST",
                             ref:"",branch:invView||branchId,by:user.name,
                             date:localDate(),timestamp:serverTimestamp()
-                          });
+                          ,at:serverTimestamp()});
                         }catch(e3){console.warn("batch log failed",lg.id,e3);}
                       }
 
@@ -15205,7 +15217,7 @@ function App(){
                                 source:"TRANSFER",ref:po.poNum||"",
                                 branch:"ct-main",by:user.name,
                                 date:localDate(),timestamp:serverTimestamp()
-                              });
+                              ,at:serverTimestamp()});
                             }catch(e2){console.warn("restore failed",it.id,e2);}
                           }
                         }
