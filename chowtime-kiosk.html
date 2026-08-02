@@ -783,7 +783,9 @@ async function doAction(action){
 
   const now=new Date();
   const timeStr=now.toTimeString().slice(0,5);
-  const dateStr=now.toISOString().split('T')[0];
+  // Use local date string to avoid UTC timezone shift (Philippines UTC+8)
+  const y=now.getFullYear(), mo=String(now.getMonth()+1).padStart(2,'0'), dy=String(now.getDate()).padStart(2,'0');
+  const dateStr=`${y}-${mo}-${dy}`;
   const today=dateStr.replace(/-/g,'');
   const timeDisp=now.toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
   const photo=snapPhoto();
@@ -907,7 +909,7 @@ window.doAction=doAction;
 //  TODAY LOG
 // ══════════════════════════════════════════════════════
 function renderTodayLog(){
-  const today=new Date().toISOString().split('T')[0];
+  const today=(() => { const _d=new Date(); return `${_d.getFullYear()}-${String(_d.getMonth()+1).padStart(2,'0')}-${String(_d.getDate()).padStart(2,'0')}`; })();
   const entries=kioskLog.filter(e=>e.date===today);
   const el=document.getElementById('today-log');
   if(!entries.length){el.innerHTML='<div class="log-empty">No entries yet today.</div>';return;}
@@ -1092,7 +1094,7 @@ if(!fbCfg?.apiKey||!fbCfg?.databaseURL){
       const [ah,am]=(data.time||'22:00').split(':').map(Number);
       const autoTime=new Date(now.getFullYear(),now.getMonth(),now.getDate(),ah,am,0);
       if(now<autoTime) return; // not yet time
-      const todayStr=now.toISOString().split('T')[0];
+      const todayStr=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
       const pKey=getPeriodKey(todayStr);
       if(!pKey) return;
       const allEmps=JSON.parse(localStorage.getItem('ct_employees')||'[]');
@@ -1139,7 +1141,7 @@ if(!fbCfg?.apiKey||!fbCfg?.databaseURL){
     });
 
     // Pull today log
-    const today=new Date().toISOString().split('T')[0].replace(/-/g,'');
+    const today=(() => { const _d=new Date(); return `${_d.getFullYear()}-${String(_d.getMonth()+1).padStart(2,'0')}-${String(_d.getDate()).padStart(2,'0')}`; })().replace(/-/g,'');
     onValue(ref(db,`kioskLog/${today}`),snap=>{
       const data=snap.val();
       if(data){
@@ -1148,7 +1150,7 @@ if(!fbCfg?.apiKey||!fbCfg?.databaseURL){
         const byTs={};local.forEach(e=>{if(e.ts)byTs[e.ts]=e;});
         const merged=all.map(e=>byTs[e.ts]?{...e,photo:byTs[e.ts].photo||''}:e);
         localStorage.setItem('ct_kioskLog',JSON.stringify(merged));
-        const dateStr=new Date().toISOString().split('T')[0];
+        const dateStr=(() => { const _d=new Date(); return `${_d.getFullYear()}-${String(_d.getMonth()+1).padStart(2,'0')}-${String(_d.getDate()).padStart(2,'0')}`; })();
         const todayE=merged.filter(e=>e.date===dateStr);
         const ACTION_LABELS={in:'🟢 Clock In',out:'🔴 Clock Out',bstart:'☕ Break Start',bend:'▶️ Break End'};
         const el=document.getElementById('today-log');
