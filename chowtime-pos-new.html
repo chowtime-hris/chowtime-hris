@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Chowtime POS — 20260802-231715</title>
+<title>Chowtime POS — 20260802-232713</title>
 <meta name="theme-color" content="#6A1B9A"/>
 <meta name="mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260802-231715 -->
+<!-- BUILD:20260802-232713 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -1476,7 +1476,7 @@ function ItemCustomizer({ item,onAdd,onClose,optionGroups=[],priceType="retail",
           ),
           h("button",{onClick:handleAdd,disabled:blocked,style:{flex:1,padding:"12px",background:blocked?"#eee":`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:10,color:blocked?"#999":"#fff",fontWeight:800,fontSize:13,cursor:blocked?"not-allowed":"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:9}},
             "Add to Order",
-            h("span",{style:{background:"rgba(255,255,255,.22)",padding:"2px 9px",borderRadius:20,fontSize:14}},"₱"+peso(lineTotal))
+            h("span",{style:{background:"#5A5A5A",padding:"2px 9px",borderRadius:20,fontSize:14}},"₱"+peso(lineTotal))
           )
         )
       )
@@ -1706,10 +1706,10 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
         h("div",null,
           h("div",{style:{color:C.accent,fontSize:12,fontWeight:700,letterSpacing:2}},"PURCHASE ORDER / SALES ORDER"),
           h("div",{style:{color:"#fff",fontSize:16,fontWeight:900,marginTop:2}},soNum),
-          h("div",{style:{color:"rgba(255,255,255,.5)",fontSize:13,marginTop:1}},
+          h("div",{style:{color:"#5A5A5A",fontSize:13,marginTop:1}},
             "From: "+( branches.find(b=>b.id===branchId)?.full||branchId)+" · Date: "+today)
         ),
-        h("button",{onClick:onClose,style:{background:"rgba(255,255,255,.15)",border:"none",color:"#fff",
+        h("button",{onClick:onClose,style:{background:"#5A5A5A",border:"none",color:"#fff",
           width:30,height:30,borderRadius:8,fontSize:18,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}},"×")
       ),
 
@@ -2824,12 +2824,12 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
           h("div",{style:{color:C.accent,fontSize:12,fontWeight:700,letterSpacing:2}},"CASH COUNT TOTAL"),
           h("div",{style:{color:"#fff",fontSize:28,fontWeight:900,margin:"6px 0"}},"₱"+peso(totalCash)),
           h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:10}},
-            h("div",{style:{background:"rgba(255,255,255,.12)",borderRadius:8,padding:"8px 10px"}},
-              h("div",{style:{color:"rgba(255,255,255,.6)",fontSize:11}},"BILLS"),
+            h("div",{style:{background:"#5A5A5A",borderRadius:8,padding:"8px 10px"}},
+              h("div",{style:{color:"#5A5A5A",fontSize:11}},"BILLS"),
               h("div",{style:{color:"#fff",fontSize:13,fontWeight:800}},"₱"+peso(billsTotal))
             ),
-            h("div",{style:{background:"rgba(255,255,255,.12)",borderRadius:8,padding:"8px 10px"}},
-              h("div",{style:{color:"rgba(255,255,255,.6)",fontSize:11}},"COINS"),
+            h("div",{style:{background:"#5A5A5A",borderRadius:8,padding:"8px 10px"}},
+              h("div",{style:{color:"#5A5A5A",fontSize:11}},"COINS"),
               h("div",{style:{color:"#fff",fontSize:13,fontWeight:800}},"₱"+peso(coinsTotal))
             )
           )
@@ -3058,13 +3058,13 @@ function CALoanPage({user,branchId,curBranch,db,hrisDB,showT,mode,hrisEmps=[]}){
       h("div",null,
         h("div",{style:{color:C.accent,fontSize:12,fontWeight:700,letterSpacing:2}},isCA?"CASH ADVANCE REQUEST":"CASH LOAN REQUEST"),
         h("div",{style:{color:"#fff",fontSize:15,fontWeight:900,marginTop:2}},user.name),
-        h("div",{style:{color:"rgba(255,255,255,.6)",fontSize:12,marginTop:1}},curBranch.full+" · "+today),
+        h("div",{style:{color:"#5A5A5A",fontSize:12,marginTop:1}},curBranch.full+" · "+today),
         hrisEmp
           ?h("div",{style:{color:"#4ade80",fontSize:12,marginTop:3}},"✅ HRIS linked: "+hrisEmp.name+" ("+hrisEmp.pos+")")
           :h("div",{style:{color:"#fbbf24",fontSize:12,marginTop:3}},"⚠️ Name not found in HRIS — admin will link manually")
       ),
       h("div",{style:{textAlign:"right"}},
-        h("div",{style:{color:"rgba(255,255,255,.5)",fontSize:12}},"OUTSTANDING BALANCE"),
+        h("div",{style:{color:"#5A5A5A",fontSize:12}},"OUTSTANDING BALANCE"),
         h("div",{style:{color:totalOwed>0?C.warning:"#4ade80",fontSize:20,fontWeight:900}},"₱"+peso(totalOwed))
       )
     ),
@@ -3528,7 +3528,7 @@ function MenuEditor({menuItems,setMenuItems,db,user,showT}){
                   boxShadow:"0 1px 3px rgba(0,0,0,.25)"}})
               )
             ),
-            ! item.avail&&h("div",{style:{position:"absolute",inset:0,background:"rgba(255,255,255,.5)",
+            ! item.avail&&h("div",{style:{position:"absolute",inset:0,background:"#5A5A5A",
               display:"flex",alignItems:"center",justifyContent:"center",fontSize:20}},"🚫")
           ),
           h("div",{style:{padding:"9px 11px"}},
@@ -5852,7 +5852,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260802-231715";
+const BUILD = "20260802-232713";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -7349,7 +7349,7 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
           "Stock: "+fmtStock( item,current)+" · ₱"+peso( item.price||0))
       ),
       h("button",{onClick:onClose,
-        style:{background:"rgba(255,255,255,.15)",border:"none",color:"#fff",
+        style:{background:"#5A5A5A",border:"none",color:"#fff",
           width:28,height:28,borderRadius:8,fontSize:16,cursor:"pointer"}},"×")
     ),
 
@@ -7831,9 +7831,9 @@ function ReceiveItemsModal({po,db,user,showT,branchId,onClose}){
       h("div",null,
         h("div",{style:{color:"rgba(255,255,255,.6)",fontSize:12,fontWeight:700,letterSpacing:2}},"RECEIVE ITEMS"),
         h("div",{style:{color:"#fff",fontSize:15,fontWeight:900}},po.drNum||po.poNum),
-        h("div",{style:{color:"rgba(255,255,255,.5)",fontSize:12}},"DR Date: "+(po.deliveryDate||po.date))
+        h("div",{style:{color:"#5A5A5A",fontSize:12}},"DR Date: "+(po.deliveryDate||po.date))
       ),
-      h("button",{onClick:onClose,style:{background:"rgba(255,255,255,.15)",border:"none",
+      h("button",{onClick:onClose,style:{background:"#5A5A5A",border:"none",
         color:"#fff",width:28,height:28,borderRadius:8,fontSize:16,cursor:"pointer"}},"x")
     ),
     hasDisc&&h("div",{style:{padding:"8px 20px",background:"#FFF3E0",
@@ -7953,12 +7953,12 @@ function PaymentModal({po,db,user,showT,onClose}){
     h("div",{style:{background:`linear-gradient(135deg,${C.success},#1B5E20)`,
       padding:"14px 20px",display:"flex",justifyContent:"space-between"}},
       h("div",null,
-        h("div",{style:{color:"rgba(255,255,255,.6)",fontSize:12,fontWeight:700,letterSpacing:2}},
+        h("div",{style:{color:"#5A5A5A",fontSize:12,fontWeight:700,letterSpacing:2}},
           "RECORD PAYMENT"),
         h("div",{style:{color:"#fff",fontSize:15,fontWeight:900,marginTop:2}},po.poNum),
-        h("div",{style:{color:"rgba(255,255,255,.5)",fontSize:12}},po.branchName||po.branch)
+        h("div",{style:{color:"#5A5A5A",fontSize:12}},po.branchName||po.branch)
       ),
-      h("button",{onClick:onClose,style:{background:"rgba(255,255,255,.15)",border:"none",
+      h("button",{onClick:onClose,style:{background:"#5A5A5A",border:"none",
         color:"#fff",width:28,height:28,borderRadius:8,fontSize:16,cursor:"pointer"}},"×")
     ),
 
@@ -8349,13 +8349,13 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
     h("div",{style:{background:`linear-gradient(135deg,#6A1B9A,#4A148C)`,
       padding:"14px 20px",display:"flex",justifyContent:"space-between",alignItems:"center"}},
       h("div",null,
-        h("div",{style:{color:"rgba(255,255,255,.6)",fontSize:12,fontWeight:700,letterSpacing:2}},
+        h("div",{style:{color:"#5A5A5A",fontSize:12,fontWeight:700,letterSpacing:2}},
           "PROCESS & ISSUE DELIVERY RECEIPT"),
         h("div",{style:{color:"#fff",fontSize:15,fontWeight:900,marginTop:2}},po.poNum),
-        h("div",{style:{color:"rgba(255,255,255,.5)",fontSize:12,marginTop:1}},
+        h("div",{style:{color:"#5A5A5A",fontSize:12,marginTop:1}},
           po.branchName||po.branch)
       ),
-      h("button",{onClick:onClose,style:{background:"rgba(255,255,255,.15)",border:"none",
+      h("button",{onClick:onClose,style:{background:"#5A5A5A",border:"none",
         color:"#fff",width:28,height:28,borderRadius:8,fontSize:16,cursor:"pointer"}},
         "×")
     ),
@@ -8622,7 +8622,7 @@ function PermissionsTab({db,showT,companySettings,setCompanySettings}){
               ROLE_LABELS[role]||role),
             h("div",{style:{display:"flex",gap:8}},
               h("button",{onClick:()=>resetRole(role),
-                style:{padding:"4px 10px",background:"rgba(255,255,255,.2)",
+                style:{padding:"4px 10px",background:"#5A5A5A",
                   border:"none",borderRadius:6,color:"#fff",
                   fontSize:13,fontWeight:700,cursor:"pointer"}},
                 "↺ Reset"),
@@ -8633,7 +8633,7 @@ function PermissionsTab({db,showT,companySettings,setCompanySettings}){
                   ROLE_NAVS[role].forEach(n=>all[n.key]=true);
                   setPerms(p=>({...p,[role]:all}));
                 },
-                style:{padding:"4px 10px",background:"rgba(255,255,255,.2)",
+                style:{padding:"4px 10px",background:"#5A5A5A",
                   border:"none",borderRadius:6,color:"#fff",
                   fontSize:13,fontWeight:700,cursor:"pointer"}},
                 "✅ All On"),
@@ -8645,7 +8645,7 @@ function PermissionsTab({db,showT,companySettings,setCompanySettings}){
                     (role==="cashier"&&n.key==="pos")?true:false);
                   setPerms(p=>({...p,[role]:none}));
                 },
-                style:{padding:"4px 10px",background:"rgba(255,255,255,.2)",
+                style:{padding:"4px 10px",background:"#5A5A5A",
                   border:"none",borderRadius:6,color:"#fff",
                   fontSize:13,fontWeight:700,cursor:"pointer"}},
                 "🚫 All Off")
@@ -10972,10 +10972,10 @@ function App(){
     h("div",{style:{textAlign:"center"}},
       h("div",{style:{fontSize:40,marginBottom:12}},"🍽️"),
       h("div",{style:{color:"#fff",fontSize:16,fontWeight:700}},"Loading ChowTime POS..."),
-      h("div",{style:{color:"rgba(255,255,255,.3)",fontSize:13,marginTop:6}},"Connecting to Firebase..."),
-      h("div",{style:{background:"rgba(255,255,255,.05)",borderRadius:8,padding:"10px 14px",marginTop:16,textAlign:"left",maxWidth:320}},
-        h("div",{style:{color:"rgba(255,255,255,.5)",fontSize:13,fontWeight:700,marginBottom:6}},"IF STUCK HERE:"),
-        h("div",{style:{color:"rgba(255,255,255,.3)",fontSize:12,lineHeight:1.8}},
+      h("div",{style:{color:"#5A5A5A",fontSize:13,marginTop:6}},"Connecting to Firebase..."),
+      h("div",{style:{background:"#5A5A5A",borderRadius:8,padding:"10px 14px",marginTop:16,textAlign:"left",maxWidth:320}},
+        h("div",{style:{color:"#5A5A5A",fontSize:13,fontWeight:700,marginBottom:6}},"IF STUCK HERE:"),
+        h("div",{style:{color:"#5A5A5A",fontSize:12,lineHeight:1.8}},
           "1. Firebase Console → Authentication → Settings → Authorized domains → Add your domain",h("br",null),
           "2. Firestore → Rules → allow read,write: if request.auth != null → Publish",h("br",null),
           "3. Try opening via GitHub Pages instead of local file"
@@ -11502,8 +11502,8 @@ function App(){
         h("div",{style:{background:`linear-gradient(135deg,${C.primary},${C.dark})`,padding:"13px 15px 10px",textAlign:"center"}},
           h("div",{style:{fontSize:19}},"🍽️"),
           h("div",{style:{color:"#fff",fontWeight:900,fontSize:15,letterSpacing:2}},"CHOWTIME"),
-          h("div",{style:{color:"rgba(255,255,255,.6)",fontSize:11,letterSpacing:2}},"FAST-FOOD CHAIN"),
-          h("div",{style:{color:"rgba(255,255,255,.5)",fontSize:12}},curBranch.full)
+          h("div",{style:{color:"#5A5A5A",fontSize:11,letterSpacing:2}},"FAST-FOOD CHAIN"),
+          h("div",{style:{color:"#5A5A5A",fontSize:12}},curBranch.full)
         ),
         h("div",{style:{padding:"12px 16px"}},
           h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:5}},
@@ -11644,11 +11644,13 @@ function App(){
   const subLocked=!subS.ok&&!(user.role==="owner"||user.role==="commissary");
 
   if(subLocked){
-    return h("div",{style:{minHeight:"100vh",background:"linear-gradient(160deg,#6A1B9A,#4A148C)",
+    return h("div",{style:{minHeight:"100vh",background:"#FFFFFF",
       display:"flex",alignItems:"center",justifyContent:"center",padding:20,
       fontFamily:"'Segoe UI',system-ui,sans-serif"}},
       h("div",{style:{background:"#fff",borderRadius:18,maxWidth:420,width:"100%",
-        padding:"30px 26px",textAlign:"center"}},
+        padding:"30px 26px",textAlign:"center",
+        border:"1px solid "+C.border,
+        boxShadow:"0 8px 30px rgba(0,0,0,.08)"}},
         h("div",{style:{fontSize:46,marginBottom:12}},"🔒"),
         h("div",{style:{fontSize:19,fontWeight:900,marginBottom:6}},
           subS.mode==="trial"?"Setup period ended"
@@ -12177,42 +12179,42 @@ function App(){
           ),
 
           // ── MAIN BRANCH REVENUE STREAMS ──
-          h("div",{style:{background:"linear-gradient(135deg,#6A1B9A,#8B0000)",
-            borderRadius:14,padding:"16px 20px",marginBottom:14,color:"#fff"}},
-            h("div",{style:{fontSize:13,fontWeight:700,opacity:.7,letterSpacing:2,marginBottom:10}},
+          h("div",{style:{background:"#FFFFFF",border:"1px solid "+C.border,
+            borderRadius:14,padding:"16px 20px",marginBottom:14,color:C.text}},
+            h("div",{style:{fontSize:13,fontWeight:800,color:C.muted,letterSpacing:2,marginBottom:10}},
               "MAIN BRANCH — REVENUE STREAMS"),
             h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12}},
               // Walk-in POS
-              h("div",{style:{background:"rgba(255,255,255,.1)",borderRadius:10,padding:"12px"}},
-                h("div",{style:{fontSize:12,opacity:.7,marginBottom:4}},"🛒 WALK-IN POS SALES"),
-                h("div",{style:{fontSize:22,fontWeight:900}},
+              h("div",{style:{background:C.bg,border:"1px solid "+C.border,borderRadius:10,padding:"12px"}},
+                h("div",{style:{fontSize:12,color:C.muted,fontWeight:700,marginBottom:4}},"🛒 WALK-IN POS SALES"),
+                h("div",{style:{fontSize:22,fontWeight:900,color:C.primary}},
                   "₱"+orders.filter(o=>o.branch==="ct-main"&&
                     o.status!=="void"&&o.status!=="cancelled"&&
                     o.date===localDate())
                     .reduce((s,o)=>s+(o.total||0),0).toLocaleString()),
-                h("div",{style:{fontSize:12,opacity:.6}},
+                h("div",{style:{fontSize:12,color:C.muted}},
                   orders.filter(o=>o.branch==="ct-main"&&
                     o.date===localDate()).length+" transactions today")
               ),
               // Commissary PO collections
-              h("div",{style:{background:"rgba(255,255,255,.1)",borderRadius:10,padding:"12px"}},
-                h("div",{style:{fontSize:12,opacity:.7,marginBottom:4}},"📦 COMMISSARY COLLECTIONS"),
-                h("div",{style:{fontSize:22,fontWeight:900}},
+              h("div",{style:{background:C.bg,border:"1px solid "+C.border,borderRadius:10,padding:"12px"}},
+                h("div",{style:{fontSize:12,color:C.muted,fontWeight:700,marginBottom:4}},"📦 COMMISSARY COLLECTIONS"),
+                h("div",{style:{fontSize:22,fontWeight:900,color:C.primary}},
                   "₱"+advances.filter(a=>a._type==="po"&&
                     (a.paidAt?.seconds||0)*1000>Date.now()-86400000)
                     .reduce((s,a)=>s+poValue(a),0).toLocaleString()),
-                h("div",{style:{fontSize:12,opacity:.6}},
+                h("div",{style:{fontSize:12,color:C.muted}},
                   advances.filter(a=>a._type==="po"&&a.paymentStatus==="Paid").length+" POs paid")
               ),
               // Wholesale/Franchisee
-              h("div",{style:{background:"rgba(255,255,255,.1)",borderRadius:10,padding:"12px"}},
-                h("div",{style:{fontSize:12,opacity:.7,marginBottom:4}},"🏭 WHOLESALE/FRANCHISEE"),
-                h("div",{style:{fontSize:22,fontWeight:900}},
+              h("div",{style:{background:C.bg,border:"1px solid "+C.border,borderRadius:10,padding:"12px"}},
+                h("div",{style:{fontSize:12,color:C.muted,fontWeight:700,marginBottom:4}},"🏭 WHOLESALE/FRANCHISEE"),
+                h("div",{style:{fontSize:22,fontWeight:900,color:C.primary}},
                   "₱"+orders.filter(o=>o.branch==="ct-main"&&
                     (o.priceType==="wholesale"||o.priceType==="franchisee")&&
                     o.date===localDate())
                     .reduce((s,o)=>s+(o.subtotal||0),0).toLocaleString()),
-                h("div",{style:{fontSize:12,opacity:.6}},"Special price type orders")
+                h("div",{style:{fontSize:12,color:C.muted}},"Special price type orders")
               )
             )
           ),
@@ -12627,7 +12629,7 @@ function App(){
                   border:"2px solid rgba(255,255,255,.5)",
                   borderRadius:20,cursor:"pointer",fontWeight:800,
                   fontSize:14,
-                  color:cart.length>0?C.primary:"rgba(255,255,255,.6)"}},
+                  color:cart.length>0?C.primary:"#5A5A5A"}},
                 cart.length>0
                   ? "🛒 "+cartCount+" · ₱"+cartTotal.toFixed(0)
                   : "🛒 Cart"
@@ -12741,7 +12743,7 @@ function App(){
                 display:"flex",justifyContent:"space-between",
                 alignItems:"center"}},
               h("div",{style:{display:"flex",alignItems:"center",gap:8}},
-                h("span",{style:{background:"rgba(255,255,255,.25)",
+                h("span",{style:{background:"#5A5A5A",
                   borderRadius:"50%",width:26,height:26,display:"flex",
                   alignItems:"center",justifyContent:"center",
                   fontSize:14,fontWeight:900}},String(cartCount)),
@@ -13201,11 +13203,11 @@ function App(){
               h("div",null,
                 h("div",{style:{color:C.accent,fontSize:11,fontWeight:700,letterSpacing:2}},isZ?"Z-READING":"X-READING"),
                 h("div",{style:{color:"#fff",fontSize:15,fontWeight:900,marginTop:2}},curBranch.full),
-                h("div",{style:{color:"rgba(255,255,255,.6)",fontSize:12,marginTop:1}},
+                h("div",{style:{color:"#5A5A5A",fontSize:12,marginTop:1}},
                   isSaved
                     ? ("Saved · "+saved.date+" · ni "+(saved.closedBy||"?"))
                     : ("Cashier: "+user.name+" · "+new Date().toLocaleDateString("en-PH"))),
-                h("div",{style:{color:"rgba(255,255,255,.4)",fontSize:11,marginTop:2}},dbReady?"✓ From Firebase ("+orders.length+" orders)":"Loading Firebase data...")
+                h("div",{style:{color:"#5A5A5A",fontSize:11,marginTop:2}},dbReady?"✓ From Firebase ("+orders.length+" orders)":"Loading Firebase data...")
               ),
               h("div",{style:{textAlign:"right"}},
                 h("div",{style:{color:C.accent,fontSize:11}},"CASH ON HAND"),
@@ -13635,7 +13637,7 @@ function App(){
               h("div",null,
                 h("div",{style:{color:"#fff",fontWeight:900,fontSize:13}},
                   "⚠️ "+lowItems.length+"  item(s) LOW on stock!"),
-                h("div",{style:{color:"rgba(255,255,255,.8)",fontSize:13,marginTop:2}},
+                h("div",{style:{color:"#111111",fontSize:13,marginTop:2}},
                   lowItems.slice(0,3).map(i=>i.name+"("+i.stock+")").join(" · ")+
                   (lowItems.length>3?" +more":""))
               ),
@@ -14356,17 +14358,17 @@ function App(){
                 "YOUR BRANCH"),
               h("div",{style:{color:"#fff",fontSize:20,fontWeight:900,marginTop:2}},
                 curBranch.name||curBranch.full),
-              h("div",{style:{color:"rgba(255,255,255,.5)",fontSize:12,marginTop:2}},
+              h("div",{style:{color:"#5A5A5A",fontSize:12,marginTop:2}},
                 curBranch.address||"")
             ),
             h("div",{style:{textAlign:"right"}},
-              h("div",{style:{color:"rgba(255,255,255,.5)",fontSize:12}},"LIVE SALES"),
+              h("div",{style:{color:"#5A5A5A",fontSize:12}},"LIVE SALES"),
               h("div",{style:{color:"#fff",fontSize:22,fontWeight:900}},
                 "₱"+myOrders.filter(function(o){
                   return o.date===localDate();
                 }).filter(function(o){return o.status!=="void"&&o.status!=="cancelled";})
                   .reduce(function(s,o){return s+(o.total||0);},0).toLocaleString()),
-              h("div",{style:{color:"rgba(255,255,255,.5)",fontSize:12}},
+              h("div",{style:{color:"#5A5A5A",fontSize:12}},
                 myOrders.filter(function(o){
                   return o.date===localDate();
                 }).length+" orders today")
@@ -14686,7 +14688,7 @@ function App(){
                         editingStaff.name||"New Staff")
                     ),
                     h("button",{onClick:()=>setEditingStaff(null),
-                      style:{background:"rgba(255,255,255,.2)",border:"none",
+                      style:{background:"#5A5A5A",border:"none",
                         color:"#fff",width:28,height:28,borderRadius:8,
                         fontSize:15,cursor:"pointer"}},"×")
                   ),
@@ -15048,9 +15050,9 @@ function App(){
           h("div",{style:{background:`linear-gradient(135deg,${C.primary},${C.dark})`,borderRadius:11,padding:"12px 16px",display:"flex",alignItems:"center",gap:10}},
             h("div",{style:{fontSize:24}},"🏪"),
             h("div",null,
-              h("div",{style:{color:"rgba(255,255,255,.5)",fontSize:12,fontWeight:700,letterSpacing:1}},"KIOSK BRANCH"),
+              h("div",{style:{color:"#5A5A5A",fontSize:12,fontWeight:700,letterSpacing:1}},"KIOSK BRANCH"),
               h("div",{style:{color:"#fff",fontSize:14,fontWeight:800}},curBranch.full),
-              h("div",{style:{color:"rgba(255,255,255,.4)",fontSize:12,marginTop:2}},"Time Kiosk will open for this branch automatically")
+              h("div",{style:{color:"#5A5A5A",fontSize:12,marginTop:2}},"Time Kiosk will open for this branch automatically")
             )
           )
         ),
@@ -15152,7 +15154,7 @@ function App(){
                     h("div",{style:{color:"#fff",fontWeight:800,fontSize:13}},
                       editingStaff._isNew?"New Staff":"Edit: "+editingStaff.name),
                     h("button",{onClick:()=>setEditingStaff(null),
-                      style:{background:"rgba(255,255,255,.2)",border:"none",
+                      style:{background:"#5A5A5A",border:"none",
                         color:"#fff",borderRadius:7,width:26,height:26,cursor:"pointer"}},"×")
                   ),
                   h("div",{style:{padding:"14px"}},
