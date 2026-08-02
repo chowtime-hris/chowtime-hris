@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Chowtime Stock Management</title>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 <style>
   :root{
@@ -148,7 +149,15 @@
   <button class="exit" id="exitBtn" style="display:none;" onclick="goHome()">⟵ Switch</button>
 </header>
 
-<main id="mainConnect" class="narrow">
+<main id="mainConnecting" class="narrow">
+  <div class="card" style="text-align:center;">
+    <h2 id="connectingTitle">Connecting…</h2>
+    <p class="sub" id="connectingMsg">Signing in securely, please wait.</p>
+    <button class="btn-primary" id="connectingRetry" style="display:none;" onclick="location.reload()">Try Again</button>
+  </div>
+</main>
+
+<main id="mainConnect" class="narrow" style="display:none;">
   <div class="card">
     <h2>Connect</h2>
     <p class="sub">Paste your Firebase project config (Project Settings → General → Your apps → SDK config).</p>
@@ -549,7 +558,7 @@ function peso(n){ return '₱' + fmt(Math.round(n*100)/100); }
 function todayStr(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 
 function showMain(id){
-  ['mainConnect','mainBranchPicker','mainRole','mainOwnerPin','mainAuditorPin','mainAuditor','mainCrew','mainOwner'].forEach(m=>{
+  ['mainConnecting','mainConnect','mainBranchPicker','mainRole','mainOwnerPin','mainAuditorPin','mainAuditor','mainCrew','mainOwner'].forEach(m=>{
     document.getElementById(m).style.display = (m===id) ? 'block' : 'none';
   });
   document.getElementById('exitBtn').style.display = (id==='mainOwnerPin'||id==='mainAuditorPin'||id==='mainAuditor'||id==='mainCrew'||id==='mainOwner') ? 'inline-block' : 'none';
@@ -570,6 +579,32 @@ function changeBranch(){
 }
 
 /* ---------- CONNECT ---------- */
+function showConnectError(title, msg){
+  showMain('mainConnecting');
+  document.getElementById('connectingTitle').textContent = title;
+  document.getElementById('connectingTitle').style.color = 'var(--danger)';
+  document.getElementById('connectingMsg').innerHTML = msg;
+  document.getElementById('connectingRetry').style.display = 'inline-block';
+}
+
+function signInAnon(){
+  return firebase.auth().signInAnonymously().catch(e=>{
+    const code = e && e.code ? e.code : '';
+    if(code === 'auth/operation-not-allowed'){
+      showConnectError('Sign-in not enabled',
+        'Anonymous sign-in is turned off for this Firebase project.<br><br>' +
+        'Owner: go to <strong>Firebase Console → Build → Authentication → Sign-in method</strong>, ' +
+        'enable <strong>Anonymous</strong>, then reload this page.');
+    } else if(code === 'auth/network-request-failed'){
+      showConnectError('No internet',
+        'Cannot reach Firebase. Check the WiFi or mobile data at this branch, then try again.');
+    } else {
+      showConnectError('Sign-in failed', 'Error: ' + escapeHtml(e.message || String(e)) + '<br><br>Tell the owner about this message.');
+    }
+    throw e;
+  });
+}
+
 function connectFirebase(){
   const raw = document.getElementById('fbConfig').value.trim();
   if(!raw){ toast('Paste Firebase config first'); return; }
@@ -579,8 +614,11 @@ function connectFirebase(){
     if(!firebase.apps.length){ firebase.initializeApp(cfg); }
     db = firebase.database();
     localStorage.setItem('chowtimeStockFirebaseConfig', raw);
-    showMain('mainBranchPicker');
-    loadBranchList();
+    showMain('mainConnecting');
+    signInAnon().then(()=>{
+      showMain('mainBranchPicker');
+      loadBranchList();
+    }).catch(()=>{});
   }catch(e){ toast('Connection failed: '+e.message); }
 }
 
@@ -616,6 +654,16 @@ function loadBranchList(){
       row.innerHTML = `<div><div class="code">${escapeHtml(code)}</div><div class="nm">${escapeHtml(b.name||'')}</div></div><div class="go">→</div>`;
       box.appendChild(row);
     });
+  }).catch(e=>{
+    if(e && e.code === 'PERMISSION_DENIED'){
+      showConnectError('Database access blocked',
+        'Firebase is refusing to read the data.<br><br>' +
+        'Owner: go to <strong>Firebase Console → Build → Realtime Database → Rules</strong> and make sure the rules allow signed-in users, then Publish:<br><br>' +
+        '<code>{ "rules": { ".read": "auth != null", ".write": "auth != null" } }</code><br><br>' +
+        'Also check the rules have <strong>no expiry date</strong>.');
+    } else {
+      showConnectError('Could not load branches', 'Error: ' + escapeHtml(e.message || String(e)));
+    }
   });
 }
 
@@ -1759,21 +1807,26 @@ window.addEventListener('load', ()=>{
     try{
       if(!firebase.apps.length){ firebase.initializeApp(EMBEDDED_FIREBASE_CONFIG); }
       db = firebase.database();
-      showMain('mainBranchPicker');
-      loadBranchList();
-      const lastBranch = localStorage.getItem('chowtimeStockLastBranch');
-      if(lastBranch){ selectBranch(lastBranch); }
+      showMain('mainConnecting');
+      signInAnon().then(()=>{
+        showMain('mainBranchPicker');
+        loadBranchList();
+        const lastBranch = localStorage.getItem('chowtimeStockLastBranch');
+        if(lastBranch){ selectBranch(lastBranch); }
+      }).catch(()=>{});
       return;
     }catch(e){
-      toast('Auto-connect failed: '+e.message);
+      showConnectError('Startup failed', 'Error: ' + escapeHtml(e.message));
+      return;
     }
   }
   const saved = localStorage.getItem('chowtimeStockFirebaseConfig');
   if(saved){
+    showMain('mainConnect');
     document.getElementById('fbConfig').value = saved;
     connectFirebase();
-    const lastBranch = localStorage.getItem('chowtimeStockLastBranch');
-    if(lastBranch && db){ selectBranch(lastBranch); }
+  } else {
+    showMain('mainConnect');
   }
 });
 </script>
