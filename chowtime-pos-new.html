@@ -419,7 +419,6 @@ function SectionHeader({title,action,actionLabel}){
 }
 
 
-
 // ─── TEST PRINT ──────────────────────────────────────────
 function testPrint(cs,paperSize,showT){
   cs=cs||{}; paperSize=paperSize||"80mm";
@@ -5276,7 +5275,6 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
 }
 
 
-
 // ─── FEATURE DEFINITIONS PER ROLE ────────────────────────
 const FEATURE_DEFS = {
   cashier: [
@@ -5764,31 +5762,9 @@ const logColFor=(bid)=>(bid==="ct-main"||bid==="main")
 //   pay always starts at shift start; lateness is deducted in pesos instead
 //   OT begins one hour after shift end, so a slightly late punch-out is not OT
 //   a straight shift takes no break and auto-earns OT past 9 paid hours
-// ── FACE RECOGNITION ──────────────────────────────────────
-// Ported from the kiosk: same library, same three nets, same 0.5 distance,
-// same three enrolment samples. A PIN can be lent to a workmate; a face
-// cannot, and buddy punching is the thing a time clock exists to stop.
-
-
-
-// One descriptor from the current video frame, or null when no face is visible.
-async 
-
-// 1:1 check against the samples enrolled for one person — the same shape the
-// kiosk uses, so an employee already enrolled there behaves identically here.
-
-
-
-
-
-
 
 
 // One day, one shift, one row. Mirrors computeDTRRow in the live payroll.
-
-
-
-
 
 
 // Cut-offs are semi-monthly: 1st-15th and 16th-end of month.
@@ -5800,12 +5776,8 @@ async
 // Hours between two timestamps, rounded to 2dp. Null when still open.
 
 
-
-
 // Ported from the live payroll. The ledger is the source of truth: a balance
 // is replayed from recorded movements, never recomputed from a schedule.
-
-
 
 
 // ── Statutory contributions, ported verbatim ──────────────
@@ -5820,29 +5792,11 @@ async
 //                 carries an instalment that is still pending
 
 
-
-
-
-
 // 13th month, ported: one twelfth of basic pay earned in the year.
 
 
 // Resolve one employee's shift for one day. Ported: a date-specific override
 // beats the weekly pattern, which beats the fixed default.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 function addMonths(iso,n){
@@ -6976,12 +6930,7 @@ function VoidBadge({branchId,db,setPage,visible=true}){
 }
 
 
-
-
 // ─── RECEIVE ITEMS MODAL (Branch) ────────────────────────
-
-
-
 
 
 // ─── STOCK EDIT MODAL ────────────────────────────────────
@@ -8367,7 +8316,6 @@ function printPODR(po,cs){
 }
 
 
-
 // ─── PERMISSIONS TAB ──────────────────────────────────────
 function PermissionsTab({db,showT,companySettings,setCompanySettings}){
   // Default permissions per role
@@ -9012,7 +8960,6 @@ function PrinterPage({db,user,showT,companySettings,setCompanySettings}){
     )
   );
 }
-
 
 
 // ─── INVENTORY LOG PAGE ───────────────────────────────────
@@ -10813,9 +10760,6 @@ function App(){
       scPwd:bo.filter(o=>o.discType?.id==="sc"||o.discType?.id==="pwd").length,
       txns:bo.length};
   };
-
-
-
 
 
   // ── LOGIN SCREEN ─────────────────────────────────────────
@@ -14878,7 +14822,6 @@ function App(){
         }),
 
 
-
         // ══ COMMISSARY ══
 
         // ══ STOCK ORDER (Branch → Commissary PO) ══
@@ -15724,7 +15667,6 @@ function App(){
         onClose:()=>setModal(null)
       })
     ),
-
 
 
     // NEW INVENTORY ITEM MODAL
