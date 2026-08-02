@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Chowtime POS — 20260802-225115</title>
+<title>Chowtime POS — 20260802-225930</title>
 <meta name="theme-color" content="#6A1B9A"/>
 <meta name="mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260802-225115 -->
+<!-- BUILD:20260802-225930 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -4462,6 +4462,112 @@ function localDate(d){
     String(x.getDate()).padStart(2,"0");
 }
 
+// ─── HOW-TO GUIDES ────────────────────────────────────────
+// Written for the person doing the task, not as a feature list. Each one
+// names where to tap and what the system does behind it, because the parts
+// that go wrong are the ones nobody explains: what a PIN is for, why a count
+// cannot be edited, what "received" actually moves.
+const GUIDES=[
+  {id:"crew",roles:["manager","owner","commissary"],icon:"👥",
+   title:"How to add crew",
+   steps:[
+    "Open People & HR → My Branch Staff.",
+    "Tap + Add User. The branch is already yours — you cannot add to another store.",
+    "Enter their full name and a work email. That email is their login, and it cannot be changed later.",
+    "Pick the role: Cashier can take orders and request voids. Crew sees the kitchen queue only. Stock Clerk handles inventory.",
+    "Set a password of at least 6 characters and tap Create Login Account.",
+    "Hand them the email and password. They change the password themselves from the sign-in screen."],
+   note:"Removing someone: tap their row, then the ✕. They lose access straight away. Their login stays registered, so the same email cannot be given to a different person."},
+
+  {id:"order",roles:["cashier","manager","crew","owner"],icon:"🛒",
+   title:"How to take an order",
+   steps:[
+    "Open POS. Tap the items — tap again to add another of the same.",
+    "For a meal with choices, pick the required options before it can be added.",
+    "Check the cart on the right, then tap Checkout.",
+    "Page 1: Dine-in or Takeout, then the payment method. Tap Next.",
+    "Page 2: cash tendered if paying cash — the change shows as you type. Add a customer name or discount only if needed.",
+    "Tap Place Order. The receipt prints and the drawer opens for cash sales."],
+   note:"Stock is deducted by recipe the moment the order is placed. If an ingredient is short, the sale is blocked before it goes through — that is deliberate, so you never sell what cannot be made."},
+
+  {id:"void",roles:["cashier","manager","owner"],icon:"🚫",
+   title:"How to void an order",
+   steps:[
+    "Open POS & Sales → Void Requests.",
+    "Pick the order, tick the items to void, and write the reason.",
+    "Submit. A cashier's request waits for the manager; a manager or owner voids straight away.",
+    "Once approved, the ingredients go back into stock and the sale comes off the day's total."],
+   note:"One request per order. If a request is already waiting, a second one is blocked — and an order that has already been voided cannot be voided again."},
+
+  {id:"stocks",roles:["manager","stockclerk","owner"],icon:"📦",
+   title:"How to order stocks from Main",
+   steps:[
+    "Open Inventory → Order Stocks, then + New Order.",
+    "Search the item, enter how many packs you need. Add a note if something is urgent.",
+    "Save it as a batch first if this is your usual order — you can reuse it next time.",
+    "Submit to Commissary. Main is notified.",
+    "You can still edit or cancel while it says Pending at Main. Once they issue the DR, it is locked."],
+   note:"Order 2–3 times a month rather than daily. Main does not need to approve — they just prepare and dispatch."},
+
+  {id:"receive",roles:["manager","stockclerk","owner"],icon:"📥",
+   title:"How to receive a delivery",
+   steps:[
+    "When the delivery arrives, open Inventory → Order Stocks and find the PO.",
+    "Tap Receive Items.",
+    "Count what actually arrived and type that figure — not what was ordered.",
+    "If anything is short, the difference is recorded as a discrepancy and Main is told.",
+    "Confirm. Only then does the stock enter your inventory."],
+   note:"Count before confirming. Once received, the quantities are in your stock and correcting them means a manual adjustment with a reason attached."},
+
+  {id:"count",roles:["manager","stockclerk","cashier","owner"],icon:"🧊",
+   title:"How to do the freezer count",
+   steps:[
+    "Open Inventory → Freezer Count and sign in with your PIN.",
+    "Pick the checkpoint: Open, Handoff or Close.",
+    "Count what is physically in the freezer and enter it. Full packs and loose pieces have separate boxes.",
+    "The POS column fills itself — you do not enter it.",
+    "Submit. The variance appears afterwards."],
+   note:"You cannot see the POS figure while counting. That is on purpose: a count only means something if the answer is not known in advance."},
+
+  {id:"cash",roles:["cashier","manager","owner"],icon:"💰",
+   title:"How to do the cash count",
+   steps:[
+    "Open POS & Sales → Cash Count at the end of your shift.",
+    "Enter the opening fund if it is the first count of the day — otherwise it carries over.",
+    "Record any cash in or cash out that happened during the shift, with the reason.",
+    "Count the drawer and enter the actual amount.",
+    "The system shows expected versus actual. Explain any difference in the notes before saving."],
+   note:"Expected cash = opening fund + cash sales + cash in − cash out. If it is off, check for a sale rung up as GCash that was actually paid in cash."},
+
+  {id:"close",roles:["cashier","manager","owner"],icon:"📃",
+   title:"How to close the day",
+   steps:[
+    "Finish the cash count first.",
+    "Open POS & Sales → Z-Reading.",
+    "Check the figures against your drawer, then tap Close Day.",
+    "Print it — Bluetooth for the thermal printer, or Browser for a paper copy.",
+    "The day is now saved and cannot be re-rung."],
+   note:"If you forget, the next opening closes the previous day automatically. Better to do it yourself — the automatic one cannot ask you about a cash difference."},
+
+  {id:"clock",roles:["cashier","crew","stockclerk","manager","owner","commissary"],icon:"⏰",
+   title:"How to clock in and out",
+   steps:[
+    "Open People & HR → Time Clock.",
+    "Select your name, then face the camera.",
+    "Tap Scan face. Green means you are in.",
+    "Do the same when you leave."],
+   note:"Clock out before you go. A punch left open counts as no day worked at all until a manager closes it."},
+
+  {id:"inventory",roles:["manager","stockclerk","owner"],icon:"📊",
+   title:"How to adjust stock",
+   steps:[
+    "Open Inventory and tap the item.",
+    "Choose Add, Deduct or Set exact.",
+    "Enter the amount and pick a reason — Physical Count, Spoilage, Wastage, Correction.",
+    "Save. The before and after are written to the log with your name."],
+   note:"Use Batch edit for many items at once — the toolbar button. Every change still writes its own log line, so a batch and a single adjustment read the same afterwards."},
+];
+
 // ─── DATE RANGES ──────────────────────────────────────────
 // One definition of "this week" and "this month" for the dashboard and the
 // analytics, so the two can never disagree about the period they are showing.
@@ -5746,7 +5852,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260802-225115";
+const BUILD = "20260802-225930";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -9752,6 +9858,8 @@ function App(){
   const [dashFrom,setDashFrom]=useState(localDate());
   const [dashTo,setDashTo]=useState(localDate());
   const [dashBranch,setDashBranch]=useState("");         // "" = all branches
+  const [showGuide,setShowGuide]=useState(false);        // how-to panel
+  const [openGuide,setOpenGuide]=useState("");           // expanded topic
   const [editSub,setEditSub]=useState(null);             // subscription being edited
   const [newBuild,setNewBuild]=useState(null);           // a newer build is live
   const [subs,setSubs]=useState([]);                     // subscriptions, all branches
@@ -11724,6 +11832,14 @@ function App(){
             )
           ),
           h("div",{style:{display:"flex",alignItems:"center",gap:8,position:"relative"}},
+            // How-to guide — sits beside the bell because that is where people
+            // look when they are stuck mid-task.
+            h("button",{onClick:()=>{setShowGuide(true);setOpenGuide("");},
+              title:"How to use the POS",
+              style:{width:32,height:32,borderRadius:9,cursor:"pointer",
+                border:"1px solid "+C.border,background:"#fff",fontSize:15,
+                lineHeight:1}},"📖"),
+
             // Notification bell
             (function(){
               const unread=notifs.filter(x=>!x.read).length;
@@ -11799,7 +11915,75 @@ function App(){
           )
         ),
 
-        editSub&&h("div",{style:{position:"fixed",inset:0,
+        showGuide&&h("div",{style:{position:"fixed",inset:0,
+        background:"rgba(0,0,0,.55)",display:"flex",alignItems:"center",
+        justifyContent:"center",zIndex:960,padding:16},
+        onClick:ev=>ev.target===ev.currentTarget&&setShowGuide(false)},
+        h("div",{style:{background:"#fff",width:"100%",maxWidth:520,
+          borderRadius:14,maxHeight:"88vh",display:"flex",
+          flexDirection:"column",overflow:"hidden"}},
+
+          h("div",{style:{padding:"15px 18px",borderBottom:"1px solid "+C.border,
+            display:"flex",alignItems:"center",gap:10}},
+            h("div",{style:{flex:1}},
+              h("div",{style:{fontSize:16,fontWeight:800}},"📖 How to use the POS"),
+              h("div",{style:{fontSize:12,color:C.muted,marginTop:2}},
+                "Guides for what you can do with this account")),
+            h("button",{onClick:()=>setShowGuide(false),
+              style:{width:30,height:30,borderRadius:8,cursor:"pointer",
+                border:"1px solid "+C.border,background:"#fff",
+                fontSize:15,lineHeight:1}},"✕")),
+
+          h("div",{style:{overflowY:"auto",padding:"12px 14px"}},
+            (function(){
+              // Only what this role can actually reach — a cashier reading how
+              // to add crew is being shown a door they cannot open.
+              const mine=GUIDES.filter(g=>g.roles.indexOf(user.role)>=0);
+              if(!mine.length)
+                return h("div",{style:{padding:"26px",textAlign:"center",
+                  color:C.muted,fontSize:13}},"No guides for this account yet.");
+              return mine.map(g=>{
+                const open=openGuide===g.id;
+                return h("div",{key:g.id,style:{border:"1px solid "+C.border,
+                  borderRadius:11,marginBottom:9,overflow:"hidden"}},
+                  h("button",{
+                    onClick:()=>setOpenGuide(open?"":g.id),
+                    style:{width:"100%",display:"flex",alignItems:"center",
+                      gap:10,padding:"12px 13px",cursor:"pointer",border:"none",
+                      background:open?C.primary+"18":"#fff",textAlign:"left"}},
+                    h("span",{style:{fontSize:17}},g.icon),
+                    h("span",{style:{flex:1,fontSize:14,fontWeight:800,
+                      color:open?C.primary:C.text}},g.title),
+                    h("span",{style:{fontSize:13,color:C.muted}},open?"▾":"▸")),
+
+                  open&&h("div",{style:{padding:"4px 13px 13px"}},
+                    g.steps.map((st,ix)=>h("div",{key:ix,
+                      style:{display:"flex",gap:10,padding:"7px 0",
+                        alignItems:"flex-start"}},
+                      h("span",{style:{flexShrink:0,width:21,height:21,
+                        borderRadius:"50%",background:C.primary,color:"#fff",
+                        fontSize:11,fontWeight:900,display:"flex",
+                        alignItems:"center",justifyContent:"center"}},
+                        String(ix+1)),
+                      h("span",{style:{fontSize:13,lineHeight:1.6}},st))),
+                    g.note&&h("div",{style:{marginTop:9,padding:"10px 12px",
+                      background:C.bg,borderRadius:9,fontSize:12,
+                      color:C.muted,lineHeight:1.6,
+                      borderLeft:"3px solid "+C.primary}},
+                      h("b",{style:{color:C.text}},"Worth knowing: "),g.note))
+                );
+              });
+            })()
+          ),
+
+          h("div",{style:{padding:"11px 16px",borderTop:"1px solid "+C.border,
+            fontSize:11,color:C.muted,lineHeight:1.5}},
+            "Something here not matching what you see? Tell the owner — the "+
+            "guide is kept alongside the system, not written once and left.")
+        )
+      ),
+
+      editSub&&h("div",{style:{position:"fixed",inset:0,
         background:"rgba(0,0,0,.55)",display:"flex",alignItems:"center",
         justifyContent:"center",zIndex:950,padding:16},
         onClick:ev=>ev.target===ev.currentTarget&&setEditSub(null)},
