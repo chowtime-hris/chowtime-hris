@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Chowtime POS — 20260802-225930</title>
+<title>Chowtime POS — 20260802-231715</title>
 <meta name="theme-color" content="#6A1B9A"/>
 <meta name="mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260802-225930 -->
+<!-- BUILD:20260802-231715 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -5852,7 +5852,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260802-225930";
+const BUILD = "20260802-231715";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -10985,19 +10985,19 @@ function App(){
   );
 
   if(!user){
-    return h("div",{style:{minHeight:"100vh",background:`linear-gradient(160deg,${C.primary},${C.dark})`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",fontFamily:"'Segoe UI',system-ui,sans-serif",padding:"20px"}},
+    return h("div",{style:{minHeight:"100vh",background:"#FFFFFF",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",fontFamily:"'Segoe UI',system-ui,sans-serif",padding:"20px"}},
       h("div",{style:{textAlign:"center",marginBottom:28}},
         h("div",{style:{fontSize:50}},"🍽️"),
-        h("div",{style:{color:"#fff",fontSize:26,fontWeight:900,letterSpacing:1}},"CHOWTIME"),
-        h("div",{style:{color:C.accent,fontSize:12,fontWeight:700,letterSpacing:3,marginTop:4}},"FAST-FOOD CHAIN · POS SYSTEM"),
+        h("div",{style:{color:C.primary,fontSize:26,fontWeight:900,letterSpacing:1}},"CHOWTIME"),
+        h("div",{style:{color:C.muted,fontSize:12,fontWeight:700,letterSpacing:3,marginTop:4}},"FAST-FOOD CHAIN · POS SYSTEM"),
         h("div",{style:{display:"flex",alignItems:"center",gap:6,justifyContent:"center",marginTop:10}},
           h("div",{style:{width:7,height:7,borderRadius:"50%",background:isOnline?C.success:C.danger}}),
-          h("span",{style:{color:"rgba(255,255,255,.4)",fontSize:12}},isOnline?"Firebase Connected":"Offline")
+          h("span",{style:{color:C.muted,fontSize:12}},isOnline?"Firebase Connected":"Offline")
         )
       ),
-      h("div",{style:{background:"rgba(255,255,255,.07)",border:"1px solid rgba(255,255,255,.12)",borderRadius:20,padding:"28px 24px",width:"100%",maxWidth:360}},
-        h("div",{style:{fontWeight:800,fontSize:16,color:"#fff",marginBottom:4,textAlign:"center"}},"Sign In"),
-        h("div",{style:{fontSize:13,color:"rgba(255,255,255,.4)",marginBottom:20,textAlign:"center"}},"Enter your work email and password"),
+      h("div",{style:{background:"#FFFFFF",border:"1px solid "+C.border,borderRadius:20,padding:"28px 24px",width:"100%",maxWidth:360,boxShadow:"0 8px 30px rgba(0,0,0,.08)"}},
+        h("div",{style:{fontWeight:800,fontSize:16,color:C.text,marginBottom:4,textAlign:"center"}},"Sign In"),
+        h("div",{style:{fontSize:13,color:C.muted,marginBottom:20,textAlign:"center"}},"Enter your work email and password"),
 
         // Error message
         loginErr&&h("div",{style:{background:"rgba(255,59,48,.2)",border:"1px solid rgba(255,59,48,.4)",borderRadius:9,padding:"9px 13px",marginBottom:14,fontSize:14,color:"#FF6B6B",fontWeight:600}},
@@ -11006,22 +11006,22 @@ function App(){
 
         // Email
         h("div",{style:{marginBottom:12}},
-          h("div",{style:{fontSize:12,fontWeight:700,color:"rgba(255,255,255,.4)",marginBottom:5,letterSpacing:1}},"EMAIL"),
+          h("div",{style:{fontSize:12,fontWeight:700,color:C.muted,marginBottom:5,letterSpacing:1}},"EMAIL"),
           h("input",{
             type:"email",
             value:loginEmail,
             onChange:e=>setLoginEmail(e.target.value),
             onKeyDown:e=>e.key==="Enter"&&document.getElementById("pw-input")?.focus(),
             placeholder:"yourname@chowtime.com",
-            style:{width:"100%",padding:"12px 14px",borderRadius:10,border:"1px solid rgba(255,255,255,.15)",
-              background:"rgba(255,255,255,.08)",color:"#fff",fontSize:13,outline:"none",
+            style:{width:"100%",padding:"12px 14px",borderRadius:10,border:"1px solid "+C.border,
+              background:"#FFFFFF",color:C.text,fontSize:13,outline:"none",
               boxSizing:"border-box"}
           })
         ),
 
         // Password
         h("div",{style:{marginBottom:16}},
-          h("div",{style:{fontSize:12,fontWeight:700,color:"rgba(255,255,255,.4)",marginBottom:5,letterSpacing:1}},"PASSWORD"),
+          h("div",{style:{fontSize:12,fontWeight:700,color:C.muted,marginBottom:5,letterSpacing:1}},"PASSWORD"),
           h("div",{style:{position:"relative"}},
             h("input",{
               id:"pw-input",
@@ -11031,13 +11031,13 @@ function App(){
               onKeyDown:e=>e.key==="Enter"&&handleLogin(),
               placeholder:"••••••••",
               style:{width:"100%",padding:"12px 44px 12px 14px",borderRadius:10,
-                border:"1px solid rgba(255,255,255,.15)",
-                background:"rgba(255,255,255,.08)",color:"#fff",fontSize:13,outline:"none",
+                border:"1px solid "+C.border,
+                background:"#FFFFFF",color:C.text,fontSize:13,outline:"none",
                 boxSizing:"border-box"}
             }),
             h("button",{onClick:()=>setShowPw(p=>!p),
               style:{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",
-                background:"none",border:"none",color:"rgba(255,255,255,.4)",cursor:"pointer",fontSize:16}},
+                background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:16}},
               showPw?"🙈":"👁️")
           )
         ),
@@ -11053,7 +11053,7 @@ function App(){
         // Forgot password
         h("div",{style:{textAlign:"center"}},
           h("button",{onClick:handleForgotPw,
-            style:{background:"none",border:"none",color:"rgba(255,255,255,.3)",fontSize:13,cursor:"pointer",textDecoration:"underline"}},
+            style:{background:"none",border:"none",color:C.muted,fontSize:13,cursor:"pointer",textDecoration:"underline"}},
             "Forgot password?")
         ),
 
@@ -11061,7 +11061,7 @@ function App(){
           "✅ Password reset link sent to your email!"
         )
       ),
-      h("div",{style:{textAlign:"center",marginTop:20,color:"rgba(255,255,255,.12)",fontSize:12}},
+      h("div",{style:{textAlign:"center",marginTop:20,color:C.muted,fontSize:12}},
         "Chowtime POS · "+BUILD
       )
     );
