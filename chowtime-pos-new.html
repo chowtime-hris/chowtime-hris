@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Chowtime POS — 20260802-125343</title>
+<title>Chowtime POS — 20260802-215748</title>
 <meta name="theme-color" content="#6A1B9A"/>
 <meta name="mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260802-125343 -->
+<!-- BUILD:20260802-215748 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -211,9 +211,9 @@ const BRANCHES = [
 
 const ROLES = {
   owner:     {label:"Owner / Admin",    emoji:"\u{1F451}", color:"#6A1B9A",
-    nav:["dashboard","branches","subs","pos","orders","void_requests","all_orders","analytics","z_reading","reports","cash_count","expenses","cash_monitor","inventory","inv_log","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","settings","printer","ext_payroll","ext_kiosk","hris_dash","ext_production"]},
+    nav:["dashboard","branches","subs","pos","orders","void_requests","all_orders","analytics","z_reading","reports","cash_count","expenses","cash_monitor","inventory","inv_log","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","settings","printer","ext_payroll","ext_kiosk","hris_dash","ext_production","ext_stock"]},
   manager:   {label:"Branch Manager",   emoji:"\u{1F3EA}", color:"#007AFF",
-    nav:["branch_dash","pos","orders","analytics","z_reading","reports","cash_count","expenses","inventory","inv_log","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","bom_mgmt","branch_settings","printer","ext_kiosk"]},
+    nav:["branch_dash","pos","orders","analytics","z_reading","reports","cash_count","expenses","inventory","inv_log","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","bom_mgmt","branch_settings","printer","ext_kiosk","ext_stock"]},
   cashier:   {label:"Cashier",          emoji:"\u{1F4B3}", color:"#34C759",
     nav:["pos","orders","x_reading","printer","z_reading","cash_count","expenses","inventory","ca_request","loan_request","void_request","ext_kiosk"]},
   crew:      {label:"Crew / Kitchen",   emoji:"\u{1F9D1}\u{200D}\u{1F373}", color:"#FF9500",
@@ -221,7 +221,7 @@ const ROLES = {
   stockclerk:{label:"Stock Clerk",      emoji:"\u{1F4E6}", color:"#AF52DE",
     nav:["inventory","inv_log","stock_order","stock_receive","ca_request","loan_request","pos","orders","expenses","ext_kiosk"]},
   commissary:{label:"Commissary Staff", emoji:"\u{1F3ED}", color:"#32ADE6",
-    nav:["comm_dash","comm_inv","comm_orders","comm_dr","printer","ext_payroll","ext_kiosk","hris_dash","ext_production"]},
+    nav:["comm_dash","comm_inv","comm_orders","comm_dr","printer","ext_payroll","ext_kiosk","hris_dash","ext_production","ext_stock"]},
 };
 
 // Sidebar grouping. Any page not listed here stays top-level, so adding a new
@@ -233,7 +233,7 @@ const NAV_GROUPS = [
           "reports","sales_report","analytics"]},
   {id:"stock", icon:"\u{1F4E6}", label:"Inventory",
    pages:["inventory","inv_log","stock_order","stock_receive","po_monitor",
-          "bom_mgmt","commissary","comm_inv","comm_orders","comm_dr","ext_production"]},
+          "bom_mgmt","commissary","comm_inv","comm_orders","comm_dr","ext_production","ext_stock"]},
   {id:"menu",  icon:"\u{1F37D}", label:"Menu",
    pages:["menu_mgmt","branch_menu"]},
   {id:"people",icon:"\u{1F465}", label:"People & HR",
@@ -257,6 +257,7 @@ const NAV_META = {
   ext_payroll: {icon:"💵",label:"Payroll System ↗"},
   ext_kiosk:   {icon:"⏰",label:"Time Clock ↗"},
   ext_production:{icon:"🏭",label:"Production ↗"},
+  ext_stock:   {icon:"🧊",label:"Freezer Count ↗"},
   x_reading:   {icon:"📃",label:"X-Reading"},
   expenses:    {icon:"💸",label:"Expenses"},
   cash_monitor:{icon:"💵",label:"Cash Monitor"},
@@ -5691,7 +5692,7 @@ function renderDRDoc(po,cs,brs){
 // ─── BUILD / UPDATE CHECK ────────────────────
 // GitHub Pages caches hard, so a branch can run an old copy for hours.
 // Without a visible stamp a bug report cannot be tied to a version.
-const BUILD = "20260802-125343";
+const BUILD = "20260802-215748";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -11575,7 +11576,8 @@ function App(){
           const EXT_APPS={
             ext_payroll:"chowtime-payroll.html",
             ext_kiosk:"chowtime-kiosk.html",
-            ext_production:"chowtime-production.html"
+            ext_production:"chowtime-production.html",
+            ext_stock:"chowtime-stock.html"
           };
           const  item=(p,indent)=>{
             const m=NAV_META[p]; if(!m)return null;

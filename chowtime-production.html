@@ -171,16 +171,30 @@ function posLocalDate(d){
 async function postProductionToPOS(dateStr, products){
   const fs = posDB();
   if(!fs) return {ok:false, reason:"POS database not reachable"};
-  const map = state.posMap || {};
-  const posted = state.posPosted && state.posPosted[dateStr] ? state.posPosted[dateStr] : {};
+  // Both the links and the already-posted marker live in the POS project.
+  let map = state.posMap || {};
+  let posted = {};
+  try{
+    const dm = await fs.collection("settings").doc("production_map").get();
+    if(dm.exists && dm.data() && dm.data().map){ map = dm.data().map; state.posMap = map; }
+    const dp = await fs.collection("settings").doc("production_posted").get();
+    if(dp.exists && dp.data() && dp.data()[dateStr]) posted = dp.data()[dateStr];
+  }catch(e){ console.warn("bridge state:", e); }
   const done = [], skipped = [], failed = [];
 
   for(const code of Object.keys(products||{})){
     const qty = Number((products[code]||{}).qty) || 0;
-    const itemId = map[code];
+    const cfg = map[code];
+    // a link is either the old plain id, or {id, unit, per}
+    const itemId = cfg ? (typeof cfg==="string" ? cfg : cfg.id) : "";
+    const per    = cfg && typeof cfg==="object" ? (Number(cfg.per)||1) : 1;
+    const pUnit  = cfg && typeof cfg==="object" ? (cfg.unit||"") : "";
     if(!itemId){ if(qty>0) skipped.push(code); continue; }
     const already = Number(posted[code]) || 0;
-    const delta = qty - already;          // only what has not been posted yet
+    // Convert to POS units before comparing: 5 bottles at 1000 ml is 5000 ml,
+    // and posting 5 would credit a thousandth of what was made.
+    const wantPos = Math.round(qty * per * 1000) / 1000;
+    const delta   = Math.round((wantPos - already) * 1000) / 1000;
     if(delta === 0) continue;
     try{
       const ref = fs.collection("inventory").doc(itemId);
@@ -201,6 +215,8 @@ async function postProductionToPOS(dateStr, products){
         prevStock: prev,
         newStock: next,
         desc: "Production " + dateStr + " · " + code +
+              (per !== 1 ? " · " + qty + " " + (pUnit || "unit") +
+                (qty === 1 ? "" : "s") + " x " + per : "") +
               (already ? " (adjusted from " + already + ")" : ""),
         source: "PRODUCTION",
         ref: dateStr,
@@ -210,8 +226,10 @@ async function postProductionToPOS(dateStr, products){
         at: firebase.firestore.FieldValue.serverTimestamp(),
         timestamp: firebase.firestore.FieldValue.serverTimestamp()
       });
-      posted[code] = qty;
-      done.push(code + " " + (delta > 0 ? "+" : "") + delta);
+      posted[code] = wantPos;
+      done.push(code + " " + (delta > 0 ? "+" : "") + delta + " " +
+        (snap.data().unit || "") +
+        (per !== 1 ? " (" + qty + " " + (pUnit || "unit") + " x " + per + ")" : ""));
     }catch(e){
       console.error("post " + code, e);
       failed.push(code + " (" + (e.message||e) + ")");
@@ -220,7 +238,13 @@ async function postProductionToPOS(dateStr, products){
 
   state.posPosted = state.posPosted || {};
   state.posPosted[dateStr] = posted;
-  try{ saveState("posPosted", state.posPosted); }catch(e){}
+  // Kept in the POS project, not the production one: the production database
+  // rejects paths its rules do not know about, and this belongs next to the
+  // inventory it guards anyway.
+  try{
+    await fs.collection("settings").doc("production_posted")
+      .set({[dateStr]: posted}, {merge:true});
+  }catch(e){ console.warn("posted marker:", e); }
   return {ok:true, done, skipped, failed};
 }
 
@@ -1555,25 +1579,73 @@ function renderSettings(main){
       box.innerHTML = '<div class="msg warn">Could not read POS items: '+(e.message||e)+'</div>';
       return;
     }
-    const map = state.posMap || {};
-    box.innerHTML = state.products.map(p=>`
-      <div class="row" style="align-items:center;gap:10px;margin-bottom:8px">
-        <div style="min-width:170px;font-weight:700">${p.label}
+    // read the saved links back from the POS project
+    let map = state.posMap || {};
+    try{
+      const d = await fs.collection('settings').doc('production_map').get();
+      if(d.exists && d.data() && d.data().map){ map = d.data().map; state.posMap = map; }
+    }catch(e){ console.warn('load map:', e); }
+    const cfgOf=(code)=>{
+      const v=map[code];
+      if(!v) return {id:"",unit:"",per:1};
+      // older links were a plain item id; treat those as 1:1
+      return (typeof v==="string") ? {id:v,unit:"",per:1}
+        : {id:v.id||"",unit:v.unit||"",per:Number(v.per)||1};
+    };
+    box.innerHTML = state.products.map(p=>{
+      const c=cfgOf(p.code);
+      const sel=items.find(it=>it.id===c.id);
+      return `
+      <div style="border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:8px">
+        <div style="font-weight:700;margin-bottom:6px">${p.label}
           <span style="color:var(--muted,#5A5A5A);font-weight:400"> · ${p.code}</span></div>
-        <select class="posMapSel" data-code="${p.code}" style="flex:1;min-width:200px">
-          <option value="">— not linked —</option>
-          ${items.map(it=>`<option value="${it.id}"${map[p.code]===it.id?' selected':''}>
-            ${it.name}${it.unit?' ('+it.unit+')':''}</option>`).join('')}
-        </select>
-      </div>`).join('');
+        <div class="row" style="align-items:center;gap:8px;flex-wrap:wrap">
+          <select class="posMapSel" data-code="${p.code}" style="flex:2;min-width:190px">
+            <option value="">— not linked —</option>
+            ${items.map(it=>`<option value="${it.id}"${c.id===it.id?' selected':''}>
+              ${it.name}${it.unit?' ('+it.unit+')':''}</option>`).join('')}
+          </select>
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:12px;color:var(--muted,#5A5A5A)">1</span>
+            <input class="posUnitIn" data-code="${p.code}" value="${c.unit}"
+              placeholder="bottle / tub / pc"
+              style="width:110px;padding:6px;font-size:12px">
+            <span style="font-size:12px;color:var(--muted,#5A5A5A)">=</span>
+            <input class="posPerIn" data-code="${p.code}" type="number" step="0.001"
+              value="${c.per}" style="width:90px;padding:6px;font-size:12px;text-align:right">
+            <span style="font-size:12px;font-weight:700"
+              id="posUnitLbl-${p.code}">${sel&&sel.unit?sel.unit:'POS units'}</span>
+          </div>
+        </div>
+      </div>`;}).join('');
+
+    // keep the trailing unit label honest as the item changes
+    document.querySelectorAll('.posMapSel').forEach(sel=>{
+      sel.addEventListener('change',()=>{
+        const it=items.find(x=>x.id===sel.value);
+        const lbl=document.getElementById('posUnitLbl-'+sel.dataset.code);
+        if(lbl) lbl.textContent=(it&&it.unit)?it.unit:'POS units';
+      });
+    });
     const btn = document.getElementById('savePosMapBtn');
     if(btn) btn.onclick = ()=>{
       const next = {};
       document.querySelectorAll('.posMapSel').forEach(sel=>{
-        if(sel.value) next[sel.dataset.code] = sel.value;
+        if(!sel.value) return;
+        const code=sel.dataset.code;
+        const u=document.querySelector('.posUnitIn[data-code="'+code+'"]');
+        const p=document.querySelector('.posPerIn[data-code="'+code+'"]');
+        next[code]={
+          id: sel.value,
+          unit: (u&&u.value||"").trim(),
+          per: Math.max(0, Number(p&&p.value)||1)   // 1 means the units match
+        };
       });
-      saveState('posMap', next);
-      alert('Links saved. From the next production entry, those items post to MAIN stock.');
+      state.posMap = next;
+      posDB().collection('settings').doc('production_map')
+        .set({map: next}, {merge:true})
+        .then(()=>alert('Links saved. From the next production entry, those items post to MAIN stock.'))
+        .catch(e=>alert('Could not save the links: '+(e.message||e)));
     };
   }, 0);
 
@@ -1581,9 +1653,12 @@ function renderSettings(main){
   <div class="card">
     <h2>POS inventory link</h2>
     <div class="msg info">Each finished batch is added to <b>MAIN's</b> POS stock
-      when you save a production entry. Pick which POS item each product feeds.
-      Anything left unlinked is simply not posted — production codes and POS
-      item ids do not match, and guessing by name credits the wrong item.</div>
+      when you save a production entry. Pick which POS item each product feeds,
+      then say what one production unit is worth there — production counts
+      bottles, tubs and pieces, while the POS may track the same thing in ml or
+      grams. <b>5 bottles at 1000 = 5,000 ml.</b> Leave it at 1 when the units
+      already match, as they do for boxes and frozen pieces. Anything left
+      unlinked is simply not posted.</div>
     <div id="posMapBox">Loading POS items…</div>
     <div class="foot-actions"><button class="btn gold" id="savePosMapBtn">Save links</button></div>
   </div>

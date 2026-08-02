@@ -7,13 +7,14 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
 <style>
   :root{
-    --maroon:#6B0F1A; --maroon-dark:#4A0A12; --maroon-light:#8C1B29;
-    --gold:#C9A227; --gold-light:#E8C766;
-    --bg:#F6F4F1; --card:#FFFFFF; --ink:#2A1A1D; --muted:#8A7A7D;
-    --danger:#B3261E; --danger-bg:#FBEAEA; --good:#2E7D32; --good-bg:#E7F3E8;
-    --warn:#B8860B; --warn-bg:#FFF6E0; --border:#E7E1DA;
+    --maroon:#6A1B9A; --maroon-dark:#4A148C; --maroon-light:#8E24AA;
+    --gold:#8E24AA; --gold-light:#F3E9F7;
+    --bg:#FFFFFF; --card:#FFFFFF; --ink:#111111; --muted:#5A5A5A;
+    --danger:#C62828; --danger-bg:#FBEAEA; --good:#2E7D32; --good-bg:#E7F3E8;
+    --warn:#E65100; --warn-bg:#FFF6E0; --border:#DDDDDD;
   }
   *{box-sizing:border-box;}
   body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink);}
@@ -430,6 +431,22 @@
     </div>
 
     <div class="card">
+      <h2>POS stock link</h2>
+      <p class="sub">Fills the POS column of the crew's count automatically, so
+        they only report what is physically in the freezer. Pick which POS
+        branch this store counts for, then link each item. Anything unlinked
+        stays a manual box — an incomplete setup never blocks a count.</p>
+      <div class="row" style="align-items:center;gap:10px;margin-bottom:10px">
+        <div style="flex:0 0 auto"><label>POS branch</label>
+          <select id="posBranchSel" style="min-width:200px"><option value="">— select —</option></select></div>
+        <div style="flex:0 0 auto;align-self:flex-end">
+          <button class="btn-ghost" id="posReloadBtn" style="width:auto">Reload POS items</button></div>
+      </div>
+      <div id="posLinkBox" class="sub">Pick a POS branch to load its items.</div>
+      <div style="margin-top:10px"><button class="btn-primary" id="posSaveBtn" style="width:auto">Save links</button></div>
+    </div>
+
+    <div class="card">
       <h2>Crew PINs</h2>
       <p class="sub">Each crew member's 4-digit PIN identifies who submitted a count.</p>
       <div class="row">
@@ -527,6 +544,82 @@ let currentBranchName = '';
 let currentCrew = null, pinBuffer = '', activeCheckpoint = null, submittedCheckpoints = {};
 let ownerPinBuffer = '';
 let dayCounts = {}, dayWaste = {};
+
+/* ===== POS INVENTORY BRIDGE ==================================
+   The crew was typing the POS figure by hand, which is the one number the
+   system already knows. Reading it straight from the POS means they only
+   count what is actually in front of them — the freezer — and the POS side
+   can no longer be mistyped or quietly rounded to make a variance disappear.
+
+   Links live in the POS project (settings/stock_map), keyed by this app's
+   item id, because item ids differ between the two systems and matching by
+   name credits the wrong item.                                             */
+const POS_CFG = {
+  apiKey:            "AIzaSyBESg7q6sAapwavECcJLx72OPnc8SxOCJc",
+  authDomain:        "chowtime-pos.firebaseapp.com",
+  projectId:         "chowtime-pos",
+  storageBucket:     "chowtime-pos.firebasestorage.app",
+  messagingSenderId: "446140959237",
+  appId:             "1:446140959237:web:c58f75db697223ef33ea6c"
+};
+let POS_FS = null;
+function posDB(){
+  if(POS_FS) return POS_FS;
+  try{
+    const app = firebase.apps.find(a=>a.name==="pos")
+      || firebase.initializeApp(POS_CFG,"pos");
+    POS_FS = app.firestore();
+  }catch(e){ console.error("POS bridge:", e); POS_FS = null; }
+  return POS_FS;
+}
+
+// itemId -> {id, per}  ·  and which POS branch this stock branch counts for
+let POS_MAP = {};
+let POS_BRANCH = "";
+let POS_STOCK = {};        // posItemId -> current stock
+let POS_READY = false;
+
+function posInvCollection(branchId){
+  return (branchId === "ct-main" || branchId === "main")
+    ? "inventory" : "inventory_" + branchId;
+}
+
+// Pull the links and the live stock for this branch. Called before the crew
+// sees the count form, so the POS column is already filled in.
+async function loadPosStock(){
+  POS_READY = false; POS_STOCK = {}; POS_MAP = {};
+  const fs = posDB();
+  if(!fs) return false;
+  try{
+    const d = await fs.collection("settings").doc("stock_map").get();
+    const data = d.exists ? (d.data()||{}) : {};
+    const perBranch = (data.branches||{})[currentBranchId] || {};
+    POS_BRANCH = perBranch.posBranch || "";
+    POS_MAP    = perBranch.items || {};
+    if(!POS_BRANCH) return false;
+    const snap = await fs.collection(posInvCollection(POS_BRANCH)).get();
+    snap.forEach(doc=>{ POS_STOCK[doc.id] = Number((doc.data()||{}).stock) || 0; });
+    POS_READY = true;
+    return true;
+  }catch(e){
+    console.error("loadPosStock:", e);
+    return false;
+  }
+}
+
+// What the POS believes this item's stock is, in THIS app's unit.
+// Returns null when the item is not linked — the input then stays manual
+// rather than silently showing a zero that looks like a real count.
+function posQtyFor(itemId){
+  if(!POS_READY) return null;
+  const cfg = POS_MAP[itemId];
+  if(!cfg) return null;
+  const id  = typeof cfg === "string" ? cfg : cfg.id;
+  const per = typeof cfg === "object" ? (Number(cfg.per) || 1) : 1;
+  if(!id || POS_STOCK[id] === undefined) return null;
+  // per = how many POS units make one unit here, so divide coming back
+  return Math.round((POS_STOCK[id] / per) * 1000) / 1000;
+}
 
 function bref(path){
   return db.ref('branches/'+currentBranchId+(path ? '/'+path : ''));
@@ -889,6 +982,7 @@ function switchOwnerTab(name){
   ['setup','daily','history'].forEach(t=>{
     document.getElementById('ownerTab-'+t).style.display = (t===name)?'block':'none';
   });
+  if(name==='setup') renderPosLinkPanel();
 }
 
 function saveBranch(){
@@ -933,6 +1027,106 @@ function itemRate(id){
   const cost = parseFloat(it.packCost);
   if(size > 0 && cost >= 0 && !isNaN(cost)) return cost / size;
   return shortageRate;
+}
+
+// ── POS link setup ────────────────────────────────────────
+let POS_ITEMS_CACHE = [];
+
+async function posLoadBranches(){
+  const fs = posDB(); if(!fs) return [];
+  try{
+    const d = await fs.collection("settings").doc("branches").get();
+    const arr = d.exists ? ((d.data()||{}).branches||[]) : [];
+    return arr.filter(b=>b&&b.id);
+  }catch(e){ console.error("pos branches:", e); return []; }
+}
+
+async function posLoadItems(branchId){
+  const fs = posDB(); if(!fs) return [];
+  const col = posInvCollection(branchId);
+  try{
+    const snap = await fs.collection(col).get();
+    const out=[];
+    snap.forEach(d=>out.push({id:d.id, name:(d.data()||{}).name||d.id,
+      unit:(d.data()||{}).unit||"", stock:Number((d.data()||{}).stock)||0}));
+    out.sort((a,b)=>String(a.name).localeCompare(String(b.name)));
+    return out;
+  }catch(e){ console.error("pos items:", e); return []; }
+}
+
+async function renderPosLinkPanel(){
+  const sel = document.getElementById("posBranchSel");
+  const box = document.getElementById("posLinkBox");
+  if(!sel || !box) return;
+  const fs = posDB();
+  if(!fs){ box.innerHTML = '<p class="sub">Could not reach the POS database.</p>'; return; }
+
+  let saved = {posBranch:"", items:{}};
+  try{
+    const d = await fs.collection("settings").doc("stock_map").get();
+    const data = d.exists ? (d.data()||{}) : {};
+    saved = (data.branches||{})[currentBranchId] || saved;
+  }catch(e){ console.warn("load stock_map:", e); }
+
+  const brs = await posLoadBranches();
+  sel.innerHTML = '<option value="">— select —</option>' + brs.map(b=>
+    `<option value="${b.id}"${saved.posBranch===b.id?' selected':''}>${escapeHtml(b.full||b.id)}</option>`).join("");
+
+  const draw = async()=>{
+    const bid = sel.value;
+    if(!bid){ box.innerHTML = '<p class="sub">Pick a POS branch to load its items.</p>'; return; }
+    box.innerHTML = '<p class="sub">Loading POS items…</p>';
+    POS_ITEMS_CACHE = await posLoadItems(bid);
+    if(!POS_ITEMS_CACHE.length){
+      box.innerHTML = '<p class="sub">That POS branch has no inventory items yet.</p>';
+      return;
+    }
+    const keys = Object.keys(items).filter(id=>!items[id].archived);
+    box.innerHTML = keys.map(id=>{
+      const it = items[id];
+      const cfg = saved.items && saved.items[id];
+      const cur = cfg ? (typeof cfg==="string" ? {id:cfg,per:1} : {id:cfg.id||"",per:Number(cfg.per)||1}) : {id:"",per:1};
+      const hit = POS_ITEMS_CACHE.find(x=>x.id===cur.id);
+      return `<div style="border:1px solid var(--border);border-radius:8px;padding:9px;margin-bottom:7px">
+        <div style="font-weight:700;margin-bottom:5px">${escapeHtml(it.name)}
+          <span class="sub">· counted in ${escapeHtml(it.unit||"")}</span></div>
+        <div class="row" style="align-items:center;gap:8px;flex-wrap:wrap">
+          <select class="posItemSel" data-item="${id}" style="flex:2;min-width:190px">
+            <option value="">— not linked —</option>
+            ${POS_ITEMS_CACHE.map(x=>`<option value="${x.id}"${cur.id===x.id?' selected':''}>${escapeHtml(x.name)}${x.unit?' ('+escapeHtml(x.unit)+')':''}</option>`).join("")}
+          </select>
+          <div style="display:flex;align-items:center;gap:6px">
+            <span class="sub">1 ${escapeHtml(it.unit||"unit")} =</span>
+            <input class="posPerIn" data-item="${id}" type="number" step="0.001" min="0"
+              value="${cur.per}" style="width:90px;text-align:right">
+            <span class="sub">${hit&&hit.unit?escapeHtml(hit.unit):'POS units'}</span>
+          </div>
+        </div>
+      </div>`;
+    }).join("");
+  };
+
+  sel.onchange = draw;
+  const rl = document.getElementById("posReloadBtn");
+  if(rl) rl.onclick = draw;
+  const sv = document.getElementById("posSaveBtn");
+  if(sv) sv.onclick = async()=>{
+    const bid = sel.value;
+    if(!bid){ toast("Pick the POS branch first"); return; }
+    const map = {};
+    document.querySelectorAll(".posItemSel").forEach(el=>{
+      if(!el.value) return;
+      const per = document.querySelector('.posPerIn[data-item="'+el.dataset.item+'"]');
+      map[el.dataset.item] = {id: el.value, per: Math.max(0, Number(per&&per.value)||1)};
+    });
+    try{
+      await fs.collection("settings").doc("stock_map").set(
+        {branches:{[currentBranchId]:{posBranch:bid, items:map}}}, {merge:true});
+      toast("POS link saved — the crew's POS column fills in from the next count");
+    }catch(e){ toast("Could not save: "+(e.message||e)); }
+  };
+
+  if(saved.posBranch) draw();
 }
 
 function loadItemsTable(){
@@ -1558,12 +1752,43 @@ function renderCheckpoints(){
 function selectCheckpoint(id){
   activeCheckpoint = id;
   renderCheckpoints();
+  _abandonedAttempts = [];
+  const list = document.getElementById('itemsList');
+  if(list) list.innerHTML = '<p class="sub">Reading POS stock…</p>';
+  loadPosStock().then(ok=>{
+    if(!ok) console.warn("POS stock not linked for this branch — manual entry");
+    renderItemsList();
+  });
   const labels = {open:'Open (9AM)', handoff:'Handoff (6PM)', close:'Close (9PM)'};
   document.getElementById('activeCheckpointLabel').textContent = labels[id]||id;
   document.getElementById('countCard').style.display='block';
   document.getElementById('resultCard').style.display='none';
-  renderItemsList();
+  // renderItemsList runs once the POS figures land, above
 }
+// The POS column is filled from the POS itself when the item is linked.
+// It stays visible but locked: the crew can see what they are counting
+// against, and cannot adjust it to close a gap. Unlinked items fall back to a
+// normal input, so an incomplete setup never blocks the count.
+function posField(id, it){
+  const q = posQtyFor(id);
+  const unit = escapeHtml(it.unit || "");
+  if(q === null){
+    return `<div class="field"><label>POS Stock${unit?' ('+unit+')':''}</label>
+      <input type="number" min="0" step="any" data-item="${id}" data-field="pos"
+        placeholder="0"></div>`;
+  }
+  // Deliberately hidden. A count where the counter can see the expected
+  // answer is not a count — the freezer figure can simply be made to match and
+  // the variance disappears without anyone opening the door. The value is
+  // still captured and submitted; it is revealed with the variance afterwards.
+  return `<div class="field">
+    <label>POS Stock${unit?' ('+unit+')':''}</label>
+    <input type="hidden" data-item="${id}" data-field="pos" value="${q}">
+    <div style="padding:9px 10px;border:1px solid var(--border);border-radius:8px;
+      background:var(--good-bg);color:var(--good);font-weight:700;font-size:13px">
+      ✓ read from POS</div></div>`;
+}
+
 function renderItemsList(){
   const list = document.getElementById('itemsList'); list.innerHTML='';
   const keys = Object.keys(items).filter(id => !items[id].archived);
@@ -1576,7 +1801,7 @@ function renderItemsList(){
     if(usesPack){
       block.innerHTML = `<div class="name">${escapeHtml(it.name)} <span class="unit">(${freezerPackSize} ${escapeHtml(it.unit)}/pack)</span></div>
         <div class="dual-input">
-          <div class="field"><label>POS Stock (${escapeHtml(it.unit)})</label><input type="number" min="0" step="any" data-item="${id}" data-field="pos" placeholder="0"></div>
+          ${posField(id, it)}
           <div class="field"><label>Full Packs</label><input type="number" min="0" step="any" data-item="${id}" data-field="freezerPacks" placeholder="0" oninput="updatePackTotal('${id}')"></div>
           <div class="field"><label>Loose ${escapeHtml(it.unit)}</label><input type="number" min="0" step="any" data-item="${id}" data-field="freezerLoose" placeholder="0" oninput="updatePackTotal('${id}')"></div>
         </div>
@@ -1584,7 +1809,7 @@ function renderItemsList(){
     } else {
       block.innerHTML = `<div class="name">${escapeHtml(it.name)} <span class="unit">(${escapeHtml(it.unit)})</span></div>
         <div class="dual-input">
-          <div class="field"><label>POS Stock</label><input type="number" min="0" step="any" data-item="${id}" data-field="pos" placeholder="0"></div>
+          ${posField(id, it)}
           <div class="field"><label>Freezer Count</label><input type="number" min="0" step="any" data-item="${id}" data-field="freezer" placeholder="0"></div>
         </div>`;
     }
@@ -1704,8 +1929,20 @@ function confirmSubmitAnyway(){
   const p = window._pendingSubmit;
   if(p) finalizeSubmit(p.values, p.baselines, p.wasteMap);
 }
+// Cancelling after seeing the variance is a legitimate move — a miscount or a
+// mistyped digit deserves a second look. It is also the one way to work
+// backwards to a zero variance, so remember what was entered first. Nothing is
+// blocked; the earlier figures simply travel with the count.
+let _abandonedAttempts = [];
 function cancelPendingSubmit(){
   document.getElementById('varianceWarningCard').style.display = 'none';
+  const p = window._pendingSubmit;
+  if(p && p.values){
+    _abandonedAttempts.push({
+      at: new Date().toISOString(),
+      values: JSON.parse(JSON.stringify(p.values))
+    });
+  }
   const statusEl = document.getElementById('countStatusLine');
   statusEl.style.color = '';
   statusEl.textContent = 'Not submitted — go recheck the freezer, then press Submit again.';
@@ -1736,6 +1973,13 @@ function finalizeSubmit(values, baselines, wasteMap){
     rawVariances[id] = rawVariance;
   });
   const payload = { items: values, countedBy: currentCrew.id, countedByName: currentCrew.name, timestamp: submitTimestamp };
+  // If the count was walked back after the variance was shown, the earlier
+  // figures ride along. Not a blocker — a record, so a pattern of recounting
+  // to zero is visible in the owner's review rather than invisible.
+  if(_abandonedAttempts.length){
+    payload.revisions = _abandonedAttempts;
+    payload.revisedTimes = _abandonedAttempts.length;
+  }
 
   bref('counts/'+todayStr()+'/'+activeCheckpoint).set(payload).then(()=>{
     clearTimeout(timeoutWarn);
