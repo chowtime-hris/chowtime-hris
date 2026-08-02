@@ -6,18 +6,19 @@
 <title>Chowtime Production System</title>
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
 <style>
 :root{
-  --maroon:#5c0f1e;
-  --maroon-dark:#3d0a14;
-  --gold:#c99a2e;
-  --gold-light:#e8c874;
-  --cream:#faf6ee;
-  --paper:#ffffff;
-  --ink:#2a1c1c;
-  --line:#e6dcc8;
-  --good:#2f7a4f;
-  --bad:#a5333e;
+  --maroon:#6A1B9A;
+  --maroon-dark:#4A148C;
+  --gold:#8E24AA;
+  --gold-light:#F3E9F7;
+  --cream:#FFFFFF;
+  --paper:#FFFFFF;
+  --ink:#111111;
+  --line:#DDDDDD;
+  --good:#2E7D32;
+  --bad:#C62828;
 }
 *{box-sizing:border-box;}
 body{margin:0;font-family:'Segoe UI',Arial,sans-serif;background:var(--cream);color:var(--ink);}
@@ -49,7 +50,7 @@ button.btn.danger{background:var(--bad);}
 button.btn.sm{padding:6px 10px;font-size:12px;}
 table{width:100%;border-collapse:collapse;font-size:12.5px;}
 th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap;}
-th{background:#f6efdf;color:var(--maroon-dark);font-size:11px;text-transform:uppercase;letter-spacing:.3px;position:sticky;top:0;}
+th{background:#F3E9F7;color:var(--maroon-dark);font-size:11px;text-transform:uppercase;letter-spacing:.3px;position:sticky;top:0;}
 tbody tr:hover{background:#fbf6ea;}
 .table-wrap{overflow-x:auto;}
 .pill{display:inline-block;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700;}
@@ -78,8 +79,8 @@ tbody tr:hover{background:#fbf6ea;}
   .card{box-shadow:none;border:none;}
 }
 .badge-conn{font-size:10px;padding:3px 8px;border-radius:12px;font-weight:700;}
-.badge-conn.on{background:#2f7a4f33;color:#c9e8d3;}
-.badge-conn.off{background:#a5333e33;color:#f5c6ca;}
+.badge-conn.on{background:#2E7D3233;color:#c9e8d3;}
+.badge-conn.off{background:#C6282833;color:#f5c6ca;}
 .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;}
 .cal-dow{text-align:center;font-size:10px;font-weight:700;color:#8a7a5a;text-transform:uppercase;padding:4px 0;}
 .cal-cell{min-height:52px;border:1px solid var(--line);border-radius:6px;padding:4px;cursor:pointer;background:#fffdf9;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:2px;}
@@ -127,6 +128,101 @@ const DEFAULT_SKUS = [
 
 let DB = null;
 let USE_FIREBASE = false;
+
+/* ===== POS INVENTORY BRIDGE =====================================
+   A finished batch is stock that exists. Until now it lived only in the
+   production database, so MAIN's inventory never knew about it and someone
+   had to key it in twice. This posts it once, on save.
+
+   The mapping is explicit on purpose: production codes (NGT, LS, FILLET) do
+   not match POS item ids, and guessing by name is how the wrong item gets
+   credited. Set it once in the Settings tab.                             */
+const POS_CFG = {
+  apiKey:            "AIzaSyBESg7q6sAapwavECcJLx72OPnc8SxOCJc",
+  authDomain:        "chowtime-pos.firebaseapp.com",
+  projectId:         "chowtime-pos",
+  storageBucket:     "chowtime-pos.firebasestorage.app",
+  messagingSenderId: "446140959237",
+  appId:             "1:446140959237:web:c58f75db697223ef33ea6c"
+};
+let POS_FS = null;
+function posDB(){
+  if(POS_FS) return POS_FS;
+  try{
+    const app = firebase.apps.find(a=>a.name==="pos")
+      || firebase.initializeApp(POS_CFG,"pos");
+    POS_FS = app.firestore();
+  }catch(e){ console.error("POS bridge:", e); POS_FS = null; }
+  return POS_FS;
+}
+
+// Local date — the POS files their day in Manila time, and using UTC here
+// would file an early-morning batch under the previous day.
+function posLocalDate(d){
+  const x = d ? new Date(d) : new Date();
+  return x.getFullYear() + "-" +
+    String(x.getMonth()+1).padStart(2,"0") + "-" +
+    String(x.getDate()).padStart(2,"0");
+}
+
+// Post one day's finished quantities into MAIN's inventory.
+// Guarded by a marker per date so re-saving the same day tops up by the
+// difference rather than adding the whole batch a second time.
+async function postProductionToPOS(dateStr, products){
+  const fs = posDB();
+  if(!fs) return {ok:false, reason:"POS database not reachable"};
+  const map = state.posMap || {};
+  const posted = state.posPosted && state.posPosted[dateStr] ? state.posPosted[dateStr] : {};
+  const done = [], skipped = [], failed = [];
+
+  for(const code of Object.keys(products||{})){
+    const qty = Number((products[code]||{}).qty) || 0;
+    const itemId = map[code];
+    if(!itemId){ if(qty>0) skipped.push(code); continue; }
+    const already = Number(posted[code]) || 0;
+    const delta = qty - already;          // only what has not been posted yet
+    if(delta === 0) continue;
+    try{
+      const ref = fs.collection("inventory").doc(itemId);
+      const snap = await ref.get();
+      if(!snap.exists){ failed.push(code+" (no such POS item)"); continue; }
+      const prev = Number(snap.data().stock) || 0;
+      const next = Math.round((prev + delta) * 1000) / 1000;
+      await ref.update({
+        stock: next,
+        lastRestocked: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      await fs.collection("inventory_log").add({
+        itemId: itemId,
+        itemName: snap.data().name || itemId,
+        unit: snap.data().unit || "",
+        type: delta >= 0 ? "add" : "deduct",
+        amount: delta,
+        prevStock: prev,
+        newStock: next,
+        desc: "Production " + dateStr + " · " + code +
+              (already ? " (adjusted from " + already + ")" : ""),
+        source: "PRODUCTION",
+        ref: dateStr,
+        branch: "ct-main",
+        by: "Production",
+        date: posLocalDate(),
+        at: firebase.firestore.FieldValue.serverTimestamp(),
+        timestamp: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      posted[code] = qty;
+      done.push(code + " " + (delta > 0 ? "+" : "") + delta);
+    }catch(e){
+      console.error("post " + code, e);
+      failed.push(code + " (" + (e.message||e) + ")");
+    }
+  }
+
+  state.posPosted = state.posPosted || {};
+  state.posPosted[dateStr] = posted;
+  try{ saveState("posPosted", state.posPosted); }catch(e){}
+  return {ok:true, done, skipped, failed};
+}
 
 let state = {
   staff: {},        // id -> {name, jobTitle, idNumber, account, rates:{code:rate}}
@@ -505,7 +601,7 @@ function renderEntry(main){
     <h2>Daily production entry</h2>
     <div class="row">
       <div style="min-width:200px"><label>Date</label><input type="date" id="entryDateInput" value="${entryDate}"></div>
-      <div><label>Cutoff period</label><input type="text" value="${cutoffLabel(cutoffKeyFor(entryDate))}" readonly style="background:#f6efdf;font-weight:700;color:var(--maroon)"></div>
+      <div><label>Cutoff period</label><input type="text" value="${cutoffLabel(cutoffKeyFor(entryDate))}" readonly style="background:#F3E9F7;font-weight:700;color:var(--maroon)"></div>
     </div>
   </div>
   ${staffList.length? `
@@ -641,12 +737,30 @@ function renderEntry(main){
     state.production[entryDate] = collectDayData();
     const btn = document.getElementById('saveEntryBtn');
     btn.disabled = true; btn.textContent = 'Saving...';
-    saveState('production', state.production).then(result=>{
+    saveState('production', state.production).then(async result=>{
+      // Post the finished quantities into MAIN's inventory. Done after the
+      // production save succeeds, so a failed sync never credits stock that
+      // was not recorded.
+      let posMsg = '';
+      try{
+        const r = await postProductionToPOS(entryDate,
+          state.production[entryDate].products);
+        if(!r.ok){
+          posMsg = '\n\n⚠ POS inventory NOT updated: ' + r.reason;
+        }else{
+          if(r.done.length)    posMsg += '\n\nPOS MAIN stock updated: ' + r.done.join(', ');
+          if(r.skipped.length) posMsg += '\n\n⚠ Not linked to a POS item yet: ' +
+            r.skipped.join(', ') + ' — set this in Settings › POS inventory link.';
+          if(r.failed.length)  posMsg += '\n\n⚠ Failed: ' + r.failed.join(', ');
+        }
+      }catch(e){
+        posMsg = '\n\n⚠ POS inventory NOT updated: ' + (e.message||e);
+      }
       btn.disabled = false;
       if(result==='synced'){
-        alert('✓ Saved and synced — this entry for '+entryDate+' is now visible on all connected devices.');
+        alert('✓ Saved and synced — this entry for '+entryDate+' is now visible on all connected devices.'+posMsg);
       } else if(result==='offline'){
-        alert('⚠ Saved on THIS DEVICE ONLY (not connected to the cloud right now). This entry for '+entryDate+' will NOT appear anywhere else until this device reconnects.');
+        alert('⚠ Saved on THIS DEVICE ONLY (not connected to the cloud right now). This entry for '+entryDate+' will NOT appear anywhere else until this device reconnects.'+posMsg);
       }
       // 'failed' case already alerts inside saveState itself
       render();
@@ -1425,7 +1539,54 @@ function renderSettings(main){
   let savedCfg = '';
   try{ savedCfg = localStorage.getItem(LS_CFG_KEY) || ''; }catch(e){}
   const supervisorUrl = window.location.origin + window.location.pathname + '?mode=supervisor';
+  // Pull MAIN's catalogue so the mapping is a picker, not a typed id.
+  setTimeout(async()=>{
+    const box = document.getElementById('posMapBox');
+    if(!box) return;
+    const fs = posDB();
+    if(!fs){ box.innerHTML = '<div class="msg warn">Could not reach the POS database.</div>'; return; }
+    let items = [];
+    try{
+      const snap = await fs.collection('inventory').get();
+      snap.forEach(d=>items.push({id:d.id, name:(d.data()||{}).name||d.id,
+        unit:(d.data()||{}).unit||''}));
+      items.sort((a,b)=>String(a.name).localeCompare(String(b.name)));
+    }catch(e){
+      box.innerHTML = '<div class="msg warn">Could not read POS items: '+(e.message||e)+'</div>';
+      return;
+    }
+    const map = state.posMap || {};
+    box.innerHTML = state.products.map(p=>`
+      <div class="row" style="align-items:center;gap:10px;margin-bottom:8px">
+        <div style="min-width:170px;font-weight:700">${p.label}
+          <span style="color:var(--muted,#5A5A5A);font-weight:400"> · ${p.code}</span></div>
+        <select class="posMapSel" data-code="${p.code}" style="flex:1;min-width:200px">
+          <option value="">— not linked —</option>
+          ${items.map(it=>`<option value="${it.id}"${map[p.code]===it.id?' selected':''}>
+            ${it.name}${it.unit?' ('+it.unit+')':''}</option>`).join('')}
+        </select>
+      </div>`).join('');
+    const btn = document.getElementById('savePosMapBtn');
+    if(btn) btn.onclick = ()=>{
+      const next = {};
+      document.querySelectorAll('.posMapSel').forEach(sel=>{
+        if(sel.value) next[sel.dataset.code] = sel.value;
+      });
+      saveState('posMap', next);
+      alert('Links saved. From the next production entry, those items post to MAIN stock.');
+    };
+  }, 0);
+
   main.innerHTML = `
+  <div class="card">
+    <h2>POS inventory link</h2>
+    <div class="msg info">Each finished batch is added to <b>MAIN's</b> POS stock
+      when you save a production entry. Pick which POS item each product feeds.
+      Anything left unlinked is simply not posted — production codes and POS
+      item ids do not match, and guessing by name credits the wrong item.</div>
+    <div id="posMapBox">Loading POS items…</div>
+    <div class="foot-actions"><button class="btn gold" id="savePosMapBtn">Save links</button></div>
+  </div>
   <div class="card">
     <h2>Link for your production supervisor</h2>
     <div class="msg info">This is a restricted view — it only shows Production Entry and Materials (batch quantities and attendance), with all ₱ figures, rates, Staff & Rates, Deductions, Payslip, and Settings hidden and inaccessible from the menu. Send this link instead of your own.</div>
@@ -1466,7 +1627,7 @@ function renderSettings(main){
     Your existing <code>chowtime-payroll.html</code> is not touched by this app in any way — its computation logic stays exactly as it is. This system only writes to a brand-new, separate spot in Firebase called <code>hrisProductionFeed</code>. Nothing reads from it yet, so there is nothing to break.</p>
     <p style="font-size:13.5px;line-height:1.6">
     On the Payslip tab, once you're connected to Firebase, a <strong>"Send to HRIS feed"</strong> button saves that staff member's finished net salary for the cutoff to:</p>
-    <div style="font-family:monospace;font-size:12px;background:#f6efdf;padding:8px 10px;border-radius:6px;">hrisProductionFeed / [cutoff, e.g. 2026-07-C1] / [staffId] → name, gross, deductions, net, account</div>
+    <div style="font-family:monospace;font-size:12px;background:#F3E9F7;padding:8px 10px;border-radius:6px;">hrisProductionFeed / [cutoff, e.g. 2026-07-C1] / [staffId] → name, gross, deductions, net, account</div>
     <p style="font-size:13.5px;line-height:1.6;margin-top:10px">
     That's as far as this app goes on its own. When — and only when — you're comfortable, you (or I, in a separate future session working directly on <code>chowtime-payroll.html</code>) can add a small, additive, read-only lookup there that displays these numbers next to the manual entry fields, as a reference or a one-click "copy in" — without replacing any of the existing payroll formulas. Until that step is taken, this feed just sits there unused and 100% risk-free to your current payroll.</p>
   </div>
