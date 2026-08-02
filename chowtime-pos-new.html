@@ -3266,7 +3266,8 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
           ),
           h("div",null,
             h("div",{style:{fontSize:13,fontWeight:700}},req.staffName),
-            h("div",{style:{fontSize:12,color:C.muted}},branches.find(b=>b.id===req.branch)?.name||req.branch),
+            h("div",{style:{fontSize:12,color:C.muted}},
+              (BRANCHES.find(b=>b.id===req.branch)||{}).name||req.branch),
             req.hrisEmpId
               ?h("div",{style:{fontSize:11,color:C.success,fontWeight:600}},"🔗 HRIS linked")
               :h("div",{style:{fontSize:11,color:C.warning,fontWeight:600}},"⚠️ No HRIS link")
