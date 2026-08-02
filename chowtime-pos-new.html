@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Chowtime POS — 20260802-222836</title>
+<title>Chowtime POS — 20260802-224400</title>
 <meta name="theme-color" content="#6A1B9A"/>
 <meta name="mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260802-222836 -->
+<!-- BUILD:20260802-224400 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -4462,6 +4462,45 @@ function localDate(d){
     String(x.getDate()).padStart(2,"0");
 }
 
+// ─── DATE RANGES ──────────────────────────────────────────
+// One definition of "this week" and "this month" for the dashboard and the
+// analytics, so the two can never disagree about the period they are showing.
+function rangeFor(key,customFrom,customTo){
+  const t=new Date();
+  const iso=(d)=>localDate(d);
+  const shift=(n)=>{const d=new Date(); d.setDate(d.getDate()+n); return d;};
+  if(key==="today")     return {from:iso(t),to:iso(t),label:"Today"};
+  if(key==="yesterday"){const y=shift(-1); return {from:iso(y),to:iso(y),label:"Yesterday"};}
+  if(key==="week"){
+    // week starts Monday — a trading week reads better than a Sunday split
+    const d=new Date(); const dow=(d.getDay()+6)%7;
+    const mon=new Date(); mon.setDate(d.getDate()-dow);
+    return {from:iso(mon),to:iso(t),label:"This week"};
+  }
+  if(key==="last7")     return {from:iso(shift(-6)),to:iso(t),label:"Last 7 days"};
+  if(key==="month"){
+    const m=new Date(t.getFullYear(),t.getMonth(),1);
+    return {from:iso(m),to:iso(t),label:"This month"};
+  }
+  if(key==="lastmonth"){
+    const a=new Date(t.getFullYear(),t.getMonth()-1,1);
+    const b=new Date(t.getFullYear(),t.getMonth(),0);
+    return {from:iso(a),to:iso(b),label:"Last month"};
+  }
+  if(key==="custom")    return {from:customFrom||iso(t),to:customTo||iso(t),label:"Custom"};
+  return {from:iso(t),to:iso(t),label:"Today"};
+}
+const RANGE_KEYS=[["today","Today"],["yesterday","Yesterday"],["week","This week"],
+  ["last7","Last 7 days"],["month","This month"],["lastmonth","Last month"],
+  ["custom","Custom"]];
+
+// Orders inside a range, excluding voids and cancellations — those are not
+// sales, and counting them inflates every figure downstream.
+function inRange(o,r){
+  const d=String(o.date||"");
+  return d>=r.from&&d<=r.to&&o.status!=="void"&&o.status!=="cancelled";
+}
+
 // Money always renders with thousands separators. Reading P330000.00 off a
 // screen is guesswork; P330,000.00 is not.
 const peso=(v)=>(Number(v)||0).toLocaleString("en-PH",
@@ -5692,7 +5731,22 @@ function renderDRDoc(po,cs,brs){
 // ─── BUILD / UPDATE CHECK ────────────────────
 // GitHub Pages caches hard, so a branch can run an old copy for hours.
 // Without a visible stamp a bug report cannot be tied to a version.
-const BUILD = "20260802-222836";
+// The reload button appends ?v=<timestamp> to get past the cache. Once the
+// page has loaded that has done its job, and leaving it in the address bar
+// means it ends up in bookmarks, shared links and history. Strip it back out
+// without navigating again.
+(function(){
+  try{
+    if(location.search && /[?&]v=\d+/.test(location.search)){
+      const clean = location.pathname
+        + location.search.replace(/([?&])v=\d+&?/,"$1").replace(/[?&]$/,"")
+        + location.hash;
+      history.replaceState(null, "", clean);
+    }
+  }catch(e){}
+})();
+
+const BUILD = "20260802-224400";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -9694,6 +9748,10 @@ function App(){
   const [zHistAll,setZHistAll]=useState([]);             // every branch, for Reports
   const [invView,setInvView]=useState("");               // "" = Main; else a branch id
   const [invViewData,setInvViewData]=useState([]);        // that branch's stock
+  const [dashRange,setDashRange]=useState("today");      // dashboard period
+  const [dashFrom,setDashFrom]=useState(localDate());
+  const [dashTo,setDashTo]=useState(localDate());
+  const [dashBranch,setDashBranch]=useState("");         // "" = all branches
   const [editSub,setEditSub]=useState(null);             // subscription being edited
   const [newBuild,setNewBuild]=useState(null);           // a newer build is live
   const [subs,setSubs]=useState([]);                     // subscriptions, all branches
@@ -11851,18 +11909,80 @@ function App(){
       h("div",{key:page,style:{flex:1,display:"flex",flexDirection:"column"}},
 
         // ══ DASHBOARD (Owner) ══
-        page==="dashboard"&&h("div",null,
+        page==="dashboard"&&(function(){
+          const R=rangeFor(dashRange,dashFrom,dashTo);
+          const scoped=orders.filter(o=>inRange(o,R))
+            .filter(o=>!dashBranch||o.branch===dashBranch);
+          const sales=scoped.reduce((a,o)=>a+(o.total||0),0);
+          const txns=scoped.length;
+          const avg=txns?sales/txns:0;
+          const items=scoped.reduce((a,o)=>
+            a+((o.items||[]).reduce((x,i)=>x+(Number(i.qty)||0),0)),0);
+          // the same window, shifted back — so "vs previous" compares like
+          // with like instead of always against yesterday
+          const span=Math.max(1,Math.round(
+            (new Date(R.to)-new Date(R.from))/86400000)+1);
+          const pf=new Date(R.from); pf.setDate(pf.getDate()-span);
+          const pt=new Date(R.from); pt.setDate(pt.getDate()-1);
+          const prevR={from:localDate(pf),to:localDate(pt)};
+          const prevSales=orders.filter(o=>inRange(o,prevR))
+            .filter(o=>!dashBranch||o.branch===dashBranch)
+            .reduce((a,o)=>a+(o.total||0),0);
+          const delta=prevSales>0?Math.round((sales-prevSales)/prevSales*100):null;
+
+          return h("div",null,
+
+          // ── PERIOD + BRANCH ──
+          h("div",{style:{background:"#fff",border:"1px solid "+C.border,
+            borderRadius:12,padding:"11px 13px",marginBottom:12}},
+            h("div",{style:{display:"flex",gap:6,flexWrap:"wrap",
+              alignItems:"center"}},
+              RANGE_KEYS.map(([k,lbl])=>h("button",{key:k,
+                onClick:()=>setDashRange(k),
+                style:{padding:"7px 13px",borderRadius:8,fontSize:13,
+                  cursor:"pointer",fontWeight:dashRange===k?800:500,
+                  border:"1px solid "+(dashRange===k?C.primary:C.border),
+                  background:dashRange===k?C.primary+"18":"#fff",
+                  color:dashRange===k?C.primary:C.text}},lbl)),
+              h("div",{style:{flex:1}}),
+              h("select",{value:dashBranch,
+                onChange:e=>setDashBranch(e.target.value),
+                style:{padding:"7px 11px",borderRadius:8,fontSize:13,
+                  outline:"none",cursor:"pointer",fontWeight:dashBranch?800:500,
+                  border:"1px solid "+(dashBranch?C.primary:C.border),
+                  background:dashBranch?C.primary+"18":"#fff",
+                  color:dashBranch?C.primary:C.text}},
+                h("option",{value:""},"All branches"),
+                branches.map(b=>h("option",{key:b.id,value:b.id},b.full)))),
+            dashRange==="custom"&&h("div",{style:{display:"flex",gap:8,
+              marginTop:9,alignItems:"center",flexWrap:"wrap"}},
+              h("span",{style:{fontSize:12,color:C.muted}},"From"),
+              h("input",{type:"date",value:dashFrom,
+                onChange:e=>setDashFrom(e.target.value),
+                style:{padding:"7px",border:"1px solid "+C.border,
+                  borderRadius:8,fontSize:13,outline:"none"}}),
+              h("span",{style:{fontSize:12,color:C.muted}},"to"),
+              h("input",{type:"date",value:dashTo,
+                onChange:e=>setDashTo(e.target.value),
+                style:{padding:"7px",border:"1px solid "+C.border,
+                  borderRadius:8,fontSize:13,outline:"none"}})),
+            h("div",{style:{fontSize:11,color:C.muted,marginTop:7}},
+              R.from===R.to?R.from:(R.from+" → "+R.to)
+              +(dashBranch?"  ·  "+((branches.find(b=>b.id===dashBranch)||{}).full||""):"")
+              +"  ·  voids and cancellations excluded")
+          ),
 
           // ── TOP KPI ROW ──
           h("div",{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}},
-            h(Stat,{label:"All Branch Sales Today",
-              value:"₱"+orders.filter(o=>o.date===localDate())
-                .filter(o=>o.status!=="void"&&o.status!=="cancelled")
-                .reduce((s,o)=>s+(o.total||0),0).toLocaleString(),
-              sub:"From Firebase orders",icon:"📈",color:C.primary}),
-            h(Stat,{label:"Live Orders",
-              value:orders.filter(o=>o.status==="pending"||o.status==="cooking").length,
-              sub:"Pending + Cooking",icon:"🔥",color:C.warning}),
+            h(Stat,{label:"Sales · "+R.label,
+              value:"₱"+peso(sales),
+              sub:delta===null?(txns+" transactions")
+                :((delta>=0?"▲ ":"▼ ")+Math.abs(delta)+"% vs previous "+span+"d"),
+              icon:"📈",color:delta===null?C.primary:(delta>=0?C.success:C.danger)}),
+            h(Stat,{label:"Transactions",
+              value:String(txns),
+              sub:txns?("₱"+peso(avg)+" average · "+items+" items"):"no sales yet",
+              icon:"🧾",color:C.primary}),
             h(Stat,{label:"Active Branches",
               value:branches.filter(b=>b.active!==false).length+"/"+branches.length,
               sub:"Online now",icon:"🏪",color:C.info}),
@@ -11924,17 +12044,23 @@ function App(){
                 h("div",{style:{fontSize:12,color:C.muted}},
                   new Date().toLocaleDateString("en-PH",{month:"short",day:"numeric",year:"numeric"}))
               ),
-              branches.map(function(b){
+              // Ranked by sales for the chosen period, so the list answers
+              // "who is carrying the week" rather than listing stores in the
+              // order they happen to be stored in.
+              branches.slice().map(function(b){
                 const bOrders=orders.filter(function(o){
-                  return o.branch===b.id&&o.date===localDate();
+                  return o.branch===b.id&&inRange(o,R);
                 });
-                const bSales=bOrders
-                  .filter(function(o){return o.status!=="void"&&o.status!=="cancelled";})
-                  .reduce(function(s,o){return s+(o.total||0);},0);
-                const bPending=bOrders.filter(function(o){return o.status==="pending";}).length;
-                const allBranchSales=orders.filter(function(o){
-                  return o.date===localDate();
-                }).filter(function(o){return o.status!=="void"&&o.status!=="cancelled";})
+                const bSales=bOrders.reduce(function(s,o){return s+(o.total||0);},0);
+                const bTx=bOrders.length;
+                const bAvg=bTx?bSales/bTx:0;
+                return {b:b,sales:bSales,tx:bTx,avg:bAvg};
+              }).sort(function(x,y){return y.sales-x.sales;}).map(function(row){
+                const b=row.b, bSales=row.sales;
+                const bPending=orders.filter(function(o){
+                  return o.branch===b.id&&o.date===localDate()&&o.status==="pending";
+                }).length;
+                const allBranchSales=orders.filter(function(o){return inRange(o,R);})
                   .reduce(function(s,o){return s+(o.total||0);},0);
                 const pct=allBranchSales>0?Math.round(bSales/allBranchSales*100):0;
                 return h("div",{key:b.id,
@@ -11947,13 +12073,17 @@ function App(){
                     h("div",{style:{fontSize:13,fontWeight:700}},b.name||b.full),
                     h("div",{style:{fontSize:12,color:C.muted}},b.address||"")
                   ),
-                  h("div",{style:{textAlign:"right"}},
+                  h("div",{style:{textAlign:"right",minWidth:150}},
                     h("div",{style:{fontSize:13,fontWeight:900,
                       color:bSales>0?C.primary:C.muted}},
-                      "₱"+bSales.toLocaleString()),
+                      "₱"+peso(bSales)),
                     h("div",{style:{fontSize:12,color:C.muted}},
-                      bOrders.length+" orders"+(bPending>0?" · ⚠️"+bPending+" pending":""))
+                      row.tx+" orders"
+                      +(row.tx?" · ₱"+peso(row.avg)+" avg":"")
+                      +(bPending>0?" · ⚠️"+bPending+" pending":""))
                   ),
+                  h("div",{style:{fontSize:12,color:C.muted,minWidth:34,
+                    textAlign:"right"}},pct+"%"),
                   // Progress bar
                   h("div",{style:{width:60}},
                     h("div",{style:{height:4,background:"#f0f0f0",borderRadius:2}},
@@ -11974,12 +12104,29 @@ function App(){
                 h("div",{style:{background:C.danger,color:"#fff",borderRadius:20,
                   padding:"2px 8px",fontSize:12,fontWeight:700}},
                   orders.filter(function(o){
-                    return o.status==="pending"||o.status==="cooking";
+                    return (o.status==="pending"||o.status==="cooking")
+                      &&o.date===localDate();
                   }).length+" active")
               ),
-              h("div",{style:{maxHeight:350,overflowY:"auto"}},
+              (function(){
+              const stuck=orders.filter(function(o){
+                return (o.status==="pending"||o.status==="cooking")
+                  &&o.date!==localDate();
+              });
+              return stuck.length>0&&h("div",{style:{margin:"0 16px 10px",
+                background:C.warning+"18",border:"1px solid "+C.warning,
+                borderRadius:9,padding:"9px 12px"}},
+                h("div",{style:{fontSize:12,fontWeight:800,color:C.warning}},
+                  stuck.length+" ticket"+(stuck.length>1?"s":"")+" left open from earlier days"),
+                h("div",{style:{fontSize:11,color:C.muted,marginTop:2,lineHeight:1.5}},
+                  "Never marked served or void, so they sit in the queue forever. "+
+                  "Close them from All Orders."));
+            })(),
+
+            h("div",{style:{maxHeight:350,overflowY:"auto"}},
                 orders.filter(function(o){
-                  return o.status==="pending"||o.status==="cooking"||o.status==="served";
+                  return (o.status==="pending"||o.status==="cooking"||o.status==="served")
+                    &&o.date===localDate();
                 })
                 .sort(function(a,b){return (b.timestamp?.seconds||0)-(a.timestamp?.seconds||0);})
                 .slice(0,15)
@@ -12277,7 +12424,8 @@ function App(){
                 "💾 Save")
             )
           )
-        ),
+        );
+        })(),
 
         // ══ POS ══
         page==="pos"&&h("div",{style:{height:"100%",display:"flex",
