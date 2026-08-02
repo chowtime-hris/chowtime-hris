@@ -28,8 +28,8 @@ header.app .brand .mark{width:36px;height:36px;border-radius:8px;background:var(
 header.app h1{font-size:16px;margin:0;letter-spacing:.3px;}
 header.app .sub{font-size:11px;opacity:.8;}
 nav.tabs{display:flex;overflow-x:auto;background:#FFFFFF;position:sticky;top:60px;z-index:49;-webkit-overflow-scrolling:touch;}
-nav.tabs button{flex:0 0 auto;background:none;border:none;color:#e9d9b8;padding:12px 16px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;border-bottom:3px solid transparent;}
-nav.tabs button.active{color:#fff;border-bottom:3px solid var(--gold);background:rgba(255,255,255,.06);}
+nav.tabs button{flex:0 0 auto;background:none;border:none;color:#5A5A5A;padding:12px 16px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;border-bottom:3px solid transparent;}
+nav.tabs button.active{color:#111111;border-bottom:3px solid var(--gold);background:rgba(255,255,255,.06);}
 main{max-width:1100px;margin:0 auto;padding:16px;padding-bottom:60px;}
 .card{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,.04);}
 .card h2{margin:0 0 12px;font-size:15px;color:var(--maroon);border-bottom:2px solid var(--gold-light);padding-bottom:8px;}
@@ -59,7 +59,7 @@ tbody tr:hover{background:#fbf6ea;}
 .pill.gold{background:#f8edd0;color:#8a6a10;}
 .kpi{display:flex;flex-direction:column;gap:2px;}
 .kpi .num{font-size:22px;font-weight:800;color:var(--maroon);}
-.kpi .lbl{font-size:11px;color:#8a7a5a;text-transform:uppercase;font-weight:700;}
+.kpi .lbl{font-size:11px;color:#5A5A5A;text-transform:uppercase;font-weight:700;}
 .row{display:flex;gap:10px;align-items:end;flex-wrap:wrap;}
 .msg{padding:10px 14px;border-radius:6px;font-size:13px;margin-bottom:12px;}
 .msg.info{background:#eef3fb;color:#2b5590;}
@@ -67,10 +67,10 @@ tbody tr:hover{background:#fbf6ea;}
 .msg.err{background:#fbe6e7;color:var(--bad);}
 .tag-rm{cursor:pointer;color:var(--bad);font-weight:800;margin-left:8px;}
 .foot-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:10px;}
-.empty{text-align:center;padding:30px;color:#9a8a6a;font-size:13px;}
+.empty{text-align:center;padding:30px;color:#5A5A5A;font-size:13px;}
 .payslip{border:2px solid var(--maroon);border-radius:8px;padding:18px;max-width:480px;margin:0 auto;background:#fffdf7;}
 .payslip h3{color:var(--maroon);text-align:center;margin:0 0 4px;letter-spacing:1px;}
-.payslip .sub{text-align:center;font-size:11px;color:#8a7a5a;margin-bottom:14px;}
+.payslip .sub{text-align:center;font-size:11px;color:#5A5A5A;margin-bottom:14px;}
 .payslip table td{padding:4px 6px;font-size:12.5px;}
 .payslip .total-row td{font-weight:800;border-top:2px solid var(--maroon);}
 @media print{
@@ -82,7 +82,7 @@ tbody tr:hover{background:#fbf6ea;}
 .badge-conn.on{background:#2E7D3233;color:#c9e8d3;}
 .badge-conn.off{background:#C6282833;color:#f5c6ca;}
 .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;}
-.cal-dow{text-align:center;font-size:10px;font-weight:700;color:#8a7a5a;text-transform:uppercase;padding:4px 0;}
+.cal-dow{text-align:center;font-size:10px;font-weight:700;color:#5A5A5A;text-transform:uppercase;padding:4px 0;}
 .cal-cell{min-height:52px;border:1px solid var(--line);border-radius:6px;padding:4px;cursor:pointer;background:#fffdf9;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:2px;}
 .cal-cell:hover{border-color:var(--gold);}
 .cal-cell.empty-cell{background:transparent;border:none;cursor:default;}
@@ -543,7 +543,7 @@ function renderDashboard(main){
       <tbody>
         ${state.products.map(p=>{
           const qty = prodTotals[p.code]||0;
-          return `<tr><td>${p.label} <span style="color:#9a8a6a">(${p.code})</span></td><td>${fmt(qty)}</td></tr>`;
+          return `<tr><td>${p.label} <span style="color:#5A5A5A">(${p.code})</span></td><td>${fmt(qty)}</td></tr>`;
         }).join('')}
       </tbody>
     </table></div>
@@ -651,7 +651,7 @@ function renderEntry(main){
           const qty = pd.qty!=null ? pd.qty : '';
           const creditedSet = pd.staff ? new Set(pd.staff) : new Set(staffList.filter(s=>attendance[s.id]).map(s=>s.id));
           return `<tr>
-            <td><strong>${p.label}</strong><br><span style="font-size:10px;color:#9a8a6a">${p.code}</span></td>
+            <td><strong>${p.label}</strong><br><span style="font-size:10px;color:#5A5A5A">${p.code}</span></td>
             <td><input type="number" min="0" step="any" style="width:100px" class="batchQty" data-code="${p.code}" value="${qty}" placeholder="0"></td>
             <td>
               <div style="display:flex;flex-wrap:wrap;gap:8px">
@@ -862,7 +862,7 @@ function renderLog(main){
     const day = state.production[logSelectedDate];
     const cutoffLbl = cutoffLabel(cutoffKeyFor(logSelectedDate));
     if(!day || !dayHasData(logSelectedDate)){
-      detailCard.innerHTML = `<h2>${logSelectedDate} <span style="font-weight:400;font-size:12px;color:#8a7a5a">(${cutoffLbl})</span></h2>
+      detailCard.innerHTML = `<h2>${logSelectedDate} <span style="font-weight:400;font-size:12px;color:#5A5A5A">(${cutoffLbl})</span></h2>
         <div class="empty">No production entry saved for this date.</div>`;
       return;
     }
@@ -888,7 +888,7 @@ function renderLog(main){
     }
 
     detailCard.innerHTML = `
-      <h2>${logSelectedDate} <span style="font-weight:400;font-size:12px;color:#8a7a5a">(${cutoffLbl})</span></h2>
+      <h2>${logSelectedDate} <span style="font-weight:400;font-size:12px;color:#5A5A5A">(${cutoffLbl})</span></h2>
       <div class="grid cols-2">
         <div>
           <label>Present that day</label>
@@ -964,7 +964,7 @@ function renderStaff(main){
           <td>${s.idNumber||'—'}</td>
           <td><strong>${s.name}</strong></td>
           <td>${s.jobTitle||''}</td>
-          <td>${s.email||'<span style="color:#c77">not set</span>'}</td>
+          <td>${s.email||'<span style="color:#C62828">not set</span>'}</td>
           ${state.products.map(p=>`<td>₱${fmt((s.rates&&s.rates[p.code])||0)}</td>`).join('')}
           <td><button class="btn ghost sm editRate" data-id="${s.id}">Edit</button> <button class="btn danger sm delStaff" data-id="${s.id}">Remove</button></td>
         </tr>
@@ -1328,7 +1328,7 @@ function renderPaymentRows(){
       if(e.type!=='payment') return;
       const debt = debtsById[e.debtId];
       const typeLabels = {loan:'Loan', fine:'Fine / penalty', ca:'Cash advance'};
-      const target = debt? `${typeLabels[debt.type]||debt.type} (${debt.date})` : '<span style="color:#c77">unlinked</span>';
+      const target = debt? `${typeLabels[debt.type]||debt.type} (${debt.date})` : '<span style="color:#C62828">unlinked</span>';
       rows.push({date:e.date, html:`<tr><td>${e.date}</td><td>${name}</td><td>${target}</td><td>₱${fmt(e.amount)}</td><td>${e.note||''}</td><td><span class="tag-rm delLedger" data-key="${sid}||${e.id}">✕</span></td></tr>`});
     });
   });
@@ -1452,7 +1452,7 @@ function renderPayslip(main){
           <tr><td>Cash Advance (same-day)</td><td>₱${fmt(caTotal)}</td></tr>
           ${deductionRows.map(r=>`
             <tr><td>${r.label}</td><td>₱${fmt(r.pay)}</td></tr>
-            <tr><td style="padding-left:16px;font-size:11px;color:#8a7a5a">→ remaining balance</td><td style="font-size:11px;color:#8a7a5a">₱${fmt(r.bal)}</td></tr>
+            <tr><td style="padding-left:16px;font-size:11px;color:#5A5A5A">→ remaining balance</td><td style="font-size:11px;color:#5A5A5A">₱${fmt(r.bal)}</td></tr>
           `).join('')}
           ${payByType.unlinked>0?`<tr><td>Other payment (unlinked)</td><td>₱${fmt(payByType.unlinked)}</td></tr>`:''}
           <tr><td>Cash Fund payout</td><td>₱${fmt(cashfund)}</td></tr>

@@ -24,10 +24,10 @@ body{font-family:'Inter',sans-serif;background:#FFFFFF;color:#111111;min-height:
 .badges{display:flex;gap:7px;flex-wrap:wrap;}
 .bg-green{background:rgba(45,125,58,.25);border:1px solid rgba(45,125,58,.5);color:#2E7D32;}
 .bg-red{background:rgba(192,57,43,.25);border:1px solid rgba(192,57,43,.5);color:#C62828;}
-.bg-orange{background:rgba(232,70,10,.25);border:1px solid rgba(232,70,10,.5);color:#E65100;}
+.bg-orange{background:rgba(232,70,10,.25);border:1px solid rgba(232,70,10,.5);color:#BF360C;}
 .bg-blue{background:rgba(26,111,168,.25);border:1px solid rgba(26,111,168,.5);color:#6A1B9A;}
 .bg-gray{background:rgba(140,112,96,.2);border:1px solid rgba(140,112,96,.3);color:#5A5A5A;}
-.bg-yellow{background:rgba(240,165,0,.25);border:1px solid rgba(240,165,0,.5);color:#f0c040;}
+.bg-yellow{background:rgba(240,165,0,.25);border:1px solid rgba(240,165,0,.5);color:#BF360C;}
 
 /* camera */
 .cam-wrap{position:relative;width:100%;border-radius:var(--radius);overflow:hidden;background:#0a0808;border:2px solid #FFFFFF;aspect-ratio:4/3;}
@@ -93,7 +93,7 @@ body{font-family:'Inter',sans-serif;background:#FFFFFF;color:#111111;min-height:
 .conf-name{font-family:'Syne',sans-serif;font-size:19px;font-weight:800;}
 .conf-action{font-size:13px;color:#5A5A5A;margin-top:3px;}
 .conf-time{font-size:26px;font-weight:700;color:var(--brand);margin:8px 0 3px;}
-.conf-branch{display:inline-block;margin-top:6px;padding:3px 10px;border-radius:20px;background:rgba(232,70,10,.2);color:#E65100;font-size:11px;font-weight:600;}
+.conf-branch{display:inline-block;margin-top:6px;padding:3px 10px;border-radius:20px;background:rgba(232,70,10,.2);color:#BF360C;font-size:11px;font-weight:600;}
 .conf-geo{font-size:11px;color:#5A5A5A;margin-top:5px;}
 
 /* geo warn */
@@ -120,7 +120,7 @@ body{font-family:'Inter',sans-serif;background:#FFFFFF;color:#111111;min-height:
 .log-badge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:9px;}
 .l-in{background:rgba(45,125,58,.3);color:#2E7D32;}
 .l-out{background:rgba(192,57,43,.3);color:#C62828;}
-.l-brk{background:rgba(232,70,10,.3);color:#E65100;}
+.l-brk{background:rgba(232,70,10,.3);color:#BF360C;}
 .log-t{font-size:10px;color:#5A5A5A;margin-top:2px;}
 
 /* toast */
@@ -128,10 +128,10 @@ body{font-family:'Inter',sans-serif;background:#FFFFFF;color:#111111;min-height:
 .toast.show{transform:translateX(-50%) translateY(0);}
 
 .setup-banner{background:rgba(232,70,10,.13);border:1px solid rgba(232,70,10,.28);border-radius:var(--radius);padding:13px 15px;font-size:13px;display:none;line-height:1.5;}
-.setup-banner a{color:#E65100;font-weight:600;}
+.setup-banner a{color:#BF360C;font-weight:600;}
 .connected-banner{background:rgba(45,125,58,.13);border:1px solid rgba(45,125,58,.3);border-radius:10px;padding:10px 14px;font-size:12px;color:#2E7D32;display:none;}
 .admin-link{margin-top:auto;padding:14px;text-align:center;}
-.admin-link a{color:#DDDDDD;font-size:11px;text-decoration:none;margin:0 8px;}
+.admin-link a{color:#5A5A5A;font-size:11px;text-decoration:none;margin:0 8px;}
 .admin-link a:hover{color:#5A5A5A;}
 
 /* face loading */
@@ -222,7 +222,7 @@ body{font-family:'Inter',sans-serif;background:#FFFFFF;color:#111111;min-height:
     </div>
     <button id="save-face-btn" onclick="saveFaceRegistration()" disabled
       style="margin-top:10px;width:100%;padding:12px;border-radius:9px;border:none;
-      background:#2D7D3A;color:#fff;font-size:14px;font-weight:700;cursor:pointer;opacity:.4;">
+      background:#2D7D3A;color:#111111;font-size:14px;font-weight:700;cursor:pointer;opacity:.4;">
       ✅ Save & Register Face
     </button>
     <button onclick="cancelRegistration()"
@@ -260,7 +260,7 @@ body{font-family:'Inter',sans-serif;background:#FFFFFF;color:#111111;min-height:
     <div class="conf-time"   id="conf-time">—</div>
     <div class="conf-branch" id="conf-branch">—</div>
     <div class="conf-geo"    id="conf-geo">—</div>
-    <div id="conf-late" style="display:none;margin-top:10px;background:rgba(255,60,60,.25);border:1px solid rgba(255,100,100,.4);border-radius:8px;padding:8px 14px;font-size:13px;font-weight:700;color:#ff8080;">⚠️ LATE — will be deducted from pay</div>
+    <div id="conf-late" style="display:none;margin-top:10px;background:rgba(255,60,60,.25);border:1px solid rgba(255,100,100,.4);border-radius:8px;padding:8px 14px;font-size:13px;font-weight:700;color:#C62828;">⚠️ LATE — will be deducted from pay</div>
   </div>
 
   <!-- Today log -->
@@ -288,10 +288,10 @@ body{font-family:'Inter',sans-serif;background:#FFFFFF;color:#111111;min-height:
     <div id="loading-status" style="font-size:11px;color:#5A5A5A;">Please wait…</div>
   </div>
   <div id="manual-cfg-section" style="display:none;background:rgba(232,70,10,.1);border:1px solid rgba(232,70,10,.3);border-radius:var(--radius);padding:14px;">
-    <div style="font-size:12px;font-weight:700;color:#E65100;margin-bottom:8px;">📋 Paste Config Code</div>
+    <div style="font-size:12px;font-weight:700;color:#BF360C;margin-bottom:8px;">📋 Paste Config Code</div>
     <textarea id="manual-cfg-input" rows="3" placeholder="Paste the config code here…"
       style="width:100%;background:#FFFFFF;border:1px solid #DDDDDD;color:#111111;padding:9px;border-radius:7px;font-family:monospace;font-size:12px;resize:none;"></textarea>
-    <button onclick="applyManualConfig()" style="margin-top:8px;width:100%;padding:10px;border-radius:8px;border:none;background:var(--brand);color:#fff;font-size:14px;font-weight:700;cursor:pointer;">
+    <button onclick="applyManualConfig()" style="margin-top:8px;width:100%;padding:10px;border-radius:8px;border:none;background:var(--brand);color:#111111;font-size:14px;font-weight:700;cursor:pointer;">
       ⚡ Apply Config
     </button>
   </div>

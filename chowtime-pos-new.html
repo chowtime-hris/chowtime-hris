@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Chowtime POS — 20260802-232713</title>
+<title>Chowtime POS — 20260802-233858</title>
 <meta name="theme-color" content="#6A1B9A"/>
 <meta name="mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260802-232713 -->
+<!-- BUILD:20260802-233858 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -65,10 +65,10 @@ window.__showErr = function(title, msg, meta, stack){
       'background:#ffd93d;color:#1a1a2e;font-weight:800;font-size:12px;cursor:pointer;'+
       'margin-bottom:6px">\uD83D\uDCCB Copy error</button> ' +
     '<button id="err-reload" style="padding:9px 14px;border:1px solid #666;border-radius:7px;'+
-      'background:transparent;color:#fff;font-size:12px;cursor:pointer;margin-bottom:6px">'+
+      'background:transparent;color:#111111;font-size:12px;cursor:pointer;margin-bottom:6px">'+
       '\u21BB Reload</button>' +
-    '<div style="color:#888;font-size:9px;margin:10px 0 4px">STACK</div>' +
-    '<pre style="color:#aaa;font-size:10px;white-space:pre-wrap;word-break:break-word;'+
+    '<div style="color:#5A5A5A;font-size:9px;margin:10px 0 4px">STACK</div>' +
+    '<pre style="color:#5A5A5A;font-size:10px;white-space:pre-wrap;word-break:break-word;'+
       'margin:0;line-height:1.5">' + esc(stack||"(no stack available)") + '</pre>' +
     '</div>';
   var cp=document.getElementById("err-copy");
@@ -391,7 +391,7 @@ function ss(obj){return JSON.parse(JSON.stringify(obj,(_,v)=>v===undefined?null:
 function Toast({msg,type,onDone}){
   useEffect(()=>{const t=setTimeout(onDone,2800);return()=>clearTimeout(t);},[]);
   const bg=type==="err"?C.danger:type==="warn"?C.warning:type==="info"?C.info:"#1C1C1E";
-  return h("div",{style:{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",background:bg,color:"#fff",padding:"11px 22px",borderRadius:14,fontWeight:600,fontSize:13,zIndex:9999,boxShadow:"0 8px 40px rgba(0,0,0,.3)",display:"flex",alignItems:"center",gap:9,whiteSpace:"nowrap"}},
+  return h("div",{style:{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",background:bg,color:"#111111",padding:"11px 22px",borderRadius:14,fontWeight:600,fontSize:13,zIndex:9999,boxShadow:"0 8px 40px rgba(0,0,0,.3)",display:"flex",alignItems:"center",gap:9,whiteSpace:"nowrap"}},
     h("span",{style:{color:C.accent}},"●"),msg
   );
 }
@@ -1352,7 +1352,7 @@ function ItemCustomizer({ item,onAdd,onClose,optionGroups=[],priceType="retail",
           opt.choices.map(ch=>{
             const on=ck(opt.id,ch.id);
             return h("button",{key:ch.id,onClick:()=>tog(opt.id,ch,opt.multi),style:{display:"flex",alignItems:"center",gap:10,padding:"9px 12px",borderRadius:9,border:`2px solid ${on?C.primary:C.border}`,background:on?"#F3E9F7":"#fff",cursor:"pointer",textAlign:"left",width:"100%",marginBottom:5}},
-              opt.multi?h("div",{style:{width:18,height:18,borderRadius:4,border:`2px solid ${on?C.primary:C.border}`,background:on?C.primary:"#fff",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}},on&&h("span",{style:{color:"#fff",fontSize:13,fontWeight:900}},"✓"))
+              opt.multi?h("div",{style:{width:18,height:18,borderRadius:4,border:`2px solid ${on?C.primary:C.border}`,background:on?C.primary:"#fff",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}},on&&h("span",{style:{color:"#111111",fontSize:13,fontWeight:900}},"✓"))
               :h("div",{style:{width:18,height:18,borderRadius:"50%",border:`2px solid ${on?C.primary:C.border}`,background:on?C.primary:"#fff",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}},on&&h("div",{style:{width:7,height:7,borderRadius:"50%",background:"#fff"}})),
               h("span",{style:{flex:1,fontSize:14,fontWeight:on?700:400}},ch.label),
               h("span",{style:{fontSize:13,color:ch.priceAdd?C.primary:C.muted,fontWeight:ch.priceAdd?600:400}},ch.priceAdd?"+₱"+ch.priceAdd:"Free")
@@ -1466,7 +1466,7 @@ function ItemCustomizer({ item,onAdd,onClose,optionGroups=[],priceType="retail",
         missing.length>0&&h("div",{style:{background:"#FFEBEE",borderRadius:8,padding:"7px 11px",marginBottom:8,fontSize:13,color:C.danger,fontWeight:600}},"⚠️ Select: "+missing.join(", ")),
         freeGaps.length>0&&h("div",{style:{background:"#FFEBEE",borderRadius:8,padding:"7px 11px",marginBottom:8,fontSize:13,color:C.danger,fontWeight:600}},
           freeGaps.map(function(g){return g.name+": "+g.got+"/"+g.need;}).join(" · ")+" — selection incomplete"),
-        isBogo&&h("div",{style:{background:"#FFF8E1",borderRadius:8,padding:"7px 11px",marginBottom:8,fontSize:13,color:"#E65100",fontWeight:600}},
+        isBogo&&h("div",{style:{background:"#FFF8E1",borderRadius:8,padding:"7px 11px",marginBottom:8,fontSize:13,color:"#BF360C",fontWeight:600}},
           "🎉 "+qty+"x BOGO = "+(qty*2)+"  items total"),
         h("div",{style:{display:"flex",gap:9,alignItems:"center"}},
           h("div",{style:{display:"flex",alignItems:"center",gap:7,background:C.bg,borderRadius:9,padding:"4px"}},
@@ -1705,7 +1705,7 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
       h("div",{style:{background:`linear-gradient(135deg,${C.primary},${C.dark})`,padding:"16px 20px",display:"flex",justifyContent:"space-between",alignItems:"center"}},
         h("div",null,
           h("div",{style:{color:C.accent,fontSize:12,fontWeight:700,letterSpacing:2}},"PURCHASE ORDER / SALES ORDER"),
-          h("div",{style:{color:"#fff",fontSize:16,fontWeight:900,marginTop:2}},soNum),
+          h("div",{style:{color:"#111111",fontSize:16,fontWeight:900,marginTop:2}},soNum),
           h("div",{style:{color:"#5A5A5A",fontSize:13,marginTop:1}},
             "From: "+( branches.find(b=>b.id===branchId)?.full||branchId)+" · Date: "+today)
         ),
@@ -1768,7 +1768,7 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
       h("div",{style:{padding:"9px 20px",borderBottom:"1px solid #eee",
         background:"#FFFDF7"}},
         h("div",{style:{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}},
-          h("span",{style:{fontSize:12,fontWeight:800,color:"#E65100",letterSpacing:1}},
+          h("span",{style:{fontSize:12,fontWeight:800,color:"#BF360C",letterSpacing:1}},
             "SAVED BATCHES"),
           batches.length===0
             ? h("span",{style:{fontSize:13,color:C.muted}},
@@ -1918,7 +1918,7 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
                 ),
                 vatType==="vat"&&h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:4}},
                   h("span",{style:{fontSize:13,color:C.muted}},"VAT (12%):"),
-                  h("span",{style:{fontSize:13,fontWeight:700,color:"#E65100"}},"₱"+peso(vatAmt))
+                  h("span",{style:{fontSize:13,fontWeight:700,color:"#BF360C"}},"₱"+peso(vatAmt))
                 ),
                 h("div",{style:{display:"flex",justifyContent:"space-between",
                   padding:"6px 0",borderTop:"2px solid "+C.primary,marginTop:4}},
@@ -2263,7 +2263,7 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
         h("button",{onClick:issueDR,
           style:{flex:1,padding:"11px",
             background:`linear-gradient(135deg,${C.primary},${C.dark})`,
-            border:"none",borderRadius:9,color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer"}},
+            border:"none",borderRadius:9,color:"#111111",fontWeight:700,fontSize:14,cursor:"pointer"}},
           "✅ Issue DR → Update Branch Inventory")
       )
     )
@@ -2440,7 +2440,7 @@ function DRCheckForm({po,db,branchId,user,showT,INIT_INVENTORY,setAdvances,advan
             style:{width:"100%",padding:"8px",border:"1px solid "+C.warning,borderRadius:7,fontSize:13,outline:"none",resize:"none",height:52,boxSizing:"border-box",fontFamily:"inherit"}})
         ),
       h("button",{onClick:confirmReceipt,
-        style:{marginTop:12,width:"100%",padding:"11px",background:`linear-gradient(135deg,${C.success},${"#2e7d32"}`,border:"none",borderRadius:9,color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer"}},
+        style:{marginTop:12,width:"100%",padding:"11px",background:`linear-gradient(135deg,${C.success},${"#2e7d32"}`,border:"none",borderRadius:9,color:"#111111",fontWeight:700,fontSize:14,cursor:"pointer"}},
         "✅ Confirm Receipt & Update Inventory")
     )
   );
@@ -2451,7 +2451,7 @@ function DRCheckForm({po,db,branchId,user,showT,INIT_INVENTORY,setAdvances,advan
 const DENOMS = [
   {label:"₱1,000",value:1000,type:"bill",color:"#1565C0"},
   {label:"₱500", value:500, type:"bill",color:"#2E7D32"},
-  {label:"₱200", value:200, type:"bill",color:"#E65100"},
+  {label:"₱200", value:200, type:"bill",color:"#BF360C"},
   {label:"₱100", value:100, type:"bill",color:"#6A1B9A"},
   {label:"₱50",  value:50,  type:"bill",color:"#AD1457"},
   {label:"₱20",  value:20,  type:"bill",color:"#00695C"},
@@ -2667,7 +2667,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
         !showHistory&&h("button",{onClick:()=>saveCashCount(false),
           style:{padding:"7px 13px",background:C.info,border:"none",borderRadius:8,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}},"💾 Save"),
         !showHistory&&h("button",{onClick:()=>saveCashCount(true),
-          style:{padding:"7px 13px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:8,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}},"🏁 Close Store")
+          style:{padding:"7px 13px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:8,color:"#111111",fontSize:13,fontWeight:700,cursor:"pointer"}},"🏁 Close Store")
       )
     ),
 
@@ -2740,7 +2740,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
             ),
             selHistory.note&&h("div",{style:{marginTop:8,padding:"7px 10px",background:C.bg,borderRadius:7,fontSize:13,color:C.muted}},"📝 "+selHistory.note),
             h("button",{onClick:()=>printCount(selHistory.isClosing),
-              style:{marginTop:10,width:"100%",padding:"8px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:7,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}},"🖨️ Reprint")
+              style:{marginTop:10,width:"100%",padding:"8px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:7,color:"#111111",fontSize:13,fontWeight:700,cursor:"pointer"}},"🖨️ Reprint")
           )
         )
       ):h("div",{style:{textAlign:"center",padding:"30px",color:C.muted}},"No record for this date")
@@ -2822,15 +2822,15 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
         // Total summary card
         h("div",{style:{background:`linear-gradient(135deg,${C.primary},${C.dark})`,borderRadius:13,padding:"16px 18px",marginBottom:10}},
           h("div",{style:{color:C.accent,fontSize:12,fontWeight:700,letterSpacing:2}},"CASH COUNT TOTAL"),
-          h("div",{style:{color:"#fff",fontSize:28,fontWeight:900,margin:"6px 0"}},"₱"+peso(totalCash)),
+          h("div",{style:{color:"#111111",fontSize:28,fontWeight:900,margin:"6px 0"}},"₱"+peso(totalCash)),
           h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:10}},
             h("div",{style:{background:"#5A5A5A",borderRadius:8,padding:"8px 10px"}},
               h("div",{style:{color:"#5A5A5A",fontSize:11}},"BILLS"),
-              h("div",{style:{color:"#fff",fontSize:13,fontWeight:800}},"₱"+peso(billsTotal))
+              h("div",{style:{color:"#111111",fontSize:13,fontWeight:800}},"₱"+peso(billsTotal))
             ),
             h("div",{style:{background:"#5A5A5A",borderRadius:8,padding:"8px 10px"}},
               h("div",{style:{color:"#5A5A5A",fontSize:11}},"COINS"),
-              h("div",{style:{color:"#fff",fontSize:13,fontWeight:800}},"₱"+peso(coinsTotal))
+              h("div",{style:{color:"#111111",fontSize:13,fontWeight:800}},"₱"+peso(coinsTotal))
             )
           )
         ),
@@ -2962,7 +2962,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
             style:{padding:"11px",background:"#fff",border:"1px solid "+C.border,borderRadius:9,fontWeight:700,fontSize:13,cursor:"pointer"}},
             "💾 Save Count"),
           h("button",{onClick:()=>{saveCashCount(true);printCount(true);},
-            style:{padding:"11px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:9,color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer"}},
+            style:{padding:"11px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:9,color:"#111111",fontWeight:700,fontSize:14,cursor:"pointer"}},
             "🏁 Close Store & Print")
         ),
         saved&&h("div",{style:{textAlign:"center",marginTop:8,fontSize:13,color:C.success,fontWeight:700}},"✅ Count saved to Firebase")
@@ -3057,10 +3057,10 @@ function CALoanPage({user,branchId,curBranch,db,hrisDB,showT,mode,hrisEmps=[]}){
     h("div",{style:{background:isCA?`linear-gradient(135deg,${C.primary},${C.dark})`:`linear-gradient(135deg,#1565C0,#0D47A1)`,borderRadius:13,padding:"16px 18px",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}},
       h("div",null,
         h("div",{style:{color:C.accent,fontSize:12,fontWeight:700,letterSpacing:2}},isCA?"CASH ADVANCE REQUEST":"CASH LOAN REQUEST"),
-        h("div",{style:{color:"#fff",fontSize:15,fontWeight:900,marginTop:2}},user.name),
+        h("div",{style:{color:"#111111",fontSize:15,fontWeight:900,marginTop:2}},user.name),
         h("div",{style:{color:"#5A5A5A",fontSize:12,marginTop:1}},curBranch.full+" · "+today),
         hrisEmp
-          ?h("div",{style:{color:"#4ade80",fontSize:12,marginTop:3}},"✅ HRIS linked: "+hrisEmp.name+" ("+hrisEmp.pos+")")
+          ?h("div",{style:{color:"#2E7D32",fontSize:12,marginTop:3}},"✅ HRIS linked: "+hrisEmp.name+" ("+hrisEmp.pos+")")
           :h("div",{style:{color:"#fbbf24",fontSize:12,marginTop:3}},"⚠️ Name not found in HRIS — admin will link manually")
       ),
       h("div",{style:{textAlign:"right"}},
@@ -3143,7 +3143,7 @@ function CALoanPage({user,branchId,curBranch,db,hrisDB,showT,mode,hrisEmps=[]}){
           h("button",{onClick:submit,
             style:{width:"100%",padding:"13px",
               background:isCA?`linear-gradient(135deg,${C.primary},${C.dark})`:`linear-gradient(135deg,#1565C0,#0D47A1)`,
-              border:"none",borderRadius:10,color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer"}},
+              border:"none",borderRadius:10,color:"#111111",fontWeight:800,fontSize:13,cursor:"pointer"}},
             isCA?"📤 Submit CA Request":"📤 Submit Loan Request")
         )
       ),
@@ -3487,7 +3487,7 @@ function MenuEditor({menuItems,setMenuItems,db,user,showT}){
             style:{padding:"7px 9px 7px 26px",border:"1px solid "+C.border,borderRadius:7,fontSize:13,outline:"none",width:140}})
         ),
         h("button",{onClick:openAdd,
-          style:{padding:"8px 16px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:8,color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer"}},
+          style:{padding:"8px 16px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:8,color:"#111111",fontWeight:700,fontSize:14,cursor:"pointer"}},
           "+ Add Item")
       )
     ),
@@ -3629,7 +3629,7 @@ function MenuEditor({menuItems,setMenuItems,db,user,showT}){
                       background:linked?C.primary:"#fff",
                       display:"flex",alignItems:"center",justifyContent:"center",
                       flexShrink:0}},
-                      linked&&h("span",{style:{color:"#fff",fontSize:13,fontWeight:900}},"✓")),
+                      linked&&h("span",{style:{color:"#111111",fontSize:13,fontWeight:900}},"✓")),
                     h("div",null,
                       h("div",{style:{fontSize:13,fontWeight:linked?700:400,
                         color:linked?C.primary:C.text}},g.name),
@@ -3683,12 +3683,12 @@ function MenuEditor({menuItems,setMenuItems,db,user,showT}){
             // Franchisee + Wholesale prices
             h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}},
               h("div",null,
-                h("div",{style:{fontSize:12,fontWeight:700,color:"#E65100",marginBottom:4,letterSpacing:1}},"FRANCHISEE PRICE (₱)"),
+                h("div",{style:{fontSize:12,fontWeight:700,color:"#BF360C",marginBottom:4,letterSpacing:1}},"FRANCHISEE PRICE (₱)"),
                 h("input",{type:"number",onFocus:e=>e.target.select(),value: item.franchiseePrice||"",
                   onChange:e=>setField("franchiseePrice",parseFloat(e.target.value)||0),
                   placeholder:"Optional",
                   style:{width:"100%",padding:"9px",border:"1px solid #FFE0B2",borderRadius:7,
-                    fontSize:14,fontWeight:700,outline:"none",boxSizing:"border-box",color:"#E65100"}})
+                    fontSize:14,fontWeight:700,outline:"none",boxSizing:"border-box",color:"#BF360C"}})
               ),
               h("div",null,
                 h("div",{style:{fontSize:12,fontWeight:700,color:"#6A1B9A",marginBottom:4,letterSpacing:1}},"WHOLESALE PRICE (₱)"),
@@ -4170,7 +4170,7 @@ function BranchMenuPage({menuItems,setMenuItems,branchId,curBranch,user,db,showT
           hasOverride?h("button",{onClick:()=>resetItem( item),
             style:{padding:"4px 8px",background:"#fff",border:"1px solid "+C.border,
               borderRadius:6,fontSize:12,cursor:"pointer",color:C.muted}},"↺ Reset")
-          :h("div",{style:{fontSize:12,color:"#ddd"}},"—")
+          :h("div",{style:{fontSize:12,color:"#5A5A5A"}},"—")
         );
       })
     )
@@ -5676,7 +5676,7 @@ function renderDRDoc(po,cs,brs){
         const totPk = sz>1 ? (Math.round((i.aq/sz)*1000)/1000)+" "+pu : "—";
         tableRows+=`<tr>
           <td>${ itemNo++}</td>
-          <td style="color:#888;font-size:10px">${i.id||""}</td>
+          <td style="color:#5A5A5A;font-size:10px">${i.id||""}</td>
           <td>${cat}</td>
           <td>${i.name}</td>
           <td>${perPk}</td>
@@ -5734,14 +5734,14 @@ function renderDRDoc(po,cs,brs){
         display:flex;align- items:center;justify-content:center;
         color:#fff;font-weight:900;font-size:20px;flex-shrink:0;}
       .dr-title{font-size:20px;font-weight:900;color:#6A1B9A;}
-      .dr-sub{font-size:11px;color:#888;margin-top:2px;}
+      .dr-sub{font-size:11px;color:#5A5A5A;margin-top:2px;}
       .qr-box{text-align:center;}
       .qr-box img{width:80px;height:80px;object-fit:contain;}
       .to-from{display:grid;grid-template-columns:1fr 1fr;gap:0;
         border:1px solid #ddd;border-radius:8px;overflow:hidden;margin-bottom:14px;}
       .to-box{padding:10px 14px;border-right:1px solid #ddd;}
       .from-box{padding:10px 14px;background:#f9f9f9;}
-      .box-label{font-size:9px;font-weight:700;color:#888;letter-spacing:1px;margin-bottom:4px;}
+      .box-label{font-size:9px;font-weight:700;color:#5A5A5A;letter-spacing:1px;margin-bottom:4px;}
       .box-name{font-size:13px;font-weight:800;margin-bottom:4px;}
       .box-detail{font-size:10px;color:#555;line-height:1.6;}
       table{width:100%;border-collapse:collapse;margin-bottom:14px;}
@@ -5756,9 +5756,9 @@ function renderDRDoc(po,cs,brs){
       .sig-name{position:absolute;left:0;right:0;top:14px;font-size:11px;font-weight:700;color:#111;}
       .payment-section{border:1px solid #ddd;border-radius:8px;padding:12px 16px;
         display:flex;justify-content:space-between;align- items:center;}
-      .pay-label{font-size:9px;font-weight:700;color:#888;letter-spacing:1px;margin-bottom:6px;}
+      .pay-label{font-size:9px;font-weight:700;color:#5A5A5A;letter-spacing:1px;margin-bottom:6px;}
       .pay-detail{font-size:11px;line-height:1.8;}
-      .footer{margin-top:12px;font-size:9px;color:#aaa;text-align:center;}
+      .footer{margin-top:12px;font-size:9px;color:#5A5A5A;text-align:center;}
       @media print{body{padding:12px;}}
     </style></head><body>
 
@@ -5771,7 +5771,7 @@ function renderDRDoc(po,cs,brs){
           <div class="dr-sub">Delivery date: ${deliveryDate}</div>
         </div>
       </div>
-      ${cs2.bankQR?`<div class="qr-box"><img src="${cs2.bankQR}" alt="QR"/><div style="font-size:9px;color:#888;margin-top:2px">Scan to Pay</div></div>`:""}
+      ${cs2.bankQR?`<div class="qr-box"><img src="${cs2.bankQR}" alt="QR"/><div style="font-size:9px;color:#5A5A5A;margin-top:2px">Scan to Pay</div></div>`:""}
     </div>
 
     <!-- TO / FROM -->
@@ -5852,7 +5852,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260802-232713";
+const BUILD = "20260802-233858";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -6212,10 +6212,10 @@ async function notify(db,n){
 
 const NOTIF_META={
   po_new:      {icon:"\uD83D\uDCE5", color:"#1565C0"},
-  dr_issued:   {icon:"\uD83D\uDE9A", color:"#E65100"},
+  dr_issued:   {icon:"\uD83D\uDE9A", color:"#BF360C"},
   po_received: {icon:"\u2705",        color:"#2E7D32"},
   discrepancy: {icon:"\u26A0\uFE0F", color:"#C62828"},
-  low_stock:   {icon:"\uD83D\uDCE6", color:"#E65100"},
+  low_stock:   {icon:"\uD83D\uDCE6", color:"#BF360C"},
   void:        {icon:"\uD83D\uDEAB", color:"#C62828"},
   info:        {icon:"\u2139\uFE0F", color:"#666"}
 };
@@ -7344,7 +7344,7 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
       padding:"14px 18px",display:"flex",justifyContent:"space-between",alignItems:"center"}},
       h("div",null,
         h("div",{style:{color:"rgba(255,255,255,.6)",fontSize:12,letterSpacing:2,fontWeight:700}},"INVENTORY ITEM"),
-        h("div",{style:{color:"#fff",fontWeight:900,fontSize:15}}, item.name),
+        h("div",{style:{color:"#111111",fontWeight:900,fontSize:15}}, item.name),
         h("div",{style:{color:"rgba(255,255,255,.5)",fontSize:13}},
           "Stock: "+fmtStock( item,current)+" · ₱"+peso( item.price||0))
       ),
@@ -7401,7 +7401,7 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
         h("div",{style:{background:"#f0f4ff",borderRadius:12,
           padding:"12px 16px",marginBottom:12,textAlign:"right",
           border:"2px solid #1565C0"}},
-          h("div",{style:{fontSize:12,color:"#888",marginBottom:2,textAlign:"left"}},
+          h("div",{style:{fontSize:12,color:"#5A5A5A",marginBottom:2,textAlign:"left"}},
             mode==="adjust"?(isNeg?"DEDUCT":"ADD")+" AMOUNT":"SET STOCK TO"),
           mode==="adjust"&&h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",
             gap:5,marginBottom:8}},
@@ -7447,7 +7447,7 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
               style:{background:"#FFF8E1",border:"1px solid #FFE082",borderRadius:7,
                 padding:"6px 8px",marginTop:6,display:"flex",gap:8,alignItems:"center",
                 flexWrap:"wrap"}},
-              h("div",{style:{flex:1,minWidth:150,fontSize:12,color:"#E65100",fontWeight:700}},
+              h("div",{style:{flex:1,minWidth:150,fontSize:12,color:"#BF360C",fontWeight:700}},
                 (parseFloat(looseVal)||0)+" "+baseUnitOf( item)+" ay "+
                 Math.floor((parseFloat(looseVal)||0)/packSz)+" full "+packUnitOf( item)+
                 "  already. Same result, but clearer in the right box."),
@@ -7495,7 +7495,7 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
         ),
         // Reason
         h("div",{style:{marginBottom:12}},
-          h("div",{style:{fontSize:12,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:6}},"REASON *"),
+          h("div",{style:{fontSize:12,fontWeight:700,color:"#5A5A5A",letterSpacing:1,marginBottom:6}},"REASON *"),
           h("div",{style:{display:"flex",gap:5,flexWrap:"wrap"}},
             ["Physical Count","Spoilage","Wastage","Transfer","Correction","Received","Other"].map(function(r){
               return h("button",{key:r,onClick:function(){setReason(r);},
@@ -7518,18 +7518,18 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
       // ── DETAILS TAB ──
       tab==="history"&&h("div",null,
         histLoading
-          ? h("div",{style:{textAlign:"center",padding:"30px",color:"#888",
+          ? h("div",{style:{textAlign:"center",padding:"30px",color:"#5A5A5A",
               fontSize:13}},"Loading...")
           : hist.length===0
             ? h("div",{style:{textAlign:"center",padding:"34px 18px"}},
                 h("div",{style:{fontSize:32,marginBottom:8}},"🕘"),
                 h("div",{style:{fontSize:14,fontWeight:800,marginBottom:4}},
                   "No movements recorded"),
-                h("div",{style:{fontSize:12,color:"#888",lineHeight:1.6}},
+                h("div",{style:{fontSize:12,color:"#5A5A5A",lineHeight:1.6}},
                   "Every adjustment, sale and delivery for this item will "+
                   "appear here with its before and after."))
             : h("div",null,
-                h("div",{style:{fontSize:12,color:"#888",marginBottom:9}},
+                h("div",{style:{fontSize:12,color:"#5A5A5A",marginBottom:9}},
                   hist.length+" movement"+(hist.length>1?"s":"")+" · newest first"),
                 hist.map(function(l,li){
                   var amt=Number(l.amount)||0;
@@ -7546,12 +7546,12 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
                     h("div",{style:{flex:1,minWidth:0}},
                       h("div",{style:{fontSize:13,fontWeight:700}},
                         (l.reason||l.desc||l.source||"Adjustment")),
-                      h("div",{style:{fontSize:12,color:"#888",marginTop:2}},
+                      h("div",{style:{fontSize:12,color:"#5A5A5A",marginTop:2}},
                         // before -> after is the part that makes a log
                         // auditable; without it you cannot tell what happened
                         (l.prevStock!=null?l.prevStock:"?")+" → "
                         +(l.newStock!=null?l.newStock:"?")+" "+(item.unit||"")),
-                      h("div",{style:{fontSize:11,color:"#aaa",marginTop:2}},
+                      h("div",{style:{fontSize:11,color:"#5A5A5A",marginTop:2}},
                         (when?when.toLocaleString("en-PH",{month:"short",day:"numeric",
                           hour:"2-digit",minute:"2-digit"}):(l.date||""))
                         +(l.by?" · "+l.by:"")
@@ -7564,7 +7564,7 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
 
       tab==="details"&&h("div",null,
         h("div",{style:{marginBottom:10}},
-          h("div",{style:{fontSize:12,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},"ITEM NAME"),
+          h("div",{style:{fontSize:12,fontWeight:700,color:"#5A5A5A",letterSpacing:1,marginBottom:4}},"ITEM NAME"),
           h("input",{value:details.name,
             onChange:e=>setDetails(p=>({...p,name:e.target.value})),
             style:{width:"100%",padding:"9px",border:"2px solid #1565C0",
@@ -7572,13 +7572,13 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
         ),
         h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}},
           h("div",null,
-            h("div",{style:{fontSize:12,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},"UNIT"),
+            h("div",{style:{fontSize:12,fontWeight:700,color:"#5A5A5A",letterSpacing:1,marginBottom:4}},"UNIT"),
             h("select",{value:details.unit,onChange:e=>setDetails(p=>({...p,unit:e.target.value})),
               style:{width:"100%",padding:"8px",border:"1px solid #ddd",borderRadius:7,fontSize:14,outline:"none"}},
               UNITS.map(u=>h("option",{key:u,value:u},u)))
           ),
           h("div",null,
-            h("div",{style:{fontSize:12,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},"CATEGORY"),
+            h("div",{style:{fontSize:12,fontWeight:700,color:"#5A5A5A",letterSpacing:1,marginBottom:4}},"CATEGORY"),
             h("select",{value:details.cat,onChange:e=>setDetails(p=>({...p,cat:e.target.value})),
               style:{width:"100%",padding:"8px",border:"1px solid #ddd",borderRadius:7,fontSize:14,outline:"none"}},
               DEFAULT_CATS.map(c=>h("option",{key:c,value:c},c)))
@@ -7586,20 +7586,20 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
         ),
         h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}},
           h("div",null,
-            h("div",{style:{fontSize:12,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},"SELL PRICE — BRANCH PAYS (₱/"+(details.unit||"pc")+")"),
+            h("div",{style:{fontSize:12,fontWeight:700,color:"#5A5A5A",letterSpacing:1,marginBottom:4}},"SELL PRICE — BRANCH PAYS (₱/"+(details.unit||"pc")+")"),
             h("input",{type:"number",onFocus:e=>e.target.select(),value:details.price,
               onChange:e=>setDetails(p=>({...p,price:e.target.value})),
               style:{width:"100%",padding:"8px",border:"1px solid #ddd",borderRadius:7,fontSize:13,fontWeight:700,outline:"none",boxSizing:"border-box",color:"#1565C0"}})
           ),
           h("div",null,
-            h("div",{style:{fontSize:12,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},"COST — USED BY BOM (₱/"+(details.unit||"pc")+")"),
+            h("div",{style:{fontSize:12,fontWeight:700,color:"#5A5A5A",letterSpacing:1,marginBottom:4}},"COST — USED BY BOM (₱/"+(details.unit||"pc")+")"),
             h("input",{type:"number",onFocus:e=>e.target.select(),value:details.cost,
               onChange:e=>setDetails(p=>({...p,cost:e.target.value})),
               style:{width:"100%",padding:"8px",border:"1px solid #ddd",borderRadius:7,fontSize:13,fontWeight:700,outline:"none",boxSizing:"border-box",color:"#C62828"}})
           )
         ),
         h("div",{style:{marginBottom:12}},
-          h("div",{style:{fontSize:12,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4,
+          h("div",{style:{fontSize:12,fontWeight:700,color:"#5A5A5A",letterSpacing:1,marginBottom:4,
             display:"flex",justifyContent:"space-between"}},
             h("span",null,"MIN STOCK (Alert Threshold)"),
             h("span",{style:{color:"#1565C0"}},"sa "+(details.unit||"pc"))),
@@ -7630,11 +7630,11 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
         // Pack detail — enables pack counting on the Adjust Stock tab
         h("div",{style:{background:"#FFFDE7",border:"1px solid #FFE082",borderRadius:8,
           padding:"9px 10px",marginBottom:12}},
-          h("div",{style:{fontSize:12,fontWeight:800,color:"#E65100",letterSpacing:1,marginBottom:6}},
+          h("div",{style:{fontSize:12,fontWeight:800,color:"#BF360C",letterSpacing:1,marginBottom:6}},
             "PACK DETAIL (optional)"),
           h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
             h("div",null,
-              h("div",{style:{fontSize:12,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},"PACK UNIT"),
+              h("div",{style:{fontSize:12,fontWeight:700,color:"#5A5A5A",letterSpacing:1,marginBottom:4}},"PACK UNIT"),
               h("select",{value:details.packUnit||"",
                 onChange:e=>setDetails(p=>({...p,packUnit:e.target.value})),
                 style:{width:"100%",padding:"8px",border:"1px solid #ddd",borderRadius:7,fontSize:14,outline:"none"}},
@@ -7642,7 +7642,7 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
                 UNITS.map(u=>h("option",{key:u,value:u},u)))
             ),
             h("div",null,
-              h("div",{style:{fontSize:12,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},
+              h("div",{style:{fontSize:12,fontWeight:700,color:"#5A5A5A",letterSpacing:1,marginBottom:4}},
                 "ILAN KADA PACK"),
               h("input",{type:"number",onFocus:e=>e.target.select(),min:0,value:details.packSize||"",
                 onChange:e=>setDetails(p=>({...p,packSize:e.target.value})),
@@ -7651,7 +7651,7 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
                   borderRadius:7,fontSize:14,outline:"none",boxSizing:"border-box"}})
             )
           ),
-          h("div",{style:{fontSize:12,color:"#888",marginTop:5}},
+          h("div",{style:{fontSize:12,color:"#5A5A5A",marginTop:5}},
             (Number(details.packSize)>1&&details.packUnit)
               ? ("1 "+details.packUnit+" = "+details.packSize+" "+(details.unit||"pc")
                  +". The pack toggle appears in Adjust Stock.")
@@ -7692,7 +7692,7 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
         ),
         // BOM warning
         usedInBOM&&h("div",{style:{background:"#FFF3E0",borderRadius:8,
-          padding:"8px 12px",marginBottom:12,fontSize:13,color:"#E65100",fontWeight:600}},
+          padding:"8px 12px",marginBottom:12,fontSize:13,color:"#BF360C",fontWeight:600}},
           "⚠️ This  item is used in BOM — name change will need BOM update"),
         h("button",{onClick:saveDetails,disabled:saving,
           style:{width:"100%",padding:"13px",
@@ -7830,14 +7830,14 @@ function ReceiveItemsModal({po,db,user,showT,branchId,onClose}){
       padding:"14px 20px",display:"flex",justifyContent:"space-between",alignItems:"center"}},
       h("div",null,
         h("div",{style:{color:"rgba(255,255,255,.6)",fontSize:12,fontWeight:700,letterSpacing:2}},"RECEIVE ITEMS"),
-        h("div",{style:{color:"#fff",fontSize:15,fontWeight:900}},po.drNum||po.poNum),
+        h("div",{style:{color:"#111111",fontSize:15,fontWeight:900}},po.drNum||po.poNum),
         h("div",{style:{color:"#5A5A5A",fontSize:12}},"DR Date: "+(po.deliveryDate||po.date))
       ),
       h("button",{onClick:onClose,style:{background:"#5A5A5A",border:"none",
         color:"#fff",width:28,height:28,borderRadius:8,fontSize:16,cursor:"pointer"}},"x")
     ),
     hasDisc&&h("div",{style:{padding:"8px 20px",background:"#FFF3E0",
-      borderBottom:"1px solid #FFE0B2",fontSize:13,color:"#E65100",fontWeight:700}},
+      borderBottom:"1px solid #FFE0B2",fontSize:13,color:"#BF360C",fontWeight:700}},
       String(discItems.length)+"  item(s) with discrepancy — needs Main approval"),
     h("div",{style:{flex:1,overflowY:"auto"}},
       h("div",{style:{display:"grid",gridTemplateColumns:"1fr 80px 90px 60px 1fr",
@@ -7856,7 +7856,7 @@ function ReceiveItemsModal({po,db,user,showT,branchId,onClose}){
             background:diff!==0?"#FFF8E1":"#fff"}},
           h("div",null,
             h("div",{style:{fontSize:13,fontWeight:700}},i.name),
-            h("div",{style:{fontSize:12,color:"#888"}},i.unit||"")
+            h("div",{style:{fontSize:12,color:"#5A5A5A"}},i.unit||"")
           ),
           h("div",{style:{fontSize:13,color:C.muted}},String(drQty)+" "+(i.unit||"")),
           h("div",{style:{display:"flex",alignItems:"center",gap:3}},
@@ -7889,7 +7889,7 @@ function ReceiveItemsModal({po,db,user,showT,branchId,onClose}){
       borderTop:"2px solid "+(hasDisc?C.warning:C.primary),
       background:"#fafafa",display:"flex",gap:8,alignItems:"center"}},
       hasDisc
-        ? h("div",{style:{fontSize:13,color:"#E65100",flex:1}},"Will be reported to Main for approval")
+        ? h("div",{style:{fontSize:13,color:"#BF360C",flex:1}},"Will be reported to Main for approval")
         : h("div",{style:{fontSize:13,color:C.success,flex:1}},"No discrepancy — PO will be completed"),
       h("button",{onClick:onClose,
         style:{padding:"9px 16px",background:"#fff",border:"1px solid "+C.border,
@@ -7955,7 +7955,7 @@ function PaymentModal({po,db,user,showT,onClose}){
       h("div",null,
         h("div",{style:{color:"#5A5A5A",fontSize:12,fontWeight:700,letterSpacing:2}},
           "RECORD PAYMENT"),
-        h("div",{style:{color:"#fff",fontSize:15,fontWeight:900,marginTop:2}},po.poNum),
+        h("div",{style:{color:"#111111",fontSize:15,fontWeight:900,marginTop:2}},po.poNum),
         h("div",{style:{color:"#5A5A5A",fontSize:12}},po.branchName||po.branch)
       ),
       h("button",{onClick:onClose,style:{background:"#5A5A5A",border:"none",
@@ -8107,7 +8107,7 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
         const totPk = sz>1 ? (Math.round((i.aq/sz)*1000)/1000)+" "+pu : "—";
         tableRows+=`<tr>
           <td>${ itemNo++}</td>
-          <td style="color:#888;font-size:10px">${i.id||""}</td>
+          <td style="color:#5A5A5A;font-size:10px">${i.id||""}</td>
           <td>${cat}</td>
           <td>${i.name}</td>
           <td>${perPk}</td>
@@ -8162,14 +8162,14 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
         display:flex;align- items:center;justify-content:center;
         color:#fff;font-weight:900;font-size:20px;flex-shrink:0;}
       .dr-title{font-size:20px;font-weight:900;color:#6A1B9A;}
-      .dr-sub{font-size:11px;color:#888;margin-top:2px;}
+      .dr-sub{font-size:11px;color:#5A5A5A;margin-top:2px;}
       .qr-box{text-align:center;}
       .qr-box img{width:80px;height:80px;object-fit:contain;}
       .to-from{display:grid;grid-template-columns:1fr 1fr;gap:0;
         border:1px solid #ddd;border-radius:8px;overflow:hidden;margin-bottom:14px;}
       .to-box{padding:10px 14px;border-right:1px solid #ddd;}
       .from-box{padding:10px 14px;background:#f9f9f9;}
-      .box-label{font-size:9px;font-weight:700;color:#888;letter-spacing:1px;margin-bottom:4px;}
+      .box-label{font-size:9px;font-weight:700;color:#5A5A5A;letter-spacing:1px;margin-bottom:4px;}
       .box-name{font-size:13px;font-weight:800;margin-bottom:4px;}
       .box-detail{font-size:10px;color:#555;line-height:1.6;}
       table{width:100%;border-collapse:collapse;margin-bottom:14px;}
@@ -8184,9 +8184,9 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
       .sig-name{position:absolute;left:0;right:0;top:14px;font-size:11px;font-weight:700;color:#111;}
       .payment-section{border:1px solid #ddd;border-radius:8px;padding:12px 16px;
         display:flex;justify-content:space-between;align- items:center;}
-      .pay-label{font-size:9px;font-weight:700;color:#888;letter-spacing:1px;margin-bottom:6px;}
+      .pay-label{font-size:9px;font-weight:700;color:#5A5A5A;letter-spacing:1px;margin-bottom:6px;}
       .pay-detail{font-size:11px;line-height:1.8;}
-      .footer{margin-top:12px;font-size:9px;color:#aaa;text-align:center;}
+      .footer{margin-top:12px;font-size:9px;color:#5A5A5A;text-align:center;}
       @media print{body{padding:12px;}}
     </style></head><body>
 
@@ -8199,7 +8199,7 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
           <div class="dr-sub">Delivery date: ${deliveryDate}</div>
         </div>
       </div>
-      ${cs2.bankQR?`<div class="qr-box"><img src="${cs2.bankQR}" alt="QR"/><div style="font-size:9px;color:#888;margin-top:2px">Scan to Pay</div></div>`:""}
+      ${cs2.bankQR?`<div class="qr-box"><img src="${cs2.bankQR}" alt="QR"/><div style="font-size:9px;color:#5A5A5A;margin-top:2px">Scan to Pay</div></div>`:""}
     </div>
 
     <!-- TO / FROM -->
@@ -8351,7 +8351,7 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
       h("div",null,
         h("div",{style:{color:"#5A5A5A",fontSize:12,fontWeight:700,letterSpacing:2}},
           "PROCESS & ISSUE DELIVERY RECEIPT"),
-        h("div",{style:{color:"#fff",fontSize:15,fontWeight:900,marginTop:2}},po.poNum),
+        h("div",{style:{color:"#111111",fontSize:15,fontWeight:900,marginTop:2}},po.poNum),
         h("div",{style:{color:"#5A5A5A",fontSize:12,marginTop:1}},
           po.branchName||po.branch)
       ),
@@ -8398,9 +8398,9 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
             background:diff!==0?"#FFF8E1":"#fff"}},
           h("div",null,
             h("div",{style:{fontSize:13,fontWeight:700}},i.name),
-            h("div",{style:{fontSize:12,color:"#888"}},i.unit||"")
+            h("div",{style:{fontSize:12,color:"#5A5A5A"}},i.unit||"")
           ),
-          h("div",{style:{fontSize:13,color:"#888"}},i.qty+" "+(i.unit||"")),
+          h("div",{style:{fontSize:13,color:"#5A5A5A"}},i.qty+" "+(i.unit||"")),
           // Actual qty
           h("div",{style:{display:"flex",alignItems:"center",gap:4}},
             h("button",{onClick:()=>setActual(p=>({...p,[i.id]:Math.max(0,(p[i.id]!=null?p[i.id]:i.qty)-1)})),
@@ -8420,7 +8420,7 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
           ),
           // Price
           h("div",{style:{display:"flex",alignItems:"center",gap:3}},
-            h("span",{style:{fontSize:13,color:"#888"}},"₱"),
+            h("span",{style:{fontSize:13,color:"#5A5A5A"}},"₱"),
             h("input",{type:"number",onFocus:e=>e.target.select(),min:0,step:"0.01",
               value:prices[i.id]||"",
               onChange:e=>setPrices(p=>({...p,[i.id]:parseFloat(e.target.value)||0})),
@@ -8618,7 +8618,7 @@ function PermissionsTab({db,showT,companySettings,setCompanySettings}){
             background:ROLE_COLORS[role]||C.primary,
             padding:"10px 16px",
             display:"flex",justifyContent:"space-between",alignItems:"center"}},
-            h("div",{style:{color:"#fff",fontWeight:800,fontSize:13}},
+            h("div",{style:{color:"#111111",fontWeight:800,fontSize:13}},
               ROLE_LABELS[role]||role),
             h("div",{style:{display:"flex",gap:8}},
               h("button",{onClick:()=>resetRole(role),
@@ -8838,7 +8838,7 @@ function SettingsPage({db,user,showT,branches,companySettings,setCompanySettings
       ),
       h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,
         padding:"16px",marginBottom:14}},
-        h("div",{style:{fontSize:14,fontWeight:800,marginBottom:4,color:"#E65100"}},
+        h("div",{style:{fontSize:14,fontWeight:800,marginBottom:4,color:"#BF360C"}},
           "✍️ Delivery Receipt Signatories"),
         h("div",{style:{fontSize:13,color:C.muted,marginBottom:10,lineHeight:1.5}},
           "Printed above the signature lines on every DR. Leave blank to print an "+
@@ -8910,7 +8910,7 @@ function SettingsPage({db,user,showT,branches,companySettings,setCompanySettings
       // Header
       h("div",{style:{background:"linear-gradient(135deg,#1565C0,#0D47A1)",
         padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}},
-        h("div",{style:{color:"#fff",fontWeight:800,fontSize:13}},"🖨️ Print & Bluetooth Printer"),
+        h("div",{style:{color:"#111111",fontWeight:800,fontSize:13}},"🖨️ Print & Bluetooth Printer"),
         h("div",{style:{fontSize:13,color:"rgba(255,255,255,.8)"}},
           _btChar?"✅ BT Connected":"⚪ BT Not connected")
       ),
@@ -9036,7 +9036,7 @@ function PrinterPage({db,user,showT,companySettings,setCompanySettings}){
             h("option",{value:"2"},"Pin 2"),
             h("option",{value:"5"},"Pin 5"))
         ),
-        h("div",{style:{fontSize:12,color:"#888",marginTop:7}},
+        h("div",{style:{fontSize:12,color:"#5A5A5A",marginTop:7}},
           "The Bluetooth printer must already be connected. Otherwise it silently "+
           "skips — no device picker interrupts a transaction.")
       ),
@@ -9092,11 +9092,11 @@ function PrinterPage({db,user,showT,companySettings,setCompanySettings}){
       h("div",{style:{background:"linear-gradient(135deg,#1565C0,#0D47A1)",
         padding:"14px 16px",display:"flex",justifyContent:"space-between",
         alignItems:"center"}},
-        h("div",{style:{color:"#fff",fontWeight:800,fontSize:14}},"📡 Bluetooth Printer"),
+        h("div",{style:{color:"#111111",fontWeight:800,fontSize:14}},"📡 Bluetooth Printer"),
         h("div",{style:{display:"flex",alignItems:"center",gap:6}},
           h("div",{style:{width:8,height:8,borderRadius:"50%",
             background:_btChar?"#4CAF50":"#ff5252"}}),
-          h("div",{style:{fontSize:13,color:"#fff"}},
+          h("div",{style:{fontSize:13,color:"#111111"}},
             _btChar?"Connected":"Not connected")
         )
       ),
@@ -9206,7 +9206,7 @@ function InvLogPage({db,user,branchId,branches,showT}){
     deduct:  {label:"Deducted",    color:"#C62828", bg:"#FFEBEE", icon:"➖"},
     add:     {label:"Added",       color:"#1B5E20", bg:"#E8F5E9", icon:"➕"},
     set:     {label:"Set",         color:"#1565C0", bg:"#E3F2FD", icon:"="},
-    adjust:  {label:"Adjusted",    color:"#E65100", bg:"#FFF3E0", icon:"✏️"},
+    adjust:  {label:"Adjusted",    color:"#BF360C", bg:"#FFF3E0", icon:"✏️"},
     created: {label:"New Item",    color:"#6A1B9A", bg:"#F3E5F5", icon:"🆕"},
     edited:  {label:"Edited",      color:"#1565C0", bg:"#E3F2FD", icon:"✏️"},
     deleted: {label:"Deleted",     color:"#C62828", bg:"#FFEBEE", icon:"🗑️"},
@@ -9480,7 +9480,7 @@ function PayrollPage({db,hrisDB,user,showT,branches,branchId,staff,advances}){
             h("div",null,
               h("div",{style:{fontWeight:700,fontSize:14}},s.name),
               h("div",{style:{fontSize:12}},
-                h("span",{style:{background:ri.color,color:"#fff",
+                h("span",{style:{background:ri.color,color:"#111111",
                   borderRadius:6,padding:"1px 6px",fontWeight:700,fontSize:11}},
                   ri.emoji+" "+ri.label))
             ),
@@ -9654,7 +9654,7 @@ function NewInventoryItemForm({db,user,branchId,showT,onClose,invBranch}){
   };
 
   const fld=(label,key,type)=>h("div",{style:{marginBottom:10}},
-    h("div",{style:{fontSize:12,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},label),
+    h("div",{style:{fontSize:12,fontWeight:700,color:"#5A5A5A",letterSpacing:1,marginBottom:4}},label),
     h("input",{type:type||"text",value:form[key],
       onChange:e=>setForm(p=>({...p,[key]:e.target.value})),
       placeholder:label,
@@ -9666,13 +9666,13 @@ function NewInventoryItemForm({db,user,branchId,showT,onClose,invBranch}){
     fld("Item Name *","name"),
     h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
       h("div",{style:{marginBottom:10}},
-        h("div",{style:{fontSize:12,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},"UNIT"),
+        h("div",{style:{fontSize:12,fontWeight:700,color:"#5A5A5A",letterSpacing:1,marginBottom:4}},"UNIT"),
         h("select",{value:form.unit,onChange:e=>setForm(p=>({...p,unit:e.target.value})),
           style:{width:"100%",padding:"8px",border:"1px solid #ddd",borderRadius:7,fontSize:14,outline:"none"}},
           UNITS.map(u=>h("option",{key:u,value:u},u)))
       ),
       h("div",{style:{marginBottom:10}},
-        h("div",{style:{fontSize:12,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4,
+        h("div",{style:{fontSize:12,fontWeight:700,color:"#5A5A5A",letterSpacing:1,marginBottom:4,
           display:"flex",justifyContent:"space-between",alignItems:"center"}},
           h("span",null,"CATEGORY"),
           h("button",{onClick:()=>setShowAddCat(!showAddCat),
@@ -9698,11 +9698,11 @@ function NewInventoryItemForm({db,user,branchId,showT,onClose,invBranch}){
     // Pack detail — how it is bought/counted vs how it is consumed
     h("div",{style:{background:"#FFFDE7",border:"1px solid #FFE082",borderRadius:8,
       padding:"9px 10px",marginBottom:10}},
-      h("div",{style:{fontSize:12,fontWeight:800,color:"#E65100",letterSpacing:1,marginBottom:6}},
+      h("div",{style:{fontSize:12,fontWeight:800,color:"#BF360C",letterSpacing:1,marginBottom:6}},
         "PACK DETAIL (optional)"),
       h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
         h("div",null,
-          h("div",{style:{fontSize:12,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},"PACK UNIT"),
+          h("div",{style:{fontSize:12,fontWeight:700,color:"#5A5A5A",letterSpacing:1,marginBottom:4}},"PACK UNIT"),
           h("select",{value:form.packUnit||"",
             onChange:e=>setForm(p=>({...p,packUnit:e.target.value})),
             style:{width:"100%",padding:"8px",border:"1px solid #ddd",borderRadius:7,fontSize:14,outline:"none"}},
@@ -9710,7 +9710,7 @@ function NewInventoryItemForm({db,user,branchId,showT,onClose,invBranch}){
             UNITS.map(u=>h("option",{key:u,value:u},u)))
         ),
         h("div",null,
-          h("div",{style:{fontSize:12,fontWeight:700,color:"#888",letterSpacing:1,marginBottom:4}},
+          h("div",{style:{fontSize:12,fontWeight:700,color:"#5A5A5A",letterSpacing:1,marginBottom:4}},
             "ILAN KADA PACK"),
           h("input",{type:"number",onFocus:e=>e.target.select(),min:0,value:form.packSize||"",
             onChange:e=>setForm(p=>({...p,packSize:e.target.value})),
@@ -9719,7 +9719,7 @@ function NewInventoryItemForm({db,user,branchId,showT,onClose,invBranch}){
               borderRadius:7,fontSize:14,outline:"none",boxSizing:"border-box"}})
         )
       ),
-      h("div",{style:{fontSize:12,color:"#888",marginTop:5}},
+      h("div",{style:{fontSize:12,color:"#5A5A5A",marginTop:5}},
         (Number(form.packSize)>1&&form.packUnit)
           ? ("1 "+form.packUnit+" = "+form.packSize+" "+(form.unit||"pc")
              +". Stock is always in "+(form.unit||"pc")+"; packs are used for receiving and counting.")
@@ -10971,7 +10971,7 @@ function App(){
   if(authLoading) return h("div",{style:{minHeight:"100vh",background:`linear-gradient(160deg,${C.primary},${C.dark})`,display:"flex",alignItems:"center",justifyContent:"center"}},
     h("div",{style:{textAlign:"center"}},
       h("div",{style:{fontSize:40,marginBottom:12}},"🍽️"),
-      h("div",{style:{color:"#fff",fontSize:16,fontWeight:700}},"Loading ChowTime POS..."),
+      h("div",{style:{color:"#111111",fontSize:16,fontWeight:700}},"Loading ChowTime POS..."),
       h("div",{style:{color:"#5A5A5A",fontSize:13,marginTop:6}},"Connecting to Firebase..."),
       h("div",{style:{background:"#5A5A5A",borderRadius:8,padding:"10px 14px",marginTop:16,textAlign:"left",maxWidth:320}},
         h("div",{style:{color:"#5A5A5A",fontSize:13,fontWeight:700,marginBottom:6}},"IF STUCK HERE:"),
@@ -11000,7 +11000,7 @@ function App(){
         h("div",{style:{fontSize:13,color:C.muted,marginBottom:20,textAlign:"center"}},"Enter your work email and password"),
 
         // Error message
-        loginErr&&h("div",{style:{background:"rgba(255,59,48,.2)",border:"1px solid rgba(255,59,48,.4)",borderRadius:9,padding:"9px 13px",marginBottom:14,fontSize:14,color:"#FF6B6B",fontWeight:600}},
+        loginErr&&h("div",{style:{background:"rgba(255,59,48,.2)",border:"1px solid rgba(255,59,48,.4)",borderRadius:9,padding:"9px 13px",marginBottom:14,fontSize:14,color:"#C62828",fontWeight:600}},
           "⚠️ "+loginErr
         ),
 
@@ -11045,7 +11045,7 @@ function App(){
         // Login button
         h("button",{onClick:handleLogin,disabled:loginLoading,
           style:{width:"100%",padding:"13px",background:loginLoading?"#555":`linear-gradient(135deg,${C.primary},${C.dark})`,
-            border:"none",borderRadius:11,color:"#fff",fontWeight:800,fontSize:14,cursor:loginLoading?"not-allowed":"pointer",
+            border:"none",borderRadius:11,color:"#111111",fontWeight:800,fontSize:14,cursor:loginLoading?"not-allowed":"pointer",
             marginBottom:12}},
           loginLoading?"Signing in...":"Sign In →"
         ),
@@ -11184,7 +11184,7 @@ function App(){
                               border:"2px solid "+(on?C.primary:C.border),
                               background:on?C.primary:"#fff",display:"flex",
                               alignItems:"center",justifyContent:"center"}},
-                              on&&h("span",{style:{color:"#fff",fontSize:14,fontWeight:900}},"✓")),
+                              on&&h("span",{style:{color:"#111111",fontSize:14,fontWeight:900}},"✓")),
                             h("span",{style:{flex:1,fontSize:13,fontWeight:on?700:400}},"▸ "+f.label),
                             h("span",{style:{fontSize:14,fontWeight:700,
                               color:on?C.primary:C.muted}},on?"T/O":"dine-in")
@@ -11221,7 +11221,7 @@ function App(){
                   h("div",{style:{width:16,height:16,borderRadius:4,flexShrink:0,
                     border:"2px solid "+(on?C.primary:C.border),background:on?C.primary:"#fff",
                     display:"flex",alignItems:"center",justifyContent:"center"}},
-                    on&&h("span",{style:{color:"#fff",fontSize:14,fontWeight:900}},"✓")),
+                    on&&h("span",{style:{color:"#111111",fontSize:14,fontWeight:900}},"✓")),
                   h("div",{style:{flex:1}},
                     h("div",{style:{fontSize:13,fontWeight:on?700:400}},lineLabel(i)),
                     lineSub(i)&&h("div",{style:{fontSize:14,color:C.muted}},lineSub(i))
@@ -11357,7 +11357,7 @@ function App(){
                   h("div",{style:{width:16,height:16,borderRadius:4,flexShrink:0,
                     border:"2px solid "+(on?C.primary:C.border),background:on?C.primary:"#fff",
                     display:"flex",alignItems:"center",justifyContent:"center"}},
-                    on&&h("span",{style:{color:"#fff",fontSize:14,fontWeight:900}},"✓")),
+                    on&&h("span",{style:{color:"#111111",fontSize:14,fontWeight:900}},"✓")),
                   h("span",{style:{flex:1,fontSize:13,fontWeight:on?700:400}},i.qty+"x "+i.name),
                   h("span",{style:{fontSize:13,color:C.muted}},"₱"+peso(lineAmt(i)))
                 );
@@ -11485,7 +11485,7 @@ function App(){
           },
           style:{width:"100%",padding:"13px",opacity:cartShort().length?.5:1,
             background:`linear-gradient(135deg,${C.primary},${C.dark})`,
-            border:"none",borderRadius:10,color:"#fff",
+            border:"none",borderRadius:10,color:"#111111",
             fontSize:14,fontWeight:800,cursor:"pointer"}},
           "✓ Confirm & Print Receipt"),
 
@@ -11501,7 +11501,7 @@ function App(){
       h("div",{style:{background:"#fff",width:315,borderRadius:20,overflow:"hidden",maxHeight:"90vh",overflowY:"auto",boxShadow:"0 32px 80px rgba(0,0,0,.5)"}},
         h("div",{style:{background:`linear-gradient(135deg,${C.primary},${C.dark})`,padding:"13px 15px 10px",textAlign:"center"}},
           h("div",{style:{fontSize:19}},"🍽️"),
-          h("div",{style:{color:"#fff",fontWeight:900,fontSize:15,letterSpacing:2}},"CHOWTIME"),
+          h("div",{style:{color:"#111111",fontWeight:900,fontSize:15,letterSpacing:2}},"CHOWTIME"),
           h("div",{style:{color:"#5A5A5A",fontSize:11,letterSpacing:2}},"FAST-FOOD CHAIN"),
           h("div",{style:{color:"#5A5A5A",fontSize:12}},curBranch.full)
         ),
@@ -11511,7 +11511,7 @@ function App(){
             h("span",{style:{color:C.muted}},ord.time)
           ),
           h("div",{style:{display:"flex",gap:4,flexWrap:"wrap",marginBottom:8}},
-            h(Badge,{label:(ord.orderType||"dine-in").toUpperCase(),color:"#E65100",bg:"#FFF3E0"}),
+            h(Badge,{label:(ord.orderType||"dine-in").toUpperCase(),color:"#BF360C",bg:"#FFF3E0"}),
             ord.tableNo&&h(Badge,{label:"T"+ord.tableNo,color:"#5E35B1",bg:"#EDE7F6"}),
             ord.cashier&&h(Badge,{label:ord.cashier,color:C.info,bg:"#E3F2FD"}),
             da>0&&h(Badge,{label:dt.label,color:C.danger,bg:"#FFEBEE"})
@@ -11522,13 +11522,13 @@ function App(){
                 h("span",null,i.emoji+" "+i.qty+"x "+i.name),
                 h("span",null,"₱"+peso(i.lineTotal||0))
               ),
-              i.takeout&&h("div",{style:{fontSize:12,color:"#E65100",fontWeight:800,paddingLeft:18}},
+              i.takeout&&h("div",{style:{fontSize:12,color:"#BF360C",fontWeight:800,paddingLeft:18}},
                 i.partialTO?("📦 T/O "+(i.toQty||0)+" pcs (split)"):"📦 T/O"),
               i.variant&&h("div",{style:{fontSize:12,color:C.muted,paddingLeft:18}},"📦 "+i.variant),
               (i.options||[]).length>0&&h("div",{style:{fontSize:12,color:C.muted,paddingLeft:18}},"✓ "+i.options.join(", ")),
               (i.freebies||[]).map((f,fi)=>h("div",{key:fi,style:{fontSize:12,color:"#2E7D32",fontWeight:700,paddingLeft:18}},
                 "▸ "+f.label+" ×"+f.qty,
-                (i.takeout&&(f.toQty||0)>0)&&h("span",{style:{color:"#E65100",fontWeight:900}},
+                (i.takeout&&(f.toQty||0)>0)&&h("span",{style:{color:"#BF360C",fontWeight:900}},
                   (f.toQty>=(f.qty||0))?"  [T/O]":"  ["+f.toQty+" T/O]")
               )),
               i.isBogo&&(i.freebies||[]).length===0&&h("div",{style:{fontSize:12,color:"#FF4B2B",fontWeight:700,paddingLeft:18}},"BOGO – "+((i.qty||1)*2)+"  items"),
@@ -11686,7 +11686,7 @@ function App(){
           h("div",{style:{width:28,height:28,background:`linear-gradient(135deg,${C.primary},${C.dark})`,borderRadius:7,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13}},"🍽️"),
           h("div",null,
             h("div",{style:{color:C.primary,fontWeight:900,fontSize:14}},"CHOWTIME"),
-            h("div",{style:{color:"#eee",fontSize:12,fontWeight:700,letterSpacing:2}},"FAST-FOOD CHAIN")
+            h("div",{style:{color:"#111111",fontSize:12,fontWeight:700,letterSpacing:2}},"FAST-FOOD CHAIN")
           )
         ),
         h("div",{style:{background:`${role?.color||"#E63946"}18`,border:`1px solid ${role?.color||"#E63946"}44`,borderRadius:7,padding:"6px 8px",display:"flex",gap:6,alignItems:"center"}},
@@ -11694,13 +11694,13 @@ function App(){
           h("div",null,
             h("div",{style:{color:role?.color||"#E63946",fontSize:11,fontWeight:700}},role?.label||""),
             h("div",{style:{color:"#1A1A1A",fontSize:13,fontWeight:700}},user.name),
-            h("div",{style:{color:"#eee",fontSize:11}},user.branch==="all"?"All Branches":user.branch==="comm"?"Commissary":curBranch.name)
+            h("div",{style:{color:"#111111",fontSize:11}},user.branch==="all"?"All Branches":user.branch==="comm"?"Commissary":curBranch.name)
           )
         ),
         // Online indicator
         h("div",{style:{display:"flex",alignItems:"center",gap:5,marginTop:7,padding:"4px 8px",background:"#F5F5F5",borderRadius:6}},
           h("div",{style:{width:6,height:6,borderRadius:"50%",background:isOnline?C.success:C.danger}}),
-          h("span",{style:{fontSize:11,color:"#eee"}},isOnline?"Firebase Live":"Offline"),
+          h("span",{style:{fontSize:11,color:"#111111"}},isOnline?"Firebase Live":"Offline"),
           dbReady&&h("span",{style:{fontSize:12,color:"#9E9E9E"}},orders.length+" orders")
         )
       ),
@@ -11898,7 +11898,7 @@ function App(){
                             h("div",{style:{fontSize:13,fontWeight:nf.read?600:800,
                               color:m.color,marginBottom:1}},nf.title||""),
                             h("div",{style:{fontSize:13,color:C.muted,lineHeight:1.4}},nf.message||""),
-                            h("div",{style:{fontSize:11,color:"#bbb",marginTop:2}},
+                            h("div",{style:{fontSize:11,color:"#5A5A5A",marginTop:2}},
                               (nf.ref?nf.ref+" · ":"")+
                               (t?t.toLocaleString("en-PH",{month:"short",day:"numeric",
                                 hour:"2-digit",minute:"2-digit"}):(nf.date||"")))
@@ -12330,7 +12330,7 @@ function App(){
                         (o.branch||"").replace("ct-","").toUpperCase()+" · "+
                         (o. items||[]).slice(0,2).map(function(i){return i.name;}).join(", ")),
                       h("span",{style:{fontSize:11,padding:"1px 6px",borderRadius:8,
-                        background:stCol,color:"#fff",fontWeight:700}},
+                        background:stCol,color:"#111111",fontWeight:700}},
                         (o.status||"").toUpperCase())
                     )
                   );
@@ -12491,7 +12491,7 @@ function App(){
 
               editBr._isNew&&h("div",{style:{background:"#FFFDE7",
                 border:"1px solid #FFE082",borderRadius:9,padding:"10px 11px"}},
-                h("div",{style:{fontSize:12,fontWeight:800,color:"#E65100",
+                h("div",{style:{fontSize:12,fontWeight:800,color:"#BF360C",
                   letterSpacing:1,marginBottom:3}},"BRANCH MANAGER ACCOUNT"),
                 h("div",{style:{fontSize:12,color:C.muted,marginBottom:8,lineHeight:1.5}},
                   "Optional — but without a manager account nobody can sign in "+
@@ -12620,7 +12620,7 @@ function App(){
           h("div",{style:{display:"flex",justifyContent:"space-between",
             alignItems:"center",padding:"8px 14px",
             background:C.primary,flexShrink:0}},
-            h("div",{style:{color:"#fff",fontWeight:700,fontSize:14}},
+            h("div",{style:{color:"#111111",fontWeight:700,fontSize:14}},
               "🍽️ "+curBranch.name),
             h("div",{style:{display:"flex",gap:8,alignItems:"center"}},
               h("button",{onClick:()=>setCartOpen(true),
@@ -12636,7 +12636,7 @@ function App(){
               ),
               h("button",{onClick:handleSignOut,
                 style:{padding:"7px 12px",background:"rgba(0,0,0,.3)",
-                  border:"none",borderRadius:20,color:"#fff",
+                  border:"none",borderRadius:20,color:"#111111",
                   fontWeight:700,fontSize:13,cursor:"pointer"}},
                 "Sign Out")
             )
@@ -12677,7 +12677,7 @@ function App(){
                 display:"flex",gap:10,alignItems:"center"}},
                 h("div",{style:{fontSize:24}},"🔥"),
                 h("div",null,
-                  h("div",{style:{color:"#fff",fontWeight:900,fontSize:14}},"BOGO Deals!"),
+                  h("div",{style:{color:"#111111",fontWeight:900,fontSize:14}},"BOGO Deals!"),
                   h("div",{style:{color:"rgba(255,255,255,.8)",fontSize:12}},
                     menuWithOverrides.filter(i=>i.promos&&i.promos.length>0)
                       .map(i=>i.name).join(" · "))
@@ -12756,7 +12756,7 @@ function App(){
         // ══ KITCHEN ══
         page==="kitchen"&&h("div",{style:{height:"100%",overflow:"auto",padding:14,background:"#0f0f1a"}},
           h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:12}},
-            h("div",{style:{color:"#fff",fontSize:14,fontWeight:900}},"🍳 Kitchen — "+curBranch.name),
+            h("div",{style:{color:"#111111",fontSize:14,fontWeight:900}},"🍳 Kitchen — "+curBranch.name),
             h("div",{style:{color:C.accent,fontSize:13,fontWeight:700}},new Date().toLocaleTimeString("en-PH",{hour:"2-digit",minute:"2-digit"}))
           ),
           h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
@@ -12856,7 +12856,7 @@ function App(){
               h("div",{style:{flex:1}},
                 h("div",{style:{fontSize:13,fontWeight:700,display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}},
                   (o.id||"—"),
-                  h(Badge,{label:(o.orderType||"dine-in").toUpperCase(),color:"#E65100",bg:"#FFF3E0"}),
+                  h(Badge,{label:(o.orderType||"dine-in").toUpperCase(),color:"#BF360C",bg:"#FFF3E0"}),
                   o.tableNo?h(Badge,{label:"T"+o.tableNo,color:"#5E35B1",bg:"#EDE7F6"}):null,
                   o.cashier&&h(Badge,{label:o.cashier,color:C.info,bg:"#E3F2FD"}),
                   (o.discAmt||0)>0&&h(Badge,{label:o.discType?.label||"Disc",color:C.danger,bg:"#FFEBEE"})
@@ -13202,7 +13202,7 @@ function App(){
             h("div",{style:{background:`linear-gradient(135deg,${C.primary},${C.dark})`,borderRadius:13,padding:"16px 18px",marginBottom:13,display:"flex",justifyContent:"space-between",alignItems:"center"}},
               h("div",null,
                 h("div",{style:{color:C.accent,fontSize:11,fontWeight:700,letterSpacing:2}},isZ?"Z-READING":"X-READING"),
-                h("div",{style:{color:"#fff",fontSize:15,fontWeight:900,marginTop:2}},curBranch.full),
+                h("div",{style:{color:"#111111",fontSize:15,fontWeight:900,marginTop:2}},curBranch.full),
                 h("div",{style:{color:"#5A5A5A",fontSize:12,marginTop:1}},
                   isSaved
                     ? ("Saved · "+saved.date+" · ni "+(saved.closedBy||"?"))
@@ -13211,7 +13211,7 @@ function App(){
               ),
               h("div",{style:{textAlign:"right"}},
                 h("div",{style:{color:C.accent,fontSize:11}},"CASH ON HAND"),
-                h("div",{style:{color:"#fff",fontSize:24,fontWeight:900}},"₱"+peso(zd.totalCash))
+                h("div",{style:{color:"#111111",fontSize:24,fontWeight:900}},"₱"+peso(zd.totalCash))
               )
             ),
             h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}},
@@ -13491,7 +13491,7 @@ function App(){
                     style:{width:"100%",padding:"8px",border:"1px solid "+C.border,
                       borderRadius:7,fontSize:13,outline:"none",boxSizing:"border-box"}}),
                   (newExp.date&&newExp.date!==localDate())&&h("div",{style:{fontSize:12,
-                    color:"#E65100",fontWeight:700,marginTop:3}},
+                    color:"#BF360C",fontWeight:700,marginTop:3}},
                     "Will be filed under "+newExp.date+", not today")),
                 h("div",null,h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"CATEGORY"),h("select",{value:newExp.cat,onChange:e=>setNewExp(p=>({...p,cat:e.target.value})),style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:13,outline:"none"}},EXPENSE_CATS.map(c=>h("option",{key:c},c)))),
                 h("div",null,h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"DESCRIPTION"),h("input",{value:newExp.desc,onChange:e=>setNewExp(p=>({...p,desc:e.target.value})),placeholder:"Description",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:13,outline:"none",boxSizing:"border-box"}})),
@@ -13505,7 +13505,7 @@ function App(){
                     by:user.name,status:user.role==="owner"?"approved":"pending",
                     timestamp:serverTimestamp()});
                   setNewExp({cat:"Utilities",desc:"",amount:"",date:""});setModal(null);showT("Expense recorded!");
-                },style:{padding:"10px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:8,color:"#fff",fontWeight:700,cursor:"pointer"}},"Save Expense")
+                },style:{padding:"10px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:8,color:"#111111",fontWeight:700,cursor:"pointer"}},"Save Expense")
               )
             )
           )
@@ -13518,7 +13518,7 @@ function App(){
           h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}},
             h(Stat,{label:"Total Cash In",value:"₱"+cashLog.filter(c=>c.type==="in"&&(user.role==="owner"||c.branch===branchId)).reduce((s,c)=>s+(c.amount||0),0).toLocaleString(),icon:"💰",color:C.success}),
             h(Stat,{label:"Total Cash Out",value:"₱"+cashLog.filter(c=>c.type==="out"&&(user.role==="owner"||c.branch===branchId)).reduce((s,c)=>s+(c.amount||0),0).toLocaleString(),icon:"💸",color:C.danger}),
-            h(Stat,{label:"Void Refunds",value:"₱"+cashLog.filter(c=>c.type==="void_refund"&&(user.role==="owner"||c.branch===branchId)).reduce((s,c)=>s+(c.amount||0),0).toLocaleString(),sub:"Already removed from sales",icon:"🚫",color:"#E65100"})
+            h(Stat,{label:"Void Refunds",value:"₱"+cashLog.filter(c=>c.type==="void_refund"&&(user.role==="owner"||c.branch===branchId)).reduce((s,c)=>s+(c.amount||0),0).toLocaleString(),sub:"Already removed from sales",icon:"🚫",color:"#BF360C"})
           ),
           h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
             cashLog.filter(c=>user.role==="owner"||c.branch===branchId).map(c=>h("div",{key:c._docId,style:{display:"flex",alignItems:"center",gap:9,padding:"10px 14px",borderBottom:"1px solid #f9f9f9"}},
@@ -13562,7 +13562,7 @@ function App(){
                   const now=new Date();
                   await addDoc(collection(db,"cash_log"),{type:newCash.type,branch:branchId,desc:newCash.desc,amount:parseFloat(newCash.amount),time:now.toLocaleTimeString("en-PH",{hour:"2-digit",minute:"2-digit"}),date:localDate(now),by:user.name,timestamp:serverTimestamp(),at:serverTimestamp()});
                   setNewCash({type:"in",desc:"",amount:""});setModal(null);showT("Cash "+newCash.type+" recorded!");
-                },style:{padding:"10px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:8,color:"#fff",fontWeight:700,cursor:"pointer"}},"Save")
+                },style:{padding:"10px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:8,color:"#111111",fontWeight:700,cursor:"pointer"}},"Save")
               )
             )
           )
@@ -13596,7 +13596,7 @@ function App(){
                   if(!newAdv.staff||!newAdv.amount){showT("Fill all fields","warn");return;}
                   await addDoc(collection(db,"advances"),{branch:branchId,staff:newAdv.staff,amount:parseFloat(newAdv.amount),reason:newAdv.reason,date:localDate(),deductDate:newAdv.deductDate,status:"pending",requestedBy:user.name,timestamp:serverTimestamp()});
                   setNewAdv({staff:"",amount:"",reason:"",deductDate:""});setModal(null);showT("Request submitted!");
-                },style:{padding:"10px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:8,color:"#fff",fontWeight:700,cursor:"pointer"}},"Submit Request")
+                },style:{padding:"10px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:8,color:"#111111",fontWeight:700,cursor:"pointer"}},"Submit Request")
               )
             )
           )
@@ -13635,7 +13635,7 @@ function App(){
               borderRadius:12,padding:"12px 16px",marginBottom:12,
               display:"flex",justifyContent:"space-between",alignItems:"center"}},
               h("div",null,
-                h("div",{style:{color:"#fff",fontWeight:900,fontSize:13}},
+                h("div",{style:{color:"#111111",fontWeight:900,fontSize:13}},
                   "⚠️ "+lowItems.length+"  item(s) LOW on stock!"),
                 h("div",{style:{color:"#111111",fontSize:13,marginTop:2}},
                   lowItems.slice(0,3).map(i=>i.name+"("+i.stock+")").join(" · ")+
@@ -13644,7 +13644,7 @@ function App(){
               h("button",{
                 onClick:()=>setModal("new_po"),
                 style:{padding:"7px 16px",background:"#fff",border:"none",
-                  borderRadius:8,color:"#E65100",fontWeight:800,
+                  borderRadius:8,color:"#BF360C",fontWeight:800,
                   fontSize:13,cursor:"pointer"}},
                 "📦 Order Now")
             );
@@ -13768,7 +13768,7 @@ function App(){
                           (m==="retail"?C.info:C.success):C.muted}},lbl))),
                 // a stocked item with no price silently counts as zero, which
                 // makes the total look smaller than it is
-                noPrice>0&&h("div",{style:{fontSize:11,color:"#E65100",
+                noPrice>0&&h("div",{style:{fontSize:11,color:"#BF360C",
                   marginTop:4,fontWeight:700}},
                   noPrice+" item/s may stock pero walang "
                     +(retail?"presyo":"cost")+" — hindi kasama")
@@ -13787,7 +13787,7 @@ function App(){
                 flexWrap:"wrap"}},
                 h("span",{style:{fontSize:15}},"✏️"),
                 h("div",{style:{flex:1,minWidth:200}},
-                  h("div",{style:{fontSize:13,fontWeight:800,color:"#E65100"}},
+                  h("div",{style:{fontSize:13,fontWeight:800,color:"#BF360C"}},
                     n?(n+" item/s edited — not saved yet"):"Batch edit is on"),
                   h("div",{style:{fontSize:12,color:C.muted,marginTop:1}},
                     "Edit cost, price, pack, min stock and stock straight in the "+
@@ -14222,7 +14222,7 @@ function App(){
                       h("div",{style:{fontSize:12,color:C.muted,marginBottom:2}},
                         log.desc||log.reason||"Adjustment"),
                       h("div",{style:{display:"flex",justifyContent:"space-between",
-                        fontSize:11,color:"#bbb"}},
+                        fontSize:11,color:"#5A5A5A"}},
                         h("span",null,(log.by?"ni "+log.by:"")
                           +(log.invCol?" · "+log.invCol:"")),
                         h("span",null,when)
@@ -14356,14 +14356,14 @@ function App(){
             h("div",null,
               h("div",{style:{color:"rgba(255,255,255,.6)",fontSize:11,fontWeight:700,letterSpacing:2}},
                 "YOUR BRANCH"),
-              h("div",{style:{color:"#fff",fontSize:20,fontWeight:900,marginTop:2}},
+              h("div",{style:{color:"#111111",fontSize:20,fontWeight:900,marginTop:2}},
                 curBranch.name||curBranch.full),
               h("div",{style:{color:"#5A5A5A",fontSize:12,marginTop:2}},
                 curBranch.address||"")
             ),
             h("div",{style:{textAlign:"right"}},
               h("div",{style:{color:"#5A5A5A",fontSize:12}},"LIVE SALES"),
-              h("div",{style:{color:"#fff",fontSize:22,fontWeight:900}},
+              h("div",{style:{color:"#111111",fontSize:22,fontWeight:900}},
                 "₱"+myOrders.filter(function(o){
                   return o.date===localDate();
                 }).filter(function(o){return o.status!=="void"&&o.status!=="cancelled";})
@@ -14421,7 +14421,7 @@ function App(){
                 (a.status==="received_by_main"||a.status==="discrepancy");
             }).length>0&&h("div",{style:{background:"#FFF3E0",border:"1px solid #FFE0B2",
               borderRadius:10,padding:"10px 14px"}},
-              h("div",{style:{fontSize:13,fontWeight:700,color:"#E65100",marginBottom:6}},
+              h("div",{style:{fontSize:13,fontWeight:700,color:"#BF360C",marginBottom:6}},
                 "⚠️ Needs Action"),
               advances.filter(function(a){
                 return a._type==="po"&&
@@ -14460,7 +14460,7 @@ function App(){
                   ),
                   h("div",{style:{display:"flex",gap:8,alignItems:"center"}},
                     h("span",{style:{fontSize:12,padding:"2px 7px",borderRadius:8,
-                      background:stCol,color:"#fff",fontWeight:700}},
+                      background:stCol,color:"#111111",fontWeight:700}},
                       (o.status||"").toUpperCase()),
                     h("span",{style:{fontWeight:800,fontSize:14}},
                       "₱"+peso(o.subtotal||0))
@@ -14631,7 +14631,7 @@ function App(){
                       h("div",{style:{flex:1}},
                         h("div",{style:{fontWeight:700,fontSize:14}},s.name),
                         h("div",{style:{fontSize:12,display:"flex",gap:6,marginTop:2}},
-                          h("span",{style:{background:roleInfo.color,color:"#fff",
+                          h("span",{style:{background:roleInfo.color,color:"#111111",
                             borderRadius:8,padding:"1px 6px",fontWeight:700}},
                             roleInfo.label||s.role),
                           h("span",{style:{color:C.muted}},
@@ -14684,7 +14684,7 @@ function App(){
                     alignItems:"center"}},
                     h("div",null,
                       h("div",{style:{color:"rgba(255,255,255,.7)",fontSize:12,letterSpacing:2}},"EDITING STAFF"),
-                      h("div",{style:{color:"#fff",fontWeight:900,fontSize:14,marginTop:2}},
+                      h("div",{style:{color:"#111111",fontWeight:900,fontSize:14,marginTop:2}},
                         editingStaff.name||"New Staff")
                     ),
                     h("button",{onClick:()=>setEditingStaff(null),
@@ -14769,7 +14769,7 @@ function App(){
                     // Say so plainly rather than blocking it.
                     !editingStaff.branch&&h("div",{style:{background:"#FFF3E0",
                       border:"1px solid #FFCC80",borderRadius:8,padding:"9px 12px",
-                      marginBottom:10,fontSize:13,color:"#E65100",fontWeight:700}},
+                      marginBottom:10,fontSize:13,color:"#BF360C",fontWeight:700}},
                       "⚠️ Pick a branch — this account cannot be saved without one"),
                     (editingStaff.branch==="ct-main"&&editingStaff.role!=="owner"
                       &&editingStaff.role!=="commissary")&&h("div",{
@@ -14827,7 +14827,7 @@ function App(){
 
                     !editingStaff._isNew&&h("div",{style:{background:"#FFF3E0",
                       border:"1px solid #FFCC80",borderRadius:8,padding:"9px 12px",
-                      marginBottom:10,fontSize:13,color:"#E65100",lineHeight:1.5}},
+                      marginBottom:10,fontSize:13,color:"#BF360C",lineHeight:1.5}},
                       h("b",null,"The login email cannot be changed here."),
                       " Sign-in matches the Firebase account, so editing it would "+
                       "lock this person out. To move them to a new address, create "+
@@ -14942,7 +14942,7 @@ function App(){
                   }catch(e){showT("Error: "+e.message,"err");}
                 },
                 style:{flex:1,padding:"11px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,
-                  border:"none",borderRadius:9,color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer"}
+                  border:"none",borderRadius:9,color:"#111111",fontWeight:700,fontSize:14,cursor:"pointer"}
               },"💾 Save Changes"),
               h("button",{onClick:()=>{setModal(null);setEditingStaff(null);},
                 style:{padding:"11px 16px",background:"#fff",border:"1px solid "+C.border,
@@ -15008,7 +15008,7 @@ function App(){
                   {icon:"🕐",label:"Time Kiosk",sub:"Time In / Out",url:"https://chowtime-hris.github.io/chowtime-hris/chowtime-kiosk.html",color:C.primary,local:true,branchOnly:false},
                   {icon:"👥",label:"Employees",sub:"Staff records",url:"https://chowtime-hris.github.io/chowtime-hris/chowtime-payroll.html#employees",color:"#1565C0",mainOnly:true},
                   {icon:"📋",label:"Attendance",sub:"DTR records",url:"https://chowtime-hris.github.io/chowtime-hris/chowtime-payroll.html#attendance",color:"#2E7D32",mainOnly:true},
-                  {icon:"💰",label:"Payroll",sub:"Compute payroll",url:"https://chowtime-hris.github.io/chowtime-hris/chowtime-payroll.html#payroll",color:"#E65100",mainOnly:true},
+                  {icon:"💰",label:"Payroll",sub:"Compute payroll",url:"https://chowtime-hris.github.io/chowtime-hris/chowtime-payroll.html#payroll",color:"#BF360C",mainOnly:true},
                   {icon:"🗓️",label:"Shifts",sub:"Shift scheduler",url:"https://chowtime-hris.github.io/chowtime-hris/chowtime-payroll.html#shifts",color:"#6A1B9A",mainOnly:true},
                   {icon:"🏖️",label:"Leaves",sub:"Leave filings",url:"https://chowtime-hris.github.io/chowtime-hris/chowtime-payroll.html#leaves",color:"#00695C",mainOnly:true},
                   {icon:"🏦",label:"Loans",sub:"CA & Loan records",url:"https://chowtime-hris.github.io/chowtime-hris/chowtime-payroll.html#loans",color:"#AD1457",mainOnly:true},
@@ -15051,7 +15051,7 @@ function App(){
             h("div",{style:{fontSize:24}},"🏪"),
             h("div",null,
               h("div",{style:{color:"#5A5A5A",fontSize:12,fontWeight:700,letterSpacing:1}},"KIOSK BRANCH"),
-              h("div",{style:{color:"#fff",fontSize:14,fontWeight:800}},curBranch.full),
+              h("div",{style:{color:"#111111",fontSize:14,fontWeight:800}},curBranch.full),
               h("div",{style:{color:"#5A5A5A",fontSize:12,marginTop:2}},"Time Kiosk will open for this branch automatically")
             )
           )
@@ -15115,7 +15115,7 @@ function App(){
                       h("div",{style:{flex:1}},
                         h("div",{style:{fontWeight:700,fontSize:14}},s.name),
                         h("div",{style:{fontSize:12,marginTop:2}},
-                          h("span",{style:{background:ri.color,color:"#fff",
+                          h("span",{style:{background:ri.color,color:"#111111",
                             borderRadius:8,padding:"1px 6px",fontWeight:700}},ri.label))
                       ),
                       h("button",{onClick:e=>{e.stopPropagation();
@@ -15151,7 +15151,7 @@ function App(){
                   border:"1px solid "+C.border,overflow:"hidden"}},
                   h("div",{style:{background:ROLES[editingStaff.role]?.color||C.primary,
                     padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}},
-                    h("div",{style:{color:"#fff",fontWeight:800,fontSize:13}},
+                    h("div",{style:{color:"#111111",fontWeight:800,fontSize:13}},
                       editingStaff._isNew?"New Staff":"Edit: "+editingStaff.name),
                     h("button",{onClick:()=>setEditingStaff(null),
                       style:{background:"#5A5A5A",border:"none",
@@ -15356,7 +15356,7 @@ function App(){
                     h("div",{style:{display:"flex",gap:8,alignItems:"center"}},
                       h("span",{style:{fontWeight:900,color:stColor,fontSize:13}},po.poNum),
                       h("span",{style:{fontSize:12,padding:"2px 8px",background:stColor,
-                        color:"#fff",borderRadius:10,fontWeight:700}},stLabel)
+                        color:"#111111",borderRadius:10,fontWeight:700}},stLabel)
                     ),
                     // Three independent dimensions. One badge cannot say
                     // "delivered but unpaid", which is the state that matters
@@ -15448,7 +15448,7 @@ function App(){
                     display:"flex",gap:9,alignItems:"center",flexWrap:"wrap"}},
                   h("span",{style:{fontSize:14}},"📥"),
                   h("div",{style:{flex:1,minWidth:180}},
-                    h("div",{style:{fontSize:13,fontWeight:800,color:"#E65100"}},
+                    h("div",{style:{fontSize:13,fontWeight:800,color:"#BF360C"}},
                       "Received, but never added to stock"),
                     h("div",{style:{fontSize:12,color:C.muted,marginTop:1}},
                       (po.receivedItems||[]).length+" item/s on this DR")),
@@ -15568,7 +15568,7 @@ function App(){
                     h("div",{style:{display:"flex",gap:8,alignItems:"center"}},
                       h("span",{style:{fontWeight:900,color:stColor,fontSize:13}},po.poNum),
                       h("span",{style:{fontSize:12,padding:"2px 8px",
-                        background:stColor,color:"#fff",borderRadius:10,fontWeight:700}},stLabel)
+                        background:stColor,color:"#111111",borderRadius:10,fontWeight:700}},stLabel)
                     ),
                     h("div",{style:{fontSize:12,color:C.muted,marginTop:2}},
                       (po.branchName||po.branch)+" · "+po.date+
@@ -15629,7 +15629,7 @@ function App(){
                           padding:0,textAlign:"left"}},
                         h("span",{style:{fontSize:14}},"⚠️"),
                         h("div",{style:{flex:1}},
-                          h("div",{style:{fontSize:13,fontWeight:800,color:"#E65100"}},
+                          h("div",{style:{fontSize:13,fontWeight:800,color:"#BF360C"}},
                             "DISCREPANCY REPORT — "+rows.length+" line"+(rows.length>1?"s":"")),
                           h("div",{style:{fontSize:12,color:C.muted,marginTop:1}},
                             (short?short+" short":"")+
@@ -15685,7 +15685,7 @@ function App(){
                       gap:9,alignItems:"center",flexWrap:"wrap"}},
                     h("span",{style:{fontSize:14}},"📥"),
                     h("div",{style:{flex:1,minWidth:190}},
-                      h("div",{style:{fontSize:13,fontWeight:800,color:"#E65100"}},
+                      h("div",{style:{fontSize:13,fontWeight:800,color:"#BF360C"}},
                         "Received, but never added to stock"),
                       h("div",{style:{fontSize:12,color:C.muted,marginTop:1}},
                         (po.receivedItems||[]).length+" item/s on this DR · "
@@ -15735,7 +15735,7 @@ function App(){
                           justifyContent:"space-between",fontSize:13,marginBottom:1}},
                           h("span",{style:{color:C.muted}},l),
                           h("span",{style:{fontWeight:800,color:col}},v))),
-                      bad&&h("div",{style:{fontSize:12,color:"#E65100",
+                      bad&&h("div",{style:{fontSize:12,color:"#BF360C",
                         fontWeight:700,marginTop:4}},
                         "No cost on the items — margin reads as 100%")
                     );
@@ -15985,7 +15985,7 @@ function App(){
                   });
                   setInventory(p=>p.map(x=>({...x,_order:0})));
                   showT("Order submitted to Commissary ✓");
-                },style:{padding:"9px 20px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:8,color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer"}},"Submit →")
+                },style:{padding:"9px 20px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:8,color:"#111111",fontWeight:700,fontSize:14,cursor:"pointer"}},"Submit →")
               )
             )
           ),
@@ -16118,7 +16118,7 @@ function App(){
         h("div",{style:{padding:"10px 14px 16px",borderTop:"1px solid "+C.border,
           display:cart.length>0?"block":"none"}},
           h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:14,fontWeight:800,marginBottom:9}},h("span",null,"Subtotal"),h("span",null,"₱"+peso(cartTotal))),
-          h("button",{onClick:()=>{setCartOpen(false);setChkStep(1);setModal("checkout");},style:{width:"100%",padding:"12px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:10,color:"#fff",fontSize:14,fontWeight:800,cursor:"pointer"}},"Proceed to Checkout →")
+          h("button",{onClick:()=>{setCartOpen(false);setChkStep(1);setModal("checkout");},style:{width:"100%",padding:"12px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:10,color:"#111111",fontSize:14,fontWeight:800,cursor:"pointer"}},"Proceed to Checkout →")
         )
       )
     ),
@@ -16241,8 +16241,8 @@ class ErrorBoundary extends React.Component {
         fontFamily:"monospace",padding:30,display:"flex",flexDirection:"column",
         alignItems:"center",justifyContent:"center"}},
         h("div",{style:{fontSize:30,marginBottom:12}},"⚠️ Render Error"),
-        h("div",{style:{fontSize:13,color:"#ff6b6b",marginBottom:8}},err&&err.message||"Unknown"),
-        h("pre",{style:{fontSize:12,color:"#aaa",background:"#0d0d1a",padding:12,
+        h("div",{style:{fontSize:13,color:"#C62828",marginBottom:8}},err&&err.message||"Unknown"),
+        h("pre",{style:{fontSize:12,color:"#5A5A5A",background:"#0d0d1a",padding:12,
           borderRadius:8,maxWidth:700,overflow:"auto",whiteSpace:"pre-wrap"}},
           err&&err.stack||""),
         h("button",{onClick:()=>location.reload(),

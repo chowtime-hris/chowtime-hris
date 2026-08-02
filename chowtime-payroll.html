@@ -59,7 +59,7 @@ main{max-width:1320px;margin:0 auto;padding:22px 18px 60px;}
 .btn-sm{padding:4px 10px;font-size:11px;}
 .table-wrap{overflow-x:auto;}
 table{width:100%;border-collapse:collapse;font-size:13px;}
-thead th{background:#F7F7F7;color:#fff;padding:9px 11px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;white-space:nowrap;}
+thead th{background:#F7F7F7;color:#111111;padding:9px 11px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;white-space:nowrap;}
 tbody tr{border-bottom:1px solid var(--border);}
 tbody tr:hover{background:#fff5f0;}
 tbody td{padding:9px 11px;}
@@ -132,7 +132,7 @@ tbody td{padding:9px 11px;}
     <select class="period-select" id="global-period" onchange="onPeriodChange()">
       <option value="2026-06-16" selected>June 16–30, 2026</option>
     </select>
-    <span id="firebase-status-badge" style="padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;border:1px solid rgba(240,165,0,.5);background:rgba(240,165,0,.15);color:#f0c040;">
+    <span id="firebase-status-badge" style="padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;border:1px solid rgba(240,165,0,.5);background:rgba(240,165,0,.15);color:#BF360C;">
       ⟳ Connecting…
     </span>
   </div>
@@ -290,7 +290,7 @@ tbody td{padding:9px 11px;}
         <button class="btn btn-danger" style="margin-left:8px;" onclick="clearDTREntry()">🗑 Clear This Entry</button>
       </div>
     </div>
-    <pre id="debug-output" style="background:#1a1a1a;color:#6fcf7a;padding:14px;border-radius:8px;font-size:12px;min-height:60px;overflow-x:auto;">Select employee and date to see raw data...</pre>
+    <pre id="debug-output" style="background:#1a1a1a;color:#2E7D32;padding:14px;border-radius:8px;font-size:12px;min-height:60px;overflow-x:auto;">Select employee and date to see raw data...</pre>
   </div>
 
   <div class="panel">
@@ -1727,7 +1727,7 @@ function loadDTREditor() {
           style="border:1px solid #C0392B;border-radius:5px;padding:4px;font-size:12px;"></td>
       <td style="color:var(--green);font-weight:600;">${
         c.status==='in-progress'
-          ? '<span style="color:#f0a500;font-size:11px;">⏳ In Progress</span>'
+          ? '<span style="color:#BF360C;font-size:11px;">⏳ In Progress</span>'
           : (entry.in&&entry.out)?c.hrs+'h':'—'
       }</td>
       <td style="color:${c.late>0?'var(--red)':'var(--muted)'};">${c.late>0?c.late+'m':'—'}</td>
@@ -1880,7 +1880,7 @@ function renderShiftDefs() {
   tbody.innerHTML=defs.map((s,i)=>`
     <tr>
       <td><strong>${s.name}</strong></td>
-      <td><span style="background:${s.color};color:#fff;padding:2px 10px;border-radius:20px;font-size:12px;font-weight:600;">${s.label||s.name}</span></td>
+      <td><span style="background:${s.color};color:#111111;padding:2px 10px;border-radius:20px;font-size:12px;font-weight:600;">${s.label||s.name}</span></td>
       <td>${s.start}</td><td>${s.end}</td><td>${s.bstart}</td><td>${s.bend}</td><td>${s.grace}min</td>
       <td>${s.prep||0}min</td>
       <td><div style="width:20px;height:20px;border-radius:50%;background:${s.color};display:inline-block;"></div></td>
@@ -1984,15 +1984,15 @@ function renderShiftAssignment() {
     const days=weekDates.map(date=>{
       const s=getEmpShiftForDay(emp.id,date.getDay(),toLocalDateStr(date));
       if(!s) return '<td style="text-align:center;color:var(--muted);">—</td>';
-      if(s==='REST') return '<td style="text-align:center;"><span style="background:#f0f0f0;color:#888;padding:2px 6px;border-radius:8px;font-size:11px;">🛌</span></td>';
+      if(s==='REST') return '<td style="text-align:center;"><span style="background:#f0f0f0;color:#5A5A5A;padding:2px 6px;border-radius:8px;font-size:11px;">🛌</span></td>';
       if(s==='OFF')  return '<td style="text-align:center;"><span style="background:#fdd;color:#c00;padding:2px 6px;border-radius:8px;font-size:11px;">OFF</span></td>';
-      return `<td style="text-align:center;"><span style="background:${s.color};color:#fff;padding:2px 6px;border-radius:8px;font-size:11px;font-weight:600;">${s.label||s.name}</span></td>`;
+      return `<td style="text-align:center;"><span style="background:${s.color};color:#111111;padding:2px 6px;border-radius:8px;font-size:11px;font-weight:600;">${s.label||s.name}</span></td>`;
     }).join('');
     return `<tr>
       <td><strong>${emp.name}</strong></td>
       <td style="font-size:11px;color:var(--muted);">${emp.pos||''}</td>
       <td><span style="font-size:11px;">${a.type==='fixed'?'🔒 Fixed':a.type==='rotation'?'🔄 Rotating':'—'}</span></td>
-      <td>${shift?`<span style="background:${shift.color};color:#fff;padding:2px 8px;border-radius:10px;font-size:11px;">${shift.label||''} ${shift.name}</span>`:'<span style="color:var(--muted);font-size:11px;">Not assigned</span>'}</td>
+      <td>${shift?`<span style="background:${shift.color};color:#111111;padding:2px 8px;border-radius:10px;font-size:11px;">${shift.label||''} ${shift.name}</span>`:'<span style="color:var(--muted);font-size:11px;">Not assigned</span>'}</td>
       ${days}
       <td>
         <button class="btn btn-sm btn-primary" onclick="openEmpShiftModal('${emp.id}')">✏️ Edit</button>
@@ -2432,7 +2432,7 @@ function loadDTR() { // loadDTR — loads DTR for selected employee and period
 
     // Show shift label in row
     const shiftLabel = shiftSched
-      ? `<span style="background:${shiftSched.color||'#888'};color:#fff;padding:1px 6px;border-radius:8px;font-size:10px;">${shiftSched.label||shiftSched.name||''}</span><br><span style="font-size:9px;color:#666;">${shiftSched.start||'?'}-${shiftSched.end||'?'}</span>`
+      ? `<span style="background:${shiftSched.color||'#888'};color:#111111;padding:1px 6px;border-radius:8px;font-size:10px;">${shiftSched.label||shiftSched.name||''}</span><br><span style="font-size:9px;color:#666;">${shiftSched.start||'?'}-${shiftSched.end||'?'}</span>`
       : assignedShift==='REST' ? '<span style="font-size:11px;color:var(--muted);">🛌 Rest</span>' : '';
 
     rows+=`<tr style="${rowBg}">
@@ -2454,7 +2454,7 @@ function loadDTR() { // loadDTR — loads DTR for selected employee and period
           onchange="saveDTRField('${dateStr}','out',this.value,'${empId}','${periodKey}')" /></td>
       <td style="color:var(--green);font-weight:600;">${
         c.status==='in-progress'
-          ? '<span style="color:#f0a500;font-size:11px;">⏳ In Progress</span>'
+          ? '<span style="color:#BF360C;font-size:11px;">⏳ In Progress</span>'
           : (entry.in&&entry.out)?c.hrs+'h':'—'
       }</td>
       <td style="color:var(--red);">${c.late>0?c.late+'m':'—'}</td>
