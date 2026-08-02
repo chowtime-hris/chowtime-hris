@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Chowtime POS — 20260730-103900</title>
+<title>Chowtime POS — 20260802-122723</title>
 <meta name="theme-color" content="#6A1B9A"/>
 <meta name="mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260730-103900 -->
+<!-- BUILD:20260802-122723 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -2979,15 +2979,25 @@ function CALoanPage({user,branchId,curBranch,db,hrisDB,showT,mode,hrisEmps=[]}){
   const [loading, setLoading]   = useState(true);
   const today = localDate();
 
+  // Start on the obvious match, but the person filing still confirms it.
+  const guess = hrisEmps.find(e=>
+    String(e.name||"").toLowerCase().trim()===String(user.name||"").toLowerCase().trim());
+  const [empId,setEmpId]=useState(guess?guess.id:"");
+  useEffect(()=>{
+    if(!empId&&guess)setEmpId(guess.id);
+  },[hrisEmps.length]);
+  const hrisEmp = hrisEmps.find(e=>String(e.id)===String(empId));
+
   useEffect(()=>{ setLoading(false); },[hrisEmps]);
 
   // Load my requests from POS Firestore
   useEffect(()=>{
     // one equality filter only; the rest is done in memory so no composite
     // index is required
+    const who=(hrisEmp&&hrisEmp.name)||user.name;
     const q = query(
       collection(db,"hris_requests"),
-      where("staffName","==",user.name),
+      where("staffName","==",who),
       limit(80)
     );
     const want=isCA?"Cash Advance":"Cash Loan";
@@ -2998,15 +3008,15 @@ function CALoanPage({user,branchId,curBranch,db,hrisDB,showT,mode,hrisEmps=[]}){
                     -((a.timestamp&&a.timestamp.seconds)||0)));
     }, (err)=>{ console.error("hris_requests:",err); });
     return()=>unsub();
-  },[user.name, isCA]);
+  },[user.name, isCA, hrisEmp&&hrisEmp.name]);
 
-  // Find matching HRIS employee record
-  const hrisEmp = hrisEmps.find(e=>
-    e.name?.toLowerCase().trim()===user.name.toLowerCase().trim() ||
-    e.name?.toLowerCase().includes(user.name.split(" ")[0].toLowerCase())
-  );
 
   const submit = async()=>{
+    if(!hrisEmp){
+      showT("Pick the name from the payroll list — the deduction is posted "
+        +"against that record","warn");
+      return;
+    }
     if(!amount||parseFloat(amount)<=0){showT("Enter amount","warn");return;}
     if(!reason.trim()){showT("Enter reason","warn");return;}
     const amt = parseFloat(amount);
@@ -3015,7 +3025,8 @@ function CALoanPage({user,branchId,curBranch,db,hrisDB,showT,mode,hrisEmps=[]}){
     // 1. Save request to POS Firestore (for approval tracking)
     const reqRef = await addDoc(collection(db,"hris_requests"),{
       type: isCA?"Cash Advance":"Cash Loan",
-      staffName: user.name,
+      staffName: hrisEmp.name,
+      requestedBy: user.name,
       branch: branchId,
       branchName: curBranch.full,
       amount: amt,
@@ -3063,6 +3074,30 @@ function CALoanPage({user,branchId,curBranch,db,hrisDB,showT,mode,hrisEmps=[]}){
         h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,padding:"16px"}},
           h("div",{style:{fontWeight:800,fontSize:13,marginBottom:14,color:isCA?C.primary:"#1565C0"}},
             isCA?"💵 New Cash Advance":"💸 New Cash Loan"),
+
+          // Employee — from the payroll list, so the loan lands on the right
+          // record and the cut-off deduction actually finds it
+          h("div",{style:{marginBottom:11}},
+            h("div",{style:{fontSize:12,fontWeight:700,color:C.muted,
+              marginBottom:5,letterSpacing:1}},"NAME (from payroll)"),
+            h("select",{value:empId,onChange:e=>setEmpId(e.target.value),
+              style:{width:"100%",padding:"11px",borderRadius:9,fontSize:14,
+                outline:"none",cursor:"pointer",boxSizing:"border-box",
+                border:"1px solid "+(empId?C.primary:C.warning),
+                background:empId?"#fff":C.warning+"14",
+                fontWeight:empId?700:400}},
+              h("option",{value:""},
+                hrisEmps.length?"— select your name —":"No payroll records loaded"),
+              hrisEmps.slice()
+                .sort((a,b)=>String(a.name||"").localeCompare(String(b.name||"")))
+                .map(e=>h("option",{key:e.id,value:e.id},
+                  e.name+(e.pos?" · "+e.pos:"")))),
+            !empId&&h("div",{style:{fontSize:11,color:C.warning,marginTop:4,
+              lineHeight:1.5}},
+              hrisEmps.length
+                ? "The deduction is posted against this record, so it has to be "
+                  +"the payroll name — not the POS login."
+                : "The payroll list has not loaded. Check the HRIS connection.")),
 
           // Amount
           h("div",{style:{marginBottom:11}},
@@ -5655,7 +5690,7 @@ function renderDRDoc(po,cs,brs){
 // ─── BUILD / UPDATE CHECK ────────────────────
 // GitHub Pages caches hard, so a branch can run an old copy for hours.
 // Without a visible stamp a bug report cannot be tied to a version.
-const BUILD = "20260730-103900";
+const BUILD = "20260802-122723";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
