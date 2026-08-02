@@ -6241,6 +6241,397 @@ function HREmployeesPage({db,user,branchId,branches,showT}){
   );
 }
 
+// Ported from the live payroll. The ledger is the source of truth: a balance
+// is replayed from recorded movements, never recomputed from a schedule.
+function hrLoanBalance(l){
+  if(!l)return 0;
+  if(l.status==="Paid")return 0;
+  const b=l.balance;
+  if(b===undefined||b===null||isNaN(+b))return Number(l.amount)||0;
+  return Number(b)||0;
+}
+function hrRecordedDeductions(ledger,loanId,periodKey){
+  return (ledger||[])
+    .filter(e=>e.loanId===loanId&&e.period===periodKey&&
+      (e.action==="cutoff-deduction"||e.action==="manual-deduction"))
+    .sort((a,b)=>(a.ts||0)-(b.ts||0));
+}
+function hrWasDeducted(ledger,loanId,periodKey){
+  return hrRecordedDeductions(ledger,loanId,periodKey).length>0;
+}
+
+function HRLoansPage({db,user,branchId,curBranch,showT}){
+  const periods=hrRecentPeriods(8);
+  const [period,setPeriod]=useState(periods[0].id);
+  const [emps,setEmps]=useState([]);
+  const [loans,setLoans]=useState([]);
+  const [ledger,setLedger]=useState([]);
+  const [edit,setEdit]=useState(null);
+  const [histFor,setHistFor]=useState(null);
+  const [busy,setBusy]=useState(false);
+  const [tab,setTab]=useState("loans");
+
+  useEffect(()=>{
+    const u1=onSnapshot(
+      query(collection(db,"hr_employees"),where("branch","==",branchId),limit(200)),
+      s1=>setEmps(s1.docs.map(d=>({...d.data(),_docId:d.id}))),
+      e=>console.error("loans emps:",e));
+    // One document per loan — not one array holding all of them. Two people
+    // approving at the same moment cannot overwrite each other's write.
+    const u2=onSnapshot(
+      query(collection(db,"hr_loans"),where("branch","==",branchId),limit(300)),
+      s2=>setLoans(s2.docs.map(d=>({...d.data(),_docId:d.id}))),
+      e=>console.error("hr_loans:",e));
+    const u3=onSnapshot(
+      query(collection(db,"hr_loan_ledger"),where("branch","==",branchId),limit(600)),
+      s3=>setLedger(s3.docs.map(d=>({...d.data(),_docId:d.id}))),
+      e=>console.error("hr_loan_ledger:",e));
+    return()=>{u1();u2();u3();};
+  },[branchId]);
+
+  const per=periods.find(p=>p.id===period)||periods[0];
+
+  const writeLedger=async(loan,action,amount,before,after,note)=>{
+    await addDoc(collection(db,"hr_loan_ledger"),{
+      ts:Date.now(),date:localDate(),
+      time:new Date().toLocaleTimeString("en-PH",{hour:"2-digit",minute:"2-digit"}),
+      period:period,branch:branchId,
+      loanId:loan._docId,empId:loan.empId||"",empName:loan.empName||"",
+      loanType:loan.type||"",action:action,
+      amount:Number(Number(amount||0).toFixed(2)),
+      before:Number(Number(before||0).toFixed(2)),
+      after:Number(Number(after||0).toFixed(2)),
+      note:note||"",by:user.name,at:serverTimestamp()
+    });
+  };
+
+  const blank=()=>({_isNew:true,empId:"",type:HR_DEDUCTIONS[2],
+    amount:"",monthly:"",start:localDate(),reason:"",status:"Active"});
+
+  const save=async()=>{
+    const l=edit; if(!l)return;
+    if(!l.empId){showT("Pick the employee","warn");return;}
+    const amt=Number(l.amount)||0, mo=Number(l.monthly)||0;
+    if(amt<=0){showT("Enter the principal","warn");return;}
+    if(mo<=0){showT("Enter the amount to deduct per cut-off","warn");return;}
+    setBusy(true);
+    try{
+      const emp=emps.find(e=>e._docId===l.empId)||{};
+      const body={empId:l.empId,empName:emp.name||"",branch:branchId,
+        type:l.type||HR_DEDUCTIONS[0],
+        amount:amt,monthly:mo,start:l.start||localDate(),
+        reason:l.reason||"",status:l.status||"Active",
+        updatedAt:serverTimestamp(),updatedBy:user.name};
+      if(l._isNew){
+        body.balance=amt;
+        body.createdAt=serverTimestamp();
+        const ref=await addDoc(collection(db,"hr_loans"),body);
+        await writeLedger({_docId:ref.id,empId:l.empId,empName:emp.name,type:body.type},
+          "created",amt,0,amt,"Loan opened");
+        showT(body.type+" for "+emp.name+" recorded ✓");
+      }else{
+        await updateDoc(doc(db,"hr_loans",l._docId),body);
+        showT("Updated ✓");
+      }
+      setEdit(null);
+    }catch(e){
+      console.error("save loan:",e);
+      showT("Save failed: "+String(e&&e.message||e).slice(0,60),"err");
+    }
+    setBusy(false);
+  };
+
+  // Same rules as the live payroll: skip paid, not-yet-started, already
+  // deducted this cut-off, and anything with no per-cut-off amount set.
+  const eligible=()=>{
+    const out=[],skip={paid:0,notStarted:0,already:0,noSched:0};
+    loans.forEach(l=>{
+      if(l.status==="Paid"){skip.paid++;return;}
+      if(l.start&&l.start>per.to){skip.notStarted++;return;}
+      if(hrWasDeducted(ledger,l._docId,period)){skip.already++;return;}
+      const sched=Number(l.monthly)||0;
+      if(sched<=0){skip.noSched++;return;}
+      const before=hrLoanBalance(l);
+      if(before<=0){skip.paid++;return;}
+      const amount=Math.min(sched,before);
+      out.push({l,before,amount,after:Number((before-amount).toFixed(2))});
+    });
+    return {out,skip};
+  };
+
+  const applyCutoff=async()=>{
+    const {out,skip}=eligible();
+    if(!out.length){
+      const why=[];
+      if(skip.already)   why.push(skip.already+" already deducted this cut-off");
+      if(skip.notStarted)why.push(skip.notStarted+" not yet started");
+      if(skip.paid)      why.push(skip.paid+" fully paid");
+      if(skip.noSched)   why.push(skip.noSched+" with no per-cut-off amount");
+      showT("Nothing to deduct for "+per.label+(why.length?" — "+why.join(", "):""),"warn");
+      return;
+    }
+    const total=out.reduce((a,e)=>a+e.amount,0);
+    const lines=out.slice(0,6).map(e=>
+      "  • "+e.l.empName+" ("+e.l.type+"): ₱"+peso(e.before)+" → ₱"+peso(e.after));
+    if(!confirm("Deduct loan balances for "+per.label+"?\n\n"+lines.join("\n")
+      +(out.length>6?"\n  …and "+(out.length-6)+" more":"")
+      +"\n\nTotal: ₱"+peso(total)))return;
+    setBusy(true);
+    let done=0;
+    for(const e of out){
+      try{
+        const patch={balance:e.after};
+        if(e.after<=0){patch.status="Paid";patch.balance=0;}
+        await updateDoc(doc(db,"hr_loans",e.l._docId),patch);
+        await writeLedger(e.l,"cutoff-deduction",e.amount,e.before,e.after,
+          "Applied for "+per.label);
+        done++;
+      }catch(err){console.error("deduct:",err);}
+    }
+    showT("₱"+peso(total)+" deducted across "+done+" loan"+(done>1?"s":""));
+    setBusy(false);
+  };
+
+  const markPaid=async(l)=>{
+    const before=hrLoanBalance(l);
+    if(!confirm("Mark "+l.type+" for "+l.empName+" as fully paid?\n\n"
+      +"Remaining ₱"+peso(before)+" will be written off."))return;
+    try{
+      await updateDoc(doc(db,"hr_loans",l._docId),{status:"Paid",balance:0});
+      await writeLedger(l,"marked-paid",before,before,0,"Closed manually");
+      showT("Closed ✓");
+    }catch(e){showT("Failed: "+String(e&&e.message||e).slice(0,50),"err");}
+  };
+
+  const empName=(id)=>(emps.find(e=>e._docId===id)||{}).name||id;
+  const active=loans.filter(l=>l.status!=="Paid");
+  const paid=loans.filter(l=>l.status==="Paid");
+  const totalOut=active.reduce((a,l)=>a+hrLoanBalance(l),0);
+  const dueNow=eligible().out.reduce((a,e)=>a+e.amount,0);
+
+  const F=(k,label,ph,type)=>h("div",null,
+    h("div",{style:{fontSize:11,fontWeight:800,color:C.muted,
+      letterSpacing:1,marginBottom:4}},label),
+    h("input",{type:type||"text",value:edit[k]||"",placeholder:ph||"",
+      onFocus:e=>e.target.select(),
+      onChange:e=>setEdit(p=>Object.assign({},p,{[k]:e.target.value})),
+      style:{width:"100%",padding:"9px 10px",border:"1px solid "+C.border,
+        borderRadius:8,fontSize:13,outline:"none",boxSizing:"border-box"}}));
+
+  return h("div",null,
+    h(SectionHeader,{title:"🧾 Loans & Deductions — "+curBranch.name,
+      action:()=>setEdit(blank()),actionLabel:"New"}),
+
+    h("div",{style:{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap",
+      alignItems:"center"}},
+      h("select",{value:period,onChange:e=>setPeriod(e.target.value),
+        style:{padding:"9px 11px",borderRadius:8,fontSize:13,outline:"none",
+          cursor:"pointer",border:"1px solid "+C.primary,
+          background:C.primary+"18",color:C.primary,fontWeight:800}},
+        periods.map(p=>h("option",{key:p.id,value:p.id},p.label))),
+      [["loans","Loans"],["ledger","Ledger"]].map(([k,lbl])=>
+        h("button",{key:k,onClick:()=>setTab(k),
+          style:{padding:"9px 15px",borderRadius:8,fontSize:13,cursor:"pointer",
+            fontWeight:tab===k?800:500,
+            border:"1px solid "+(tab===k?C.primary:C.border),
+            background:tab===k?C.primary+"18":"#fff",
+            color:tab===k?C.primary:C.text}},lbl))
+    ),
+
+    h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",
+      gap:10,marginBottom:12}},
+      [["Outstanding","₱"+peso(totalOut),C.danger],
+       ["Active loans",String(active.length),C.text],
+       ["Due this cut-off","₱"+peso(dueNow),C.primary]].map(([k,v,col])=>
+        h("div",{key:k,style:{background:"#fff",border:"1px solid "+C.border,
+          borderRadius:11,padding:"12px 14px"}},
+          h("div",{style:{fontSize:11,fontWeight:800,color:C.muted,
+            letterSpacing:1}},k.toUpperCase()),
+          h("div",{style:{fontSize:19,fontWeight:900,color:col,marginTop:3}},v)))
+    ),
+
+    tab==="loans"&&h("div",null,
+      dueNow>0&&h("div",{style:{background:C.primary+"18",
+        border:"1px solid "+C.primary,borderRadius:11,padding:"12px 14px",
+        marginBottom:12,display:"flex",gap:10,alignItems:"center",
+        flexWrap:"wrap"}},
+        h("div",{style:{flex:1,minWidth:200}},
+          h("div",{style:{fontSize:13,fontWeight:800,color:C.primary}},
+            "₱"+peso(dueNow)+" scheduled for "+per.label),
+          h("div",{style:{fontSize:11,color:C.muted,marginTop:2}},
+            "Applied automatically when payroll is released. Use this only to "+
+            "charge them ahead of the release.")),
+        h("button",{onClick:applyCutoff,disabled:busy,
+          style:{padding:"9px 15px",borderRadius:8,border:"none",
+            background:busy?"#ccc":C.primary,color:"#fff",fontWeight:800,
+            fontSize:12,cursor:busy?"wait":"pointer"}},
+          busy?"…":"Deduct now")),
+
+      loans.length===0
+        ? h("div",{style:{background:"#fff",border:"1px dashed "+C.border,
+            borderRadius:12,padding:"36px 20px",textAlign:"center"}},
+            h("div",{style:{fontSize:34,marginBottom:9}},"🧾"),
+            h("div",{style:{fontSize:14,fontWeight:800}},"No loans on file"))
+        : h("div",{style:{background:"#fff",borderRadius:12,
+            border:"1px solid "+C.border,overflow:"hidden"}},
+            active.concat(paid).map(l=>{
+              const bal=hrLoanBalance(l);
+              const charged=hrWasDeducted(ledger,l._docId,period);
+              const isPaid=l.status==="Paid";
+              return h("div",{key:l._docId,style:{padding:"12px 14px",
+                borderBottom:"1px solid "+C.border,display:"flex",gap:10,
+                alignItems:"center",flexWrap:"wrap",
+                opacity:isPaid?.55:1}},
+                h("div",{style:{flex:1,minWidth:170}},
+                  h("div",{style:{fontSize:13,fontWeight:700}},
+                    l.empName,
+                    h("span",{style:{fontSize:11,color:C.muted,fontWeight:500}},
+                      "  ·  "+l.type)),
+                  h("div",{style:{fontSize:11,color:C.muted,marginTop:2}},
+                    "₱"+peso(l.amount)+" principal · ₱"+peso(l.monthly)+"/cut-off"
+                    +(l.start?" · from "+l.start:"")
+                    +(l.reason?" · "+l.reason:""))),
+                h("div",{style:{textAlign:"right",minWidth:96}},
+                  h("div",{style:{fontSize:10,fontWeight:800,color:C.muted,
+                    letterSpacing:1}},"BALANCE"),
+                  h("div",{style:{fontSize:15,fontWeight:900,
+                    color:isPaid?C.success:C.danger}},
+                    isPaid?"PAID":"₱"+peso(bal))),
+                h("div",{style:{minWidth:92,textAlign:"center"}},
+                  charged
+                    ? h("span",{style:{fontSize:11,fontWeight:800,
+                        color:C.success}},"charged")
+                    : (!isPaid&&h("span",{style:{fontSize:11,color:C.muted}},
+                        "pending"))),
+                h("div",{style:{display:"flex",gap:5}},
+                  h("button",{onClick:()=>setHistFor(l),
+                    style:{padding:"6px 11px",borderRadius:7,fontSize:11,
+                      cursor:"pointer",border:"1px solid "+C.border,
+                      background:"#fff"}},"History"),
+                  !isPaid&&h("button",{onClick:()=>setEdit(Object.assign({},l)),
+                    style:{padding:"6px 11px",borderRadius:7,fontSize:11,
+                      cursor:"pointer",border:"1px solid "+C.border,
+                      background:"#fff"}},"Edit"),
+                  !isPaid&&h("button",{onClick:()=>markPaid(l),
+                    style:{padding:"6px 11px",borderRadius:7,fontSize:11,
+                      cursor:"pointer",border:"none",background:C.success,
+                      color:"#fff",fontWeight:700}},"Close"))
+              );
+            })
+          )
+    ),
+
+    tab==="ledger"&&h("div",{style:{background:"#fff",borderRadius:12,
+      border:"1px solid "+C.border,overflow:"hidden"}},
+      ledger.length===0
+        ? h("div",{style:{padding:"32px",textAlign:"center",color:C.muted,
+            fontSize:13}},"No movements recorded yet")
+        : ledger.slice()
+            .sort((a,b)=>(b.ts||0)-(a.ts||0))
+            .slice(0,200)
+            .map(e=>h("div",{key:e._docId,style:{display:"flex",gap:10,
+              padding:"10px 14px",borderBottom:"1px solid "+C.border,
+              alignItems:"flex-start"}},
+              h("div",{style:{width:76,flexShrink:0,textAlign:"right",
+                fontSize:13,fontWeight:900,
+                color:e.action==="created"?C.text:C.danger}},
+                (e.action==="created"?"":"−")+"₱"+peso(e.amount)),
+              h("div",{style:{flex:1,minWidth:0}},
+                h("div",{style:{fontSize:12,fontWeight:700}},
+                  e.empName+" · "+e.loanType),
+                h("div",{style:{fontSize:11,color:C.muted,marginTop:1}},
+                  "₱"+peso(e.before)+" → ₱"+peso(e.after)
+                  +"  ·  "+(e.note||e.action)),
+                h("div",{style:{fontSize:10,color:C.muted,marginTop:1}},
+                  e.date+" "+(e.time||"")+"  ·  "+(e.period||"")
+                  +(e.by?"  ·  "+e.by:"")))
+            ))
+    ),
+
+    edit&&h("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",
+      display:"flex",alignItems:"center",justifyContent:"center",zIndex:900,padding:16},
+      onClick:ev=>ev.target===ev.currentTarget&&setEdit(null)},
+      h("div",{style:{background:"#fff",width:"100%",maxWidth:460,
+        borderRadius:14,padding:"18px",maxHeight:"88vh",overflowY:"auto"}},
+        h("div",{style:{fontSize:15,fontWeight:800,marginBottom:14}},
+          edit._isNew?"➕ New loan or deduction":"✏️ "+edit.empName),
+        h("div",{style:{display:"grid",gap:10}},
+          h("div",null,
+            h("div",{style:{fontSize:11,fontWeight:800,color:C.muted,
+              letterSpacing:1,marginBottom:4}},"EMPLOYEE"),
+            h("select",{value:edit.empId||"",disabled:!edit._isNew,
+              onChange:e=>setEdit(p=>Object.assign({},p,{empId:e.target.value})),
+              style:{width:"100%",padding:"9px 10px",border:"1px solid "+C.border,
+                borderRadius:8,fontSize:13,outline:"none",boxSizing:"border-box",
+                background:edit._isNew?"#fff":C.bg}},
+              h("option",{value:""},"— select —"),
+              emps.filter(e=>e.active!==false).map(e=>
+                h("option",{key:e._docId,value:e._docId},e.name)))),
+          h("div",null,
+            h("div",{style:{fontSize:11,fontWeight:800,color:C.muted,
+              letterSpacing:1,marginBottom:4}},"TYPE"),
+            h("select",{value:edit.type||HR_DEDUCTIONS[0],
+              onChange:e=>setEdit(p=>Object.assign({},p,{type:e.target.value})),
+              style:{width:"100%",padding:"9px 10px",border:"1px solid "+C.border,
+                borderRadius:8,fontSize:13,outline:"none",boxSizing:"border-box"}},
+              HR_DEDUCTIONS.map(t=>h("option",{key:t,value:t},t)))),
+          h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}},
+            F("amount","PRINCIPAL","0.00","number"),
+            F("monthly","PER CUT-OFF","0.00","number"),
+            F("start","STARTS","","date")),
+          F("reason","NOTE","e.g. uniform 2 sets"),
+          h("div",{style:{background:C.bg,borderRadius:9,padding:"10px 12px",
+            fontSize:11,color:C.muted,lineHeight:1.6}},
+            "The per-cut-off amount is what gets deducted each release, never "+
+            "more than the remaining balance. Every movement is written to the "+
+            "ledger, so a balance can always be traced.")
+        ),
+        h("div",{style:{display:"flex",gap:9,marginTop:16}},
+          h("button",{onClick:()=>setEdit(null),
+            style:{flex:1,padding:"11px",borderRadius:9,
+              border:"1px solid "+C.border,background:"#fff",fontSize:13,
+              cursor:"pointer"}},"Cancel"),
+          h("button",{onClick:save,disabled:busy,
+            style:{flex:2,padding:"11px",borderRadius:9,border:"none",
+              background:busy?"#ccc":C.primary,color:"#fff",fontWeight:800,
+              fontSize:13,cursor:busy?"wait":"pointer"}},
+            busy?"…":"💾 Save"))
+      )
+    ),
+
+    histFor&&h("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",
+      display:"flex",alignItems:"center",justifyContent:"center",zIndex:900,padding:16},
+      onClick:ev=>ev.target===ev.currentTarget&&setHistFor(null)},
+      h("div",{style:{background:"#fff",width:"100%",maxWidth:440,
+        borderRadius:14,padding:"18px",maxHeight:"84vh",overflowY:"auto"}},
+        h("div",{style:{fontSize:15,fontWeight:800}},histFor.empName),
+        h("div",{style:{fontSize:12,color:C.muted,marginBottom:12}},
+          histFor.type+" · ₱"+peso(histFor.amount)+" principal"),
+        (function(){
+          const rows=ledger.filter(e=>e.loanId===histFor._docId)
+            .sort((a,b)=>(b.ts||0)-(a.ts||0));
+          if(!rows.length)return h("div",{style:{fontSize:12,color:C.muted}},
+            "No movements yet");
+          return rows.map(e=>h("div",{key:e._docId,
+            style:{padding:"9px 0",borderBottom:"1px solid "+C.border}},
+            h("div",{style:{display:"flex",justifyContent:"space-between",
+              fontSize:13,fontWeight:700}},
+              h("span",null,e.note||e.action),
+              h("span",{style:{color:e.action==="created"?C.text:C.danger}},
+                (e.action==="created"?"":"−")+"₱"+peso(e.amount))),
+            h("div",{style:{fontSize:11,color:C.muted,marginTop:2}},
+              "₱"+peso(e.before)+" → ₱"+peso(e.after)+"  ·  "+e.date
+              +"  ·  "+(e.period||"")+(e.by?"  ·  "+e.by:""))));
+        })(),
+        h("button",{onClick:()=>setHistFor(null),
+          style:{width:"100%",marginTop:14,padding:"11px",borderRadius:9,
+            border:"1px solid "+C.border,background:"#fff",fontSize:13,
+            cursor:"pointer"}},"Close")
+      )
+    )
+  );
+}
+
 function HRTimesheetPage({db,user,branchId,curBranch,showT}){
   const periods=hrRecentPeriods(8);
   const [period,setPeriod]=useState(periods[0].id);
@@ -13652,6 +14043,11 @@ function App(){
               "If already lapsed it starts from today. The pencil is a manual override.")
           );
         })(),
+
+        // ══ HR: LOANS ══
+        page==="hr_loans"&&h(HRLoansPage,{
+          db,user,branchId,curBranch,showT,key:"hrloans"
+        }),
 
         // ══ HR: TIMESHEET ══
         page==="hr_time"&&h(HRTimesheetPage,{
