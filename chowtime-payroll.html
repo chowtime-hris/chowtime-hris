@@ -21,7 +21,7 @@
   }
   .no-print { display: none !important; }
 }
-:root{--brand:#E8460A;--brand2:#FF7A3C;--dark:#1A1208;--warm:#2C1F0F;--surface:#FFF8F4;--card:#FFFFFF;--border:#F0DDD4;--muted:#8C7060;--green:#2D7D3A;--red:#C0392B;--blue:#1A6FA8;--text:#1A1208;--radius:10px;}
+:root{--brand:#6A1B9A;--brand2:#8E24AA;--dark:#4A148C;--warm:#6A1B9A;--surface:#FFFFFF;--card:#FFFFFF;--border:#DDDDDD;--muted:#5A5A5A;--green:#2E7D32;--red:#C62828;--blue:#6A1B9A;--text:#111111;--radius:10px;}
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:'Inter',sans-serif;background:var(--surface);color:var(--text);font-size:14px;line-height:1.5;}
 header{background:var(--dark);color:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 24px;height:56px;position:sticky;top:0;z-index:100;box-shadow:0 2px 12px rgba(0,0,0,.4);}
@@ -68,7 +68,7 @@ tbody td{padding:9px 11px;}
 .tag-red{background:#fde8e6;color:var(--red);}
 .tag-blue{background:#d4e8f5;color:var(--blue);}
 .tag-orange{background:#ffe5d5;color:var(--brand);}
-.tag-gray{background:#f0ddd4;color:var(--muted);}
+.tag-gray{background:#DDDDDD;color:var(--muted);}
 .lv-count{display:inline-block;min-width:18px;padding:0 5px;margin-left:5px;border-radius:9px;background:rgba(0,0,0,.16);font-size:11px;font-weight:700;line-height:16px;text-align:center;vertical-align:middle;}
 #payslip-preview{background:#fff;border:2px solid var(--border);border-radius:var(--radius);padding:30px;max-width:580px;margin:0 auto;font-size:13px;}
 .payslip-header{text-align:center;border-bottom:2px solid var(--brand);padding-bottom:12px;margin-bottom:16px;}
@@ -694,8 +694,8 @@ tbody td{padding:9px 11px;}
       <div class="form-group"><label>Color</label>
         <select id="shift-color">
           <option value="#2D7D3A">🟢 Green (Morning)</option>
-          <option value="#1A6FA8">🔵 Blue (Mid)</option>
-          <option value="#E8460A">🟠 Orange (Afternoon)</option>
+          <option value="#6A1B9A">🔵 Blue (Mid)</option>
+          <option value="#6A1B9A">🟠 Orange (Afternoon)</option>
           <option value="#7a5500">🟤 Brown (Evening)</option>
           <option value="#5a2d82">🟣 Purple (Night)</option>
           <option value="#C0392B">🔴 Red (Graveyard)</option>
@@ -1715,7 +1715,7 @@ function loadDTREditor() {
       <td style="${isSun?'color:var(--red);font-weight:700;':''}">${dayName}</td>
       <td><input class="dtr-input" type="time" value="${entry.in||''}"
           onchange="adminEditDTR('${dateStr}','in',this.value,'${empId}','${periodKey}')"
-          style="border:1px solid #E8460A;border-radius:5px;padding:4px;font-size:12px;"></td>
+          style="border:1px solid #6A1B9A;border-radius:5px;padding:4px;font-size:12px;"></td>
       <td><input class="dtr-input" type="time" value="${entry.bstart||''}"
           onchange="adminEditDTR('${dateStr}','bstart',this.value,'${empId}','${periodKey}')"
           style="background:#fff8e1;border:1px solid #f0a500;border-radius:5px;padding:4px;font-size:12px;"></td>
@@ -2100,7 +2100,7 @@ window.quickEditShift = quickEditShift;
 function printSchedule() {
   const content=document.getElementById('weekly-schedule-wrap').innerHTML;
   const w=window.open('');
-  w.document.write(`<!DOCTYPE html><html><head><style>body{font-family:Arial;padding:20px;}table{border-collapse:collapse;width:100%;}th,td{border:1px solid #ddd;padding:8px;font-size:12px;}th{background:#1A1208;color:#fff;}</style><title>Schedule</title></head><body><h2>🍽️ Chowtime — Weekly Shift Schedule</h2>${content}</body></html>`);
+  w.document.write(`<!DOCTYPE html><html><head><style>body{font-family:Arial;padding:20px;}table{border-collapse:collapse;width:100%;}th,td{border:1px solid #ddd;padding:8px;font-size:12px;}th{background:#111111;color:#fff;}</style><title>Schedule</title></head><body><h2>🍽️ Chowtime — Weekly Shift Schedule</h2>${content}</body></html>`);
   w.document.close(); setTimeout(()=>w.print(),500);
 }
 
@@ -2198,11 +2198,11 @@ function renderDashboard() {
   const onLeave    = leaves.filter(l=>l.status==='Approved').length;
 
   document.getElementById('kpi-row').innerHTML = [
-    kpiCard('Employees',    employees.length, 'Active staff', '#E8460A'),
+    kpiCard('Employees',    employees.length, 'Active staff', '#6A1B9A'),
     kpiCard('Gross Pay',    '₱'+fmt(totalGross), p.label, '#2D7D3A'),
-    kpiCard('Net Pay',      '₱'+fmt(totalNet),   'After deductions', '#1A6FA8'),
-    kpiCard('Gov\'t Ded.',  '₱'+fmt(totalDed),   'SSS+PHIC+PagIbig', '#8C7060'),
-    kpiCard('Leave Filings',onLeave, 'Approved leaves', '#FF7A3C'),
+    kpiCard('Net Pay',      '₱'+fmt(totalNet),   'After deductions', '#6A1B9A'),
+    kpiCard('Gov\'t Ded.',  '₱'+fmt(totalDed),   'SSS+PHIC+PagIbig', '#5A5A5A'),
+    kpiCard('Leave Filings',onLeave, 'Approved leaves', '#8E24AA'),
     kpiCard('Active Loans', loans.filter(l=>l.status!=='Paid').length, 'Ongoing', '#C0392B'),
   ].join('');
 

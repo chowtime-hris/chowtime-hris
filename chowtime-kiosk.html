@@ -8,7 +8,7 @@
 <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Syne:wght@700;800&display=swap');
-:root{--brand:#E8460A;--dark:#1A1208;--green:#2D7D3A;--red:#C0392B;--blue:#1A6FA8;--radius:14px;}
+:root{--brand:#6A1B9A;--dark:#4A148C;--green:#2E7D32;--red:#C62828;--blue:#6A1B9A;--radius:14px;}
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
 body{font-family:'Inter',sans-serif;background:var(--dark);color:#fff;min-height:100vh;display:flex;flex-direction:column;align-items:center;}
 .kiosk-hdr{width:100%;background:rgba(255,255,255,.05);border-bottom:1px solid rgba(255,255,255,.08);display:flex;align-items:center;justify-content:space-between;padding:13px 20px;}
@@ -79,8 +79,8 @@ body{font-family:'Inter',sans-serif;background:var(--dark);color:#fff;min-height
 .btn-in{background:#2D7D3A;color:#fff;}
 .btn-out{background:#C0392B;color:#fff;}
 .btn-brk{background:#7a5500;color:#fff;}
-.btn-rsm{background:#1A6FA8;color:#fff;}
-.btn-reg{background:#1A6FA8;color:#fff;grid-column:1/-1;padding:14px;}
+.btn-rsm{background:#6A1B9A;color:#fff;}
+.btn-reg{background:#6A1B9A;color:#fff;grid-column:1/-1;padding:14px;}
 .act-btn:active{transform:scale(.95);filter:brightness(.85);}
 
 /* confirm */
@@ -216,7 +216,7 @@ body{font-family:'Inter',sans-serif;background:var(--dark);color:#fff;min-height
       <div class="face-sample" id="sample-2">3</div>
     </div>
     <div class="act-grid">
-      <button class="act-btn btn-reg" id="capture-btn" onclick="captureRegistrationSample()" style="background:#1A6FA8;">
+      <button class="act-btn btn-reg" id="capture-btn" onclick="captureRegistrationSample()" style="background:#6A1B9A;">
         <span class="ico">📸</span>Capture Photo (<span id="capture-count">0</span>/3)
       </button>
     </div>
