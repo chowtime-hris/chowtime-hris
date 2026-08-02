@@ -99,6 +99,7 @@ tbody td{padding:9px 11px;}
 .modal-box h2{font-family:'Syne',sans-serif;font-size:18px;margin-bottom:16px;}
 @media(max-width:600px){nav.tabs{padding:5px 10px;}.kpi-value{font-size:20px;}.panel{padding:14px;}}
 </style>
+<!-- BUILD:20260802-234526 -->
 </head>
 <body>
 
@@ -2100,7 +2101,8 @@ window.quickEditShift = quickEditShift;
 function printSchedule() {
   const content=document.getElementById('weekly-schedule-wrap').innerHTML;
   const w=window.open('');
-  w.document.write(`<!DOCTYPE html><html><head><style>body{font-family:Arial;padding:20px;}table{border-collapse:collapse;width:100%;}th,td{border:1px solid #ddd;padding:8px;font-size:12px;}th{background:#111111;color:#fff;}</style><title>Schedule</title></head><body><h2>🍽️ Chowtime — Weekly Shift Schedule</h2>${content}</body></html>`);
+  w.document.write(`<!DOCTYPE html><html><head><style>body{font-family:Arial;padding:20px;}table{border-collapse:collapse;width:100%;}th,td{border:1px solid #ddd;padding:8px;font-size:12px;}th{background:#111111;color:#fff;}</style><title>Schedule</title></head><body><h2>🍽️ Chowtime — Weekly Shift Schedule</h2>${content}<div id="buildStamp" style="text-align:center;padding:14px 8px;font-size:11px;color:#5A5A5A">Chowtime Payroll · 20260802-234526</div>
+</body></html>`);
   w.document.close(); setTimeout(()=>w.print(),500);
 }
 
