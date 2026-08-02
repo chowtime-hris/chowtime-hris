@@ -69,6 +69,7 @@ tbody td{padding:9px 11px;}
 .tag-blue{background:#d4e8f5;color:var(--blue);}
 .tag-orange{background:#ffe5d5;color:var(--brand);}
 .tag-gray{background:#f0ddd4;color:var(--muted);}
+.lv-count{display:inline-block;min-width:18px;padding:0 5px;margin-left:5px;border-radius:9px;background:rgba(0,0,0,.16);font-size:11px;font-weight:700;line-height:16px;text-align:center;vertical-align:middle;}
 #payslip-preview{background:#fff;border:2px solid var(--border);border-radius:var(--radius);padding:30px;max-width:580px;margin:0 auto;font-size:13px;}
 .payslip-header{text-align:center;border-bottom:2px solid var(--brand);padding-bottom:12px;margin-bottom:16px;}
 .payslip-company{font-family:'Syne',sans-serif;font-size:22px;color:var(--brand);font-weight:800;}
@@ -425,6 +426,13 @@ tbody td{padding:9px 11px;}
 
 <!-- LEDGER & LOGS -->
 <div id="page-ledger" class="page">
+  <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;">
+    <button id="lvb-loan"    class="btn btn-primary"   onclick="showLedgerView('loan')">📒 Loan Ledger <span class="lv-count" id="lvc-loan">0</span></button>
+    <button id="lvb-payroll" class="btn btn-secondary" onclick="showLedgerView('payroll')">🧾 Payroll Log <span class="lv-count" id="lvc-payroll">0</span></button>
+    <button id="lvb-salary"  class="btn btn-secondary" onclick="showLedgerView('salary')">📈 Salary Rate History <span class="lv-count" id="lvc-salary">0</span></button>
+  </div>
+
+  <div id="lv-loan">
   <div class="panel">
     <div class="panel-title"><span>📒</span> Loan Ledger — every balance movement</div>
     <div class="alert alert-info">Each row is one recorded movement on a loan balance. Nothing changes a balance without landing here, so the balance you see on the Loans page is always the running total of this ledger.</div>
@@ -463,6 +471,9 @@ tbody td{padding:9px 11px;}
     </div>
   </div>
 
+  </div>
+
+  <div id="lv-payroll" style="display:none;">
   <div class="panel">
     <div class="panel-title"><span>🧾</span> Payroll Log — released cut-offs</div>
     <div class="alert alert-info">A snapshot is saved every time you release a cut-off. It freezes what each employee was actually paid, so later edits to DTR or rates never rewrite payroll history.</div>
@@ -471,8 +482,8 @@ tbody td{padding:9px 11px;}
         <select id="pl-f-year" onchange="onPayrollLogYear()"></select></div>
       <div class="form-group" style="margin-bottom:0;"><label>Cut-off</label>
         <select id="pl-f-period" onchange="renderPayrollLog()" style="min-width:170px;"></select></div>
-      <button class="btn btn-secondary" onclick="clearPayrollLogFilter()">Show all</button>
-      <button class="btn btn-secondary" onclick="exportPayrollLogCSV()">📥 Export CSV</button>
+      <button id="pl-clear-btn" class="btn btn-secondary" onclick="clearPayrollLogFilter()">Show all</button>
+      <button id="pl-export-btn" class="btn btn-secondary" onclick="exportPayrollLogCSV()">📥 Export CSV</button>
     </div>
     <div class="table-wrap">
       <table>
@@ -482,6 +493,9 @@ tbody td{padding:9px 11px;}
     </div>
   </div>
 
+  </div>
+
+  <div id="lv-salary" style="display:none;">
   <div class="panel">
     <div class="panel-title"><span>📈</span> Salary Rate History</div>
     <div class="alert alert-info">Every daily-rate change per employee, with the reason it was granted.</div>
@@ -494,6 +508,7 @@ tbody td{padding:9px 11px;}
         <tbody id="ratelog-tbody"></tbody>
       </table>
     </div>
+  </div>
   </div>
 </div>
 
@@ -877,8 +892,21 @@ tbody td{padding:9px 11px;}
         </select>
       </div>
       <div class="form-group"><label>Start Date</label><input type="date" id="ln-start"></div>
-      <div class="form-group"><label>Principal Amount (₱)</label><input type="number" id="ln-amount" placeholder="0"></div>
-      <div class="form-group"><label>Per Cut-off Deduction (₱)</label><input type="number" id="ln-monthly" placeholder="0"></div>
+      <div class="form-group"><label>Principal Amount (₱)</label><input type="number" id="ln-amount" placeholder="0" oninput="onLoanFormChange()"></div>
+      <div class="form-group"><label>Per Cut-off Deduction (₱)</label><input type="number" id="ln-monthly" placeholder="0" oninput="onLoanFormChange()"></div>
+      <div class="form-group" style="grid-column:1/-1;"><label>Deduction Schedule</label>
+        <select id="ln-sched" onchange="onLoanFormChange()">
+          <option value="spread">Spread — take the per cut-off amount every cut-off</option>
+          <option value="once">One-time — take the whole principal in a single cut-off</option>
+        </select>
+      </div>
+      <div class="form-group" id="ln-now-row" style="grid-column:1/-1;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0;">
+          <input type="checkbox" id="ln-now" onchange="onLoanFormChange()" style="width:16px;height:16px;flex:none;">
+          <span>Charge the first deduction now</span>
+        </label>
+        <div id="ln-now-hint" style="font-size:11px;color:var(--muted);margin-top:6px;line-height:1.5;"></div>
+      </div>
     </div>
     <div style="display:flex;gap:10px;margin-top:16px;">
       <button class="btn btn-primary" onclick="saveLoan()">💾 Save</button>
@@ -2693,6 +2721,12 @@ function editLoan(i) {
   document.getElementById('ln-start').value   = l.start   || '';
   // Update modal title to show Edit mode
   const modal = document.getElementById('loan-modal');
+  const schedEl = document.getElementById('ln-sched');
+  if (schedEl) schedEl.value = (+l.monthly > 0 && +l.monthly >= +l.amount) ? 'once' : 'spread';
+  const nowEl  = document.getElementById('ln-now');   if (nowEl)  nowEl.checked = false;
+  const nowRow = document.getElementById('ln-now-row');
+  if (nowRow) nowRow.style.display = 'none';   // charging now only applies to a new loan
+  onLoanFormChange();
   modal.querySelector('h2').textContent = '✏️ Edit Loan / Deduction';
   modal.style.display = 'block';
 }
@@ -2702,10 +2736,52 @@ function openLoanModal(){
   // Reset form fields
   ['ln-amount','ln-monthly','ln-start'].forEach(id=>{ document.getElementById(id).value=''; });
   document.getElementById('ln-type').value = 'Cash Bond';
+  const schedEl = document.getElementById('ln-sched'); if (schedEl) schedEl.value = 'spread';
+  const nowEl   = document.getElementById('ln-now');   if (nowEl)   nowEl.checked = false;
+  const nowRow  = document.getElementById('ln-now-row'); if (nowRow) nowRow.style.display = '';
+  onLoanFormChange();
   const modal = document.getElementById('loan-modal');
   modal.querySelector('h2').textContent = '🏦 Add Loan / Deduction';
   modal.style.display='block';
 }
+// Keeps the schedule fields honest and spells out what "charge now" will do.
+function onLoanFormChange(){
+  const schedEl = document.getElementById('ln-sched');
+  const amtEl   = document.getElementById('ln-amount');
+  const monEl   = document.getElementById('ln-monthly');
+  const nowEl   = document.getElementById('ln-now');
+  const hintEl  = document.getElementById('ln-now-hint');
+  if (!schedEl || !monEl) return;
+
+  const once = schedEl.value === 'once';
+  if (once) {
+    monEl.value = amtEl.value || 0;   // one-time: the instalment IS the principal
+    monEl.readOnly = true;
+    monEl.style.background = 'var(--surface)';
+  } else {
+    monEl.readOnly = false;
+    monEl.style.background = '';
+  }
+
+  if (!hintEl) return;
+  const p    = getPeriod();
+  const amt  = +(amtEl?.value || 0);
+  const inst = Math.min(+(monEl.value || 0), amt);
+  const name = document.getElementById('ln-emp')?.selectedOptions?.[0]?.text || 'This employee';
+  if (!nowEl || !nowEl.checked) {
+    hintEl.textContent = inst > 0
+      ? 'Leave this off to let the cut-off release charge it. Nothing is deducted when you save.'
+      : 'Set an amount first.';
+    return;
+  }
+  hintEl.textContent = inst > 0
+    ? name + ' will be charged \u20b1' + fmt(inst) + ' for ' + (p.label || p.key) +
+      ' the moment you save, leaving \u20b1' + fmt(Math.max(0, amt - inst)) +
+      '. It goes into the ledger, and releasing this cut-off will skip this loan so it is never taken twice.'
+    : 'Enter a principal and a deduction amount first.';
+}
+window.onLoanFormChange = onLoanFormChange;
+
 function saveLoan(){
   const el=document.getElementById('ln-emp');
   const emp=employees.find(e=>e.id===el.value);
@@ -2729,8 +2805,28 @@ function saveLoan(){
     if (changes.length) logLedger(record, 'loan-edited', 0, loanBalanceOf(prev), loanBalanceOf(record), changes.join('; '));
   } else {
     loans.push(record);
+    const once = v('ln-sched') === 'once';
     logLedger(record, 'loan-created', +record.amount, 0, +record.amount,
-      `New ${record.type} \u2014 \u20b1${fmt(record.monthly)} per cut-off, starting ${record.start||'\u2014'}`);
+      once
+        ? `New ${record.type} \u2014 one-time \u20b1${fmt(record.amount)}, starting ${record.start||'\u2014'}`
+        : `New ${record.type} \u2014 \u20b1${fmt(record.monthly)} per cut-off, starting ${record.start||'\u2014'}`);
+
+    // "Charge the first deduction now" — logged as this cut-off's deduction, so
+    // releasing the cut-off later will skip it instead of taking the money twice.
+    const nowEl = document.getElementById('ln-now');
+    if (nowEl && nowEl.checked) {
+      const p      = getPeriod();
+      const before = loanBalanceOf(record);
+      const amount = Math.min(+(record.monthly || 0), before);
+      if (amount > 0) {
+        record.balance = +(before - amount).toFixed(2);
+        if (record.balance <= 0) { record.status = 'Paid'; record.balance = 0; }
+        logLedger(record, 'cutoff-deduction', amount, before, record.balance,
+          'Charged immediately when the loan was created', p.key);
+        showToastAdmin && showToastAdmin('\u2705 \u20b1' + fmt(amount) + ' charged to ' +
+          record.empName + ' for ' + (p.label || p.key) + '. Balance: \u20b1' + fmt(record.balance));
+      }
+    }
   }
   editingLoanIdx = -1;
   save('loans',loans);
@@ -3250,8 +3346,35 @@ function setupLedger(){
   renderLedger();
   renderPayrollLog();
   renderRateLog();
+  showLedgerView(_ledgerView);
 }
 window.setupLedger = setupLedger;
+
+// ── Ledger & Logs: one view at a time ──────────────────────────────
+let _ledgerView = 'loan';
+function showLedgerView(view){
+  const views = ['loan','payroll','salary'];
+  _ledgerView = views.indexOf(view) >= 0 ? view : 'loan';
+  views.forEach(k => {
+    const sec = document.getElementById('lv-' + k);
+    if (sec) sec.style.display = (k === _ledgerView) ? '' : 'none';
+    const btn = document.getElementById('lvb-' + k);
+    if (btn) btn.className = 'btn ' + (k === _ledgerView ? 'btn-primary' : 'btn-secondary');
+  });
+  if (_ledgerView === 'loan')    renderLedger();
+  if (_ledgerView === 'payroll') renderPayrollLog();
+  if (_ledgerView === 'salary')  renderRateLog();
+  updateLedgerCounts();
+}
+window.showLedgerView = showLedgerView;
+
+function updateLedgerCounts(){
+  const set = (id, n) => { const el = document.getElementById(id); if (el) el.textContent = n; };
+  set('lvc-loan',    (loanLedger || []).length);
+  set('lvc-payroll', Object.keys(payrollLog || {}).length);
+  set('lvc-salary',  (salaryLog || []).length);
+}
+window.updateLedgerCounts = updateLedgerCounts;
 
 function filteredLedger(){
   const emp = v('lg-emp'), per = v('lg-period'), act = v('lg-action');
@@ -3295,10 +3418,18 @@ function setupPayrollLogFilters(){
   const ys = document.getElementById('pl-f-year');
   if (!ys) return;
   const years = [...new Set(Object.keys(payrollLog).map(k=>k.split('-')[0]))].sort().reverse();
+  const empty = years.length === 0;
   const cur = ys.value;
-  ys.innerHTML = '<option value="">All years</option>' +
+  ys.innerHTML = (empty ? '<option value="">No released cut-off yet</option>'
+                        : '<option value="">All years</option>') +
     years.map(y=>'<option value="'+y+'">'+y+'</option>').join('');
   if (cur && years.indexOf(cur) >= 0) ys.value = cur;
+  ys.disabled = empty;
+  // Nothing to filter, nothing to export — say so rather than offering dead controls
+  ['pl-clear-btn','pl-export-btn'].forEach(id=>{
+    const b = document.getElementById(id);
+    if (b) { b.disabled = empty; b.style.opacity = empty ? '.45' : ''; b.style.cursor = empty ? 'not-allowed' : ''; }
+  });
   fillPayrollLogPeriods();
 }
 function fillPayrollLogPeriods(){
@@ -3308,9 +3439,11 @@ function fillPayrollLogPeriods(){
   const y = ys ? ys.value : '';
   const keys = Object.keys(payrollLog).filter(k => !y || k.indexOf(y+'-') === 0).sort().reverse();
   const cur = ps.value;
-  ps.innerHTML = '<option value="">All cut-offs</option>' +
+  ps.innerHTML = (keys.length ? '<option value="">All cut-offs</option>'
+                              : '<option value="">Nothing released yet</option>') +
     keys.map(k=>'<option value="'+k+'">'+getPeriodLabel(k)+'</option>').join('');
   if (cur && keys.indexOf(cur) >= 0) ps.value = cur;
+  ps.disabled = keys.length === 0;
 }
 function onPayrollLogYear(){ fillPayrollLogPeriods(); renderPayrollLog(); }
 function clearPayrollLogFilter(){
@@ -3389,11 +3522,14 @@ function renderPayrollLog(){
       '</tr>';
   }).join('') || '<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--muted);">' +
     (filtered ? 'No released cut-off matches this filter. Choose another, or press Show all.'
-              : 'No cut-off has been released yet. Release one from the Payroll tab.') + '</td></tr>';
+              : 'No cut-off has been released yet, so there is nothing to pick in the filters above. ' +
+                'Set the cut-off in the header, open the Payroll tab, and press ' +
+                '\u201c\ud83d\udd12 Release &amp; Log This Cut-off\u201d \u2014 it will show up here.') + '</td></tr>';
 }
 
 let _snapKey = '';
 function openPayrollSnapshot(k){
+  if (_ledgerView !== 'payroll') showLedgerView('payroll');
   const snap = payrollLog[k];
   if (!snap) return;
   _snapKey = k;
