@@ -213,9 +213,9 @@ const BRANCHES = [
 
 const ROLES = {
   owner:     {label:"Owner / Admin",    emoji:"\u{1F451}", color:"#6A1B9A",
-    nav:["dashboard","branches","subs","pos","orders","void_requests","all_orders","analytics","z_reading","reports","cash_count","expenses","cash_monitor","inventory","inv_log","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","settings","printer","hr_staff","hr_time","hr_loans","hr_payroll","hr_clock"]},
+    nav:["dashboard","branches","subs","pos","orders","void_requests","all_orders","analytics","z_reading","reports","cash_count","expenses","cash_monitor","inventory","inv_log","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","settings","printer","hr_staff","hr_time","hr_loans","hr_payroll","hr_clock","hr_extras","hr_sched","hr_monitor"]},
   manager:   {label:"Branch Manager",   emoji:"\u{1F3EA}", color:"#007AFF",
-    nav:["branch_dash","pos","orders","analytics","z_reading","reports","cash_count","expenses","inventory","inv_log","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","bom_mgmt","branch_settings","printer","hr_staff","hr_time","hr_loans","hr_clock"]},
+    nav:["branch_dash","pos","orders","analytics","z_reading","reports","cash_count","expenses","inventory","inv_log","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","bom_mgmt","branch_settings","printer","hr_staff","hr_time","hr_loans","hr_clock","hr_extras","hr_sched","hr_monitor"]},
   cashier:   {label:"Cashier",          emoji:"\u{1F4B3}", color:"#34C759",
     nav:["pos","orders","x_reading","printer","z_reading","cash_count","expenses","inventory","ca_request","loan_request","void_request","hr_clock"]},
   crew:      {label:"Crew / Kitchen",   emoji:"\u{1F9D1}\u{200D}\u{1F373}", color:"#FF9500",
@@ -240,7 +240,8 @@ const NAV_GROUPS = [
    pages:["menu_mgmt","branch_menu"]},
   {id:"people",icon:"\u{1F465}", label:"People & HR",
    pages:["user_mgmt","crew_mgmt",
-          "hr_staff","hr_clock","hr_time","hr_loans","hr_payroll",
+          "hr_staff","hr_clock","hr_sched","hr_monitor","hr_time","hr_loans",
+          "hr_payroll","hr_extras",
           "ca_request","loan_request","cash_advance"]},
   {id:"money", icon:"\u{1F4B8}", label:"Expenses",
    pages:["expenses"]},
@@ -261,6 +262,9 @@ const NAV_META = {
   hr_time:     {icon:"📋",label:"Timesheet"},
   hr_loans:    {icon:"🧾",label:"Loans"},
   hr_payroll:  {icon:"💵",label:"Payroll"},
+  hr_extras:   {icon:"🌴",label:"Leaves & Bonuses"},
+  hr_sched:    {icon:"📅",label:"Shift Scheduler"},
+  hr_monitor:  {icon:"🔍",label:"Clock Monitor"},
   x_reading:   {icon:"📃",label:"X-Reading"},
   expenses:    {icon:"💸",label:"Expenses"},
   cash_monitor:{icon:"💵",label:"Cash Monitor"},
@@ -6299,7 +6303,7 @@ function hrTotals(rows,emp){
 // preview:true  — what WILL be charged, for review before release
 // preview:false — only what the ledger says WAS charged; a payslip never
 //                 carries an instalment that is still pending
-function hrPayrollRow(emp,rows,loans,ledger,periodKey,periodTo,released,preview){
+function hrPayrollRow(emp,rows,loans,ledger,periodKey,periodTo,released,preview,incentives){
   const t=hrTotals(rows,emp);
   const rate=Number(emp.dailyRate)||0;
   const monthly=rate*HR_DAYS_PER_MONTH;
@@ -6319,7 +6323,12 @@ function hrPayrollRow(emp,rows,loans,ledger,periodKey,periodTo,released,preview)
   });
   otPay=Number(otPay.toFixed(2));
   const ndPay=Number((t.nd*hourly*HR_ND_MULT).toFixed(2));
-  const gross=Number((basic+otPay+ndPay+t.holPay).toFixed(2));
+  // quota and performance bonuses are part of gross, so they are taxed and
+  // reported like any other earning rather than handed over off the payslip
+  const incAmt=(incentives||[])
+    .filter(i=>i.empId===emp._docId&&i.period===periodKey)
+    .reduce((a,i)=>a+(Number(i.amount)||0),0);
+  const gross=Number((basic+otPay+ndPay+t.holPay+incAmt).toFixed(2));
 
   const doleActive=(emp.dole||"yes")!=="no";
   const sssM =doleActive?hrSSS(monthly):0;
@@ -6361,9 +6370,754 @@ function hrPayrollRow(emp,rows,loans,ledger,periodKey,periodTo,released,preview)
 
   return {id:emp._docId,name:emp.name,pos:emp.position||"",rate,
     days:t.days,ot:t.ot,nd:t.nd,late:t.late,ut:t.ut,
-    basic,otPay,ndPay,holPay:t.holPay,gross,
+    basic,otPay,ndPay,holPay:t.holPay,incentiveAmt:Number(incAmt.toFixed(2)),gross,
     sss,phic,pagibig,tax,loanDed,loanByCategory:byCat,loanLines:lines,
     loanPending:pending,otherDed,net};
+}
+
+const HR_LEAVE_TYPES=["Vacation","Sick","Emergency","Maternity","Paternity",
+  "Bereavement","Unpaid","Offset"];
+const HR_MEMO_TYPES=["Verbal Warning","Written Warning","Final Warning",
+  "Suspension","Commendation","Notice to Explain","Other"];
+const HR_INCENTIVE_TYPES=["Quota Bonus","Sales Incentive","Perfect Attendance",
+  "Performance Bonus","Other"];
+
+// 13th month, ported: one twelfth of basic pay earned in the year.
+function hr13th(rate,monthsWorked){
+  const monthly=rate*HR_DAYS_PER_MONTH;
+  const ytd=monthly*(monthsWorked||12);
+  const th=ytd/12;
+  const taxable=Math.max(0,th-90000);          // first 90k is exempt
+  const tax=taxable>0?hrTax(taxable*24)/24*12:0;
+  return {monthly,ytd,th,tax:Math.max(0,tax),net:th-Math.max(0,tax)};
+}
+
+// Resolve one employee's shift for one day. Ported: a date-specific override
+// beats the weekly pattern, which beats the fixed default.
+function hrShiftForDay(emp,dow,dateStr,defs){
+  const list=defs&&defs.length?defs:HR_SHIFT_PRESETS;
+  const pick=(id)=>list.find(x=>x.id===id)||null;
+  if(!emp)return null;
+  const ov=(emp.shiftDates||{})[dateStr];
+  if(ov!==undefined&&ov!==""){
+    if(ov==="off")return list.find(x=>x.rest)||{rest:true,name:"REST DAY"};
+    const f=pick(ov); if(f)return f;
+  }
+  if(emp.restDay!==undefined&&emp.restDay!==null&&Number(emp.restDay)===dow)
+    return list.find(x=>x.rest)||{rest:true,name:"REST DAY"};
+  const rota=emp.shiftByDay||{};
+  const byDay=rota[dow];
+  if(byDay)return pick(byDay)||null;
+  return pick(emp.shiftId||"am");
+}
+
+function HRSchedulePage({db,user,branchId,curBranch,showT}){
+  const [emps,setEmps]=useState([]);
+  const [defs,setDefs]=useState(HR_SHIFT_PRESETS);
+  const [weekStart,setWeekStart]=useState(()=>{
+    const d=new Date(); d.setDate(d.getDate()-d.getDay());
+    return localDate(d);
+  });
+  const [busy,setBusy]=useState(false);
+  const [editDef,setEditDef]=useState(null);
+
+  useEffect(()=>{
+    const u1=onSnapshot(query(collection(db,"hr_employees"),
+      where("branch","==",branchId),limit(200)),
+      s1=>setEmps(s1.docs.map(d=>({...d.data(),_docId:d.id}))),()=>{});
+    const u2=onSnapshot(doc(db,"settings","hr_shifts"),
+      snap=>{
+        const v=snap.exists()?snap.data():null;
+        if(v&&Array.isArray(v.shifts)&&v.shifts.length)setDefs(v.shifts);
+      },()=>{});
+    return()=>{u1();u2();};
+  },[branchId]);
+
+  const days=[...Array(7)].map((_,i)=>{
+    const d=new Date(weekStart+"T00:00:00"); d.setDate(d.getDate()+i);
+    return {iso:localDate(d),dow:d.getDay(),
+      label:d.toLocaleDateString("en-PH",{weekday:"short"}),
+      num:d.getDate()};
+  });
+
+  const setDay=async(emp,day,shiftId)=>{
+    try{
+      const dates=Object.assign({},emp.shiftDates||{});
+      // Clearing an override falls back to the weekly pattern rather than
+      // writing an empty shift that reads as "no schedule".
+      if(!shiftId)delete dates[day.iso]; else dates[day.iso]=shiftId;
+      await updateDoc(doc(db,"hr_employees",emp._docId),{shiftDates:dates});
+    }catch(e){showT("Failed: "+String(e&&e.message||e).slice(0,45),"err");}
+  };
+
+  const saveDefs=async(list)=>{
+    setBusy(true);
+    try{
+      await setDoc(doc(db,"settings","hr_shifts"),
+        {shifts:list,updatedAt:serverTimestamp(),updatedBy:user.name},{merge:true});
+      showT("Shifts saved ✓"); setEditDef(null);
+    }catch(e){showT("Save failed","err");}
+    setBusy(false);
+  };
+
+  const shiftLabel=(sh)=>!sh?"—":(sh.rest?"OFF":sh.name.split(" ")[0]);
+  const shiftCol=(sh)=>!sh?C.muted:(sh.rest?C.muted:C.primary);
+  const active=emps.filter(e=>e.active!==false);
+
+  return h("div",null,
+    h(SectionHeader,{title:"📅 Shift Scheduler — "+curBranch.name}),
+
+    h("div",{style:{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap",
+      alignItems:"center"}},
+      h("button",{onClick:()=>{
+        const d=new Date(weekStart+"T00:00:00"); d.setDate(d.getDate()-7);
+        setWeekStart(localDate(d));},
+        style:{padding:"9px 13px",borderRadius:8,fontSize:13,cursor:"pointer",
+          border:"1px solid "+C.border,background:"#fff"}},"‹ Prev week"),
+      h("div",{style:{fontSize:13,fontWeight:800}},
+        days[0].iso+" → "+days[6].iso),
+      h("button",{onClick:()=>{
+        const d=new Date(weekStart+"T00:00:00"); d.setDate(d.getDate()+7);
+        setWeekStart(localDate(d));},
+        style:{padding:"9px 13px",borderRadius:8,fontSize:13,cursor:"pointer",
+          border:"1px solid "+C.border,background:"#fff"}},"Next week ›"),
+      h("button",{onClick:()=>setEditDef({list:defs.map(x=>Object.assign({},x))}),
+        style:{padding:"9px 13px",borderRadius:8,fontSize:13,cursor:"pointer",
+          border:"1px solid "+C.primary,background:C.primary+"18",
+          color:C.primary,fontWeight:700}},"⚙️ Shift times")),
+
+    active.length===0
+      ? h("div",{style:{background:"#fff",border:"1px dashed "+C.border,
+          borderRadius:12,padding:"36px",textAlign:"center"}},
+          h("div",{style:{fontSize:34,marginBottom:9}},"📅"),
+          h("div",{style:{fontSize:14,fontWeight:800}},"No employees yet"))
+      : h("div",{style:{background:"#fff",borderRadius:12,
+          border:"1px solid "+C.border,overflow:"auto"}},
+          h("div",{style:{minWidth:700}},
+            h("div",{style:{display:"grid",
+              gridTemplateColumns:"1.5fr repeat(7,1fr)",gap:4,
+              padding:"10px 12px",background:C.bg,
+              borderBottom:"1px solid "+C.border}},
+              h("div",{style:{fontSize:10,fontWeight:800,color:C.muted,
+                letterSpacing:1}},"EMPLOYEE"),
+              days.map(d=>h("div",{key:d.iso,style:{fontSize:10,fontWeight:800,
+                color:C.muted,letterSpacing:1,textAlign:"center"}},
+                d.label,h("div",{style:{fontSize:11,color:C.text,marginTop:1}},
+                  d.num)))),
+            active.map(e=>h("div",{key:e._docId,style:{display:"grid",
+              gridTemplateColumns:"1.5fr repeat(7,1fr)",gap:4,
+              padding:"9px 12px",borderBottom:"1px solid "+C.border,
+              alignItems:"center"}},
+              h("div",null,
+                h("div",{style:{fontSize:13,fontWeight:700}},e.name),
+                h("div",{style:{fontSize:11,color:C.muted}},e.position||"")),
+              days.map(d=>{
+                const sh=hrShiftForDay(e,d.dow,d.iso,defs);
+                const isOverride=(e.shiftDates||{})[d.iso]!==undefined;
+                return h("select",{key:d.iso,
+                  value:((e.shiftDates||{})[d.iso])||"",
+                  onChange:ev=>setDay(e,d,ev.target.value),
+                  style:{width:"100%",padding:"5px 2px",fontSize:10,
+                    borderRadius:6,outline:"none",cursor:"pointer",
+                    boxSizing:"border-box",fontWeight:700,
+                    border:"1px solid "+(isOverride?C.warning:C.border),
+                    background:isOverride?C.warning+"18":"#fff",
+                    color:shiftCol(sh)}},
+                  h("option",{value:""},shiftLabel(sh)+" (rota)"),
+                  defs.map(sp=>h("option",{key:sp.id,value:sp.id},
+                    sp.rest?"OFF":sp.name.split(" ")[0])));
+              })
+            ))
+          )),
+
+    h("div",{style:{fontSize:11,color:C.muted,marginTop:9,lineHeight:1.6}},
+      "Blank follows the employee's weekly rota set on their profile. Picking a "+
+      "shift here overrides that one date only — use it for swaps and emergency "+
+      "cover, and the orange border shows where the week differs from the rota."),
+
+    editDef&&h("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",
+      display:"flex",alignItems:"center",justifyContent:"center",zIndex:900,padding:16},
+      onClick:ev=>ev.target===ev.currentTarget&&setEditDef(null)},
+      h("div",{style:{background:"#fff",width:"100%",maxWidth:520,
+        borderRadius:14,padding:"18px",maxHeight:"88vh",overflowY:"auto"}},
+        h("div",{style:{fontSize:15,fontWeight:800,marginBottom:4}},"Shift times"),
+        h("div",{style:{fontSize:11,color:C.muted,marginBottom:14,lineHeight:1.6}},
+          "Prep is how early they are expected in — lateness is measured from "+
+          "there, not from the shift start. Leave the break blank for a "+
+          "straight shift."),
+        editDef.list.map((sp,ix)=>h("div",{key:sp.id,
+          style:{border:"1px solid "+C.border,borderRadius:10,
+            padding:"11px 12px",marginBottom:9}},
+          h("div",{style:{fontSize:13,fontWeight:800,marginBottom:8}},sp.name),
+          !sp.rest&&h("div",{style:{display:"grid",
+            gridTemplateColumns:"repeat(3,1fr)",gap:8}},
+            [["start","START"],["end","END"],["bstart","BREAK FROM"],
+             ["bend","BREAK TO"],["prep","PREP (min)"],["grace","GRACE (min)"]]
+              .map(([k,lbl])=>h("div",{key:k},
+                h("div",{style:{fontSize:10,fontWeight:800,color:C.muted,
+                  letterSpacing:1,marginBottom:3}},lbl),
+                h("input",{
+                  type:(k==="prep"||k==="grace")?"number":"time",
+                  value:sp[k]!==undefined?sp[k]:"",
+                  onChange:ev=>setEditDef(p=>{
+                    const l=p.list.map(x=>Object.assign({},x));
+                    l[ix][k]=(k==="prep"||k==="grace")
+                      ?Number(ev.target.value)||0:ev.target.value;
+                    return {list:l};
+                  }),
+                  style:{width:"100%",padding:"7px",border:"1px solid "+C.border,
+                    borderRadius:7,fontSize:12,outline:"none",
+                    boxSizing:"border-box"}}))))
+        )),
+        h("div",{style:{display:"flex",gap:9,marginTop:6}},
+          h("button",{onClick:()=>setEditDef(null),
+            style:{flex:1,padding:"11px",borderRadius:9,
+              border:"1px solid "+C.border,background:"#fff",fontSize:13,
+              cursor:"pointer"}},"Cancel"),
+          h("button",{onClick:()=>saveDefs(editDef.list),disabled:busy,
+            style:{flex:2,padding:"11px",borderRadius:9,border:"none",
+              background:busy?"#ccc":C.primary,color:"#fff",fontWeight:800,
+              fontSize:13,cursor:"pointer"}},busy?"…":"💾 Save"))
+      )
+    )
+  );
+}
+
+function HRMonitorPage({db,user,branchId,curBranch,showT}){
+  const [rows,setRows]=useState([]);
+  const [emps,setEmps]=useState([]);
+  const [now,setNow]=useState(new Date());
+  const [cfg,setCfg]=useState({enabled:true,time:"22:00"});
+  const [busy,setBusy]=useState(false);
+
+  useEffect(()=>{
+    const t=setInterval(()=>setNow(new Date()),30000);
+    return()=>clearInterval(t);
+  },[]);
+
+  useEffect(()=>{
+    const u1=onSnapshot(query(collection(db,"hr_attendance"),
+      where("branch","==",branchId),limit(600)),
+      s1=>setRows(s1.docs.map(d=>({...d.data(),_docId:d.id}))),()=>{});
+    const u2=onSnapshot(query(collection(db,"hr_employees"),
+      where("branch","==",branchId),limit(200)),
+      s2=>setEmps(s2.docs.map(d=>({...d.data(),_docId:d.id}))),()=>{});
+    const u3=onSnapshot(doc(db,"settings","hr_autoclock"),
+      snap=>{ if(snap.exists())setCfg(Object.assign({enabled:true,time:"22:00"},
+        snap.data())); },()=>{});
+    return()=>{u1();u2();u3();};
+  },[branchId]);
+
+  const today=localDate();
+  const open=rows.filter(r=>!r.timeOut);
+  const openToday=open.filter(r=>r.date===today);
+  // Anything still open from a previous day is a missed punch-out, not a shift.
+  const stale=open.filter(r=>r.date!==today);
+  const doneToday=rows.filter(r=>r.date===today&&r.timeOut);
+  const expected=emps.filter(e=>{
+    if(e.active===false)return false;
+    const sh=hrShiftForDay(e,new Date().getDay(),today,null);
+    return sh&&!sh.rest;
+  });
+  const missing=expected.filter(e=>!rows.some(r=>r.empId===e._docId&&r.date===today));
+
+  const closeStale=async(r)=>{
+    const end=(r.shift&&r.shift.end)||cfg.time||"22:00";
+    const outISO=r.date+"T"+end+":00";
+    if(!confirm("Close "+r.empName+"'s "+r.date+" punch at "+end+"?\n\n"
+      +"It will be marked as an automatic clock-out, so no undertime is charged."))
+      return;
+    try{
+      await updateDoc(doc(db,"hr_attendance",r._docId),{
+        timeOut:outISO,hours:hrHours(r.timeIn,outISO),
+        auto:true,outBy:"auto ("+user.name+")",closedAt:serverTimestamp()});
+      showT(r.empName+" closed at "+end);
+    }catch(e){showT("Failed","err");}
+  };
+
+  const closeAll=async()=>{
+    if(!stale.length)return;
+    if(!confirm("Close "+stale.length+" open punch"+(stale.length>1?"es":"")
+      +" at each employee's shift end?"))return;
+    setBusy(true);
+    for(const r of stale){
+      const end=(r.shift&&r.shift.end)||cfg.time||"22:00";
+      const outISO=r.date+"T"+end+":00";
+      try{
+        await updateDoc(doc(db,"hr_attendance",r._docId),{
+          timeOut:outISO,hours:hrHours(r.timeIn,outISO),
+          auto:true,outBy:"auto ("+user.name+")",closedAt:serverTimestamp()});
+      }catch(e){console.error(e);}
+    }
+    showT(stale.length+" punch"+(stale.length>1?"es":"")+" closed");
+    setBusy(false);
+  };
+
+  const saveCfg=async(next)=>{
+    setCfg(next);
+    try{ await setDoc(doc(db,"settings","hr_autoclock"),next,{merge:true}); }
+    catch(e){}
+  };
+
+  const fmt=(iso)=>iso?String(iso).slice(11,16):"—";
+
+  return h("div",null,
+    h(SectionHeader,{title:"🔍 Clock Monitor — "+curBranch.name}),
+
+    h("div",{style:{display:"grid",
+      gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:9,
+      marginBottom:12}},
+      [["On duty",openToday.length,C.success],
+       ["Finished today",doneToday.length,C.text],
+       ["Expected in",expected.length,C.muted],
+       ["No punch yet",missing.length,missing.length?C.warning:C.muted],
+       ["Left open",stale.length,stale.length?C.danger:C.muted]].map(([k,v,col])=>
+        h("div",{key:k,style:{background:"#fff",border:"1px solid "+C.border,
+          borderRadius:11,padding:"11px 13px"}},
+          h("div",{style:{fontSize:10,fontWeight:800,color:C.muted,
+            letterSpacing:1}},k.toUpperCase()),
+          h("div",{style:{fontSize:20,fontWeight:900,color:col,marginTop:3}},
+            String(v))))),
+
+    stale.length>0&&h("div",{style:{background:C.danger+"14",
+      border:"1px solid "+C.danger,borderRadius:11,padding:"12px 14px",
+      marginBottom:12}},
+      h("div",{style:{display:"flex",gap:10,alignItems:"center",
+        flexWrap:"wrap",marginBottom:9}},
+        h("div",{style:{flex:1,minWidth:200}},
+          h("div",{style:{fontSize:13,fontWeight:800,color:C.danger}},
+            stale.length+" punch"+(stale.length>1?"es":"")+" left open from a previous day"),
+          h("div",{style:{fontSize:11,color:C.muted,marginTop:2}},
+            "Until these are closed they count as no day worked at all — the "+
+            "hours never land on the timesheet.")),
+        h("button",{onClick:closeAll,disabled:busy,
+          style:{padding:"9px 15px",borderRadius:8,border:"none",
+            background:busy?"#ccc":C.danger,color:"#fff",fontWeight:800,
+            fontSize:12,cursor:"pointer"}},busy?"…":"Close all at shift end")),
+      stale.map(r=>h("div",{key:r._docId,style:{display:"flex",gap:10,
+        alignItems:"center",padding:"7px 0",
+        borderTop:"1px solid "+C.border}},
+        h("div",{style:{flex:1,minWidth:0}},
+          h("div",{style:{fontSize:12,fontWeight:700}},r.empName),
+          h("div",{style:{fontSize:11,color:C.muted}},
+            r.date+" · in at "+fmt(r.timeIn)
+            +" · "+((r.shift&&r.shift.name)||"no shift"))),
+        h("button",{onClick:()=>closeStale(r),
+          style:{padding:"6px 11px",borderRadius:7,fontSize:11,
+            border:"1px solid "+C.border,background:"#fff",cursor:"pointer"}},
+          "Close")))),
+
+    missing.length>0&&h("div",{style:{background:C.warning+"14",
+      border:"1px solid "+C.warning,borderRadius:11,padding:"12px 14px",
+      marginBottom:12}},
+      h("div",{style:{fontSize:13,fontWeight:800,color:C.warning,marginBottom:3}},
+        missing.length+" scheduled but not clocked in"),
+      h("div",{style:{fontSize:12,color:C.muted}},
+        missing.map(e=>e.name).join(" · "))),
+
+    h("div",{style:{background:"#fff",border:"1px solid "+C.border,
+      borderRadius:12,padding:"14px",marginBottom:12}},
+      h("div",{style:{fontSize:13,fontWeight:800,marginBottom:3}},
+        "Automatic clock-out"),
+      h("div",{style:{fontSize:11,color:C.muted,marginBottom:10,lineHeight:1.6}},
+        "Closes a forgotten punch at that employee's own shift end, falling "+
+        "back to the time below. An automatic close is marked as such, so no "+
+        "undertime is charged for it."),
+      h("div",{style:{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}},
+        h("button",{onClick:()=>saveCfg(Object.assign({},cfg,{enabled:!cfg.enabled})),
+          style:{padding:"9px 15px",borderRadius:8,fontSize:12,fontWeight:800,
+            cursor:"pointer",border:"1px solid "+(cfg.enabled?C.success:C.border),
+            background:cfg.enabled?C.success+"18":"#fff",
+            color:cfg.enabled?C.success:C.muted}},
+          cfg.enabled?"ON":"OFF"),
+        h("div",{style:{fontSize:12,color:C.muted}},"Fallback time"),
+        h("input",{type:"time",value:cfg.time||"22:00",
+          onChange:e=>saveCfg(Object.assign({},cfg,{time:e.target.value})),
+          style:{padding:"8px",border:"1px solid "+C.border,borderRadius:8,
+            fontSize:13,outline:"none"}}))),
+
+    h("div",{style:{background:"#fff",border:"1px solid "+C.border,
+      borderRadius:12,overflow:"hidden"}},
+      h("div",{style:{padding:"11px 14px",background:C.bg,
+        borderBottom:"1px solid "+C.border,fontSize:12,fontWeight:800}},
+        "Today · "+today),
+      rows.filter(r=>r.date===today).length===0
+        ? h("div",{style:{padding:"28px",textAlign:"center",color:C.muted,
+            fontSize:13}},"No punches yet today")
+        : rows.filter(r=>r.date===today)
+            .sort((a,b)=>String(a.timeIn||"").localeCompare(String(b.timeIn||"")))
+            .map(r=>h("div",{key:r._docId,style:{display:"flex",gap:10,
+              alignItems:"center",padding:"10px 14px",
+              borderBottom:"1px solid "+C.border}},
+              h("div",{style:{width:9,height:9,borderRadius:"50%",flexShrink:0,
+                background:r.timeOut?C.muted:C.success}}),
+              h("div",{style:{flex:1,minWidth:0}},
+                h("div",{style:{fontSize:13,fontWeight:700}},r.empName),
+                h("div",{style:{fontSize:11,color:C.muted,marginTop:1}},
+                  ((r.shift&&r.shift.name)||"")
+                  +(r.inVerified==="face"?" · face verified":""))),
+              h("div",{style:{fontSize:12,textAlign:"right"}},
+                fmt(r.timeIn)+" → "+(r.timeOut?fmt(r.timeOut):"…"),
+                r.auto&&h("div",{style:{fontSize:10,color:C.warning,
+                  fontWeight:700}},"auto")),
+              h("div",{style:{fontSize:13,fontWeight:800,minWidth:56,
+                textAlign:"right"}},
+                r.timeOut?(r.hours||0)+"h"
+                  :(hrHours(r.timeIn,now.toISOString())||0)+"h")))
+    )
+  );
+}
+
+function HRExtrasPage({db,user,branchId,curBranch,showT}){
+  const periods=hrRecentPeriods(8);
+  const [tab,setTab]=useState("leaves");
+  const [period,setPeriod]=useState(periods[0].id);
+  const [emps,setEmps]=useState([]);
+  const [leaves,setLeaves]=useState([]);
+  const [memos,setMemos]=useState([]);
+  const [incent,setIncent]=useState([]);
+  const [edit,setEdit]=useState(null);
+  const [busy,setBusy]=useState(false);
+  const [months,setMonths]=useState(12);
+
+  useEffect(()=>{
+    const subs=[
+      onSnapshot(query(collection(db,"hr_employees"),
+        where("branch","==",branchId),limit(200)),
+        s1=>setEmps(s1.docs.map(d=>({...d.data(),_docId:d.id}))),()=>{}),
+      onSnapshot(query(collection(db,"hr_leaves"),
+        where("branch","==",branchId),limit(300)),
+        s2=>setLeaves(s2.docs.map(d=>({...d.data(),_docId:d.id}))),()=>{}),
+      onSnapshot(query(collection(db,"hr_memos"),
+        where("branch","==",branchId),limit(300)),
+        s3=>setMemos(s3.docs.map(d=>({...d.data(),_docId:d.id}))),()=>{}),
+      onSnapshot(query(collection(db,"hr_incentives"),
+        where("branch","==",branchId),limit(300)),
+        s4=>setIncent(s4.docs.map(d=>({...d.data(),_docId:d.id}))),()=>{}),
+    ];
+    return()=>subs.forEach(u=>u());
+  },[branchId]);
+
+  const active=emps.filter(e=>e.active!==false);
+  const nameOf=(id)=>(emps.find(e=>e._docId===id)||{}).name||id;
+  const per=periods.find(p=>p.id===period)||periods[0];
+
+  const save=async()=>{
+    const e=edit; if(!e)return;
+    if(!e.empId){showT("Pick the employee","warn");return;}
+    setBusy(true);
+    try{
+      const base={empId:e.empId,empName:nameOf(e.empId),branch:branchId,
+        updatedAt:serverTimestamp(),updatedBy:user.name};
+      if(e._kind==="leave"){
+        if(!e.from||!e.to){showT("Enter the dates","warn");return;}
+        const body={...base,type:e.type||HR_LEAVE_TYPES[0],
+          from:e.from,to:e.to,reason:e.reason||"",
+          status:e.status||"Pending",
+          // days is inclusive of both ends, the way a leave form reads
+          days:Math.max(1,Math.round((new Date(e.to)-new Date(e.from))/86400000)+1)};
+        if(e._isNew)await addDoc(collection(db,"hr_leaves"),
+          {...body,createdAt:serverTimestamp()});
+        else await updateDoc(doc(db,"hr_leaves",e._docId),body);
+      }else if(e._kind==="memo"){
+        const body={...base,type:e.type||HR_MEMO_TYPES[0],
+          date:e.date||localDate(),subject:e.subject||"",
+          details:e.details||"",issuedBy:e.issuedBy||user.name};
+        if(e._isNew)await addDoc(collection(db,"hr_memos"),
+          {...body,createdAt:serverTimestamp()});
+        else await updateDoc(doc(db,"hr_memos",e._docId),body);
+      }else{
+        const amt=Number(e.amount)||0;
+        if(amt<=0){showT("Enter the amount","warn");return;}
+        const body={...base,period:e.period||period,
+          type:e.type||HR_INCENTIVE_TYPES[0],amount:amt,note:e.note||""};
+        if(e._isNew)await addDoc(collection(db,"hr_incentives"),
+          {...body,createdAt:serverTimestamp()});
+        else await updateDoc(doc(db,"hr_incentives",e._docId),body);
+      }
+      showT("Saved ✓"); setEdit(null);
+    }catch(err){
+      console.error("hr extras save:",err);
+      showT("Save failed: "+String(err&&err.message||err).slice(0,55),"err");
+    }
+    setBusy(false);
+  };
+
+  const del=async(coll,row,label)=>{
+    if(!confirm("Delete this "+label+" for "+row.empName+"?"))return;
+    try{ await deleteDoc(doc(db,coll,row._docId)); showT("Deleted"); }
+    catch(e){ showT("Failed: "+String(e&&e.message||e).slice(0,45),"err"); }
+  };
+
+  const setLeaveStatus=async(l,st)=>{
+    try{
+      await updateDoc(doc(db,"hr_leaves",l._docId),
+        {status:st,decidedBy:user.name,decidedAt:serverTimestamp()});
+      showT("Leave "+st.toLowerCase());
+    }catch(e){showT("Failed","err");}
+  };
+
+  const F=(k,label,ph,type)=>h("div",null,
+    h("div",{style:{fontSize:11,fontWeight:800,color:C.muted,
+      letterSpacing:1,marginBottom:4}},label),
+    h("input",{type:type||"text",value:edit[k]||"",placeholder:ph||"",
+      onFocus:e=>e.target.select(),
+      onChange:e=>setEdit(p=>Object.assign({},p,{[k]:e.target.value})),
+      style:{width:"100%",padding:"9px 10px",border:"1px solid "+C.border,
+        borderRadius:8,fontSize:13,outline:"none",boxSizing:"border-box"}}));
+
+  const Picker=(list,key)=>h("div",null,
+    h("div",{style:{fontSize:11,fontWeight:800,color:C.muted,
+      letterSpacing:1,marginBottom:4}},"TYPE"),
+    h("select",{value:edit[key]||list[0],
+      onChange:e=>setEdit(p=>Object.assign({},p,{[key]:e.target.value})),
+      style:{width:"100%",padding:"9px 10px",border:"1px solid "+C.border,
+        borderRadius:8,fontSize:13,outline:"none",boxSizing:"border-box"}},
+      list.map(t=>h("option",{key:t,value:t},t))));
+
+  const EmpPicker=()=>h("div",null,
+    h("div",{style:{fontSize:11,fontWeight:800,color:C.muted,
+      letterSpacing:1,marginBottom:4}},"EMPLOYEE"),
+    h("select",{value:edit.empId||"",
+      onChange:e=>setEdit(p=>Object.assign({},p,{empId:e.target.value})),
+      style:{width:"100%",padding:"9px 10px",border:"1px solid "+C.border,
+        borderRadius:8,fontSize:13,outline:"none",boxSizing:"border-box"}},
+      h("option",{value:""},"— select —"),
+      active.map(e=>h("option",{key:e._docId,value:e._docId},e.name))));
+
+  const addLabel={leaves:"Leave",memos:"Memo",incentives:"Incentive"}[tab];
+
+  return h("div",null,
+    h(SectionHeader,{title:"🌴 Leaves, Bonuses & Memos — "+curBranch.name,
+      action:tab==="thirteenth"?null:()=>setEdit({_isNew:true,
+        _kind:tab==="leaves"?"leave":(tab==="memos"?"memo":"incentive"),
+        empId:"",type:(tab==="leaves"?HR_LEAVE_TYPES[0]
+          :tab==="memos"?HR_MEMO_TYPES[0]:HR_INCENTIVE_TYPES[0]),
+        from:localDate(),to:localDate(),date:localDate(),
+        period:period,status:"Pending"}),
+      actionLabel:addLabel}),
+
+    h("div",{style:{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}},
+      [["leaves","🌴 Leaves"],["incentives","💰 Incentives"],
+       ["thirteenth","🎁 13th Month"],["memos","📋 Memo Log"]].map(([k,lbl])=>
+        h("button",{key:k,onClick:()=>setTab(k),
+          style:{padding:"9px 15px",borderRadius:8,fontSize:13,cursor:"pointer",
+            fontWeight:tab===k?800:500,
+            border:"1px solid "+(tab===k?C.primary:C.border),
+            background:tab===k?C.primary+"18":"#fff",
+            color:tab===k?C.primary:C.text}},lbl))),
+
+    tab==="incentives"&&h("div",{style:{marginBottom:11}},
+      h("select",{value:period,onChange:e=>setPeriod(e.target.value),
+        style:{padding:"9px 11px",borderRadius:8,fontSize:13,outline:"none",
+          cursor:"pointer",border:"1px solid "+C.primary,
+          background:C.primary+"18",color:C.primary,fontWeight:800}},
+        periods.map(p=>h("option",{key:p.id,value:p.id},p.label)))),
+
+    // ── LEAVES ────────────────────────────────────────────
+    tab==="leaves"&&(leaves.length===0
+      ? h("div",{style:{background:"#fff",border:"1px dashed "+C.border,
+          borderRadius:12,padding:"36px",textAlign:"center"}},
+          h("div",{style:{fontSize:34,marginBottom:9}},"🌴"),
+          h("div",{style:{fontSize:14,fontWeight:800}},"No leave filed"))
+      : h("div",{style:{background:"#fff",borderRadius:12,
+          border:"1px solid "+C.border,overflow:"hidden"}},
+          leaves.slice().sort((a,b)=>String(b.from||"").localeCompare(String(a.from||"")))
+            .map(l=>h("div",{key:l._docId,style:{padding:"12px 14px",
+              borderBottom:"1px solid "+C.border,display:"flex",gap:10,
+              alignItems:"center",flexWrap:"wrap"}},
+              h("div",{style:{flex:1,minWidth:180}},
+                h("div",{style:{fontSize:13,fontWeight:700}},
+                  l.empName,h("span",{style:{fontSize:11,color:C.muted,
+                    fontWeight:500}},"  ·  "+l.type)),
+                h("div",{style:{fontSize:11,color:C.muted,marginTop:2}},
+                  l.from+" → "+l.to+" · "+(l.days||1)+" day"+((l.days||1)>1?"s":"")
+                  +(l.reason?" · "+l.reason:""))),
+              h("span",{style:{fontSize:11,fontWeight:800,padding:"4px 10px",
+                borderRadius:20,
+                background:(l.status==="Approved"?C.success
+                  :l.status==="Rejected"?C.danger:C.warning)+"18",
+                color:l.status==="Approved"?C.success
+                  :l.status==="Rejected"?C.danger:C.warning}},
+                (l.status||"Pending").toUpperCase()),
+              l.status!=="Approved"&&h("button",{
+                onClick:()=>setLeaveStatus(l,"Approved"),
+                style:{padding:"6px 11px",borderRadius:7,fontSize:11,
+                  border:"none",background:C.success,color:"#fff",
+                  fontWeight:700,cursor:"pointer"}},"Approve"),
+              l.status!=="Rejected"&&h("button",{
+                onClick:()=>setLeaveStatus(l,"Rejected"),
+                style:{padding:"6px 11px",borderRadius:7,fontSize:11,
+                  border:"1px solid "+C.border,background:"#fff",
+                  cursor:"pointer"}},"Reject"),
+              h("button",{onClick:()=>del("hr_leaves",l,"leave"),
+                style:{padding:"6px 9px",borderRadius:7,fontSize:11,
+                  border:"none",background:"none",color:C.danger,
+                  cursor:"pointer"}},"✕")))
+        )),
+
+    // ── INCENTIVES ────────────────────────────────────────
+    tab==="incentives"&&(function(){
+      const mine=incent.filter(i=>i.period===period);
+      const total=mine.reduce((a,i)=>a+(Number(i.amount)||0),0);
+      return h("div",null,
+        h("div",{style:{background:C.primary+"18",
+          border:"1px solid "+C.primary,borderRadius:11,padding:"11px 14px",
+          marginBottom:11,fontSize:13,fontWeight:800,color:C.primary}},
+          "₱"+peso(total)+" in incentives for "+per.label
+          +" · added to gross pay on the payslip"),
+        mine.length===0
+          ? h("div",{style:{background:"#fff",border:"1px dashed "+C.border,
+              borderRadius:12,padding:"32px",textAlign:"center",
+              color:C.muted,fontSize:13}},"None for this cut-off")
+          : h("div",{style:{background:"#fff",borderRadius:12,
+              border:"1px solid "+C.border,overflow:"hidden"}},
+              mine.map(i=>h("div",{key:i._docId,style:{padding:"12px 14px",
+                borderBottom:"1px solid "+C.border,display:"flex",gap:10,
+                alignItems:"center"}},
+                h("div",{style:{flex:1,minWidth:0}},
+                  h("div",{style:{fontSize:13,fontWeight:700}},i.empName),
+                  h("div",{style:{fontSize:11,color:C.muted,marginTop:1}},
+                    i.type+(i.note?" · "+i.note:""))),
+                h("div",{style:{fontSize:15,fontWeight:900,color:C.success}},
+                  "₱"+peso(i.amount)),
+                h("button",{onClick:()=>del("hr_incentives",i,"incentive"),
+                  style:{padding:"6px 9px",borderRadius:7,fontSize:11,
+                    border:"none",background:"none",color:C.danger,
+                    cursor:"pointer"}},"✕")))));
+    })(),
+
+    // ── 13TH MONTH ────────────────────────────────────────
+    tab==="thirteenth"&&h("div",null,
+      h("div",{style:{display:"flex",gap:9,alignItems:"center",
+        marginBottom:11,flexWrap:"wrap"}},
+        h("div",{style:{fontSize:12,color:C.muted}},"Months worked this year"),
+        h("input",{type:"number",min:1,max:12,value:months,
+          onChange:e=>setMonths(Math.min(12,Math.max(1,Number(e.target.value)||1))),
+          style:{width:70,padding:"8px",border:"1px solid "+C.border,
+            borderRadius:8,fontSize:13,textAlign:"center",outline:"none"}}),
+        h("div",{style:{fontSize:11,color:C.muted}},
+          "First ₱90,000 is tax exempt")),
+      active.length===0
+        ? h("div",{style:{background:"#fff",border:"1px dashed "+C.border,
+            borderRadius:12,padding:"32px",textAlign:"center",
+            color:C.muted,fontSize:13}},"No employees")
+        : h("div",{style:{background:"#fff",borderRadius:12,
+            border:"1px solid "+C.border,overflow:"auto"}},
+            h("div",{style:{minWidth:560}},
+              h("div",{style:{display:"grid",
+                gridTemplateColumns:"1.4fr 100px 110px 110px 90px 110px",gap:6,
+                padding:"10px 14px",background:C.bg,
+                borderBottom:"1px solid "+C.border}},
+                ["EMPLOYEE","MONTHLY","YTD BASIC","13TH MONTH","TAX","NET"]
+                  .map(k=>h("div",{key:k,style:{fontSize:10,fontWeight:800,
+                    color:C.muted,letterSpacing:1,
+                    textAlign:k==="EMPLOYEE"?"left":"right"}},k))),
+              active.map(e=>{
+                const t=hr13th(Number(e.dailyRate)||0,months);
+                return h("div",{key:e._docId,style:{display:"grid",
+                  gridTemplateColumns:"1.4fr 100px 110px 110px 90px 110px",gap:6,
+                  padding:"11px 14px",borderBottom:"1px solid "+C.border,
+                  alignItems:"center"}},
+                  h("div",null,
+                    h("div",{style:{fontSize:13,fontWeight:700}},e.name),
+                    h("div",{style:{fontSize:11,color:C.muted}},
+                      (e.position||"")+" · ₱"+peso(e.dailyRate)+"/day")),
+                  h("div",{style:{fontSize:12,textAlign:"right"}},"₱"+peso(t.monthly)),
+                  h("div",{style:{fontSize:12,textAlign:"right",color:C.muted}},
+                    "₱"+peso(t.ytd)),
+                  h("div",{style:{fontSize:13,textAlign:"right",fontWeight:800,
+                    color:C.success}},"₱"+peso(t.th)),
+                  h("div",{style:{fontSize:12,textAlign:"right",color:C.muted}},
+                    t.tax>0?"₱"+peso(t.tax):"—"),
+                  h("div",{style:{fontSize:14,textAlign:"right",fontWeight:900,
+                    color:C.primary}},"₱"+peso(t.net)));
+              })
+            ))
+    ),
+
+    // ── MEMOS ─────────────────────────────────────────────
+    tab==="memos"&&(memos.length===0
+      ? h("div",{style:{background:"#fff",border:"1px dashed "+C.border,
+          borderRadius:12,padding:"36px",textAlign:"center"}},
+          h("div",{style:{fontSize:34,marginBottom:9}},"📋"),
+          h("div",{style:{fontSize:14,fontWeight:800}},"No memos on file"))
+      : h("div",{style:{background:"#fff",borderRadius:12,
+          border:"1px solid "+C.border,overflow:"hidden"}},
+          memos.slice().sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")))
+            .map(m=>h("div",{key:m._docId,style:{padding:"12px 14px",
+              borderBottom:"1px solid "+C.border,display:"flex",gap:10,
+              alignItems:"flex-start"}},
+              h("div",{style:{flex:1,minWidth:0}},
+                h("div",{style:{fontSize:13,fontWeight:700}},
+                  m.empName,h("span",{style:{fontSize:11,color:C.muted,
+                    fontWeight:500}},"  ·  "+m.type)),
+                m.subject&&h("div",{style:{fontSize:12,marginTop:2}},m.subject),
+                h("div",{style:{fontSize:11,color:C.muted,marginTop:2}},
+                  m.date+(m.issuedBy?" · issued by "+m.issuedBy:"")),
+                m.details&&h("div",{style:{fontSize:11,color:C.muted,
+                  marginTop:3,lineHeight:1.5}},m.details)),
+              h("button",{onClick:()=>del("hr_memos",m,"memo"),
+                style:{padding:"6px 9px",borderRadius:7,fontSize:11,
+                  border:"none",background:"none",color:C.danger,
+                  cursor:"pointer"}},"✕")))
+        )),
+
+    edit&&h("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",
+      display:"flex",alignItems:"center",justifyContent:"center",zIndex:900,padding:16},
+      onClick:ev=>ev.target===ev.currentTarget&&setEdit(null)},
+      h("div",{style:{background:"#fff",width:"100%",maxWidth:440,
+        borderRadius:14,padding:"18px",maxHeight:"88vh",overflowY:"auto"}},
+        h("div",{style:{fontSize:15,fontWeight:800,marginBottom:14}},
+          edit._kind==="leave"?"🌴 File a leave"
+          :edit._kind==="memo"?"📋 New memo":"💰 New incentive"),
+        h("div",{style:{display:"grid",gap:10}},
+          EmpPicker(),
+          edit._kind==="leave"&&Picker(HR_LEAVE_TYPES,"type"),
+          edit._kind==="memo"&&Picker(HR_MEMO_TYPES,"type"),
+          edit._kind==="incentive"&&Picker(HR_INCENTIVE_TYPES,"type"),
+          edit._kind==="leave"&&h("div",{style:{display:"grid",
+            gridTemplateColumns:"1fr 1fr",gap:10}},
+            F("from","FROM","","date"),F("to","TO","","date")),
+          edit._kind==="leave"&&F("reason","REASON",""),
+          edit._kind==="memo"&&h("div",{style:{display:"grid",
+            gridTemplateColumns:"1fr",gap:10}},F("date","DATE","","date")),
+          edit._kind==="memo"&&F("subject","SUBJECT","e.g. late three times this cut-off"),
+          edit._kind==="memo"&&h("div",null,
+            h("div",{style:{fontSize:11,fontWeight:800,color:C.muted,
+              letterSpacing:1,marginBottom:4}},"DETAILS"),
+            h("textarea",{value:edit.details||"",rows:4,
+              onChange:e=>setEdit(p=>Object.assign({},p,{details:e.target.value})),
+              style:{width:"100%",padding:"9px 10px",border:"1px solid "+C.border,
+                borderRadius:8,fontSize:13,outline:"none",boxSizing:"border-box",
+                resize:"vertical",fontFamily:"inherit"}})),
+          edit._kind==="incentive"&&h("div",{style:{display:"grid",
+            gridTemplateColumns:"1fr 1fr",gap:10}},
+            F("amount","AMOUNT","0.00","number"),
+            h("div",null,
+              h("div",{style:{fontSize:11,fontWeight:800,color:C.muted,
+                letterSpacing:1,marginBottom:4}},"CUT-OFF"),
+              h("select",{value:edit.period||period,
+                onChange:e=>setEdit(p=>Object.assign({},p,{period:e.target.value})),
+                style:{width:"100%",padding:"9px 10px",
+                  border:"1px solid "+C.border,borderRadius:8,fontSize:13,
+                  outline:"none",boxSizing:"border-box"}},
+                periods.map(p=>h("option",{key:p.id,value:p.id},p.label))))),
+          edit._kind==="incentive"&&F("note","NOTE","e.g. hit 120% of quota")
+        ),
+        h("div",{style:{display:"flex",gap:9,marginTop:16}},
+          h("button",{onClick:()=>setEdit(null),
+            style:{flex:1,padding:"11px",borderRadius:9,
+              border:"1px solid "+C.border,background:"#fff",fontSize:13,
+              cursor:"pointer"}},"Cancel"),
+          h("button",{onClick:save,disabled:busy,
+            style:{flex:2,padding:"11px",borderRadius:9,border:"none",
+              background:busy?"#ccc":C.primary,color:"#fff",fontWeight:800,
+              fontSize:13,cursor:busy?"wait":"pointer"}},
+            busy?"…":"💾 Save"))
+      )
+    )
+  );
 }
 
 function HRPayrollPage({db,user,branchId,curBranch,companySettings,showT}){
@@ -6375,6 +7129,7 @@ function HRPayrollPage({db,user,branchId,curBranch,companySettings,showT}){
   const [ledger,setLedger]=useState([]);
   const [runs,setRuns]=useState([]);
   const [busy,setBusy]=useState(false);
+  const [incent,setIncent]=useState([]);
   const [slipFor,setSlipFor]=useState(null);
 
   useEffect(()=>{
@@ -6394,6 +7149,9 @@ function HRPayrollPage({db,user,branchId,curBranch,companySettings,showT}){
       onSnapshot(query(collection(db,"hr_payroll_runs"),
         where("branch","==",branchId),limit(60)),
         s5=>setRuns(s5.docs.map(d=>({...d.data(),_docId:d.id}))),()=>{}),
+      onSnapshot(query(collection(db,"hr_incentives"),
+        where("branch","==",branchId),limit(300)),
+        s6=>setIncent(s6.docs.map(d=>({...d.data(),_docId:d.id}))),()=>{}),
     ];
     return()=>subs.forEach(u=>u());
   },[branchId]);
@@ -6404,7 +7162,7 @@ function HRPayrollPage({db,user,branchId,curBranch,companySettings,showT}){
 
   const rowsFor=(emp)=>att.filter(a=>a.empId===emp._docId&&a.period===period);
   const build=(emp,preview)=>hrPayrollRow(emp,rowsFor(emp),loans,ledger,
-    period,per.to,released,preview);
+    period,per.to,released,preview,incent);
 
   const active=emps.filter(e=>e.active!==false);
   const rows=active.map(e=>build(e,!released)).filter(r=>r.gross>0);
@@ -6455,7 +7213,7 @@ function HRPayrollPage({db,user,branchId,curBranch,companySettings,showT}){
       }
       // 2. recompute AFTER the deductions so the snapshot matches what is paid
       const finalRows=active.map(e=>
-        hrPayrollRow(e,rowsFor(e),loans,ledger,period,per.to,true,false))
+        hrPayrollRow(e,rowsFor(e),loans,ledger,period,per.to,true,false,incent))
         .filter(r=>r.gross>0);
       await setDoc(doc(db,"hr_payroll_runs",branchId+"_"+period),{
         period:period,label:per.label,branch:branchId,
@@ -6509,6 +7267,7 @@ function HRPayrollPage({db,user,branchId,curBranch,companySettings,showT}){
       +(r.otPay>0?line("Overtime ("+r.ot+" hrs)","₱"+peso(r.otPay)):"")
       +(r.ndPay>0?line("Night differential ("+r.nd+" hrs)","₱"+peso(r.ndPay)):"")
       +(r.holPay>0?line("Holiday pay","₱"+peso(r.holPay)):"")
+      +(r.incentiveAmt>0?line("Incentive / bonus","₱"+peso(r.incentiveAmt)):"")
       +line("GROSS","₱"+peso(r.gross),true)
       +'</table><div class="sec">DEDUCTIONS</div><table>'
       +(r.sss>0?line("SSS","−₱"+peso(r.sss)):"")
@@ -14416,6 +15175,21 @@ function App(){
               "If already lapsed it starts from today. The pencil is a manual override.")
           );
         })(),
+
+        // ══ HR: SHIFT SCHEDULER ══
+        page==="hr_sched"&&h(HRSchedulePage,{
+          db,user,branchId,curBranch,showT,key:"hrsched"
+        }),
+
+        // ══ HR: CLOCK MONITOR ══
+        page==="hr_monitor"&&h(HRMonitorPage,{
+          db,user,branchId,curBranch,showT,key:"hrmon"
+        }),
+
+        // ══ HR: LEAVES / INCENTIVES / 13TH / MEMOS ══
+        page==="hr_extras"&&h(HRExtrasPage,{
+          db,user,branchId,curBranch,showT,key:"hrextras"
+        }),
 
         // ══ HR: PAYROLL ══
         page==="hr_payroll"&&h(HRPayrollPage,{
