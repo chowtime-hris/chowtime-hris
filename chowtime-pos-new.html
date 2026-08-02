@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Chowtime POS — 20260802-124035</title>
+<title>Chowtime POS — 20260802-125343</title>
 <meta name="theme-color" content="#6A1B9A"/>
 <meta name="mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260802-124035 -->
+<!-- BUILD:20260802-125343 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -1473,7 +1473,7 @@ function ItemCustomizer({ item,onAdd,onClose,optionGroups=[],priceType="retail",
             h("span",{style:{minWidth:20,textAlign:"center",fontWeight:900,fontSize:14}},qty),
             h("button",{onClick:()=>setQtySafe(qty+1),style:{width:30,height:30,borderRadius:7,border:"none",background:"#fff",cursor:"pointer",fontSize:16,fontWeight:700,color:C.primary}},"+")
           ),
-          h("button",{onClick:handleAdd,disabled:blocked,style:{flex:1,padding:"12px",background:blocked?"#ddd":`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:10,color:blocked?"#999":"#fff",fontWeight:800,fontSize:13,cursor:blocked?"not-allowed":"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:9}},
+          h("button",{onClick:handleAdd,disabled:blocked,style:{flex:1,padding:"12px",background:blocked?"#eee":`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:10,color:blocked?"#999":"#fff",fontWeight:800,fontSize:13,cursor:blocked?"not-allowed":"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:9}},
             "Add to Order",
             h("span",{style:{background:"rgba(255,255,255,.22)",padding:"2px 9px",borderRadius:20,fontSize:14}},"₱"+peso(lineTotal))
           )
@@ -1793,7 +1793,7 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
               borderRadius:8,fontSize:13,outline:"none"}}),
           h("button",{onClick:saveBatch,disabled:savingBatch||!ordered.length,
             style:{padding:"6px 13px",borderRadius:8,border:"none",
-              background:(savingBatch||!ordered.length)?"#ddd":"#E65100",
+              background:(savingBatch||!ordered.length)?"#8A8A8A":"#E65100",
               color:"#fff",fontWeight:800,fontSize:13,
               cursor:(savingBatch||!ordered.length)?"not-allowed":"pointer"}},
             savingBatch?"...":"\uD83D\uDCBE Save "+ordered.length+"  item")
@@ -2873,7 +2873,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
                 borderRadius:7,fontSize:13,fontWeight:700,textAlign:"right",outline:"none"}}),
             h("button",{onClick:addCashEntry,disabled:addingCash,
               style:{padding:"8px 14px",borderRadius:7,border:"none",
-                background:addingCash?"#ccc":C.primary,color:"#fff",
+                background:addingCash?"#8A8A8A":C.primary,color:"#fff",
                 fontWeight:800,fontSize:13,cursor:"pointer",flexShrink:0}},
               addingCash?"...":"Add")
           ),
@@ -4416,7 +4416,7 @@ function IngredientsPage({db,user,showT}){
                     fontSize:14,fontWeight:700,cursor:"pointer"}},"Cancel"),
                 h("button",{onClick:save,disabled:saving,
                   style:{flex:1,padding:"10px",
-                    background:saving?"#ccc":C.primary,
+                    background:saving?"#8A8A8A":C.primary,
                     border:"none",borderRadius:8,color:"#fff",
                     fontWeight:800,fontSize:13,cursor:"pointer"}},
                   saving?"Saving...":"💾 Save Ingredient")
@@ -4797,7 +4797,7 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
         "+ Add Ingredient"),
       h("button",{onClick:onSave,disabled:sv,
         style:{flex:1,padding:"8px",borderRadius:8,border:"none",
-          background:sv?"#ccc":"linear-gradient(135deg,"+C.primary+","+C.dark+")",
+          background:sv?"#8A8A8A":"linear-gradient(135deg,"+C.primary+","+C.dark+")",
           color:"#fff",fontWeight:700,fontSize:14,cursor:sv?"not-allowed":"pointer"}},
         sv?"Saving...":"💾 Save BOM")
     ),
@@ -5691,7 +5691,7 @@ function renderDRDoc(po,cs,brs){
 // ─── BUILD / UPDATE CHECK ────────────────────
 // GitHub Pages caches hard, so a branch can run an old copy for hours.
 // Without a visible stamp a bug report cannot be tied to a version.
-const BUILD = "20260802-124035";
+const BUILD = "20260802-125343";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -6493,7 +6493,7 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
             h("button",{onClick:submitVoid,
               disabled:!selOrder||!reason.trim()||submitting||!voidedItems.length,
               style:{width:"100%",padding:"12px",
-                background:selOrder&&reason&&voidedItems.length?C.danger:"#ddd",
+                background:selOrder&&reason&&voidedItems.length?C.danger:"#8A8A8A",
                 border:"none",borderRadius:9,color:"#fff",
                 fontWeight:800,fontSize:13,cursor:selOrder&&reason?"pointer":"not-allowed"}},
               submitting?"Submitting...":`📤 ${voidedItems.length<(selOrder?. items?.length||0)?"Partial ":""}Void Request (₱${peso(voidAmt)})`)
@@ -7226,13 +7226,13 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
           h("button",{onClick:function(){setMode("adjust");setDisplay("");},
             style:{padding:"9px",borderRadius:9,border:"none",cursor:"pointer",
               fontWeight:700,fontSize:14,
-              background:mode==="adjust"?"#1565C0":"#f0f0f0",
+              background:mode==="adjust"?"#1565C0":"#eee",
               color:mode==="adjust"?"#fff":"#333"}},
             "➕/➖ Adjust"),
           h("button",{onClick:function(){setMode("set");setDisplay("");},
             style:{padding:"9px",borderRadius:9,border:"none",cursor:"pointer",
               fontWeight:700,fontSize:14,
-              background:mode==="set"?"#1565C0":"#f0f0f0",
+              background:mode==="set"?"#1565C0":"#eee",
               color:mode==="set"?"#fff":"#333"}},
             "= Set Exact")
         ),
@@ -7349,7 +7349,7 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
         h("button",{onClick:saveStock,
           disabled:saving||!display||!reason,
           style:{width:"100%",padding:"13px",
-            background:saving||!display||!reason?"#ccc":"linear-gradient(135deg,#1565C0,#0D47A1)",
+            background:saving||!display||!reason?"#8A8A8A":"linear-gradient(135deg,#1565C0,#0D47A1)",
             border:"none",borderRadius:10,color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer"}},
           saving?"Saving...":"💾 SAVE STOCK")
       ),
@@ -7535,7 +7535,7 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
           "⚠️ This  item is used in BOM — name change will need BOM update"),
         h("button",{onClick:saveDetails,disabled:saving,
           style:{width:"100%",padding:"13px",
-            background:saving?"#ccc":"linear-gradient(135deg,#1565C0,#0D47A1)",
+            background:saving?"#8A8A8A":"linear-gradient(135deg,#1565C0,#0D47A1)",
             border:"none",borderRadius:10,color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer"}},
           saving?"Saving...":"💾 SAVE DETAILS")
       )
@@ -8289,7 +8289,7 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
         "🖨️ Preview DR"),
       h("button",{onClick:issueDR,disabled:saving||!deliveryDate,
         style:{flex:1,padding:"11px",
-          background:saving?"#ddd":"linear-gradient(135deg,#6A1B9A,#4A148C)",
+          background:saving?"#8A8A8A":"linear-gradient(135deg,#6A1B9A,#4A148C)",
           border:"none",borderRadius:9,color:"#fff",fontWeight:800,fontSize:13,
           cursor:saving?"not-allowed":"pointer"}},
         saving?"Issuing DR...":"✅ Issue DR → Mark as Processing")
@@ -8528,7 +8528,7 @@ function PermissionsTab({db,showT,companySettings,setCompanySettings}){
         "↺ Reset All to Default"),
       h("button",{onClick:save,disabled:saving,
         style:{flex:1,padding:"11px",
-          background:saving?"#ccc":"linear-gradient(135deg,"+C.primary+","+C.dark+")",
+          background:saving?"#8A8A8A":"linear-gradient(135deg,"+C.primary+","+C.dark+")",
           border:"none",borderRadius:9,color:"#fff",
           fontWeight:800,fontSize:13,cursor:"pointer"}},
         saving?"Saving...":"💾 Save Permissions")
@@ -8889,7 +8889,7 @@ function PrinterPage({db,user,showT,companySettings,setCompanySettings}){
               onClick:()=>setCompanySettings(p=>({...p,paperSize:s})),
               style:{flex:1,padding:"12px 8px",borderRadius:9,border:"none",
                 cursor:"pointer",fontWeight:700,fontSize:13,
-                background:(companySettings.paperSize||"80mm")===s?C.primary:"#f0f0f0",
+                background:(companySettings.paperSize||"80mm")===s?C.primary:"#eee",
                 color:(companySettings.paperSize||"80mm")===s?"#fff":C.text}},s))
           )
         ),
@@ -8901,7 +8901,7 @@ function PrinterPage({db,user,showT,companySettings,setCompanySettings}){
                 onClick:()=>setCompanySettings(p=>({...p,vatMode:id})),
                 style:{padding:"9px",borderRadius:8,border:"none",cursor:"pointer",
                   fontWeight:700,fontSize:14,textAlign:"left",paddingLeft:12,
-                  background:(companySettings.vatMode||"vat")===id?C.primary:"#f0f0f0",
+                  background:(companySettings.vatMode||"vat")===id?C.primary:"#eee",
                   color:(companySettings.vatMode||"vat")===id?"#fff":C.text}},
                 lbl))
           )
@@ -9584,7 +9584,7 @@ function NewInventoryItemForm({db,user,branchId,showT,onClose,invBranch}){
           background:"#fff",fontSize:14,cursor:"pointer"}},"Cancel"),
       h("button",{onClick:save,disabled:saving,
         style:{flex:2,padding:"10px",borderRadius:8,border:"none",
-          background:saving?"#ccc":"linear-gradient(135deg,#6A1B9A,#4A148C)",
+          background:saving?"#8A8A8A":"linear-gradient(135deg,#6A1B9A,#4A148C)",
           color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer"}},
         saving?"Saving...":"💾 Add Item")
     )
@@ -11516,7 +11516,7 @@ function App(){
           h("div",{style:{width:28,height:28,background:`linear-gradient(135deg,${C.primary},${C.dark})`,borderRadius:7,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13}},"🍽️"),
           h("div",null,
             h("div",{style:{color:C.primary,fontWeight:900,fontSize:14}},"CHOWTIME"),
-            h("div",{style:{color:"#8A8A8A",fontSize:12,fontWeight:700,letterSpacing:2}},"FAST-FOOD CHAIN")
+            h("div",{style:{color:"#eee",fontSize:12,fontWeight:700,letterSpacing:2}},"FAST-FOOD CHAIN")
           )
         ),
         h("div",{style:{background:`${role?.color||"#E63946"}18`,border:`1px solid ${role?.color||"#E63946"}44`,borderRadius:7,padding:"6px 8px",display:"flex",gap:6,alignItems:"center"}},
@@ -11524,13 +11524,13 @@ function App(){
           h("div",null,
             h("div",{style:{color:role?.color||"#E63946",fontSize:11,fontWeight:700}},role?.label||""),
             h("div",{style:{color:"#1A1A1A",fontSize:13,fontWeight:700}},user.name),
-            h("div",{style:{color:"#8A8A8A",fontSize:11}},user.branch==="all"?"All Branches":user.branch==="comm"?"Commissary":curBranch.name)
+            h("div",{style:{color:"#eee",fontSize:11}},user.branch==="all"?"All Branches":user.branch==="comm"?"Commissary":curBranch.name)
           )
         ),
         // Online indicator
         h("div",{style:{display:"flex",alignItems:"center",gap:5,marginTop:7,padding:"4px 8px",background:"#F5F5F5",borderRadius:6}},
           h("div",{style:{width:6,height:6,borderRadius:"50%",background:isOnline?C.success:C.danger}}),
-          h("span",{style:{fontSize:11,color:"#8A8A8A"}},isOnline?"Firebase Live":"Offline"),
+          h("span",{style:{fontSize:11,color:"#eee"}},isOnline?"Firebase Live":"Offline"),
           dbReady&&h("span",{style:{fontSize:12,color:"#9E9E9E"}},orders.length+" orders")
         )
       ),
@@ -11574,7 +11574,8 @@ function App(){
 
           const EXT_APPS={
             ext_payroll:"chowtime-payroll.html",
-            ext_kiosk:"chowtime-kiosk.html"
+            ext_kiosk:"chowtime-kiosk.html",
+            ext_production:"chowtime-production.html"
           };
           const  item=(p,indent)=>{
             const m=NAV_META[p]; if(!m)return null;
@@ -12650,7 +12651,7 @@ function App(){
                   "chowtime-daily-"+(repMonth||"lahat")+".csv",toCSV(rows)),
                 disabled:!rows.length,
                 style:{padding:"8px 14px",borderRadius:8,border:"none",
-                  background:rows.length?"#2E7D32":"#ccc",color:"#fff",
+                  background:rows.length?"#2E7D32":"#8A8A8A",color:"#fff",
                   fontWeight:800,fontSize:13,
                   cursor:rows.length?"pointer":"not-allowed"}},
                 "⬇ Download CSV ("+rows.length+")")
@@ -12904,7 +12905,7 @@ function App(){
                   },
                   disabled:bfBusy||!bfFrom,
                   style:{padding:"9px 16px",borderRadius:8,border:"none",
-                    background:(bfBusy||!bfFrom)?"#ccc":C.primary,color:"#fff",
+                    background:(bfBusy||!bfFrom)?"#8A8A8A":C.primary,color:"#fff",
                     fontWeight:800,fontSize:13,
                     cursor:(bfBusy||!bfFrom)?"not-allowed":"pointer"}},
                   bfBusy?"Working...":"▶ Start"),
@@ -13006,7 +13007,7 @@ function App(){
               EXPENSE_CATS.map(c=>h("option",{key:c,value:c},c))),
             h("button",{onClick:dlCSV,disabled:!rows.length,
               style:{padding:"8px 14px",borderRadius:8,border:"none",
-                background:rows.length?"#2E7D32":"#ccc",color:"#fff",
+                background:rows.length?"#2E7D32":"#8A8A8A",color:"#fff",
                 fontWeight:800,fontSize:13,
                 cursor:rows.length?"pointer":"not-allowed"}},
               "⬇ Download CSV ("+rows.length+")"),
@@ -13475,7 +13476,7 @@ function App(){
                   },
                   disabled:batchSaving||!n,
                   style:{padding:"8px 16px",borderRadius:8,border:"none",
-                    background:(batchSaving||!n)?"#ccc":"#E65100",color:"#fff",
+                    background:(batchSaving||!n)?"#8A8A8A":"#E65100",color:"#fff",
                     fontWeight:800,fontSize:13,
                     cursor:(batchSaving||!n)?"not-allowed":"pointer"}},
                   batchSaving?"Saving...":("💾 Save all"+(n?" ("+n+")":""))),
