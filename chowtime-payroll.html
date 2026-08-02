@@ -407,7 +407,7 @@ tbody td{padding:9px 11px;}
   <div class="panel">
     <div class="panel-title"><span>🏦</span> Loan & Deduction Register</div>
     <button class="btn btn-primary" style="margin-bottom:14px;" onclick="openLoanModal()">+ Add Loan</button>
-    <button class="btn btn-secondary" style="margin-bottom:14px;margin-left:8px;" onclick="deductLoanBalances()">💳 Deduct Balances This Cut-off</button>
+    <button class="btn btn-secondary" style="margin-bottom:14px;margin-left:8px;" onclick="deductLoanBalances()">💳 Manual Override — Deduct This Cut-off</button>
     <div class="table-wrap">
       <table>
         <thead><tr><th>Employee</th><th>Loan Type</th><th>Principal</th><th>Per Cut-off Ded.</th><th>Balance</th><th>Start</th><th>Status</th></tr></thead>
@@ -823,6 +823,25 @@ tbody td{padding:9px 11px;}
     <div style="display:flex;gap:10px;margin-top:16px;">
       <button class="btn btn-primary" onclick="saveMemo()">💾 Save</button>
       <button class="btn btn-secondary" onclick="closeModal('memo-modal')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div id="deduct-now-modal" class="modal-overlay">
+  <div class="modal-box" style="max-width:400px;">
+    <h2>💳 Manual Deduction</h2>
+    <div id="deduct-now-info" style="background:var(--surface);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px;"></div>
+    <div class="form-group">
+      <label>Amount to Deduct (₱)</label>
+      <input type="number" id="deduct-now-amount" placeholder="Enter amount" style="font-size:18px;font-weight:700;">
+    </div>
+    <div class="form-group">
+      <label>Reason / Note (optional)</label>
+      <input id="deduct-now-note" placeholder="e.g. Early payment, July salary">
+    </div>
+    <div style="display:flex;gap:10px;margin-top:16px;">
+      <button class="btn btn-primary" onclick="confirmDeductNow()" style="background:#e67e22;">💳 Deduct Now</button>
+      <button class="btn btn-secondary" onclick="closeModal('deduct-now-modal')">Cancel</button>
     </div>
   </div>
 </div>
@@ -2347,6 +2366,39 @@ function computeAllPayroll() {
     return;
   }
 
+  // ── AUTO LOAN DEDUCTION ──────────────────────────────────────
+  // Automatically deduct scheduled per-cut-off amounts when computing payroll
+  // Guard: only deduct once per period (stored in localStorage)
+  const deductKey = 'loanDeducted_' + p.key;
+  const alreadyDeducted = localStorage.getItem(deductKey);
+  if (!alreadyDeducted) {
+    const pDet = getPeriodDetails(p.key);
+    const pEndStr = `${pDet.year}-${String(pDet.month+1).padStart(2,'0')}-${String(pDet.end).padStart(2,'0')}`;
+    let anyDeducted = false;
+    loans.forEach((l, i) => {
+      if (l.status === 'Paid') return;
+      if (l.start && l.start > pEndStr) return; // not started yet
+      const deduction = +(l.monthly || 0);
+      const currentBalance = (l.balance !== undefined && l.balance !== null && !isNaN(+l.balance))
+        ? +l.balance : +l.amount;
+      const newBalance = Math.max(0, currentBalance - deduction);
+      loans[i].balance = newBalance;
+      if (newBalance <= 0) { loans[i].status = 'Paid'; loans[i].balance = 0; }
+      anyDeducted = true;
+    });
+    if (anyDeducted) {
+      localStorage.setItem(deductKey, '1');
+      save('loans', loans);
+      _loanSaving = true;
+      if (window._fbDB && window._fbFns) {
+        window._fbFns.set(window._fbFns.ref(window._fbDB,'loans'), loans)
+          .then(()=>{ setTimeout(()=>{_loanSaving=false;},8000); })
+          .catch(e=>{ _loanSaving=false; });
+      } else { setTimeout(()=>{_loanSaving=false;},8000); }
+      showToastAdmin && showToastAdmin(`✅ Loan deductions auto-applied for ${p.label||p.key}`);
+    }
+  }
+
   document.getElementById('pay-period-label').textContent = p.label || getPeriodLabel(p.key);
   const rows = employees
     .filter(e => e && e.id && e.name)
@@ -2464,13 +2516,16 @@ function renderLoans(){
     <tr><td>${l.empName}</td><td><span class="tag tag-blue">${l.type}</span></td>
         <td>₱${fmt(l.amount)}</td><td>₱${fmt(l.monthly)}</td>
         <td style="font-weight:600;">₱${fmt(l.status==='Paid' ? 0 : (l.balance||l.amount))}</td><td>${l.start||'—'}</td>
-        <td><span class="tag ${l.status==='Paid'?'tag-green':'tag-orange'}">${l.status||'Active'}</span>
-            <button class="btn btn-sm btn-secondary" style="margin-left:4px;" onclick="editLoan(${i})">✏️</button>
-            ${l.status==='Paid'
-              ? `<button class="btn btn-sm btn-secondary" style="margin-left:3px;" onclick="resetLoanBalance(${i})">↩️ Reset</button>`
-              : `<button class="btn btn-sm btn-success" style="margin-left:3px;" onclick="markLoanPaid(${i})">✓ Paid</button>`
-            }
-            <button class="btn btn-sm btn-danger" style="margin-left:3px;" onclick="deleteLoan(${i})">🗑</button></td>
+        <td>
+          <span class="tag ${l.status==='Paid'?'tag-green':'tag-orange'}">${l.status||'Active'}</span>
+          <button class="btn btn-sm btn-secondary" style="margin-left:4px;" onclick="editLoan(${i})">✏️</button>
+          ${l.status==='Paid'
+            ? `<button class="btn btn-sm btn-secondary" style="margin-left:3px;" onclick="resetLoanBalance(${i})">↩️ Reset</button>`
+            : `<button class="btn btn-sm btn-primary" style="margin-left:3px;background:#e67e22;" onclick="openDeductNow(${i})">💳 Deduct</button>
+               <button class="btn btn-sm btn-success" style="margin-left:3px;" onclick="markLoanPaid(${i})">✓ Paid</button>`
+          }
+          <button class="btn btn-sm btn-danger" style="margin-left:3px;" onclick="deleteLoan(${i})">🗑</button>
+        </td>
     </tr>`).join('')||'<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--muted);">No loans recorded.</td></tr>';
 }
 let editingLoanIdx = -1;
@@ -2555,7 +2610,53 @@ function resetLoanBalance(i){
       .catch(e=>{ _loanSaving=false; console.warn(e); renderLoans(); });
   } else { setTimeout(()=>{_loanSaving=false;},8000); renderLoans(); showToastAdmin&&showToastAdmin(`✅ Reset to ₱${principal.toFixed(2)}`); }
 }
-window.resetLoanBalance = resetLoanBalance;
+let _deductNowIdx = -1;
+function openDeductNow(i) {
+  const l = loans[i];
+  if (!l) return;
+  _deductNowIdx = i;
+  const currentBalance = l.status==='Paid' ? 0 : +(l.balance||l.amount);
+  document.getElementById('deduct-now-info').innerHTML = `
+    <strong>${l.empName}</strong> — ${l.type}<br>
+    Principal: ₱${fmt(l.amount)} | Balance: <strong>₱${fmt(currentBalance)}</strong><br>
+    <span style="color:var(--muted);font-size:11px;">Scheduled per cut-off: ₱${fmt(l.monthly)}</span>`;
+  document.getElementById('deduct-now-amount').value = '';
+  document.getElementById('deduct-now-note').value = '';
+  document.getElementById('deduct-now-modal').style.display = 'block';
+}
+window.openDeductNow = openDeductNow;
+
+function confirmDeductNow() {
+  const i = _deductNowIdx;
+  if (i < 0 || !loans[i]) return;
+  const amount = +document.getElementById('deduct-now-amount').value;
+  if (!amount || amount <= 0) { alert('Please enter a valid amount.'); return; }
+  const note = document.getElementById('deduct-now-note').value || '';
+  const l = loans[i];
+  const currentBalance = l.status==='Paid' ? 0 : +(l.balance||l.amount);
+  const newBalance = Math.max(0, currentBalance - amount);
+  loans[i].balance = newBalance;
+  if (newBalance <= 0) loans[i].status = 'Paid';
+  // Log the manual deduction
+  if (!loans[i].deductions) loans[i].deductions = [];
+  loans[i].deductions.push({
+    date: toLocalDateStr(new Date()),
+    amount,
+    note,
+    type: 'manual'
+  });
+  save('loans', loans);
+  _loanSaving = true;
+  if (window._fbDB && window._fbFns) {
+    window._fbFns.set(window._fbFns.ref(window._fbDB,'loans'), loans)
+      .then(()=>{ setTimeout(()=>{_loanSaving=false;},8000); })
+      .catch(e=>{ _loanSaving=false; console.warn(e); });
+  } else { setTimeout(()=>{_loanSaving=false;},8000); }
+  closeModal('deduct-now-modal');
+  renderLoans();
+  showToastAdmin && showToastAdmin(`✅ ₱${fmt(amount)} deducted from ${l.empName}'s ${l.type}. Balance: ₱${fmt(newBalance)}`);
+}
+window.confirmDeductNow = confirmDeductNow;
 
 // ── Deduct loan balances after payroll is released ───────────
 // Call this once per cut-off after confirming payroll is correct
