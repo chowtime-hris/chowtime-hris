@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Chowtime POS — 20260802-215748</title>
+<title>Chowtime POS — 20260802-222836</title>
 <meta name="theme-color" content="#6A1B9A"/>
 <meta name="mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260802-215748 -->
+<!-- BUILD:20260802-222836 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -5692,7 +5692,7 @@ function renderDRDoc(po,cs,brs){
 // ─── BUILD / UPDATE CHECK ────────────────────
 // GitHub Pages caches hard, so a branch can run an old copy for hours.
 // Without a visible stamp a bug report cannot be tied to a version.
-const BUILD = "20260802-215748";
+const BUILD = "20260802-222836";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -9694,6 +9694,7 @@ function App(){
   const [zHistAll,setZHistAll]=useState([]);             // every branch, for Reports
   const [invView,setInvView]=useState("");               // "" = Main; else a branch id
   const [invViewData,setInvViewData]=useState([]);        // that branch's stock
+  const [editSub,setEditSub]=useState(null);             // subscription being edited
   const [newBuild,setNewBuild]=useState(null);           // a newer build is live
   const [subs,setSubs]=useState([]);                     // subscriptions, all branches
   const [openDisc,setOpenDisc]=useState({});             // expanded discrepancy reports
@@ -11740,7 +11741,67 @@ function App(){
           )
         ),
 
-        // A stale tab keeps running old code and reporting fixed bugs. One tap
+        editSub&&h("div",{style:{position:"fixed",inset:0,
+        background:"rgba(0,0,0,.55)",display:"flex",alignItems:"center",
+        justifyContent:"center",zIndex:950,padding:16},
+        onClick:ev=>ev.target===ev.currentTarget&&setEditSub(null)},
+        h("div",{style:{background:"#fff",width:"100%",maxWidth:400,
+          borderRadius:14,padding:"18px"}},
+          h("div",{style:{fontSize:15,fontWeight:800,marginBottom:3}},
+            "💳 "+editSub.name),
+          h("div",{style:{fontSize:12,color:C.muted,marginBottom:14}},
+            "Subscription terms for this branch"),
+          h("div",{style:{display:"grid",gap:11}},
+            [["amount","MONTHLY AMOUNT (₱)","number","0.00"],
+             ["gcash","GCASH NUMBER","text","09xx xxx xxxx"],
+             ["until","PAID UNTIL","date",""]].map(([k,lbl,tp,ph])=>
+              h("div",{key:k},
+                h("div",{style:{fontSize:12,fontWeight:800,color:C.muted,
+                  letterSpacing:1,marginBottom:4}},lbl),
+                h("input",{type:tp,value:editSub[k]||"",placeholder:ph,
+                  onFocus:e=>e.target.select(),
+                  onChange:e=>setEditSub(p=>Object.assign({},p,{[k]:e.target.value})),
+                  style:{width:"100%",padding:"10px",border:"1px solid "+C.border,
+                    borderRadius:8,fontSize:14,outline:"none",
+                    boxSizing:"border-box"}}))),
+            h("div",{style:{fontSize:11,color:C.muted,lineHeight:1.6,
+              background:C.bg,borderRadius:8,padding:"9px 11px"}},
+              "The amount applies to the next Confirm Payment onward — payments "+
+              "already recorded keep the figure they were charged at. The GCash "+
+              "number is what the branch sees on their countdown and lock screen.")
+          ),
+          h("div",{style:{display:"flex",gap:9,marginTop:16}},
+            h("button",{onClick:()=>setEditSub(null),
+              style:{flex:1,padding:"11px",borderRadius:9,
+                border:"1px solid "+C.border,background:"#fff",fontSize:13,
+                cursor:"pointer"}},"Cancel"),
+            h("button",{
+              onClick:async()=>{
+                const amt=Number(editSub.amount)||0;
+                if(amt<0){showT("Amount cannot be negative","warn");return;}
+                try{
+                  await setDoc(doc(db,"subscriptions",editSub.id),{
+                    branch:editSub.id,
+                    amount:amt,
+                    gcashNumber:String(editSub.gcash||"").trim(),
+                    paidUntil:editSub.until||localDate(),
+                    status:"active",
+                    updatedBy:user.name,updatedAt:serverTimestamp()
+                  },{merge:true});
+                  showT(editSub.name+" updated — ₱"+peso(amt)+"/month");
+                  setEditSub(null);
+                }catch(e){
+                  console.error("save subscription:",e);
+                  showT("Save failed: "+String(e&&e.message||e).slice(0,55),"err");
+                }
+              },
+              style:{flex:2,padding:"11px",borderRadius:9,border:"none",
+                background:C.primary,color:"#fff",fontWeight:800,fontSize:13,
+                cursor:"pointer"}},"💾 Save"))
+        )
+      ),
+
+      // A stale tab keeps running old code and reporting fixed bugs. One tap
       // reloads with the cache bypassed.
       newBuild&&h("div",{style:{padding:"9px 20px",display:"flex",gap:10,
         alignItems:"center",flexWrap:"wrap",background:"#E3F2FD",
@@ -12057,6 +12118,44 @@ function App(){
                       color:editable?C.text:C.muted}}),
                   k==="id"&&!editBr._isNew&&h("div",{style:{fontSize:12,color:C.muted,marginTop:2}},
                     "Cannot be changed — orders and inventory are tagged to it"))),
+              // Editing an existing branch showed no sign of who signs into
+              // it — the login was only ever visible at the moment of
+              // creation, so a forgotten address meant guessing.
+              !editBr._isNew&&(function(){
+                const mine=(staff||[]).filter(x=>x.branch===editBr.id);
+                const mgrs=mine.filter(x=>x.role==="manager");
+                const rest=mine.filter(x=>x.role!=="manager");
+                return h("div",{style:{background:C.bg,
+                  border:"1px solid "+C.border,borderRadius:9,
+                  padding:"10px 11px"}},
+                  h("div",{style:{fontSize:12,fontWeight:800,color:C.muted,
+                    letterSpacing:1,marginBottom:6}},"WHO SIGNS IN HERE"),
+                  mine.length===0
+                    ? h("div",{style:{fontSize:12,color:C.warning,lineHeight:1.5}},
+                        "No account is assigned to this branch yet — nobody can "+
+                        "sign in. Add one from Users, using the button for this branch.")
+                    : h("div",null,
+                        mgrs.concat(rest).map(x=>h("div",{key:x.id,
+                          style:{display:"flex",gap:8,alignItems:"center",
+                            padding:"5px 0",borderTop:"1px solid "+C.border}},
+                          h("div",{style:{flex:1,minWidth:0}},
+                            h("div",{style:{fontSize:13,fontWeight:700}},x.name),
+                            h("div",{style:{fontSize:11,color:C.muted,
+                              fontFamily:"monospace",wordBreak:"break-all"}},
+                              x.email||"— no login email —")),
+                          h("span",{style:{fontSize:11,fontWeight:700,
+                            padding:"3px 9px",borderRadius:20,
+                            background:(x.role==="manager"?C.primary:C.muted)+"18",
+                            color:x.role==="manager"?C.primary:C.muted}},
+                            x.role)))),
+                  h("div",{style:{fontSize:11,color:C.muted,marginTop:7,
+                    lineHeight:1.5}},
+                    "The password is not stored anywhere readable — if it is "+
+                    "lost, use Forgot password on the sign-in screen, or create "+
+                    "a replacement account and delete the old one.")
+                );
+              })(),
+
               editBr._isNew&&h("div",{style:{background:"#FFFDE7",
                 border:"1px solid #FFE082",borderRadius:9,padding:"10px 11px"}},
                 h("div",{style:{fontSize:12,fontWeight:800,color:"#E65100",
@@ -12564,18 +12663,12 @@ function App(){
                         background:"#2E7D32",color:"#fff",fontSize:13,
                         fontWeight:800,cursor:"pointer"}},"✓ Confirm Payment"),
                     h("button",{
-                      onClick:async()=>{
-                        const d=prompt("Extend until (YYYY-MM-DD):",
-                          st.until||localDate());
-                        if(!d)return;
-                        try{
-                          await setDoc(doc(db,"subscriptions",r.b.id),
-                            {branch:r.b.id,paidUntil:d,status:"active",
-                             overrideBy:user.name,overrideAt:serverTimestamp()},
-                            {merge:true});
-                          showT(r.b.full+" until "+d);
-                        }catch(e){showT("Failed","err");}
-                      },
+                      onClick:()=>setEditSub({
+                        id:r.b.id, name:r.b.full,
+                        amount:String((r.sub&&r.sub.amount)||""),
+                        gcash:String((r.sub&&r.sub.gcashNumber)||""),
+                        until:st.until||localDate()
+                      }),
                       style:{padding:"6px 9px",borderRadius:7,fontSize:13,
                         border:"1px solid "+C.border,background:"#fff",
                         cursor:"pointer"}},"✎")
