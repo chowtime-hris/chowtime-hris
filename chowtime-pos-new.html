@@ -15,6 +15,8 @@
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
+<!-- Face recognition for the Time Clock — same build and models as the kiosk -->
+<script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
 <script type="importmap">
 {
   "imports": {
@@ -5768,6 +5770,57 @@ const logColFor=(bid)=>(bid==="ct-main"||bid==="main")
 //   pay always starts at shift start; lateness is deducted in pesos instead
 //   OT begins one hour after shift end, so a slightly late punch-out is not OT
 //   a straight shift takes no break and auto-earns OT past 9 paid hours
+// ── FACE RECOGNITION ──────────────────────────────────────
+// Ported from the kiosk: same library, same three nets, same 0.5 distance,
+// same three enrolment samples. A PIN can be lent to a workmate; a face
+// cannot, and buddy punching is the thing a time clock exists to stop.
+const FACE_MODEL_URL="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model";
+const FACE_THRESHOLD=0.5;      // stricter is lower; 0.5 matches the kiosk
+const FACE_SAMPLES=3;
+
+let _faceReady=false, _faceLoading=null;
+function faceLoadModels(){
+  if(_faceReady)return Promise.resolve(true);
+  if(_faceLoading)return _faceLoading;
+  _faceLoading=(async()=>{
+    if(typeof faceapi==="undefined")return false;
+    try{
+      await Promise.all([
+        faceapi.nets.tinyFaceDetector.loadFromUri(FACE_MODEL_URL),
+        faceapi.nets.faceLandmark68TinyNet.loadFromUri(FACE_MODEL_URL),
+        faceapi.nets.faceRecognitionNet.loadFromUri(FACE_MODEL_URL),
+      ]);
+      _faceReady=true; return true;
+    }catch(e){ console.error("face models:",e); return false; }
+  })();
+  return _faceLoading;
+}
+
+// One descriptor from the current video frame, or null when no face is visible.
+async function faceDescriptorFrom(video){
+  if(!_faceReady||typeof faceapi==="undefined"||!video)return null;
+  try{
+    const det=await faceapi
+      .detectSingleFace(video,new faceapi.TinyFaceDetectorOptions())
+      .withFaceLandmarks(true)
+      .withFaceDescriptor();
+    return det?Array.from(det.descriptor):null;
+  }catch(e){ return null; }
+}
+
+// 1:1 check against the samples enrolled for one person — the same shape the
+// kiosk uses, so an employee already enrolled there behaves identically here.
+function faceMatches(live,stored){
+  if(!live||!stored||!stored.length)return {ok:false,distance:1};
+  try{
+    const labeled=new faceapi.LabeledFaceDescriptors("emp",
+      stored.map(d=>new Float32Array(d)));
+    const matcher=new faceapi.FaceMatcher([labeled],FACE_THRESHOLD);
+    const r=matcher.findBestMatch(new Float32Array(live));
+    return {ok:r.label==="emp"&&r.distance<FACE_THRESHOLD,distance:r.distance};
+  }catch(e){ return {ok:false,distance:1}; }
+}
+
 const HR_SHIFT_PRESETS=[
   {id:"am",      name:"AM 9-6",       start:"09:00",end:"18:00",bstart:"12:00",bend:"13:00",prep:30,grace:5},
   {id:"pm",      name:"PM 12-9",      start:"12:00",end:"21:00",bstart:"16:00",bend:"17:00",prep:30,grace:5},
@@ -6520,15 +6573,21 @@ function HRTimesheetPage({db,user,branchId,curBranch,showT}){
 }
 
 function HRClockPage({db,user,branchId,curBranch,showT}){
-  const [pin,setPin]=useState("");
   const [emps,setEmps]=useState([]);
-  const [open,setOpen]=useState([]);        // punches with no time out yet
+  const [faces,setFaces]=useState({});     // {empId:[descriptor,...]}
+  const [openRows,setOpenRows]=useState([]);
+  const [selId,setSelId]=useState("");
   const [busy,setBusy]=useState(false);
-  const [last,setLast]=useState(null);      // what just happened, for the banner
+  const [last,setLast]=useState(null);
   const [now,setNow]=useState(new Date());
+  const [camState,setCamState]=useState("idle");  // idle|starting|ready|denied|nomodel
+  const [verify,setVerify]=useState(null);        // null|scanning|match|nomatch|noface
+  const [dist,setDist]=useState(null);
+  const [enroll,setEnroll]=useState(null);        // {empId,samples:[]}
+  const videoRef=useRef(null);
+  const streamRef=useRef(null);
+  const liveRef=useRef(null);                     // latest descriptor from camera
 
-  // A wall clock that does not tick is worse than none — the crew reads it to
-  // decide whether they are late.
   useEffect(()=>{
     const t=setInterval(()=>setNow(new Date()),1000);
     return()=>clearInterval(t);
@@ -6538,25 +6597,64 @@ function HRClockPage({db,user,branchId,curBranch,showT}){
     const unsub=onSnapshot(
       query(collection(db,"hr_employees"),where("branch","==",branchId),limit(200)),
       snap=>setEmps(snap.docs.map(d=>({...d.data(),_docId:d.id}))),
-      (e)=>console.error("clock employees:",e));
+      e=>console.error("clock employees:",e));
     return()=>unsub();
   },[branchId]);
+
+  // Descriptors are plain number arrays — not photos. Nothing here can be
+  // turned back into a picture of anyone.
+  useEffect(()=>{
+    const unsub=onSnapshot(collection(db,"hr_face"),
+      snap=>{
+        const m={};
+        snap.docs.forEach(d=>{const v=d.data()||{};
+          if(v.descriptors&&v.descriptors.length)m[d.id]=v.descriptors;});
+        setFaces(m);
+      },e=>console.error("hr_face:",e));
+    return()=>unsub();
+  },[]);
 
   useEffect(()=>{
-    // Open punches only: one equality filter, filtered further in memory so no
-    // composite index is required.
     const unsub=onSnapshot(
       query(collection(db,"hr_attendance"),where("branch","==",branchId),limit(300)),
-      snap=>{
-        const rows=snap.docs.map(d=>({...d.data(),_docId:d.id}));
-        setOpen(rows.filter(r=>!r.timeOut));
-      },
-      (e)=>console.error("clock attendance:",e));
+      snap=>setOpenRows(snap.docs.map(d=>({...d.data(),_docId:d.id}))
+        .filter(r=>!r.timeOut)),
+      e=>console.error("clock attendance:",e));
     return()=>unsub();
   },[branchId]);
 
-  // An employee can carry a weekly rota; fall back to the branch default, then
-  // to AM. Whatever it resolves to is stored on the punch itself.
+  // camera + models
+  useEffect(()=>{
+    let alive=true, loop=null;
+    (async()=>{
+      setCamState("starting");
+      const ok=await faceLoadModels();
+      if(!alive)return;
+      if(!ok){setCamState("nomodel");return;}
+      try{
+        const st=await navigator.mediaDevices.getUserMedia(
+          {video:{facingMode:"user",width:{ideal:640},height:{ideal:480}},audio:false});
+        if(!alive){st.getTracks().forEach(t=>t.stop());return;}
+        streamRef.current=st;
+        if(videoRef.current){videoRef.current.srcObject=st;await videoRef.current.play();}
+        setCamState("ready");
+        // keep the newest descriptor warm so a punch does not wait on detection
+        loop=setInterval(async()=>{
+          if(!alive||!videoRef.current)return;
+          liveRef.current=await faceDescriptorFrom(videoRef.current);
+        },400);
+      }catch(e){
+        console.error("camera:",e);
+        setCamState("denied");
+      }
+    })();
+    return()=>{
+      alive=false;
+      if(loop)clearInterval(loop);
+      if(streamRef.current)streamRef.current.getTracks().forEach(t=>t.stop());
+    };
+  },[]);
+
   const shiftForToday=(emp)=>{
     const dow=new Date().getDay();
     const rota=(emp&&emp.shiftByDay)||null;
@@ -6567,159 +6665,241 @@ function HRClockPage({db,user,branchId,curBranch,showT}){
             rest:!!def.rest};
   };
 
-  const punch=async()=>{
-    if(pin.length<4){showT("Enter your PIN","warn");return;}
-    const emp=emps.find(e=>String(e.pin)===pin&&e.active!==false);
-    if(!emp){
-      showT("PIN not recognised at "+curBranch.name,"err");
-      setPin(""); return;
-    }
+  const doPunch=async(emp)=>{
     setBusy(true);
     try{
-      const openRow=open.find(o=>o.empId===emp._docId);
+      const openRow=openRows.find(o=>o.empId===emp._docId);
       const stamp=new Date();
       if(openRow){
         const hrs=hrHours(openRow.timeIn,stamp.toISOString());
         await updateDoc(doc(db,"hr_attendance",openRow._docId),{
-          timeOut:stamp.toISOString(),
-          hours:hrs,
-          outBy:user.name,
-          closedAt:serverTimestamp()
-        });
+          timeOut:stamp.toISOString(),hours:hrs,
+          outBy:user.name,outVerified:"face",closedAt:serverTimestamp()});
         setLast({type:"out",name:emp.name,at:stamp,hours:hrs});
         showT(emp.name+" clocked OUT · "+hrs+" hrs");
       }else{
         await addDoc(collection(db,"hr_attendance"),{
           empId:emp._docId,empName:emp.name,position:emp.position||"",
-          branch:branchId,
-          date:localDate(stamp),
+          branch:branchId,date:localDate(stamp),
           period:hrPeriod(localDate(stamp)).id,
-          timeIn:stamp.toISOString(),
-          timeOut:null,hours:null,
-          dailyRate:Number(emp.dailyRate)||0,   // rate as it stood on the day
-          // and the schedule as it stood, for the same reason
+          timeIn:stamp.toISOString(),timeOut:null,hours:null,
+          dailyRate:Number(emp.dailyRate)||0,
           shift:shiftForToday(emp),
-          inBy:user.name,
-          at:serverTimestamp()
-        });
+          inBy:user.name,inVerified:"face",
+          at:serverTimestamp()});
         setLast({type:"in",name:emp.name,at:stamp});
         showT(emp.name+" clocked IN");
       }
-      setPin("");
+      setSelId(""); setVerify(null); setDist(null);
     }catch(e){
-      console.error("punch failed:",e);
+      console.error("punch:",e);
       showT("Punch failed: "+String(e&&e.message||e).slice(0,60),"err");
     }
     setBusy(false);
   };
 
-  const key=(k)=>{
-    if(k==="del"){setPin(p=>p.slice(0,-1));return;}
-    if(k==="clr"){setPin("");return;}
-    setPin(p=>p.length>=6?p:p+k);
+  const scanAndPunch=async()=>{
+    const emp=emps.find(e=>e._docId===selId);
+    if(!emp){showT("Pick your name first","warn");return;}
+    const stored=faces[emp._docId];
+    if(!stored||!stored.length){
+      showT(emp.name+" has no face registered yet — ask your manager","err");
+      return;
+    }
+    setVerify("scanning"); setDist(null);
+    // Give detection a few tries rather than failing on one bad frame.
+    for(let k=0;k<12;k++){
+      const live=liveRef.current;
+      if(live){
+        const r=faceMatches(live,stored);
+        setDist(r.distance);
+        if(r.ok){ setVerify("match"); await doPunch(emp); return; }
+        setVerify("nomatch");
+        showT("Face not recognised — try again facing the camera","err");
+        return;
+      }
+      await new Promise(r=>setTimeout(r,250));
+    }
+    setVerify("noface");
+    showT("No face detected — check the lighting","warn");
   };
 
-  const fmt=(d)=>d.toLocaleTimeString("en-PH",
-    {hour:"2-digit",minute:"2-digit",hour12:true});
+  const capture=async()=>{
+    const live=liveRef.current;
+    if(!live){showT("No face detected — hold still","warn");return;}
+    setEnroll(p=>({...p,samples:[...(p.samples||[]),live]}));
+    showT("Photo "+(((enroll&&enroll.samples)||[]).length+1)+"/"+FACE_SAMPLES+" captured");
+  };
+
+  const saveEnroll=async()=>{
+    if(!enroll||!enroll.empId)return;
+    const list=enroll.samples||[];
+    if(list.length<FACE_SAMPLES){showT("Need "+FACE_SAMPLES+" captures","warn");return;}
+    setBusy(true);
+    try{
+      const emp=emps.find(e=>e._docId===enroll.empId);
+      await setDoc(doc(db,"hr_face",enroll.empId),{
+        empId:enroll.empId,empName:(emp&&emp.name)||"",
+        branch:branchId,
+        descriptors:list,          // numbers only — never an image
+        registeredAt:serverTimestamp(),registeredBy:user.name
+      },{merge:true});
+      showT(((emp&&emp.name)||"Employee")+" face registered ✓");
+      setEnroll(null);
+    }catch(e){
+      showT("Save failed: "+String(e&&e.message||e).slice(0,60),"err");
+    }
+    setBusy(false);
+  };
+
+  const fmt=(d)=>d.toLocaleTimeString("en-PH",{hour:"2-digit",minute:"2-digit",hour12:true});
+  const active=emps.filter(e=>e.active!==false);
+  const canManage=user.role==="owner"||user.role==="manager"||user.role==="commissary";
+  const selEmp=active.find(e=>e._docId===selId);
+  const openFor=selEmp?openRows.find(o=>o.empId===selEmp._docId):null;
+  const guideCol=verify==="match"?C.success
+    :(verify==="nomatch"||verify==="noface")?C.danger
+    :verify==="scanning"?C.warning:C.border;
 
   return h("div",null,
     h(SectionHeader,{title:"⏰ Time Clock — "+curBranch.name}),
 
-    h("div",{style:{display:"grid",gridTemplateColumns:"minmax(260px,340px) 1fr",
+    h("div",{style:{display:"grid",gridTemplateColumns:"minmax(300px,400px) 1fr",
       gap:14,alignItems:"start",
-      ...(typeof window!=="undefined"&&window.innerWidth<780
+      ...(typeof window!=="undefined"&&window.innerWidth<820
         ?{gridTemplateColumns:"1fr"}:{})}},
 
-      // ── keypad ──────────────────────────────────────────
       h("div",{style:{background:"#fff",border:"1px solid "+C.border,
         borderRadius:14,padding:"16px"}},
         h("div",{style:{textAlign:"center",marginBottom:12}},
           h("div",{style:{fontSize:32,fontWeight:900,letterSpacing:1}},fmt(now)),
           h("div",{style:{fontSize:12,color:C.muted,marginTop:2}},
-            now.toLocaleDateString("en-PH",
-              {weekday:"long",month:"long",day:"numeric"}))),
+            now.toLocaleDateString("en-PH",{weekday:"long",month:"long",day:"numeric"}))),
 
-        last&&h("div",{style:{background:last.type==="in"?C.success+"18":C.primary+"18",
-          border:"1px solid "+(last.type==="in"?C.success:C.primary),
-          borderRadius:10,padding:"10px 12px",marginBottom:12,textAlign:"center"}},
-          h("div",{style:{fontSize:14,fontWeight:800,
-            color:last.type==="in"?C.success:C.primary}},
+        h("div",{style:{position:"relative",borderRadius:12,overflow:"hidden",
+          background:"#000",aspectRatio:"4/3",marginBottom:11,
+          border:"3px solid "+guideCol}},
+          h("video",{ref:videoRef,autoPlay:true,muted:true,playsInline:true,
+            style:{width:"100%",height:"100%",objectFit:"cover",
+              transform:"scaleX(-1)"}}),
+          camState!=="ready"&&h("div",{style:{position:"absolute",inset:0,
+            display:"flex",alignItems:"center",justifyContent:"center",
+            background:"rgba(0,0,0,.7)",color:"#fff",fontSize:13,
+            textAlign:"center",padding:16}},
+            camState==="starting"?"Starting camera…"
+            :camState==="denied"?"Camera blocked — allow camera access for this site, then reload"
+            :camState==="nomodel"?"Face models could not load — check the connection"
+            :"Camera off"),
+          verify&&h("div",{style:{position:"absolute",left:0,right:0,bottom:0,
+            padding:"9px",textAlign:"center",fontSize:13,fontWeight:800,
+            color:"#fff",background:guideCol+"E6"}},
+            verify==="scanning"?"Scanning…"
+            :verify==="match"?("Verified"+(dist!=null?" · "+Math.round((1-dist)*100)+"%":""))
+            :verify==="nomatch"?"Not recognised"
+            :"No face detected")
+        ),
+
+        last&&h("div",{style:{background:C.primary+"18",
+          border:"1px solid "+C.primary,borderRadius:10,padding:"10px 12px",
+          marginBottom:11,textAlign:"center"}},
+          h("div",{style:{fontSize:14,fontWeight:800,color:C.primary}},
             last.name+" — "+(last.type==="in"?"CLOCKED IN":"CLOCKED OUT")),
           h("div",{style:{fontSize:12,color:C.muted,marginTop:2}},
             fmt(last.at)+(last.hours!=null?" · "+last.hours+" hrs":""))),
 
-        h("div",{style:{textAlign:"center",fontSize:30,fontWeight:900,
-          letterSpacing:8,minHeight:42,color:pin?C.text:C.border,
-          fontFamily:"monospace"}},
-          pin?"•".repeat(pin.length):"— — — —"),
+        h("select",{value:selId,
+          onChange:e=>{setSelId(e.target.value);setVerify(null);setDist(null);},
+          style:{width:"100%",padding:"13px",borderRadius:10,fontSize:15,
+            outline:"none",cursor:"pointer",fontWeight:700,
+            border:"1px solid "+C.border,marginBottom:10}},
+          h("option",{value:""},"— Select your name —"),
+          active.map(e=>h("option",{key:e._docId,value:e._docId},
+            e.name+(faces[e._docId]?"":"  (no face yet)")))),
 
-        h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",
-          gap:8,marginTop:12}},
-          ["1","2","3","4","5","6","7","8","9","clr","0","del"].map(k=>
-            h("button",{key:k,onClick:()=>key(k),
-              style:{padding:"18px 0",borderRadius:11,cursor:"pointer",
-                fontSize:k==="clr"||k==="del"?15:22,fontWeight:800,
-                border:"1px solid "+C.border,
-                background:k==="clr"||k==="del"?C.bg:"#fff",
-                color:k==="clr"?C.danger:C.text}},
-              k==="del"?"⌫":k==="clr"?"C":k))),
+        h("button",{onClick:scanAndPunch,
+          disabled:busy||!selId||camState!=="ready",
+          style:{width:"100%",padding:"17px",borderRadius:12,border:"none",
+            fontSize:17,fontWeight:800,color:"#fff",
+            background:(busy||!selId||camState!=="ready")?"#ccc":C.primary,
+            cursor:(busy||!selId||camState!=="ready")?"not-allowed":"pointer"}},
+          busy?"…":(openFor?"Scan face — CLOCK OUT":"Scan face — CLOCK IN")),
 
-        h("button",{onClick:punch,disabled:busy||pin.length<4,
-          style:{width:"100%",marginTop:12,padding:"17px",borderRadius:12,
-            border:"none",fontSize:18,fontWeight:800,
-            background:(busy||pin.length<4)?"#ccc":C.primary,color:"#fff",
-            cursor:(busy||pin.length<4)?"not-allowed":"pointer"}},
-          busy?"...":"⏰ Punch In / Out")
+        canManage&&h("button",{
+          onClick:()=>{
+            if(!selId){showT("Pick the employee to register first","warn");return;}
+            setEnroll({empId:selId,samples:[]});
+          },
+          style:{width:"100%",marginTop:9,padding:"11px",borderRadius:10,
+            border:"1px solid "+C.border,background:"#fff",fontSize:13,
+            fontWeight:700,cursor:"pointer",color:C.text}},
+          "📷 Register this employee's face")
       ),
 
-      // ── who is on the floor ─────────────────────────────
       h("div",{style:{background:"#fff",border:"1px solid "+C.border,
         borderRadius:14,padding:"16px"}},
         h("div",{style:{fontSize:14,fontWeight:800,marginBottom:3}},
-          "On duty now — "+open.length),
+          "On duty now — "+openRows.length),
         h("div",{style:{fontSize:12,color:C.muted,marginBottom:11}},
-          "Anyone still clocked in. A name left here overnight means a missed "+
-          "punch out, and that shows up as a short day on the timesheet."),
-
-        open.length===0
+          "A name still here in the morning means a missed punch out — it "+
+          "shows up as a short day on the timesheet."),
+        openRows.length===0
           ? h("div",{style:{textAlign:"center",padding:"30px 14px",
               color:C.muted,fontSize:13}},
               h("div",{style:{fontSize:30,marginBottom:8}},"🌙"),
               "Nobody is clocked in")
-          : open
-              .slice()
+          : openRows.slice()
               .sort((a,b)=>String(a.timeIn||"").localeCompare(String(b.timeIn||"")))
               .map(o=>{
-                const since=new Date(o.timeIn);
-                const elapsed=hrHours(o.timeIn,now.toISOString());
-                const longShift=elapsed!=null&&elapsed>12;
-                return h("div",{key:o._docId,
-                  style:{display:"flex",gap:10,alignItems:"center",
-                    padding:"10px 0",borderBottom:"1px solid #F0F0F0"}},
+                const el=hrHours(o.timeIn,now.toISOString());
+                const long=el!=null&&el>12;
+                return h("div",{key:o._docId,style:{display:"flex",gap:10,
+                  alignItems:"center",padding:"10px 0",
+                  borderBottom:"1px solid "+C.border}},
                   h("div",{style:{width:9,height:9,borderRadius:"50%",
-                    background:longShift?C.danger:C.success,flexShrink:0}}),
+                    background:long?C.danger:C.success,flexShrink:0}}),
                   h("div",{style:{flex:1,minWidth:0}},
                     h("div",{style:{fontSize:13,fontWeight:700}},o.empName),
                     h("div",{style:{fontSize:11,color:C.muted,marginTop:1}},
-                      (o.position||"")+(o.position?" · ":"")+"in at "+fmt(since))),
+                      (o.position||"")+(o.position?" · ":"")
+                      +"in at "+fmt(new Date(o.timeIn)))),
                   h("div",{style:{fontSize:13,fontWeight:800,
-                    color:longShift?C.danger:C.text}},
-                    (elapsed!=null?elapsed:"—")+" hrs"),
-                  longShift&&h("span",{style:{fontSize:11,color:C.danger,
-                    fontWeight:700}},"check")
-                );
+                    color:long?C.danger:C.text}},(el!=null?el:"—")+" hrs"));
               })
+      )
+    ),
+
+    enroll&&h("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",
+      display:"flex",alignItems:"center",justifyContent:"center",zIndex:900,padding:16},
+      onClick:ev=>ev.target===ev.currentTarget&&setEnroll(null)},
+      h("div",{style:{background:"#fff",width:"100%",maxWidth:380,
+        borderRadius:14,padding:"18px",textAlign:"center"}},
+        h("div",{style:{fontSize:15,fontWeight:800,marginBottom:4}},
+          "Register face — "+((emps.find(e=>e._docId===enroll.empId)||{}).name||"")),
+        h("div",{style:{fontSize:12,color:C.muted,marginBottom:12,lineHeight:1.6}},
+          "Take "+FACE_SAMPLES+" captures, looking straight at the camera and "+
+          "changing angle slightly between each. Only a set of numbers is "+
+          "stored — never a photo."),
+        h("div",{style:{fontSize:30,fontWeight:900,color:C.primary,marginBottom:10}},
+          ((enroll.samples||[]).length)+" / "+FACE_SAMPLES),
+        h("div",{style:{display:"flex",gap:9}},
+          h("button",{onClick:()=>setEnroll(null),
+            style:{flex:1,padding:"12px",borderRadius:9,
+              border:"1px solid "+C.border,background:"#fff",fontSize:13,
+              cursor:"pointer"}},"Cancel"),
+          (enroll.samples||[]).length<FACE_SAMPLES
+            ? h("button",{onClick:capture,
+                style:{flex:2,padding:"12px",borderRadius:9,border:"none",
+                  background:C.primary,color:"#fff",fontWeight:800,fontSize:13,
+                  cursor:"pointer"}},"📷 Capture")
+            : h("button",{onClick:saveEnroll,disabled:busy,
+                style:{flex:2,padding:"12px",borderRadius:9,border:"none",
+                  background:busy?"#ccc":C.success,color:"#fff",fontWeight:800,
+                  fontSize:13,cursor:"pointer"}},busy?"…":"💾 Save"))
       )
     )
   );
 }
 
-// ─── SUBSCRIPTION ─────────────────────────────────────────
-// One doc per branch: subscriptions/<branchId>. The billing anniversary is the
-// FIRST payment date, not the 1st of the month — a branch that starts on the
-// 5th is always due on the 5th.
-// Verification is manual: a browser app on the Spark plan has no server to
-// receive a GCash webhook, so the owner confirms each payment by reference.
 function addMonths(iso,n){
   const [y,m,d]=String(iso||"").split("-").map(Number);
   if(!y)return iso;
