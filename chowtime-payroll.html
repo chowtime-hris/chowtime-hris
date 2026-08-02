@@ -369,7 +369,7 @@ tbody td{padding:9px 11px;}
         <select id="slip-period" onchange="generatePayslip()" style="width:100%;"></select>
       </div>
       <div class="form-group" style="align-self:flex-end;">
-        <button class="btn btn-primary" onclick="window.print()">🖨️ Print</button>
+        <button class="btn btn-primary" onclick="printPayslip()">🖨️ Print</button>
         <button class="btn btn-secondary" onclick="emailPayslip()" style="margin-left:8px;">📧 Email</button>
       </div>
     </div>
@@ -466,6 +466,14 @@ tbody td{padding:9px 11px;}
   <div class="panel">
     <div class="panel-title"><span>🧾</span> Payroll Log — released cut-offs</div>
     <div class="alert alert-info">A snapshot is saved every time you release a cut-off. It freezes what each employee was actually paid, so later edits to DTR or rates never rewrite payroll history.</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px;">
+      <div class="form-group" style="margin-bottom:0;"><label>Year</label>
+        <select id="pl-f-year" onchange="onPayrollLogYear()"></select></div>
+      <div class="form-group" style="margin-bottom:0;"><label>Cut-off</label>
+        <select id="pl-f-period" onchange="renderPayrollLog()" style="min-width:170px;"></select></div>
+      <button class="btn btn-secondary" onclick="clearPayrollLogFilter()">Show all</button>
+      <button class="btn btn-secondary" onclick="exportPayrollLogCSV()">📥 Export CSV</button>
+    </div>
     <div class="table-wrap">
       <table>
         <thead><tr><th>Cut-off</th><th>Released</th><th>Employees</th><th>Gross</th><th>Gov't Ded.</th><th>Loan Ded.</th><th>Net Paid</th><th></th></tr></thead>
@@ -928,6 +936,7 @@ tbody td{padding:9px 11px;}
     </div>
     <div style="display:flex;gap:10px;margin-top:16px;">
       <button class="btn btn-secondary" onclick="exportSnapshotCSV()">📥 Export CSV</button>
+      <button class="btn btn-primary" onclick="usePayrollSnapshotPeriod()">↩️ Work on this cut-off</button>
       <button class="btn btn-secondary" onclick="closeModal('payroll-snap-modal')">Close</button>
     </div>
   </div>
@@ -1304,7 +1313,13 @@ function getEmpIncentive(empId, periodKey){
   return (incentiveData[periodKey]||{})[empId]||null;
 }
 
-function buildPayrollRow(emp, periodKey) {
+function buildPayrollRow(emp, periodKey, opts) {
+  // preview:true  -> Payroll tab / dashboard: show the instalment that WILL be
+  //                  charged, so the numbers can be reviewed before releasing.
+  // preview:false -> Payslip, email, snapshot: report ONLY what the ledger says
+  //                  was actually charged. A payslip never carries a deduction
+  //                  that still reads Pending in the Loans tab.
+  const preview = !!(opts && opts.preview);
   if (!emp || !emp.id) return {name:'?',pos:'',days:0,basic:0,otPay:0,ndPay:0,holPay:0,gross:0,sss:0,phic:0,pagibig:0,tax:0,loanDed:0,totalDed:0,net:0,ot:0,nd:0,late:0,hasDTR:false};
   const totals   = getDTRTotals(periodKey, emp.id);
   const hasDTR   = totals.days > 0 || totals.ot > 0 || totals.nd > 0 || totals.holPay > 0;
@@ -1337,31 +1352,46 @@ function buildPayrollRow(emp, periodKey) {
   const tax      = gross > 0 ? Math.round(computeTax(annualT)/24) : 0;
 
   // ── Per-category loan/deduction breakdown ───────────────────
+  // The ledger is the source of truth. Once a cut-off is released the payslip
+  // reports what was actually charged; it never recomputes a fresh instalment
+  // off a balance that has already been reduced.
   const pDet = getPeriodDetails(periodKey);
   const pEndStr = `${pDet.year}-${String(pDet.month+1).padStart(2,'0')}-${String(pDet.end).padStart(2,'0')}`;
-  const activeLoans = gross > 0 ? loans.filter(l=>
-    l.emp===emp.id &&
-    l.status!=='Paid' &&
-    (!l.start || l.start <= pEndStr)  // include if starts on or before period end
-  ) : [];
+  const periodReleased = isPeriodReleased(periodKey);
+  const empLoans = loans.filter(l => l && l.emp === emp.id);
   const loanByCategory = {};
   const LOAN_CATS = ['Cash Bond','Company Loan','Cash Advance','SSS Loan','Pag-Ibig Loan','Fine / Disciplinary','Uniform / Equipment','Other Deduction'];
   LOAN_CATS.forEach(cat => { loanByCategory[cat] = 0; });
-  activeLoans.forEach(l => {
-    const cat = l.type || 'Other Deduction';
-    // Never schedule more than what is still owed — the final cut-off of a
-    // loan takes the remainder, not another full instalment.
-    const remaining = (typeof loanBalanceOf === 'function')
-      ? loanBalanceOf(l)
-      : (l.balance === undefined || l.balance === null || isNaN(+l.balance) ? +(l.amount||0) : +l.balance);
-    const due = Math.max(0, Math.min(+(l.monthly||0), remaining));
-    if (loanByCategory[cat] !== undefined) loanByCategory[cat] += due;
-    else loanByCategory['Other Deduction'] += due;
+  const loanLines = [];
+  let loanPending = false;
+  empLoans.forEach(l => {
+    const cat = LOAN_CATS.indexOf(l.type) >= 0 ? l.type : 'Other Deduction';
+    const recorded = recordedDeductions(l, periodKey);
+    const remaining = loanBalanceOf(l);
+    let due = 0, after = remaining, isRecorded = false;
+    if (recorded.length) {
+      // Charged for real — replay the ledger, including the closing balance
+      due   = +recorded.reduce((a,e)=>a+(+e.amount||0), 0).toFixed(2);
+      after = +(+recorded[recorded.length-1].after || 0).toFixed(2);
+      isRecorded = true;
+    } else if (periodReleased) {
+      // Cut-off is closed and this loan was not charged in it
+      due = 0; after = remaining;
+    } else if (preview && gross > 0 && l.status !== 'Paid' && (!l.start || l.start <= pEndStr)) {
+      // Preview only — the scheduled amount, never more than owed
+      due   = Math.max(0, Math.min(+(l.monthly||0), remaining));
+      after = +(remaining - due).toFixed(2);
+      if (due > 0) loanPending = true;
+    }
+    if (due <= 0 && after <= 0) return;   // settled and nothing to report
+    loanByCategory[cat] += due;
+    loanLines.push({type: l.type || 'Other Deduction', principal: +(l.amount||0),
+                    due, after, recorded: isRecorded, closed: after <= 0});
   });
-  const loanDed  = Object.values(loanByCategory).reduce((a,b)=>a+b, 0);
+  const loanDed  = +Object.values(loanByCategory).reduce((a,b)=>a+b, 0).toFixed(2);
   const totalDed = gross > 0 ? totals.ded : 0;
   const net      = Math.max(0, gross - sss - phic - pagibig - tax - loanDed - totalDed);
-  return {id:emp.id,name:emp.name,pos:emp.pos,rate,days,hasDTR,basic,otPay,ndPay,holPay,incentiveAmt,incentiveType,gross,sss,phic,pagibig,tax,loanDed,loanByCategory,totalDed,net,ot:totals.ot,nd:totals.nd,late:totals.late};
+  return {id:emp.id,name:emp.name,pos:emp.pos,rate,days,hasDTR,basic,otPay,ndPay,holPay,incentiveAmt,incentiveType,gross,sss,phic,pagibig,tax,loanDed,loanByCategory,loanLines,loanPending,periodReleased,totalDed,net,ot:totals.ot,nd:totals.nd,late:totals.late};
 }
 
 // ══════════════════════════════════════════════════════════
@@ -2133,7 +2163,7 @@ function renderDashboard() {
 
   const rows = employees
     .filter(e => e && e.id && e.name) // skip invalid employees
-    .map(e=>{ try { return buildPayrollRow(e, p.key); } catch(err) { return {name:e.name||'?',pos:e.pos||'',days:0,ot:0,late:0,gross:0,net:0,sss:0,phic:0,pagibig:0,loanDed:0,totalDed:0}; } });
+    .map(e=>{ try { return buildPayrollRow(e, p.key, {preview:true}); } catch(err) { return {name:e.name||'?',pos:e.pos||'',days:0,ot:0,late:0,gross:0,net:0,sss:0,phic:0,pagibig:0,loanDed:0,totalDed:0}; } });
   const totalGross = rows.reduce((a,r)=>a+(r.gross||0),0);
   const totalNet   = rows.reduce((a,r)=>a+(r.net||0),0);
   const totalDed   = rows.reduce((a,r)=>a+(r.sss||0)+(r.phic||0)+(r.pagibig||0),0);
@@ -2495,7 +2525,7 @@ function computeAllPayroll() {
   document.getElementById('pay-period-label').textContent = p.label || getPeriodLabel(p.key);
   const rows = employees
     .filter(e => e && e.id && e.name)
-    .map(e => { try { return buildPayrollRow(e, p.key); } catch(err) { return {name:e.name,days:0,basic:0,otPay:0,ndPay:0,holPay:0,gross:0,sss:0,phic:0,pagibig:0,tax:0,loanDed:0,totalDed:0,net:0}; } });
+    .map(e => { try { return buildPayrollRow(e, p.key, {preview:true}); } catch(err) { return {name:e.name,days:0,basic:0,otPay:0,ndPay:0,holPay:0,gross:0,sss:0,phic:0,pagibig:0,tax:0,loanDed:0,totalDed:0,net:0}; } });
 
   document.getElementById('payroll-tbody').innerHTML = rows.map(r=>`
     <tr>
@@ -2543,7 +2573,10 @@ function generatePayslip() {
   const dtrNote = r.hasDTR
     ? ''
     : `<div class="alert alert-warn" style="margin-bottom:12px;">⚠️ No DTR entries found for this period. Enter attendance in the DTR tab first.</div>`;
-  document.getElementById('payslip-preview').innerHTML = dtrNote + `
+  const relNote = r.periodReleased
+    ? ''
+    : `<div class="alert alert-warn" style="margin-bottom:12px;">⚠️ ${p ? p.label : pKey} is not released yet, so no loan deduction appears below — nothing has been charged and the Loans tab still reads Pending. Release this cut-off in the Payroll tab, then generate the payslip again.</div>`;
+  document.getElementById('payslip-preview').innerHTML = dtrNote + relNote + `
     <div class="payslip-header">
       <div class="payslip-company">🍽️ ${settings.company}</div>
       <div style="font-size:12px;color:var(--muted);">${settings.address}</div>
@@ -2568,9 +2601,14 @@ function generatePayslip() {
     <div class="payslip-row"><span>Pag-Ibig (HDMF)</span><span>₱${fmt(r.pagibig)}</span></div>
     <div class="payslip-row"><span>Withholding Tax</span><span>₱${fmt(r.tax)}</span></div>
     <div class="payslip-row"><span>DTR Deductions (Late ${r.late}min / UT)</span><span>₱${fmt(r.totalDed)}</span></div>
-    ${r.loanByCategory ? Object.entries(r.loanByCategory).filter(([cat,amt])=>amt>0).map(([cat,amt])=>`
-    <div class="payslip-row"><span>${cat}</span><span>₱${fmt(amt)}</span></div>`).join('') : `<div class="payslip-row"><span>Loan Deduction</span><span>₱${fmt(r.loanDed)}</span></div>`}
+    ${(r.loanLines||[]).filter(l=>l.due>0).map(l=>`
+    <div class="payslip-row"><span>${l.type}${l.recorded?'':' <span style="font-size:10px;color:var(--muted);">(scheduled)</span>'}</span><span>₱${fmt(l.due)}</span></div>`).join('')}
     <div class="payslip-row payslip-total"><span>NET PAY</span><span style="color:var(--brand);font-size:17px;">₱${fmt(r.net)}</span></div>
+    ${(r.loanLines||[]).length ? `
+    <div class="payslip-section">Loan Balances</div>
+    ${r.loanLines.map(l=>`
+    <div class="payslip-row"><span>${l.type}${l.principal>0?` <span style="font-size:10px;color:var(--muted);">of ₱${fmt(l.principal)}</span>`:''}</span><span>${l.closed?`<span style="color:var(--green);font-weight:600;">FULLY PAID</span>`:`₱${fmt(l.after)}`}</span></div>`).join('')}
+    <div style="font-size:10px;color:var(--muted);margin-top:5px;">${r.periodReleased ? 'Balance remaining after this cut-off.' : 'Current balance — nothing charged for this cut-off yet.'}</div>` : ''}
     <div style="margin-top:22px;font-size:11px;color:var(--muted);text-align:center;">System-generated payslip — ${settings.company}</div>`;
 }
 
@@ -2909,6 +2947,20 @@ function logLedger(loan, action, amount, before, after, note, periodKey){
   pushLedger();
 }
 
+// Has this cut-off been released? Released periods are read-only history.
+function isPeriodReleased(periodKey){
+  try { return !!(payrollLog && payrollLog[periodKey]); } catch(e){ return false; }
+}
+
+// Deductions actually written to the ledger for one loan in one cut-off
+function recordedDeductions(loan, periodKey){
+  if (!loan || !loan.id || !periodKey) return [];
+  return loanLedger
+    .filter(e => e.loanId === loan.id && e.period === periodKey &&
+                 (e.action === 'cutoff-deduction' || e.action === 'manual-deduction'))
+    .sort((a,b) => a.ts - b.ts);
+}
+
 function ledgerFor(loanId){
   return loanLedger.filter(e => e.loanId === loanId).sort((a,b)=>a.ts-b.ts);
 }
@@ -3088,7 +3140,7 @@ function releasePayroll(){
   const p = getPeriod();
   const pLabel = p.label || p.key;
   const rows = employees.filter(e => e && e.id && e.name).map(e => {
-    try { return buildPayrollRow(e, p.key); } catch(err) { return null; }
+    try { return buildPayrollRow(e, p.key, {preview:true}); } catch(err) { return null; }
   }).filter(Boolean).filter(r => r.gross > 0);
 
   if (!rows.length) {
@@ -3239,8 +3291,88 @@ function renderLedger(){
 }
 window.renderLedger = renderLedger;
 
+function setupPayrollLogFilters(){
+  const ys = document.getElementById('pl-f-year');
+  if (!ys) return;
+  const years = [...new Set(Object.keys(payrollLog).map(k=>k.split('-')[0]))].sort().reverse();
+  const cur = ys.value;
+  ys.innerHTML = '<option value="">All years</option>' +
+    years.map(y=>'<option value="'+y+'">'+y+'</option>').join('');
+  if (cur && years.indexOf(cur) >= 0) ys.value = cur;
+  fillPayrollLogPeriods();
+}
+function fillPayrollLogPeriods(){
+  const ys = document.getElementById('pl-f-year');
+  const ps = document.getElementById('pl-f-period');
+  if (!ps) return;
+  const y = ys ? ys.value : '';
+  const keys = Object.keys(payrollLog).filter(k => !y || k.indexOf(y+'-') === 0).sort().reverse();
+  const cur = ps.value;
+  ps.innerHTML = '<option value="">All cut-offs</option>' +
+    keys.map(k=>'<option value="'+k+'">'+getPeriodLabel(k)+'</option>').join('');
+  if (cur && keys.indexOf(cur) >= 0) ps.value = cur;
+}
+function onPayrollLogYear(){ fillPayrollLogPeriods(); renderPayrollLog(); }
+function clearPayrollLogFilter(){
+  const ys = document.getElementById('pl-f-year');
+  const ps = document.getElementById('pl-f-period');
+  if (ys) ys.value = '';
+  fillPayrollLogPeriods();
+  if (ps) ps.value = '';
+  renderPayrollLog();
+}
+window.onPayrollLogYear = onPayrollLogYear;
+window.clearPayrollLogFilter = clearPayrollLogFilter;
+
+function filteredPayrollLogKeys(){
+  const y = document.getElementById('pl-f-year')?.value || '';
+  const k = document.getElementById('pl-f-period')?.value || '';
+  return Object.keys(payrollLog)
+    .filter(key => (!y || key.indexOf(y+'-') === 0) && (!k || key === k))
+    .sort().reverse();
+}
+
+function exportPayrollLogCSV(){
+  const keys = filteredPayrollLogKeys();
+  const rows = [['Cut-off','Released','Released by','Employee','Position','Days','Gross','SSS','PHIC','Pag-Ibig','Tax','Loan Ded.','Other Ded.','Net']];
+  keys.forEach(k => {
+    const snap = payrollLog[k];
+    (snap.rows||[]).forEach(r => rows.push([
+      snap.label || getPeriodLabel(k),
+      new Date(snap.releasedAt).toLocaleString('en-PH'),
+      snap.releasedBy || '',
+      r.name, r.pos || '', r.days,
+      r.gross, r.sss, r.phic, r.pagibig, r.tax, r.loanDed, r.otherDed, r.net
+    ]));
+  });
+  if (rows.length === 1) { showToastAdmin && showToastAdmin('Nothing to export for this filter.'); return; }
+  const csv = rows.map(r => r.map(c => '"' + String(c).replace(/"/g,'""') + '"').join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
+  a.download = 'chowtime-payroll-log.csv';
+  a.click();
+}
+window.exportPayrollLogCSV = exportPayrollLogCSV;
+
+// Set the whole app back to a past cut-off from its snapshot
+function usePayrollSnapshotPeriod(){
+  if (!_snapKey) return;
+  const ysel = document.getElementById('period-year-sel');
+  if (ysel) ysel.value = _snapKey.split('-')[0];
+  setPeriod(_snapKey);
+  try { buildPeriodDropdown(); } catch(e) {}
+  const gp = document.getElementById('global-period');
+  if (gp) gp.value = _snapKey;
+  closeModal('payroll-snap-modal');
+  showTab('payslip');
+  showToastAdmin && showToastAdmin('Now working on ' + getPeriodLabel(_snapKey));
+}
+window.usePayrollSnapshotPeriod = usePayrollSnapshotPeriod;
+
 function renderPayrollLog(){
-  const keys = Object.keys(payrollLog).sort().reverse();
+  setupPayrollLogFilters();
+  const keys = filteredPayrollLogKeys();
+  const filtered = !!(document.getElementById('pl-f-year')?.value || document.getElementById('pl-f-period')?.value);
   document.getElementById('payrolllog-tbody').innerHTML = keys.map(k => {
     const snap = payrollLog[k];
     const t = snap.totals || {};
@@ -3255,7 +3387,9 @@ function renderPayrollLog(){
       '<td style="font-weight:700;color:var(--green);">\u20b1' + fmt(t.net) + '</td>' +
       '<td><button class="btn btn-sm btn-secondary" onclick="openPayrollSnapshot(\'' + k + '\')">View</button></td>' +
       '</tr>';
-  }).join('') || '<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--muted);">No cut-off has been released yet. Release one from the Payroll tab.</td></tr>';
+  }).join('') || '<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--muted);">' +
+    (filtered ? 'No released cut-off matches this filter. Choose another, or press Show all.'
+              : 'No cut-off has been released yet. Release one from the Payroll tab.') + '</td></tr>';
 }
 
 let _snapKey = '';
@@ -3632,11 +3766,32 @@ refreshTab = function(id) {
   try { buildPeriodDropdown(); } catch(e) { console.error('Period dropdown error:', e); }
   try { renderDashboard(); } catch(e) { console.error('Dashboard error:', e); }
 // ── Email Payslip ────────────────────────────────────────────
+// Print and Email both pass through here. An unreleased cut-off means the NET
+// PAY on the slip will still drop once the loan instalments are charged, so say
+// that plainly before the slip leaves the building.
+function unreleasedPayslipOk(pKey) {
+  if (isPeriodReleased(pKey)) return true;
+  return confirm(getPeriodLabel(pKey) + ' is not released yet.\n\n' +
+    'This payslip carries NO loan deduction, so the NET PAY shown will drop once ' +
+    'you release the cut-off and the instalments are charged.\n\n' +
+    'Send it anyway?');
+}
+window.unreleasedPayslipOk = unreleasedPayslipOk;
+
+function printPayslip() {
+  if (!document.getElementById('slip-emp').value) return alert('Choose an employee first.');
+  const pKey = document.getElementById('slip-period').value || getPeriod().key;
+  if (!unreleasedPayslipOk(pKey)) return;
+  window.print();
+}
+window.printPayslip = printPayslip;
+
 function emailPayslip() {
   const empId = document.getElementById('slip-emp').value;
   const emp   = employees.find(e => e.id === empId);
   if (!emp) return alert('Please select an employee first.');
   const pKey  = document.getElementById('slip-period').value || getPeriod().key;
+  if (!unreleasedPayslipOk(pKey)) return;
   const r     = buildPayrollRow(emp, pKey);
   const t     = getDTRTotals(pKey, empId);
   const label = getPeriodLabel(pKey);
@@ -3679,12 +3834,16 @@ PhilHealth    : P${fmt(r.phic)}
 Pag-Ibig      : P${fmt(r.pagibig)}
 Withholding Tax: P${fmt(r.tax)}
 Late/UT Ded.  : P${fmt(lateUtDed)}
-${r.loanByCategory ? Object.entries(r.loanByCategory).filter(([c,a])=>a>0).map(([c,a])=>`${c.padEnd(14)}: P${fmt(a)}`).join('\n') : `Loan Deduction: P${fmt(r.loanDed)}`}
+${(r.loanLines||[]).filter(l=>l.due>0).map(l=>`${(l.type+(l.recorded?'':' (sched)')).padEnd(14).slice(0,14)}: P${fmt(l.due)}`).join('\n')}
 Total Ded.    : P${fmt((r.sss||0)+(r.phic||0)+(r.pagibig||0)+(r.tax||0)+lateUtDed+(r.loanDed||0))}
 
 ====================================
 NET PAY       : P${fmt(r.net)}
 ====================================
+${(r.loanLines||[]).length ? `
+-------- LOAN BALANCES --------
+${r.loanLines.map(l=>`${l.type.padEnd(14).slice(0,14)}: ${l.closed?'FULLY PAID':'P'+fmt(l.after)+' remaining of P'+fmt(l.principal)}`).join('\n')}
+${r.periodReleased?'Balance remaining after this cut-off.':'Current balance. This cut-off is not released yet, so no loan amount was charged on this payslip.'}` : ''}
 System-generated — Chowtime HRIS`);
 
   window.open(`mailto:${email}?subject=${subject}&body=${body}`, '_blank');
