@@ -211,15 +211,15 @@ const BRANCHES = [
 
 const ROLES = {
   owner:     {label:"Owner / Admin",    emoji:"\u{1F451}", color:"#6A1B9A",
-    nav:["dashboard","branches","subs","pos","orders","void_requests","all_orders","analytics","z_reading","reports","cash_count","expenses","cash_monitor","inventory","inv_log","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","payroll","kiosk","settings","printer"]},
+    nav:["dashboard","branches","subs","pos","orders","void_requests","all_orders","analytics","z_reading","reports","cash_count","expenses","cash_monitor","inventory","inv_log","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","payroll","kiosk","settings","printer","hr_staff","hr_time","hr_loans","hr_payroll","hr_clock"]},
   manager:   {label:"Branch Manager",   emoji:"\u{1F3EA}", color:"#007AFF",
-    nav:["branch_dash","pos","orders","analytics","z_reading","reports","cash_count","expenses","inventory","inv_log","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","bom_mgmt","payroll","kiosk","branch_settings","printer"]},
+    nav:["branch_dash","pos","orders","analytics","z_reading","reports","cash_count","expenses","inventory","inv_log","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","bom_mgmt","payroll","kiosk","branch_settings","printer","hr_staff","hr_time","hr_loans","hr_clock"]},
   cashier:   {label:"Cashier",          emoji:"\u{1F4B3}", color:"#34C759",
-    nav:["pos","orders","x_reading","printer","z_reading","cash_count","expenses","inventory","ca_request","loan_request","kiosk","void_request"]},
+    nav:["pos","orders","x_reading","printer","z_reading","cash_count","expenses","inventory","ca_request","loan_request","kiosk","void_request","hr_clock"]},
   crew:      {label:"Crew / Kitchen",   emoji:"\u{1F9D1}\u{200D}\u{1F373}", color:"#FF9500",
-    nav:["kitchen","ca_request","loan_request","kiosk","pos","orders"]},
+    nav:["kitchen","ca_request","loan_request","kiosk","pos","orders","hr_clock"]},
   stockclerk:{label:"Stock Clerk",      emoji:"\u{1F4E6}", color:"#AF52DE",
-    nav:["inventory","inv_log","stock_order","stock_receive","ca_request","loan_request","kiosk","pos","orders","expenses"]},
+    nav:["inventory","inv_log","stock_order","stock_receive","ca_request","loan_request","kiosk","pos","orders","expenses","hr_clock"]},
   commissary:{label:"Commissary Staff", emoji:"\u{1F3ED}", color:"#32ADE6",
     nav:["comm_dash","comm_inv","comm_orders","comm_dr","printer"]},
 };
@@ -237,7 +237,9 @@ const NAV_GROUPS = [
   {id:"menu",  icon:"\u{1F37D}", label:"Menu",
    pages:["menu_mgmt","branch_menu"]},
   {id:"people",icon:"\u{1F465}", label:"People & HR",
-   pages:["user_mgmt","crew_mgmt","payroll","kiosk","hris_dash","hris_branch",
+   pages:["user_mgmt","crew_mgmt",
+          "hr_staff","hr_clock","hr_time","hr_loans","hr_payroll",
+          "payroll","kiosk","hris_dash","hris_branch",
           "ca_request","loan_request","cash_advance"]},
   {id:"money", icon:"\u{1F4B8}", label:"Expenses",
    pages:["expenses"]},
@@ -253,6 +255,11 @@ const NAV_META = {
   z_reading:   {icon:"📄",label:"Z-Reading"},
   reports:     {icon:"🗂️",label:"Reports"},
   subs:        {icon:"💳",label:"Subscriptions"},
+  hr_staff:    {icon:"🧑‍🍳",label:"Employees"},
+  hr_clock:    {icon:"⏰",label:"Time Clock"},
+  hr_time:     {icon:"📋",label:"Timesheet"},
+  hr_loans:    {icon:"🧾",label:"Loans"},
+  hr_payroll:  {icon:"💵",label:"Payroll"},
   x_reading:   {icon:"📃",label:"X-Reading"},
   expenses:    {icon:"💸",label:"Expenses"},
   cash_monitor:{icon:"💵",label:"Cash Monitor"},
@@ -5742,6 +5749,317 @@ async function postReceivedToStock(db,po,byName){
 // a write uses another.
 const logColFor=(bid)=>(bid==="ct-main"||bid==="main")
   ? "inventory_log" : "inventory_log_"+bid;
+
+// ─── HR / PAYROLL ─────────────────────────────────────────
+// Lives in the POS Firestore, not the separate HRIS project. Nothing here
+// touches hrisDB — the old app keeps running untouched until its payroll is
+// proven to match this one.
+//
+//   hr_employees      one per person: rate, position, PIN, government IDs
+//   hr_attendance     one per clock-in, closed out on clock-out
+//   hr_loans          loan header: type, principal, per-cutoff deduction
+//   hr_loan_ledger    every balance movement, so a balance is never guessed
+//   hr_payroll_runs   a frozen snapshot per branch per cut-off
+//   hr_rate_history   what someone was paid and from when
+
+const HR_DEDUCTIONS=["Cash Bond","Company Loan","Cash Advance","SSS Loan",
+  "Pag-Ibig Loan","Fine/Disciplinary","Uniform/Equipment","Other Deduction"];
+
+const HR_POSITIONS=["Crew","Cashier","Cook","Stock Clerk","Branch Manager",
+  "Supervisor","Commissary Staff","Driver","Utility"];
+
+// Cut-offs are semi-monthly: 1st-15th and 16th-end of month.
+function hrPeriod(dateISO){
+  const d=String(dateISO||localDate());
+  const [y,m,dd]=d.split("-").map(Number);
+  const half=dd<=15?1:2;
+  const last=new Date(y,m,0).getDate();
+  return {
+    id:d.slice(0,7)+"-H"+half,
+    from:d.slice(0,7)+"-01".slice(0,3)+(half===1?"01":"16"),
+    to:half===1?(d.slice(0,7)+"-15"):(d.slice(0,7)+"-"+String(last).padStart(2,"0")),
+    label:d.slice(0,7)+(half===1?" · 1-15":" · 16-"+last)
+  };
+}
+function hrPeriodFrom(y,m,half){
+  const last=new Date(y,m,0).getDate();
+  const mm=String(m).padStart(2,"0");
+  return {
+    id:y+"-"+mm+"-H"+half,
+    from:y+"-"+mm+"-"+(half===1?"01":"16"),
+    to:y+"-"+mm+"-"+(half===1?"15":String(last).padStart(2,"0")),
+    label:y+"-"+mm+(half===1?" · 1-15":" · 16-"+last)
+  };
+}
+// List of recent cut-offs, newest first — used by every period selector.
+function hrRecentPeriods(n){
+  const out=[]; const now=new Date();
+  let y=now.getFullYear(), m=now.getMonth()+1;
+  let half=now.getDate()<=15?1:2;
+  for(let k=0;k<(n||12);k++){
+    out.push(hrPeriodFrom(y,m,half));
+    if(half===2){half=1;} else {half=2;m--;if(m<1){m=12;y--;}}
+  }
+  return out;
+}
+
+// Hours between two timestamps, rounded to 2dp. Null when still open.
+function hrHours(inISO,outISO){
+  if(!inISO||!outISO)return null;
+  const a=new Date(inISO), b=new Date(outISO);
+  if(isNaN(a)||isNaN(b)||b<=a)return 0;
+  return Math.round(((b-a)/3600000)*100)/100;
+}
+
+function HREmployeesPage({db,user,branchId,branches,showT}){
+  const isOwner=user.role==="owner"||user.role==="commissary";
+  const [emps,setEmps]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [edit,setEdit]=useState(null);
+  const [srch,setSrch]=useState("");
+  const [brFilter,setBrFilter]=useState(isOwner?"":branchId);
+  const [saving,setSaving]=useState(false);
+
+  useEffect(()=>{
+    // one equality filter at most, so no composite index is needed
+    const q=isOwner
+      ? query(collection(db,"hr_employees"),limit(400))
+      : query(collection(db,"hr_employees"),where("branch","==",branchId),limit(200));
+    const unsub=onSnapshot(q,snap=>{
+      const rows=snap.docs.map(d=>({...d.data(),_docId:d.id}));
+      rows.sort((a,b)=>String(a.name||"").localeCompare(String(b.name||"")));
+      setEmps(rows); setLoading(false);
+    },(err)=>{
+      console.error("hr_employees:",err);
+      showT("Could not load employees: "+String(err&&err.message||err).slice(0,50),"err");
+      setLoading(false);
+    });
+    return()=>unsub();
+  },[branchId,isOwner]);
+
+  // A branch's crew and its rates belong to that branch. The owner adds for
+  // MAIN only; every other branch is added by its own manager.
+  const canEdit=(e)=>!e||e.branch===branchId;
+  const blank=()=>({_isNew:true,name:"",position:"Crew",
+    branch:branchId,
+    dailyRate:"",pin:"",hireDate:localDate(),
+    sssNo:"",philhealthNo:"",pagibigNo:"",tin:"",active:true});
+
+  const save=async()=>{
+    const e=edit; if(!e)return;
+    if(!String(e.name||"").trim()){showT("Enter the employee name","warn");return;}
+    if(!/^\d{4,6}$/.test(String(e.pin||""))){
+      showT("PIN must be 4-6 digits — this is what they type at the Time Clock","warn");
+      return;
+    }
+    // A PIN identifies a person at the clock, so it has to be unique inside
+    // the branch or two people share one attendance record.
+    const clash=emps.find(x=>x.branch===e.branch&&String(x.pin)===String(e.pin)
+      &&x._docId!==e._docId);
+    if(clash){showT("PIN already used by "+clash.name,"err");return;}
+    setSaving(true);
+    try{
+      const rate=Number(e.dailyRate)||0;
+      const body={
+        name:String(e.name).trim(),
+        position:e.position||"Crew",
+        branch:e.branch||branchId,
+        dailyRate:rate,
+        pin:String(e.pin),
+        hireDate:e.hireDate||localDate(),
+        sssNo:e.sssNo||"",philhealthNo:e.philhealthNo||"",
+        pagibigNo:e.pagibigNo||"",tin:e.tin||"",
+        active:e.active!==false,
+        updatedAt:serverTimestamp(),updatedBy:user.name
+      };
+      if(e._isNew){
+        body.createdAt=serverTimestamp();
+        const ref=await addDoc(collection(db,"hr_employees"),body);
+        // Rate history starts the moment someone is hired, so a payslip can
+        // always be checked against the rate that applied on that date.
+        await addDoc(collection(db,"hr_rate_history"),{
+          empId:ref.id,empName:body.name,branch:body.branch,
+          dailyRate:rate,effectiveFrom:body.hireDate,
+          by:user.name,at:serverTimestamp()});
+        showT(body.name+" added ✓");
+      }else{
+        const prev=emps.find(x=>x._docId===e._docId)||{};
+        await updateDoc(doc(db,"hr_employees",e._docId),body);
+        if((Number(prev.dailyRate)||0)!==rate){
+          await addDoc(collection(db,"hr_rate_history"),{
+            empId:e._docId,empName:body.name,branch:body.branch,
+            dailyRate:rate,previousRate:Number(prev.dailyRate)||0,
+            effectiveFrom:localDate(),
+            by:user.name,at:serverTimestamp()});
+        }
+        showT(body.name+" updated ✓");
+      }
+      setEdit(null);
+    }catch(err){
+      console.error("save employee:",err);
+      showT("Save failed: "+String(err&&err.message||err).slice(0,60),"err");
+    }
+    setSaving(false);
+  };
+
+  const bName=(id)=>(branches.find(b=>b.id===id)||{}).full||id;
+  const shown=emps
+    .filter(e=>!brFilter||e.branch===brFilter)
+    .filter(e=>!srch||String(e.name||"").toLowerCase().includes(srch.toLowerCase())
+      ||String(e.position||"").toLowerCase().includes(srch.toLowerCase()));
+
+  const F=(k,label,ph,type)=>h("div",null,
+    h("div",{style:{fontSize:11,fontWeight:800,color:C.muted,
+      letterSpacing:1,marginBottom:4}},label),
+    h("input",{type:type||"text",value:edit[k]||"",placeholder:ph||"",
+      onFocus:e=>e.target.select(),
+      onChange:e=>setEdit(p=>Object.assign({},p,{[k]:e.target.value})),
+      style:{width:"100%",padding:"9px 10px",border:"1px solid "+C.border,
+        borderRadius:8,fontSize:13,outline:"none",boxSizing:"border-box"}}));
+
+  return h("div",null,
+    h(SectionHeader,{title:"🧑‍🍳 Employees",
+      action:()=>setEdit(blank()),
+      actionLabel:"Add to "+((branches.find(b=>b.id===branchId)||{}).name||branchId)}),
+
+    isOwner&&h("div",{style:{background:"#F3E9F7",border:"1px solid "+C.primary,
+      borderRadius:9,padding:"10px 13px",marginBottom:11,
+      fontSize:12,color:C.text,lineHeight:1.6}},
+      h("b",null,"You add crew for MAIN only."),
+      " Every other branch is managed by its own manager — their rows here are "+
+      "read-only, since crew and rates differ per store."),
+
+    h("div",{style:{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}},
+      h("input",{value:srch,onChange:e=>setSrch(e.target.value),
+        placeholder:"🔍 Search name or position...",
+        style:{flex:1,minWidth:180,padding:"9px 11px",border:"1px solid "+C.border,
+          borderRadius:8,fontSize:13,outline:"none"}}),
+      isOwner&&h("select",{value:brFilter,onChange:e=>setBrFilter(e.target.value),
+        style:{padding:"9px 11px",borderRadius:8,fontSize:13,outline:"none",
+          cursor:"pointer",border:"1px solid "+(brFilter?C.primary:C.border),
+          background:brFilter?"#F3E9F7":"#fff",
+          color:brFilter?C.primary:C.text,fontWeight:brFilter?700:400}},
+        h("option",{value:""},"All branches ("+emps.length+")"),
+        branches.map(b=>h("option",{key:b.id,value:b.id},
+          b.full+" ("+emps.filter(e=>e.branch===b.id).length+")")))
+    ),
+
+    loading
+      ? h("div",{style:{textAlign:"center",padding:"34px",color:C.muted,fontSize:13}},
+          "Loading...")
+      : shown.length===0
+        ? h("div",{style:{background:"#fff",border:"1px dashed "+C.border,
+            borderRadius:12,padding:"36px 20px",textAlign:"center"}},
+            h("div",{style:{fontSize:34,marginBottom:9}},"🧑‍🍳"),
+            h("div",{style:{fontSize:14,fontWeight:800,marginBottom:5}},
+              "No employees yet"),
+            h("div",{style:{fontSize:12,color:C.muted,lineHeight:1.6}},
+              "Add each person with a daily rate and a PIN. The PIN is what "+
+              "they type at the Time Clock to punch in and out."))
+        : h("div",{style:{background:"#fff",borderRadius:12,
+            border:"1px solid "+C.border,overflow:"hidden"}},
+            h("div",{style:{display:"grid",
+              gridTemplateColumns:"1fr 130px 110px 90px 70px",gap:8,
+              padding:"10px 14px",background:C.bg,
+              borderBottom:"1px solid "+C.border}},
+              ["NAME","POSITION","BRANCH","RATE/DAY","PIN"].map(hh=>
+                h("div",{key:hh,style:{fontSize:11,fontWeight:800,
+                  color:C.muted,letterSpacing:1}},hh))),
+            shown.map(e=>h("button",{key:e._docId,
+              onClick:()=>{
+                if(!canEdit(e)){
+                  showT(bName(e.branch)+" manages their own crew — view only here","warn");
+                  return;
+                }
+                setEdit(Object.assign({},e));
+              },
+              style:{display:"grid",width:"100%",textAlign:"left",
+                gridTemplateColumns:"1fr 130px 110px 90px 70px",gap:8,
+                padding:"11px 14px",border:"none",cursor:"pointer",
+                borderBottom:"1px solid #f5f5f5",
+                background:e.active===false?"#FAFAFA":"#fff",
+                cursor:canEdit(e)?"pointer":"default",
+                opacity:e.active===false?.5:(canEdit(e)?1:.65)}},
+              h("div",null,
+                h("div",{style:{fontSize:13,fontWeight:700}},e.name),
+                h("div",{style:{fontSize:11,color:C.muted,marginTop:1}},
+                  "since "+(e.hireDate||"—")
+                  +(e.active===false?" · INACTIVE":""))),
+              h("div",{style:{fontSize:12}},e.position||"—"),
+              h("div",{style:{fontSize:12,color:C.muted}},bName(e.branch)),
+              h("div",{style:{fontSize:13,fontWeight:800,textAlign:"right"}},
+                "₱"+peso(e.dailyRate)),
+              h("div",{style:{fontSize:12,textAlign:"right",
+                fontFamily:"monospace",color:C.muted}},"••"+String(e.pin||"").slice(-2))
+            ))
+          ),
+
+    edit&&h("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",
+      display:"flex",alignItems:"center",justifyContent:"center",zIndex:900,padding:16},
+      onClick:ev=>ev.target===ev.currentTarget&&setEdit(null)},
+      h("div",{style:{background:"#fff",width:"100%",maxWidth:520,borderRadius:14,
+        padding:"18px",maxHeight:"88vh",overflowY:"auto"}},
+        h("div",{style:{fontSize:15,fontWeight:800,marginBottom:14}},
+          edit._isNew?"➕ New Employee":"✏️ "+edit.name),
+
+        h("div",{style:{display:"grid",gap:10}},
+          F("name","FULL NAME","Juan Dela Cruz"),
+          h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
+            h("div",null,
+              h("div",{style:{fontSize:11,fontWeight:800,color:C.muted,
+                letterSpacing:1,marginBottom:4}},"POSITION"),
+              h("select",{value:edit.position||"Crew",
+                onChange:e=>setEdit(p=>Object.assign({},p,{position:e.target.value})),
+                style:{width:"100%",padding:"9px 10px",border:"1px solid "+C.border,
+                  borderRadius:8,fontSize:13,outline:"none",boxSizing:"border-box"}},
+                HR_POSITIONS.map(p=>h("option",{key:p,value:p},p)))),
+            h("div",null,
+              h("div",{style:{fontSize:11,fontWeight:800,color:C.muted,
+                letterSpacing:1,marginBottom:4}},"BRANCH"),
+              h("select",{value:edit.branch||branchId,disabled:true,
+                onChange:e=>setEdit(p=>Object.assign({},p,{branch:e.target.value})),
+                style:{width:"100%",padding:"9px 10px",border:"1px solid "+C.border,
+                  borderRadius:8,fontSize:13,outline:"none",boxSizing:"border-box",
+                  background:isOwner?"#fff":"#f5f5f5"}},
+                branches.map(b=>h("option",{key:b.id,value:b.id},b.full))))),
+
+          h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}},
+            F("dailyRate","RATE / DAY","0.00","number"),
+            F("pin","CLOCK PIN","4-6 digits"),
+            F("hireDate","DATE HIRED","","date")),
+
+          h("div",{style:{background:C.bg,borderRadius:9,padding:"11px 12px"}},
+            h("div",{style:{fontSize:11,fontWeight:800,color:C.muted,
+              letterSpacing:1,marginBottom:8}},"GOVERNMENT NUMBERS — optional"),
+            h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
+              F("sssNo","SSS",""),F("philhealthNo","PHILHEALTH",""),
+              F("pagibigNo","PAG-IBIG",""),F("tin","TIN",""))),
+
+          !edit._isNew&&h("button",{
+            onClick:()=>setEdit(p=>Object.assign({},p,{active:p.active===false})),
+            style:{padding:"10px",borderRadius:9,cursor:"pointer",fontSize:13,
+              fontWeight:700,
+              border:"1px solid "+(edit.active===false?C.success:C.danger),
+              background:"#fff",
+              color:edit.active===false?C.success:C.danger}},
+            edit.active===false
+              ? "Reactivate — include again in payroll"
+              : "Mark inactive — stop including in payroll")
+        ),
+
+        h("div",{style:{display:"flex",gap:9,marginTop:16}},
+          h("button",{onClick:()=>setEdit(null),
+            style:{flex:1,padding:"11px",borderRadius:9,border:"1px solid "+C.border,
+              background:"#fff",fontSize:13,cursor:"pointer"}},"Cancel"),
+          h("button",{onClick:save,disabled:saving,
+            style:{flex:2,padding:"11px",borderRadius:9,border:"none",
+              background:saving?"#ccc":C.primary,color:"#fff",
+              fontWeight:800,fontSize:13,cursor:saving?"wait":"pointer"}},
+            saving?"Saving...":"💾 Save"))
+      )
+    )
+  );
+}
 
 // ─── SUBSCRIPTION ─────────────────────────────────────────
 // One doc per branch: subscriptions/<branchId>. The billing anniversary is the
@@ -12501,6 +12819,11 @@ function App(){
               "If already lapsed it starts from today. The pencil is a manual override.")
           );
         })(),
+
+        // ══ HR: EMPLOYEES ══
+        page==="hr_staff"&&h(HREmployeesPage,{
+          db,user,branchId,branches,showT,key:"hrstaff"
+        }),
 
         // ══ REPORTS ARCHIVE ══
         page==="reports"&&(()=>{
