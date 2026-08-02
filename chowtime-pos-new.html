@@ -5762,6 +5762,99 @@ const logColFor=(bid)=>(bid==="ct-main"||bid==="main")
 //   hr_payroll_runs   a frozen snapshot per branch per cut-off
 //   hr_rate_history   what someone was paid and from when
 
+// Shift definitions. A punch on its own cannot produce late, undertime or OT —
+// those only exist relative to a schedule. Ported from the live payroll:
+//   late is measured from PREP START (shift start minus prep), not shift start
+//   pay always starts at shift start; lateness is deducted in pesos instead
+//   OT begins one hour after shift end, so a slightly late punch-out is not OT
+//   a straight shift takes no break and auto-earns OT past 9 paid hours
+const HR_SHIFT_PRESETS=[
+  {id:"am",      name:"AM 9-6",       start:"09:00",end:"18:00",bstart:"12:00",bend:"13:00",prep:30,grace:5},
+  {id:"pm",      name:"PM 12-9",      start:"12:00",end:"21:00",bstart:"16:00",bend:"17:00",prep:30,grace:5},
+  {id:"straight",name:"STRAIGHT 9-9", start:"09:00",end:"21:00",bstart:"",bend:"",prep:30,grace:5},
+  {id:"opening", name:"OPENING 8-5",  start:"08:00",end:"17:00",bstart:"12:00",bend:"13:00",prep:30,grace:5},
+  {id:"off",     name:"REST DAY",     start:"",end:"",bstart:"",bend:"",prep:0,grace:0,rest:true},
+];
+
+const HR_OT_MULT=1.25, HR_ND_MULT=1.10, HR_RH_MULT=2.00, HR_SH_MULT=1.30;
+const HR_HOURS_PER_DAY=8, HR_DAYS_PER_MONTH=26;
+
+function hrMins(t){
+  if(!t||String(t).indexOf(":")<0)return 0;
+  const [h,m]=String(t).split(":").map(Number);
+  return (h||0)*60+(m||0);
+}
+function hrTime(mins){
+  const h=Math.floor(mins/60),m=mins%60;
+  return String(h).padStart(2,"0")+":"+String(m).padStart(2,"0");
+}
+
+// One day, one shift, one row. Mirrors computeDTRRow in the live payroll.
+function hrComputeDay(entry,shift){
+  const sh=shift||{};
+  const rest=!!sh.rest||!sh.start||!sh.end;
+  const shiftStart=hrMins(sh.start||"09:00");
+  const shiftEnd  =hrMins(sh.end  ||"18:00");
+  const grace     =Number(sh.grace!=null?sh.grace:5)||0;
+  const prep      =Number(sh.prep !=null?sh.prep :30)||0;
+  const prepStart =shiftStart-prep;
+  const OT_BUFFER =60;
+
+  const name=String(sh.name||"").toUpperCase();
+  const isStraight=name.indexOf("STRAIGHT")>=0||name.indexOf("NONSTOP")>=0
+    ||name.indexOf("NO BREAK")>=0;
+  const hasBreak=!isStraight&&sh.bstart&&sh.bend&&sh.bstart!==sh.bend&&sh.bstart!=="00:00";
+  const breakMins=hasBreak?60:0;
+
+  const inS=String((entry&&entry.in)||""), outS=String((entry&&entry.out)||"");
+  const hasIn=inS.indexOf(":")>=0, hasOut=outS.indexOf(":")>=0;
+  if(!hasIn&&!hasOut)
+    return {hrs:0,late:0,ut:0,ot:0,nd:0,breakHrs:breakMins/60,status:"none",rest:rest};
+
+  const inM=hrMins(inS);
+  const late=rest?0:Math.max(0,inM-prepStart-grace);
+
+  if(hasIn&&!hasOut)
+    return {hrs:0,late:late,ut:0,ot:0,nd:0,breakHrs:0,status:"open",rest:rest};
+
+  const outM=hrMins(outS);
+
+  // A rest-day punch is paid for what was actually worked — there is no
+  // schedule to be late against or short of.
+  if(rest){
+    const worked=Math.max(0,outM-inM)/60;
+    const nd=outM>22*60?Number(((outM-22*60)/60).toFixed(2)):0;
+    return {hrs:Number(worked.toFixed(2)),late:0,ut:0,
+            ot:0,nd:nd,breakHrs:0,status:"rest",rest:true};
+  }
+
+  const paidStart=shiftStart;                      // never shifted by a late arrival
+  const effectiveOut=Math.min(outM,shiftEnd);      // regular hours cap at shift end
+  const worked=Math.max(0,(effectiveOut-paidStart)-breakMins);
+  let hrs=Number((worked/60).toFixed(2));
+
+  const isAuto=!!(entry&&entry.auto);
+  const ut=(!isAuto&&outM<shiftEnd)?Math.max(0,shiftEnd-outM):0;
+  let ot=outM>(shiftEnd+OT_BUFFER)
+    ? Number(((outM-(shiftEnd+OT_BUFFER))/60).toFixed(2)) : 0;
+  const nd=outM>22*60?Number(((outM-22*60)/60).toFixed(2)):0;
+
+  if(isStraight){
+    const cap=HR_HOURS_PER_DAY+1;   // 8 regular + 1 buffer before OT starts
+    if(hrs>cap){
+      ot=Number((ot+(hrs-cap)).toFixed(2));
+      hrs=cap;
+    }
+  }
+  // Holiday premium applies to overtime too. Paying holiday OT at the plain
+  // 1.25 underpays it: DOLE rates OT on a holiday at the holiday multiplier
+  // as well, so the two stack.
+  const hol=(entry&&entry.holiday)||"";
+  const otMult=hol==="RH"?HR_RH_MULT:(hol==="SH"?HR_SH_MULT:1);
+  return {hrs:hrs,late:late,ut:ut,ot:ot,nd:nd,holiday:hol,otMult:otMult,
+          breakHrs:breakMins/60,status:"complete",rest:false};
+}
+
 const HR_DEDUCTIONS=["Cash Bond","Company Loan","Cash Advance","SSS Loan",
   "Pag-Ibig Loan","Fine/Disciplinary","Uniform/Equipment","Other Deduction"];
 
@@ -5870,6 +5963,8 @@ function HREmployeesPage({db,user,branchId,branches,showT}){
         sssNo:e.sssNo||"",philhealthNo:e.philhealthNo||"",
         pagibigNo:e.pagibigNo||"",tin:e.tin||"",
         active:e.active!==false,
+        shiftByDay:e.shiftByDay||{},
+        shiftId:e.shiftId||"am",
         updatedAt:serverTimestamp(),updatedBy:user.name
       };
       if(e._isNew){
@@ -5922,7 +6017,7 @@ function HREmployeesPage({db,user,branchId,branches,showT}){
       action:()=>setEdit(blank()),
       actionLabel:"Add to "+((branches.find(b=>b.id===branchId)||{}).name||branchId)}),
 
-    isOwner&&h("div",{style:{background:"#F3E9F7",border:"1px solid "+C.primary,
+    isOwner&&h("div",{style:{background:C.primary+"18",border:"1px solid "+C.primary,
       borderRadius:9,padding:"10px 13px",marginBottom:11,
       fontSize:12,color:C.text,lineHeight:1.6}},
       h("b",null,"You add crew for MAIN only."),
@@ -5937,7 +6032,7 @@ function HREmployeesPage({db,user,branchId,branches,showT}){
       isOwner&&h("select",{value:brFilter,onChange:e=>setBrFilter(e.target.value),
         style:{padding:"9px 11px",borderRadius:8,fontSize:13,outline:"none",
           cursor:"pointer",border:"1px solid "+(brFilter?C.primary:C.border),
-          background:brFilter?"#F3E9F7":"#fff",
+          background:brFilter?C.primary+"18":"#fff",
           color:brFilter?C.primary:C.text,fontWeight:brFilter?700:400}},
         h("option",{value:""},"All branches ("+emps.length+")"),
         branches.map(b=>h("option",{key:b.id,value:b.id},
@@ -5976,8 +6071,8 @@ function HREmployeesPage({db,user,branchId,branches,showT}){
               style:{display:"grid",width:"100%",textAlign:"left",
                 gridTemplateColumns:"1fr 130px 110px 90px 70px",gap:8,
                 padding:"11px 14px",border:"none",cursor:"pointer",
-                borderBottom:"1px solid #f5f5f5",
-                background:e.active===false?"#FAFAFA":"#fff",
+                borderBottom:"1px solid #F0F0F0",
+                background:e.active===false?C.bg:"#fff",
                 cursor:canEdit(e)?"pointer":"default",
                 opacity:e.active===false?.5:(canEdit(e)?1:.65)}},
               h("div",null,
@@ -6020,13 +6115,45 @@ function HREmployeesPage({db,user,branchId,branches,showT}){
                 onChange:e=>setEdit(p=>Object.assign({},p,{branch:e.target.value})),
                 style:{width:"100%",padding:"9px 10px",border:"1px solid "+C.border,
                   borderRadius:8,fontSize:13,outline:"none",boxSizing:"border-box",
-                  background:isOwner?"#fff":"#f5f5f5"}},
+                  background:isOwner?"#fff":C.border}},
                 branches.map(b=>h("option",{key:b.id,value:b.id},b.full))))),
 
           h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}},
             F("dailyRate","RATE / DAY","0.00","number"),
             F("pin","CLOCK PIN","4-6 digits"),
             F("hireDate","DATE HIRED","","date")),
+
+          h("div",{style:{background:C.bg,borderRadius:9,padding:"11px 12px"}},
+            h("div",{style:{fontSize:11,fontWeight:800,color:C.muted,
+              letterSpacing:1,marginBottom:3}},"WEEKLY SHIFT"),
+            h("div",{style:{fontSize:11,color:C.muted,marginBottom:8,lineHeight:1.5}},
+              "Late, undertime and overtime are all measured against this. "+
+              "A rest day still pays whatever is actually worked."),
+            h("div",{style:{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:4}},
+              ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((d,ix)=>{
+                const cur=((edit.shiftByDay||{})[ix])||edit.shiftId||"am";
+                return h("div",{key:d},
+                  h("div",{style:{fontSize:10,fontWeight:800,color:C.muted,
+                    textAlign:"center",marginBottom:3}},d),
+                  h("select",{value:cur,
+                    onChange:e=>setEdit(p=>{
+                      const r=Object.assign({},p.shiftByDay||{});
+                      r[ix]=e.target.value;
+                      return Object.assign({},p,{shiftByDay:r});
+                    }),
+                    style:{width:"100%",padding:"5px 2px",fontSize:10,
+                      borderRadius:6,outline:"none",boxSizing:"border-box",
+                      border:"1px solid "+(cur==="off"?C.border:C.primary),
+                      background:cur==="off"?C.bg:C.primary+"18",
+                      color:cur==="off"?C.muted:C.primary,fontWeight:700}},
+                    HR_SHIFT_PRESETS.map(sp=>
+                      h("option",{key:sp.id,value:sp.id},
+                        sp.id==="off"?"OFF":sp.name.split(" ")[0]))));
+              })),
+            h("div",{style:{fontSize:10,color:C.muted,marginTop:6}},
+              HR_SHIFT_PRESETS.filter(x=>!x.rest)
+                .map(x=>x.name+" ("+x.start+"-"+x.end+")").join("  ·  "))
+          ),
 
           h("div",{style:{background:C.bg,borderRadius:9,padding:"11px 12px"}},
             h("div",{style:{fontSize:11,fontWeight:800,color:C.muted,
@@ -6056,6 +6183,532 @@ function HREmployeesPage({db,user,branchId,branches,showT}){
               background:saving?"#ccc":C.primary,color:"#fff",
               fontWeight:800,fontSize:13,cursor:saving?"wait":"pointer"}},
             saving?"Saving...":"💾 Save"))
+      )
+    )
+  );
+}
+
+function HRTimesheetPage({db,user,branchId,curBranch,showT}){
+  const periods=hrRecentPeriods(8);
+  const [period,setPeriod]=useState(periods[0].id);
+  const [emps,setEmps]=useState([]);
+  const [rows,setRows]=useState([]);
+  const [selEmp,setSelEmp]=useState("");
+  const [loading,setLoading]=useState(true);
+  const [editRow,setEditRow]=useState(null);
+
+  useEffect(()=>{
+    const unsub=onSnapshot(
+      query(collection(db,"hr_employees"),where("branch","==",branchId),limit(200)),
+      snap=>setEmps(snap.docs.map(d=>({...d.data(),_docId:d.id}))),
+      e=>console.error("timesheet employees:",e));
+    return()=>unsub();
+  },[branchId]);
+
+  useEffect(()=>{
+    setLoading(true);
+    // one equality filter; the period is narrowed in memory so no composite
+    // index is needed
+    const unsub=onSnapshot(
+      query(collection(db,"hr_attendance"),where("branch","==",branchId),limit(600)),
+      snap=>{
+        setRows(snap.docs.map(d=>({...d.data(),_docId:d.id}))
+          .filter(r=>r.period===period));
+        setLoading(false);
+      },
+      e=>{console.error("timesheet:",e);setLoading(false);});
+    return()=>unsub();
+  },[branchId,period]);
+
+  const per=periods.find(p=>p.id===period)||periods[0];
+
+  // Every punch already carries the shift that applied that day, so a rota
+  // change now cannot rewrite what a past day was measured against.
+  // Which preset best fits the actual time-in. Used only to offer a
+  // suggestion — never applied on its own.
+  const suggestShift=(r)=>{
+    if(!r||!r.timeIn)return null;
+    const inM=hrMins(String(r.timeIn).slice(11,16));
+    let best=null,bestGap=1e9;
+    HR_SHIFT_PRESETS.filter(p=>!p.rest).forEach(p=>{
+      const gap=Math.abs(hrMins(p.start)-30-inM);   // compare against prep start
+      if(gap<bestGap){bestGap=gap;best=p;}
+    });
+    return best;
+  };
+  const shiftMismatch=(r)=>{
+    const cur=(r.shift&&r.shift.id)||"";
+    const sug=suggestShift(r);
+    if(!sug||!cur||sug.id===cur)return null;
+    const inM=hrMins(String(r.timeIn||"").slice(11,16));
+    const curDef=HR_SHIFT_PRESETS.find(p=>p.id===cur);
+    if(!curDef||curDef.rest)return null;
+    // only flag a real gap, not a few minutes
+    return Math.abs(hrMins(curDef.start)-30-inM)>90 ? sug : null;
+  };
+
+  const calc=(r)=>hrComputeDay(
+    {in:r.timeIn?String(r.timeIn).slice(11,16):"",
+     out:r.timeOut?String(r.timeOut).slice(11,16):"",
+     auto:!!r.auto,holiday:r.holiday||""},
+    r.shift||{});
+
+  const totalsFor=(empId)=>{
+    const mine=rows.filter(r=>r.empId===empId);
+    let days=0,ot=0,otApproved=0,nd=0,late=0,ut=0,open=0;
+    mine.forEach(r=>{
+      const c=calc(r);
+      if(c.status==="complete"||c.status==="rest")days++;
+      if(c.status==="open")open++;
+      ot+=c.ot; nd+=c.nd; late+=c.late; ut+=c.ut;
+      if(r.otApproved)otApproved+=c.ot;
+    });
+    return {days,ot:Number(ot.toFixed(2)),otApproved:Number(otApproved.toFixed(2)),
+            nd:Number(nd.toFixed(2)),late,ut,open,count:mine.length};
+  };
+
+  const setOT=async(r,ok)=>{
+    try{
+      await updateDoc(doc(db,"hr_attendance",r._docId),{
+        otApproved:ok,
+        otApprovedBy:ok?user.name:null,
+        otApprovedAt:ok?serverTimestamp():null
+      });
+      showT(ok?"Overtime approved":"Overtime unapproved","ok");
+    }catch(e){
+      showT("Failed: "+String(e&&e.message||e).slice(0,50),"err");
+    }
+  };
+
+  const saveEdit=async()=>{
+    const r=editRow; if(!r)return;
+    const mkISO=(hhmm)=>{
+      if(!hhmm||hhmm.indexOf(":")<0)return null;
+      return r.date+"T"+hhmm+":00";
+    };
+    try{
+      const tIn=mkISO(r._in), tOut=mkISO(r._out);
+      const hrs=hrHours(tIn,tOut);
+      const patch={
+        timeIn:tIn,timeOut:tOut,hours:hrs,
+        // an edited punch keeps a trail: who changed it and why
+        edited:true,editedBy:user.name,editedAt:serverTimestamp(),
+        editNote:r._note||""
+      };
+      if(r._holiday!==undefined)patch.holiday=r._holiday;
+      if(r._shiftId&&r._shiftId!==((r.shift&&r.shift.id)||"")){
+        const def=HR_SHIFT_PRESETS.find(x=>x.id===r._shiftId);
+        if(def){
+          patch.shift={id:def.id,name:def.name,start:def.start,end:def.end,
+            bstart:def.bstart,bend:def.bend,prep:def.prep,grace:def.grace,
+            rest:!!def.rest};
+          patch.shiftChanged=true;
+          patch.shiftChangedFrom=(r.shift&&r.shift.id)||"";
+        }
+      }
+      await updateDoc(doc(db,"hr_attendance",r._docId),patch);
+      showT("Timesheet corrected ✓");
+      setEditRow(null);
+    }catch(e){
+      showT("Save failed: "+String(e&&e.message||e).slice(0,50),"err");
+    }
+  };
+
+  const hhmm=(iso)=>iso?String(iso).slice(11,16):"";
+  const active=emps.filter(e=>e.active!==false);
+  const shown=selEmp?active.filter(e=>e._docId===selEmp):active;
+
+  return h("div",null,
+    h(SectionHeader,{title:"📋 Timesheet — "+curBranch.name}),
+
+    h("div",{style:{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap",
+      alignItems:"center"}},
+      h("select",{value:period,onChange:e=>setPeriod(e.target.value),
+        style:{padding:"9px 11px",borderRadius:8,fontSize:13,outline:"none",
+          cursor:"pointer",border:"1px solid "+C.primary,
+          background:C.primary+"18",color:C.primary,fontWeight:800}},
+        periods.map(p=>h("option",{key:p.id,value:p.id},p.label))),
+      h("select",{value:selEmp,onChange:e=>setSelEmp(e.target.value),
+        style:{padding:"9px 11px",borderRadius:8,fontSize:13,outline:"none",
+          cursor:"pointer",border:"1px solid "+C.border}},
+        h("option",{value:""},"All employees ("+active.length+")"),
+        active.map(e=>h("option",{key:e._docId,value:e._docId},e.name))),
+      h("div",{style:{fontSize:12,color:C.muted}},per.from+" → "+per.to)
+    ),
+
+    loading
+      ? h("div",{style:{textAlign:"center",padding:"34px",color:C.muted,
+          fontSize:13}},"Loading...")
+      : shown.length===0
+        ? h("div",{style:{background:"#fff",border:"1px dashed "+C.border,
+            borderRadius:12,padding:"36px 20px",textAlign:"center"}},
+            h("div",{style:{fontSize:34,marginBottom:9}},"📋"),
+            h("div",{style:{fontSize:14,fontWeight:800}},"No employees yet"))
+        : h("div",null, shown.map(e=>{
+            const t=totalsFor(e._docId);
+            const mine=rows.filter(r=>r.empId===e._docId)
+              .sort((a,b)=>String(a.date||"").localeCompare(String(b.date||"")));
+            const pendingOT=mine.filter(r=>calc(r).ot>0&&!r.otApproved);
+            return h("div",{key:e._docId,style:{background:"#fff",
+              border:"1px solid "+C.border,borderRadius:12,marginBottom:12,
+              overflow:"hidden"}},
+
+              h("div",{style:{padding:"12px 14px",background:C.bg,
+                borderBottom:"1px solid "+C.border,display:"flex",gap:10,
+                alignItems:"center",flexWrap:"wrap"}},
+                h("div",{style:{flex:1,minWidth:150}},
+                  h("div",{style:{fontSize:14,fontWeight:800}},e.name),
+                  h("div",{style:{fontSize:11,color:C.muted,marginTop:1}},
+                    (e.position||"")+" · ₱"+peso(e.dailyRate)+"/day")),
+                [["DAYS",t.days],["LATE",t.late+"m"],["UT",t.ut+"m"],
+                 ["OT",t.otApproved+(t.ot!==t.otApproved
+                    ?" / "+t.ot:"")],["ND",t.nd]].map(([k,v])=>
+                  h("div",{key:k,style:{textAlign:"right",minWidth:52}},
+                    h("div",{style:{fontSize:10,fontWeight:800,color:C.muted,
+                      letterSpacing:1}},k),
+                    h("div",{style:{fontSize:14,fontWeight:900}},String(v))))
+              ),
+
+              // Overtime is not automatic here: an unapproved hour never
+              // reaches the payslip, so a forgotten punch-out cannot quietly
+              // become paid time.
+              (function(){
+                const odd=mine.filter(r=>shiftMismatch(r));
+                return odd.length>0&&h("div",{style:{padding:"9px 14px",
+                  background:C.warning+"18",borderBottom:"1px solid "+C.border,
+                  fontSize:12,color:C.warning,fontWeight:700}},
+                  odd.length+" day"+(odd.length>1?"s":"")
+                  +" clocked in well outside the rostered shift — a swap, or "
+                  +"a late arrival. Open Edit and set the shift actually worked.");
+              })(),
+
+              pendingOT.length>0&&h("div",{style:{padding:"9px 14px",
+                background:C.warning+"18",borderBottom:"1px solid "+C.border,
+                fontSize:12,color:C.warning,fontWeight:700}},
+                pendingOT.length+" day"+(pendingOT.length>1?"s":"")
+                +" with unapproved overtime — it will not be paid until approved"),
+
+              mine.length===0
+                ? h("div",{style:{padding:"16px 14px",fontSize:12,
+                    color:C.muted}},"No punches this cut-off")
+                : h("div",null,
+                    h("div",{style:{display:"grid",
+                      gridTemplateColumns:"84px 62px 62px 54px 52px 52px 1fr",
+                      gap:6,padding:"8px 14px",background:"#fff",
+                      borderBottom:"1px solid "+C.border}},
+                      ["DATE","IN","OUT","HRS","LATE","OT",""].map(hh=>
+                        h("div",{key:hh,style:{fontSize:10,fontWeight:800,
+                          color:C.muted,letterSpacing:1}},hh))),
+                    mine.map(r=>{
+                      const c=calc(r);
+                      const openRow=c.status==="open";
+                      return h("div",{key:r._docId,style:{display:"grid",
+                        gridTemplateColumns:"84px 62px 62px 54px 52px 52px 1fr",
+                        gap:6,padding:"9px 14px",alignItems:"center",
+                        borderBottom:"1px solid "+C.border,
+                        background:openRow?C.danger+"12":"#fff"}},
+                        h("div",{style:{fontSize:12}},
+                          String(r.date||"").slice(5),
+                          r.edited&&h("span",{style:{fontSize:10,color:C.muted}}," ✎"),
+                          r.holiday&&h("span",{style:{fontSize:10,
+                            color:C.primary,fontWeight:800}}," "+r.holiday),
+                          // a punch that does not fit the rota is flagged, not
+                          // silently reinterpreted
+                          shiftMismatch(r)&&h("div",{style:{fontSize:10,
+                            color:C.warning,fontWeight:700,marginTop:1}},
+                            "≠ "+((r.shift&&r.shift.name)||"?"))),
+                        h("div",{style:{fontSize:12}},hhmm(r.timeIn)||"—"),
+                        h("div",{style:{fontSize:12,
+                          color:openRow?C.danger:C.text,
+                          fontWeight:openRow?800:400}},
+                          hhmm(r.timeOut)||"OPEN"),
+                        h("div",{style:{fontSize:12,fontWeight:700}},c.hrs||"—"),
+                        h("div",{style:{fontSize:12,
+                          color:c.late>0?C.danger:C.muted}},
+                          c.late>0?c.late+"m":"—"),
+                        h("div",{style:{fontSize:12,fontWeight:700,
+                          color:c.ot>0?(r.otApproved?C.success:C.warning):C.muted}},
+                          c.ot>0?c.ot:"—"),
+                        h("div",{style:{display:"flex",gap:5,
+                          justifyContent:"flex-end",flexWrap:"wrap"}},
+                          c.ot>0&&h("button",{onClick:()=>setOT(r,!r.otApproved),
+                            style:{padding:"4px 9px",borderRadius:6,fontSize:10,
+                              fontWeight:800,cursor:"pointer",border:"none",
+                              background:r.otApproved?C.success:C.warning,
+                              color:"#fff"}},
+                            r.otApproved?"OT ✓":"Approve OT"),
+                          h("button",{onClick:()=>setEditRow(Object.assign({},r,
+                            {_in:hhmm(r.timeIn),_out:hhmm(r.timeOut),_note:""})),
+                            style:{padding:"4px 9px",borderRadius:6,fontSize:10,
+                              cursor:"pointer",border:"1px solid "+C.border,
+                              background:"#fff",color:C.text}},"Edit")
+                        )
+                      );
+                    })
+                  )
+            );
+          })),
+
+    editRow&&h("div",{style:{position:"fixed",inset:0,
+      background:"rgba(0,0,0,.55)",display:"flex",alignItems:"center",
+      justifyContent:"center",zIndex:900,padding:16},
+      onClick:ev=>ev.target===ev.currentTarget&&setEditRow(null)},
+      h("div",{style:{background:"#fff",width:"100%",maxWidth:380,
+        borderRadius:14,padding:"18px"}},
+        h("div",{style:{fontSize:15,fontWeight:800,marginBottom:4}},
+          "Correct "+editRow.empName),
+        h("div",{style:{fontSize:12,color:C.muted,marginBottom:14}},
+          editRow.date+" · "+((editRow.shift&&editRow.shift.name)||"no shift")),
+        h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
+          ["_in","_out"].map((k,ix)=>h("div",{key:k},
+            h("div",{style:{fontSize:11,fontWeight:800,color:C.muted,
+              letterSpacing:1,marginBottom:4}},ix===0?"TIME IN":"TIME OUT"),
+            h("input",{type:"time",value:editRow[k]||"",
+              onChange:e=>setEditRow(p=>Object.assign({},p,{[k]:e.target.value})),
+              style:{width:"100%",padding:"9px",border:"1px solid "+C.border,
+                borderRadius:8,fontSize:14,outline:"none",boxSizing:"border-box"}})))),
+        h("div",{style:{marginTop:10}},
+          h("div",{style:{fontSize:11,fontWeight:800,color:C.muted,
+            letterSpacing:1,marginBottom:4}},"SHIFT ACTUALLY WORKED"),
+          h("select",{value:(editRow._shiftId||(editRow.shift&&editRow.shift.id)||"am"),
+            onChange:e=>setEditRow(p=>Object.assign({},p,{_shiftId:e.target.value})),
+            style:{width:"100%",padding:"9px",border:"1px solid "+C.border,
+              borderRadius:8,fontSize:13,outline:"none",boxSizing:"border-box"}},
+            HR_SHIFT_PRESETS.map(sp=>h("option",{key:sp.id,value:sp.id},
+              sp.rest?sp.name:sp.name+" ("+sp.start+"-"+sp.end+")"))),
+          h("div",{style:{fontSize:11,color:C.muted,marginTop:4,lineHeight:1.5}},
+            "Change this only when they genuinely swapped. Relabelling a late "+
+            "arrival as a different shift makes the lateness disappear.")),
+
+        h("div",{style:{marginTop:10}},
+          h("div",{style:{fontSize:11,fontWeight:800,color:C.muted,
+            letterSpacing:1,marginBottom:4}},"HOLIDAY"),
+          h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}},
+            [["","Ordinary"],["SH","Special 1.3x"],["RH","Regular 2.0x"]]
+              .map(([v,lbl])=>{
+                const cur=(editRow._holiday!==undefined?editRow._holiday
+                  :(editRow.holiday||""));
+                return h("button",{key:v||"none",
+                  onClick:()=>setEditRow(p=>Object.assign({},p,{_holiday:v})),
+                  style:{padding:"9px 4px",borderRadius:8,fontSize:12,
+                    cursor:"pointer",fontWeight:cur===v?800:500,
+                    border:"1px solid "+(cur===v?C.primary:C.border),
+                    background:cur===v?C.primary+"18":"#fff",
+                    color:cur===v?C.primary:C.text}},lbl);
+              }))),
+
+        h("div",{style:{marginTop:10}},
+          h("div",{style:{fontSize:11,fontWeight:800,color:C.muted,
+            letterSpacing:1,marginBottom:4}},"REASON FOR THE CHANGE"),
+          h("input",{value:editRow._note||"",
+            onChange:e=>setEditRow(p=>Object.assign({},p,{_note:e.target.value})),
+            placeholder:"e.g. forgot to punch out",
+            style:{width:"100%",padding:"9px",border:"1px solid "+C.border,
+              borderRadius:8,fontSize:13,outline:"none",boxSizing:"border-box"}})),
+        h("div",{style:{display:"flex",gap:9,marginTop:16}},
+          h("button",{onClick:()=>setEditRow(null),
+            style:{flex:1,padding:"11px",borderRadius:9,
+              border:"1px solid "+C.border,background:"#fff",fontSize:13,
+              cursor:"pointer"}},"Cancel"),
+          h("button",{onClick:saveEdit,
+            style:{flex:2,padding:"11px",borderRadius:9,border:"none",
+              background:C.primary,color:"#fff",fontWeight:800,fontSize:13,
+              cursor:"pointer"}},"💾 Save correction"))
+      )
+    )
+  );
+}
+
+function HRClockPage({db,user,branchId,curBranch,showT}){
+  const [pin,setPin]=useState("");
+  const [emps,setEmps]=useState([]);
+  const [open,setOpen]=useState([]);        // punches with no time out yet
+  const [busy,setBusy]=useState(false);
+  const [last,setLast]=useState(null);      // what just happened, for the banner
+  const [now,setNow]=useState(new Date());
+
+  // A wall clock that does not tick is worse than none — the crew reads it to
+  // decide whether they are late.
+  useEffect(()=>{
+    const t=setInterval(()=>setNow(new Date()),1000);
+    return()=>clearInterval(t);
+  },[]);
+
+  useEffect(()=>{
+    const unsub=onSnapshot(
+      query(collection(db,"hr_employees"),where("branch","==",branchId),limit(200)),
+      snap=>setEmps(snap.docs.map(d=>({...d.data(),_docId:d.id}))),
+      (e)=>console.error("clock employees:",e));
+    return()=>unsub();
+  },[branchId]);
+
+  useEffect(()=>{
+    // Open punches only: one equality filter, filtered further in memory so no
+    // composite index is required.
+    const unsub=onSnapshot(
+      query(collection(db,"hr_attendance"),where("branch","==",branchId),limit(300)),
+      snap=>{
+        const rows=snap.docs.map(d=>({...d.data(),_docId:d.id}));
+        setOpen(rows.filter(r=>!r.timeOut));
+      },
+      (e)=>console.error("clock attendance:",e));
+    return()=>unsub();
+  },[branchId]);
+
+  // An employee can carry a weekly rota; fall back to the branch default, then
+  // to AM. Whatever it resolves to is stored on the punch itself.
+  const shiftForToday=(emp)=>{
+    const dow=new Date().getDay();
+    const rota=(emp&&emp.shiftByDay)||null;
+    const pick=(rota&&rota[dow])||(emp&&emp.shiftId)||"am";
+    const def=HR_SHIFT_PRESETS.find(x=>x.id===pick)||HR_SHIFT_PRESETS[0];
+    return {id:def.id,name:def.name,start:def.start,end:def.end,
+            bstart:def.bstart,bend:def.bend,prep:def.prep,grace:def.grace,
+            rest:!!def.rest};
+  };
+
+  const punch=async()=>{
+    if(pin.length<4){showT("Enter your PIN","warn");return;}
+    const emp=emps.find(e=>String(e.pin)===pin&&e.active!==false);
+    if(!emp){
+      showT("PIN not recognised at "+curBranch.name,"err");
+      setPin(""); return;
+    }
+    setBusy(true);
+    try{
+      const openRow=open.find(o=>o.empId===emp._docId);
+      const stamp=new Date();
+      if(openRow){
+        const hrs=hrHours(openRow.timeIn,stamp.toISOString());
+        await updateDoc(doc(db,"hr_attendance",openRow._docId),{
+          timeOut:stamp.toISOString(),
+          hours:hrs,
+          outBy:user.name,
+          closedAt:serverTimestamp()
+        });
+        setLast({type:"out",name:emp.name,at:stamp,hours:hrs});
+        showT(emp.name+" clocked OUT · "+hrs+" hrs");
+      }else{
+        await addDoc(collection(db,"hr_attendance"),{
+          empId:emp._docId,empName:emp.name,position:emp.position||"",
+          branch:branchId,
+          date:localDate(stamp),
+          period:hrPeriod(localDate(stamp)).id,
+          timeIn:stamp.toISOString(),
+          timeOut:null,hours:null,
+          dailyRate:Number(emp.dailyRate)||0,   // rate as it stood on the day
+          // and the schedule as it stood, for the same reason
+          shift:shiftForToday(emp),
+          inBy:user.name,
+          at:serverTimestamp()
+        });
+        setLast({type:"in",name:emp.name,at:stamp});
+        showT(emp.name+" clocked IN");
+      }
+      setPin("");
+    }catch(e){
+      console.error("punch failed:",e);
+      showT("Punch failed: "+String(e&&e.message||e).slice(0,60),"err");
+    }
+    setBusy(false);
+  };
+
+  const key=(k)=>{
+    if(k==="del"){setPin(p=>p.slice(0,-1));return;}
+    if(k==="clr"){setPin("");return;}
+    setPin(p=>p.length>=6?p:p+k);
+  };
+
+  const fmt=(d)=>d.toLocaleTimeString("en-PH",
+    {hour:"2-digit",minute:"2-digit",hour12:true});
+
+  return h("div",null,
+    h(SectionHeader,{title:"⏰ Time Clock — "+curBranch.name}),
+
+    h("div",{style:{display:"grid",gridTemplateColumns:"minmax(260px,340px) 1fr",
+      gap:14,alignItems:"start",
+      ...(typeof window!=="undefined"&&window.innerWidth<780
+        ?{gridTemplateColumns:"1fr"}:{})}},
+
+      // ── keypad ──────────────────────────────────────────
+      h("div",{style:{background:"#fff",border:"1px solid "+C.border,
+        borderRadius:14,padding:"16px"}},
+        h("div",{style:{textAlign:"center",marginBottom:12}},
+          h("div",{style:{fontSize:32,fontWeight:900,letterSpacing:1}},fmt(now)),
+          h("div",{style:{fontSize:12,color:C.muted,marginTop:2}},
+            now.toLocaleDateString("en-PH",
+              {weekday:"long",month:"long",day:"numeric"}))),
+
+        last&&h("div",{style:{background:last.type==="in"?C.success+"18":C.primary+"18",
+          border:"1px solid "+(last.type==="in"?C.success:C.primary),
+          borderRadius:10,padding:"10px 12px",marginBottom:12,textAlign:"center"}},
+          h("div",{style:{fontSize:14,fontWeight:800,
+            color:last.type==="in"?C.success:C.primary}},
+            last.name+" — "+(last.type==="in"?"CLOCKED IN":"CLOCKED OUT")),
+          h("div",{style:{fontSize:12,color:C.muted,marginTop:2}},
+            fmt(last.at)+(last.hours!=null?" · "+last.hours+" hrs":""))),
+
+        h("div",{style:{textAlign:"center",fontSize:30,fontWeight:900,
+          letterSpacing:8,minHeight:42,color:pin?C.text:C.border,
+          fontFamily:"monospace"}},
+          pin?"•".repeat(pin.length):"— — — —"),
+
+        h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",
+          gap:8,marginTop:12}},
+          ["1","2","3","4","5","6","7","8","9","clr","0","del"].map(k=>
+            h("button",{key:k,onClick:()=>key(k),
+              style:{padding:"18px 0",borderRadius:11,cursor:"pointer",
+                fontSize:k==="clr"||k==="del"?15:22,fontWeight:800,
+                border:"1px solid "+C.border,
+                background:k==="clr"||k==="del"?C.bg:"#fff",
+                color:k==="clr"?C.danger:C.text}},
+              k==="del"?"⌫":k==="clr"?"C":k))),
+
+        h("button",{onClick:punch,disabled:busy||pin.length<4,
+          style:{width:"100%",marginTop:12,padding:"17px",borderRadius:12,
+            border:"none",fontSize:18,fontWeight:800,
+            background:(busy||pin.length<4)?"#ccc":C.primary,color:"#fff",
+            cursor:(busy||pin.length<4)?"not-allowed":"pointer"}},
+          busy?"...":"⏰ Punch In / Out")
+      ),
+
+      // ── who is on the floor ─────────────────────────────
+      h("div",{style:{background:"#fff",border:"1px solid "+C.border,
+        borderRadius:14,padding:"16px"}},
+        h("div",{style:{fontSize:14,fontWeight:800,marginBottom:3}},
+          "On duty now — "+open.length),
+        h("div",{style:{fontSize:12,color:C.muted,marginBottom:11}},
+          "Anyone still clocked in. A name left here overnight means a missed "+
+          "punch out, and that shows up as a short day on the timesheet."),
+
+        open.length===0
+          ? h("div",{style:{textAlign:"center",padding:"30px 14px",
+              color:C.muted,fontSize:13}},
+              h("div",{style:{fontSize:30,marginBottom:8}},"🌙"),
+              "Nobody is clocked in")
+          : open
+              .slice()
+              .sort((a,b)=>String(a.timeIn||"").localeCompare(String(b.timeIn||"")))
+              .map(o=>{
+                const since=new Date(o.timeIn);
+                const elapsed=hrHours(o.timeIn,now.toISOString());
+                const longShift=elapsed!=null&&elapsed>12;
+                return h("div",{key:o._docId,
+                  style:{display:"flex",gap:10,alignItems:"center",
+                    padding:"10px 0",borderBottom:"1px solid #F0F0F0"}},
+                  h("div",{style:{width:9,height:9,borderRadius:"50%",
+                    background:longShift?C.danger:C.success,flexShrink:0}}),
+                  h("div",{style:{flex:1,minWidth:0}},
+                    h("div",{style:{fontSize:13,fontWeight:700}},o.empName),
+                    h("div",{style:{fontSize:11,color:C.muted,marginTop:1}},
+                      (o.position||"")+(o.position?" · ":"")+"in at "+fmt(since))),
+                  h("div",{style:{fontSize:13,fontWeight:800,
+                    color:longShift?C.danger:C.text}},
+                    (elapsed!=null?elapsed:"—")+" hrs"),
+                  longShift&&h("span",{style:{fontSize:11,color:C.danger,
+                    fontWeight:700}},"check")
+                );
+              })
       )
     )
   );
@@ -12819,6 +13472,16 @@ function App(){
               "If already lapsed it starts from today. The pencil is a manual override.")
           );
         })(),
+
+        // ══ HR: TIMESHEET ══
+        page==="hr_time"&&h(HRTimesheetPage,{
+          db,user,branchId,curBranch,showT,key:"hrtime"
+        }),
+
+        // ══ HR: TIME CLOCK ══
+        page==="hr_clock"&&h(HRClockPage,{
+          db,user,branchId,curBranch,showT,key:"hrclock"
+        }),
 
         // ══ HR: EMPLOYEES ══
         page==="hr_staff"&&h(HREmployeesPage,{
