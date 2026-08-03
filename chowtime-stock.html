@@ -140,7 +140,7 @@
   .cutoff-foot .save-btn{width:auto;padding:8px 16px;font-size:12.5px;}
   .cutoff-foot .cp-status{font-size:11.5px;color:var(--muted);}
 </style>
-<!-- BUILD:20260803-084338 -->
+<!-- BUILD:20260803-134018 -->
 </head>
 <body>
 
@@ -1764,7 +1764,29 @@ function renderVarianceOwner(){
     section.className = 'cutoff-section';
 
     let rowsHtml = `<table><thead><tr><th>Item</th><th class="num">POS</th><th class="num">Freezer</th><th class="num">Waste</th><th class="num">Baseline</th><th class="num">New Short/Recovered</th><th class="num">Charge</th></tr></thead><tbody>`;
-    Object.entries(cpData.items||{}).forEach(([id,v])=>{
+    let lastVarCat = null;
+    Object.entries(cpData.items||{})
+      .sort((a,b)=>{
+        const A=items[a[0]]||{}, B=items[b[0]]||{};
+        const ca=String(A.category||"~").toLowerCase();
+        const cb=String(B.category||"~").toLowerCase();
+        if(ca!==cb) return ca<cb?-1:1;
+        return String(A.name||a[0]).localeCompare(String(B.name||b[0]));
+      })
+      .forEach(([id,v])=>{
+      const it0 = items[id];
+      const thisVarCat = it0 ? String(it0.category||"").trim().toLowerCase()
+                             : "\u200bgone";
+      if(thisVarCat !== lastVarCat){
+        lastVarCat = thisVarCat;
+        rowsHtml += '<tr><td colspan="7" style="background:var(--bg);'
+          + 'font-size:11px;font-weight:800;letter-spacing:1px;'
+          + 'color:var(--muted);padding:6px 8px">'
+          + escapeHtml(it0
+              ? (String(it0.category||"").trim().toUpperCase() || "UNCATEGORISED")
+              : "NO LONGER IN CATALOG")
+          + '</td></tr>';
+      }
       const waste = wasteMap[id]!==undefined ? wasteMap[id] : (v.waste||0);
       let baselineBefore = v.baselineBefore, delta = v.delta, charge = v.charge, credit = v.credit;
       if(baselineBefore === undefined || delta === undefined){
@@ -2441,6 +2463,6 @@ window.addEventListener('load', ()=>{
   }
 });
 </script>
-<div id="buildStamp" style="text-align:center;padding:14px 8px;font-size:11px;color:#5A5A5A">Chowtime Stock · 20260803-084338</div>
+<div id="buildStamp" style="text-align:center;padding:14px 8px;font-size:11px;color:#5A5A5A">Chowtime Stock · 20260803-134018</div>
 </body>
 </html>
