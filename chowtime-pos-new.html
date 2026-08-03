@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Chowtime POS — 20260803-011744</title>
+<title>Chowtime POS — 20260803-014847</title>
 <meta name="theme-color" content="#6A1B9A"/>
 <meta name="mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260803-011744 -->
+<!-- BUILD:20260803-014847 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -5852,7 +5852,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260803-011744";
+const BUILD = "20260803-014847";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -9308,11 +9308,20 @@ function InvLogPage({db,user,branchId,branches,showT}){
               fontSize:12,fontWeight:700}},
               tc.icon+" "+tc.label)
           ),
-          // Amount
-          h("div",{style:{fontWeight:700,
-            color:log.type==="deduct"||log.type==="deleted"?C.danger:C.success,
-            fontSize:14}},
-            (log.amount>0?"+":"")+parseFloat(log.amount||0).toFixed(1)+" "+(log.unit||"")
+          // Amount, then the running balance it produced
+          h("div",null,
+            h("div",{style:{fontWeight:700,
+              color:log.type==="deduct"||log.type==="deleted"?C.danger:C.success,
+              fontSize:14}},
+              (log.amount>0?"+":"")+parseFloat(log.amount||0).toFixed(1)+" "+(log.unit||"")),
+            (log.prevStock!=null&&log.newStock!=null)
+              ? h("div",{style:{fontSize:11,color:C.muted,marginTop:1,
+                  whiteSpace:"nowrap"}},
+                  parseFloat(log.prevStock).toLocaleString()+" → ",
+                  h("b",{style:{color:C.text}},
+                    parseFloat(log.newStock).toLocaleString()),
+                  " "+(log.unit||""))
+              : h("div",{style:{fontSize:11,color:C.border,marginTop:1}},"—")
           ),
           // Transaction ID (order ref)
           log.orderId
@@ -15554,7 +15563,8 @@ function App(){
                 h("div",{style:{padding:"8px 16px",borderTop:"1px solid #f5f5f5",
                   display:"flex",gap:7,flexWrap:"wrap"}},
 
-                  // PAID → Receive  items / Check discrepancy
+                  // Payment gates receiving, by design: the branch confirms
+                  // the delivery only after Main has recorded the payment.
                   st==="paid"&&h("button",{
                     onClick:()=>setModal("receive_"+po._docId),
                     style:{padding:"8px 16px",
@@ -15762,8 +15772,12 @@ function App(){
                   borderTop:"1px solid #f5f5f5",
                   display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}},
 
-                  // NEW PO → Process (opens DR modal)
-                  st==="received_by_main"&&h("button",{
+                  // Only MAIN processes a PO. Without this gate a branch
+                  // manager could issue their own DR from their own order,
+                  // deduct MAIN's stock and skip the commissary entirely.
+                  st==="received_by_main"
+                    &&(user.role==="owner"||user.role==="commissary")
+                    &&h("button",{
                     onClick:()=>setModal("issue_dr_"+po._docId),
                     style:{padding:"7px 14px",
                       background:"linear-gradient(135deg,#6A1B9A,#4A148C)",
@@ -16029,6 +16043,20 @@ function App(){
                         for(const  item of (po.deliveredItems||po. items||[])){
                           const qty= item.actualQty!=null? item.actualQty:( item.qty||0);
                           if(!qty)continue;
+                          // Read the level first. increment() is atomic but
+                          // tells you nothing, so this was the one movement in
+                          // the system with no before and after — the log said
+                          // what left, never what remained.
+                          let prev=null;
+                          try{
+                            const snap=await getDoc(doc(db,"inventory", item.id));
+                            if(snap.exists())prev=Number(snap.data().stock)||0;
+                          }catch(e){}
+                          if(prev!=null&&prev<qty){
+                            showT(( item.name|| item.id)+": Main has "+prev
+                              +", needs "+qty+" — skipped","warn");
+                            continue;
+                          }
                           try{
                             await updateDoc(doc(db,"inventory", item.id),{
                               stock:increment(-qty),
@@ -16040,8 +16068,15 @@ function App(){
                                itemId: item.id, itemName: item.name,
                               unit: item.unit||"",type:"deduct",
                               amount:-qty,
+                              prevStock:prev,
+                              newStock:prev==null?null
+                                :Math.round((prev-qty)*1000)/1000,
                               reason:"PO Issued: "+po.poNum+" → "+(po.branchName||po.branch),
-                              by:user.name,at:serverTimestamp()
+                              desc:"PO Issued: "+po.poNum,
+                              source:"TRANSFER",ref:po.poNum||"",
+                              branch:"ct-main",date:localDate(),
+                              by:user.name,at:serverTimestamp(),
+                              timestamp:serverTimestamp()
                             });
                           }catch(e){}
                         }
@@ -16059,8 +16094,30 @@ function App(){
                       opacity:po.mainDeducted?0.6:1}},
                     po.mainDeducted?"📦 Deducted":"📦 Deduct Main Inv"),
 
-                  // Mark Completed
-                  (st==="paid"&&balance<=0)&&h("button",{
+                  // Reopen a PO that was closed before the branch received it.
+                  // Completion is the branch's confirmation that the goods
+                  // arrived — a payment does not prove that, and closing it
+                  // here removed their Receive button and any chance to report
+                  // a shortage.
+                  (st==="completed"&&!po.receivedItems)&&h("button",{
+                    onClick:async()=>{
+                      if(!confirm("Reopen "+po.poNum+" so the branch can receive it?\n\n"
+                        +"It was marked completed without a receipt, so the stock "
+                        +"never reached them and no shortage could be reported."))return;
+                      await updateDoc(doc(db,"advances",po._docId),{
+                        status:"paid",
+                        reopenedBy:user.name,
+                        reopenedAt:serverTimestamp()
+                      });
+                      showT(po.poNum+" reopened — the branch can receive it now");
+                    },
+                    style:{padding:"7px 14px",background:C.warning,
+                      border:"none",borderRadius:8,color:"#fff",
+                      fontSize:13,fontWeight:700,cursor:"pointer"}},
+                    "↩ Reopen for receiving"),
+
+                  // Kept only for a PO the branch genuinely received
+                  false&&h("button",{
                     onClick:async()=>{
                       await updateDoc(doc(db,"advances",po._docId),{
                         status:"completed",
