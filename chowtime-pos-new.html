@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Chowtime POS — 20260802-235628</title>
+<title>Chowtime POS — 20260803-000711</title>
 <meta name="theme-color" content="#6A1B9A"/>
 <meta name="mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260802-235628 -->
+<!-- BUILD:20260803-000711 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -1466,7 +1466,7 @@ function ItemCustomizer({ item,onAdd,onClose,optionGroups=[],priceType="retail",
         missing.length>0&&h("div",{style:{background:"#FFEBEE",borderRadius:8,padding:"7px 11px",marginBottom:8,fontSize:13,color:C.danger,fontWeight:600}},"⚠️ Select: "+missing.join(", ")),
         freeGaps.length>0&&h("div",{style:{background:"#FFEBEE",borderRadius:8,padding:"7px 11px",marginBottom:8,fontSize:13,color:C.danger,fontWeight:600}},
           freeGaps.map(function(g){return g.name+": "+g.got+"/"+g.need;}).join(" · ")+" — selection incomplete"),
-        isBogo&&h("div",{style:{background:"#FFF8E1",borderRadius:8,padding:"7px 11px",marginBottom:8,fontSize:13,color:"#BF360C",fontWeight:600}},
+        isBogo&&h("div",{style:{background:"#FFF8E1",borderRadius:8,padding:"7px 11px",marginBottom:8,fontSize:13,color:"rgba(255,255,255,.85)",fontWeight:600}},
           "🎉 "+qty+"x BOGO = "+(qty*2)+"  items total"),
         h("div",{style:{display:"flex",gap:9,alignItems:"center"}},
           h("div",{style:{display:"flex",alignItems:"center",gap:7,background:C.bg,borderRadius:9,padding:"4px"}},
@@ -3057,14 +3057,14 @@ function CALoanPage({user,branchId,curBranch,db,hrisDB,showT,mode,hrisEmps=[]}){
     h("div",{style:{background:isCA?`linear-gradient(135deg,${C.primary},${C.dark})`:`linear-gradient(135deg,#1565C0,#0D47A1)`,borderRadius:13,padding:"16px 18px",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}},
       h("div",null,
         h("div",{style:{color:C.accent,fontSize:12,fontWeight:700,letterSpacing:2}},isCA?"CASH ADVANCE REQUEST":"CASH LOAN REQUEST"),
-        h("div",{style:{color:"#111111",fontSize:15,fontWeight:900,marginTop:2}},user.name),
-        h("div",{style:{color:"#5A5A5A",fontSize:12,marginTop:1}},curBranch.full+" · "+today),
+        h("div",{style:{color:"#fff",fontSize:15,fontWeight:900,marginTop:2}},user.name),
+        h("div",{style:{color:"rgba(255,255,255,.75)",fontSize:12,marginTop:1}},curBranch.full+" · "+today),
         hrisEmp
           ?h("div",{style:{color:"#2E7D32",fontSize:12,marginTop:3}},"✅ HRIS linked: "+hrisEmp.name+" ("+hrisEmp.pos+")")
           :h("div",{style:{color:"#fbbf24",fontSize:12,marginTop:3}},"⚠️ Name not found in HRIS — admin will link manually")
       ),
       h("div",{style:{textAlign:"right"}},
-        h("div",{style:{color:"#5A5A5A",fontSize:12}},"OUTSTANDING BALANCE"),
+        h("div",{style:{color:"rgba(255,255,255,.75)",fontSize:12}},"OUTSTANDING BALANCE"),
         h("div",{style:{color:totalOwed>0?C.warning:"#4ade80",fontSize:20,fontWeight:900}},"₱"+peso(totalOwed))
       )
     ),
@@ -3528,7 +3528,7 @@ function MenuEditor({menuItems,setMenuItems,db,user,showT}){
                   boxShadow:"0 1px 3px rgba(0,0,0,.25)"}})
               )
             ),
-            ! item.avail&&h("div",{style:{position:"absolute",inset:0,background:"#F0F0F0",
+            ! item.avail&&h("div",{style:{position:"absolute",inset:0,background:"rgba(255,255,255,.15)",
               display:"flex",alignItems:"center",justifyContent:"center",fontSize:20}},"🚫")
           ),
           h("div",{style:{padding:"9px 11px"}},
@@ -5852,7 +5852,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260802-235628";
+const BUILD = "20260803-000711";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -7830,14 +7830,14 @@ function ReceiveItemsModal({po,db,user,showT,branchId,onClose}){
       padding:"14px 20px",display:"flex",justifyContent:"space-between",alignItems:"center"}},
       h("div",null,
         h("div",{style:{color:"rgba(255,255,255,.6)",fontSize:12,fontWeight:700,letterSpacing:2}},"RECEIVE ITEMS"),
-        h("div",{style:{color:"#111111",fontSize:15,fontWeight:900}},po.drNum||po.poNum),
-        h("div",{style:{color:"#5A5A5A",fontSize:12}},"DR Date: "+(po.deliveryDate||po.date))
+        h("div",{style:{color:"#fff",fontSize:15,fontWeight:900}},po.drNum||po.poNum),
+        h("div",{style:{color:"rgba(255,255,255,.75)",fontSize:12}},"DR Date: "+(po.deliveryDate||po.date))
       ),
       h("button",{onClick:onClose,style:{background:"rgba(255,255,255,.15)",border:"none",
         color:"#fff",width:28,height:28,borderRadius:8,fontSize:16,cursor:"pointer"}},"x")
     ),
     hasDisc&&h("div",{style:{padding:"8px 20px",background:"#FFF3E0",
-      borderBottom:"1px solid #FFE0B2",fontSize:13,color:"#BF360C",fontWeight:700}},
+      borderBottom:"1px solid #FFE0B2",fontSize:13,color:"rgba(255,255,255,.85)",fontWeight:700}},
       String(discItems.length)+"  item(s) with discrepancy — needs Main approval"),
     h("div",{style:{flex:1,overflowY:"auto"}},
       h("div",{style:{display:"grid",gridTemplateColumns:"1fr 80px 90px 60px 1fr",
@@ -7856,7 +7856,7 @@ function ReceiveItemsModal({po,db,user,showT,branchId,onClose}){
             background:diff!==0?"#FFF8E1":"#fff"}},
           h("div",null,
             h("div",{style:{fontSize:13,fontWeight:700}},i.name),
-            h("div",{style:{fontSize:12,color:"#5A5A5A"}},i.unit||"")
+            h("div",{style:{fontSize:12,color:"rgba(255,255,255,.75)"}},i.unit||"")
           ),
           h("div",{style:{fontSize:13,color:C.muted}},String(drQty)+" "+(i.unit||"")),
           h("div",{style:{display:"flex",alignItems:"center",gap:3}},
@@ -7889,7 +7889,7 @@ function ReceiveItemsModal({po,db,user,showT,branchId,onClose}){
       borderTop:"2px solid "+(hasDisc?C.warning:C.primary),
       background:"#fafafa",display:"flex",gap:8,alignItems:"center"}},
       hasDisc
-        ? h("div",{style:{fontSize:13,color:"#BF360C",flex:1}},"Will be reported to Main for approval")
+        ? h("div",{style:{fontSize:13,color:"rgba(255,255,255,.85)",flex:1}},"Will be reported to Main for approval")
         : h("div",{style:{fontSize:13,color:C.success,flex:1}},"No discrepancy — PO will be completed"),
       h("button",{onClick:onClose,
         style:{padding:"9px 16px",background:"#fff",border:"1px solid "+C.border,
@@ -8910,7 +8910,7 @@ function SettingsPage({db,user,showT,branches,companySettings,setCompanySettings
       // Header
       h("div",{style:{background:"linear-gradient(135deg,#1565C0,#0D47A1)",
         padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}},
-        h("div",{style:{color:"#111111",fontWeight:800,fontSize:13}},"🖨️ Print & Bluetooth Printer"),
+        h("div",{style:{color:"#fff",fontWeight:800,fontSize:13}},"🖨️ Print & Bluetooth Printer"),
         h("div",{style:{fontSize:13,color:"rgba(255,255,255,.8)"}},
           _btChar?"✅ BT Connected":"⚪ BT Not connected")
       ),
@@ -9092,11 +9092,11 @@ function PrinterPage({db,user,showT,companySettings,setCompanySettings}){
       h("div",{style:{background:"linear-gradient(135deg,#1565C0,#0D47A1)",
         padding:"14px 16px",display:"flex",justifyContent:"space-between",
         alignItems:"center"}},
-        h("div",{style:{color:"#111111",fontWeight:800,fontSize:14}},"📡 Bluetooth Printer"),
+        h("div",{style:{color:"#fff",fontWeight:800,fontSize:14}},"📡 Bluetooth Printer"),
         h("div",{style:{display:"flex",alignItems:"center",gap:6}},
           h("div",{style:{width:8,height:8,borderRadius:"50%",
             background:_btChar?"#4CAF50":"#ff5252"}}),
-          h("div",{style:{fontSize:13,color:"#111111"}},
+          h("div",{style:{fontSize:13,color:"rgba(255,255,255,.85)"}},
             _btChar?"Connected":"Not connected")
         )
       ),
@@ -10974,8 +10974,8 @@ function App(){
       h("div",{style:{color:"#fff",fontSize:16,fontWeight:700}},"Loading ChowTime POS..."),
       h("div",{style:{color:"rgba(255,255,255,.75)",fontSize:13,marginTop:6}},"Connecting to Firebase..."),
       h("div",{style:{background:"rgba(255,255,255,.15)",borderRadius:8,padding:"10px 14px",marginTop:16,textAlign:"left",maxWidth:320}},
-        h("div",{style:{color:"#5A5A5A",fontSize:13,fontWeight:700,marginBottom:6}},"IF STUCK HERE:"),
-        h("div",{style:{color:"#5A5A5A",fontSize:12,lineHeight:1.8}},
+        h("div",{style:{color:"rgba(255,255,255,.75)",fontSize:13,fontWeight:700,marginBottom:6}},"IF STUCK HERE:"),
+        h("div",{style:{color:"rgba(255,255,255,.75)",fontSize:12,lineHeight:1.8}},
           "1. Firebase Console → Authentication → Settings → Authorized domains → Add your domain",h("br",null),
           "2. Firestore → Rules → allow read,write: if request.auth != null → Publish",h("br",null),
           "3. Try opening via GitHub Pages instead of local file"
@@ -11357,7 +11357,7 @@ function App(){
                   h("div",{style:{width:16,height:16,borderRadius:4,flexShrink:0,
                     border:"2px solid "+(on?C.primary:C.border),background:on?C.primary:"#fff",
                     display:"flex",alignItems:"center",justifyContent:"center"}},
-                    on&&h("span",{style:{color:"#111111",fontSize:14,fontWeight:900}},"✓")),
+                    on&&h("span",{style:{color:"#fff",fontSize:14,fontWeight:900}},"✓")),
                   h("span",{style:{flex:1,fontSize:13,fontWeight:on?700:400}},i.qty+"x "+i.name),
                   h("span",{style:{fontSize:13,color:C.muted}},"₱"+peso(lineAmt(i)))
                 );
@@ -12620,7 +12620,7 @@ function App(){
           h("div",{style:{display:"flex",justifyContent:"space-between",
             alignItems:"center",padding:"8px 14px",
             background:C.primary,flexShrink:0}},
-            h("div",{style:{color:"#111111",fontWeight:700,fontSize:14}},
+            h("div",{style:{color:"#fff",fontWeight:700,fontSize:14}},
               "🍽️ "+curBranch.name),
             h("div",{style:{display:"flex",gap:8,alignItems:"center"}},
               h("button",{onClick:()=>setCartOpen(true),
@@ -12629,7 +12629,7 @@ function App(){
                   border:"2px solid rgba(255,255,255,.5)",
                   borderRadius:20,cursor:"pointer",fontWeight:800,
                   fontSize:14,
-                  color:cart.length>0?C.primary:"#5A5A5A"}},
+                  color:cart.length>0?C.primary:"#fff"}},
                 cart.length>0
                   ? "🛒 "+cartCount+" · ₱"+cartTotal.toFixed(0)
                   : "🛒 Cart"
@@ -13491,7 +13491,7 @@ function App(){
                     style:{width:"100%",padding:"8px",border:"1px solid "+C.border,
                       borderRadius:7,fontSize:13,outline:"none",boxSizing:"border-box"}}),
                   (newExp.date&&newExp.date!==localDate())&&h("div",{style:{fontSize:12,
-                    color:"#BF360C",fontWeight:700,marginTop:3}},
+                    color:"rgba(255,255,255,.85)",fontWeight:700,marginTop:3}},
                     "Will be filed under "+newExp.date+", not today")),
                 h("div",null,h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"CATEGORY"),h("select",{value:newExp.cat,onChange:e=>setNewExp(p=>({...p,cat:e.target.value})),style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:13,outline:"none"}},EXPENSE_CATS.map(c=>h("option",{key:c},c)))),
                 h("div",null,h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"DESCRIPTION"),h("input",{value:newExp.desc,onChange:e=>setNewExp(p=>({...p,desc:e.target.value})),placeholder:"Description",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:13,outline:"none",boxSizing:"border-box"}})),
@@ -14827,7 +14827,7 @@ function App(){
 
                     !editingStaff._isNew&&h("div",{style:{background:"#FFF3E0",
                       border:"1px solid #FFCC80",borderRadius:8,padding:"9px 12px",
-                      marginBottom:10,fontSize:13,color:"#BF360C",lineHeight:1.5}},
+                      marginBottom:10,fontSize:13,color:"rgba(255,255,255,.85)",lineHeight:1.5}},
                       h("b",null,"The login email cannot be changed here."),
                       " Sign-in matches the Firebase account, so editing it would "+
                       "lock this person out. To move them to a new address, create "+
@@ -15008,7 +15008,7 @@ function App(){
                   {icon:"🕐",label:"Time Kiosk",sub:"Time In / Out",url:"https://chowtime-hris.github.io/chowtime-hris/chowtime-kiosk.html",color:C.primary,local:true,branchOnly:false},
                   {icon:"👥",label:"Employees",sub:"Staff records",url:"https://chowtime-hris.github.io/chowtime-hris/chowtime-payroll.html#employees",color:"#1565C0",mainOnly:true},
                   {icon:"📋",label:"Attendance",sub:"DTR records",url:"https://chowtime-hris.github.io/chowtime-hris/chowtime-payroll.html#attendance",color:"#2E7D32",mainOnly:true},
-                  {icon:"💰",label:"Payroll",sub:"Compute payroll",url:"https://chowtime-hris.github.io/chowtime-hris/chowtime-payroll.html#payroll",color:"#BF360C",mainOnly:true},
+                  {icon:"💰",label:"Payroll",sub:"Compute payroll",url:"https://chowtime-hris.github.io/chowtime-hris/chowtime-payroll.html#payroll",color:"rgba(255,255,255,.85)",mainOnly:true},
                   {icon:"🗓️",label:"Shifts",sub:"Shift scheduler",url:"https://chowtime-hris.github.io/chowtime-hris/chowtime-payroll.html#shifts",color:"#6A1B9A",mainOnly:true},
                   {icon:"🏖️",label:"Leaves",sub:"Leave filings",url:"https://chowtime-hris.github.io/chowtime-hris/chowtime-payroll.html#leaves",color:"#00695C",mainOnly:true},
                   {icon:"🏦",label:"Loans",sub:"CA & Loan records",url:"https://chowtime-hris.github.io/chowtime-hris/chowtime-payroll.html#loans",color:"#AD1457",mainOnly:true},
