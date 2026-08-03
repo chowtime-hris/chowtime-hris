@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Chowtime POS — 20260803-022347</title>
+<title>Chowtime POS — 20260803-025654</title>
 <meta name="theme-color" content="#6A1B9A"/>
 <meta name="mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260803-022347 -->
+<!-- BUILD:20260803-025654 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -2004,15 +2004,18 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
         for(const it of delivered){
           if(!it.id||!(it.actualQty>0))continue;
           try{
-            let _dprev=null;
+            let _dprev=null, _dlots=null;
             try{
               const _ds=await getDoc(doc(db,"inventory",it.id));
-              if(_ds.exists())_dprev=Number(_ds.data().stock)||0;
+              if(_ds.exists()){
+                _dprev=Number(_ds.data().stock)||0;
+                _dlots=lotsConsume(_ds.data().lots,it.actualQty||0).lots;
+              }
             }catch(e7){}
-            await updateDoc(doc(db,"inventory",it.id),{
+            await updateDoc(doc(db,"inventory",it.id),Object.assign({
               stock:increment(-(it.actualQty||0)),
               lastIssued:serverTimestamp()
-            });
+            }, _dlots?{lots:_dlots}:{}));
             moved++;
             await addDoc(collection(db,"inventory_log"),{
                itemId:it.id, itemName:it.name||it.id,unit:it.unit||"",
@@ -2339,6 +2342,8 @@ function DRCheckForm({po,db,branchId,user,showT,INIT_INVENTORY,setAdvances,advan
               minStock:0,   // branch sets its own reorder point, not Main's
               branch:branchId,
               stock:Number( item.receivedQty)||0,
+              lots:lotsAdd([],Number( item.receivedQty)||0,
+                Number( item.price)||0,po.poNum||"",Date.now()),
               adoptedFrom:"main",
               adoptedAt:serverTimestamp(),
               lastRestocked:serverTimestamp()
@@ -4571,6 +4576,111 @@ const GUIDES=[
    note:"Use Batch edit for many items at once — the toolbar button. Every change still writes its own log line, so a batch and a single adjustment read the same afterwards."},
 ];
 
+// ─── FIFO LOTS ────────────────────────────────────────────
+// Each delivery becomes a lot carrying the price actually paid for it. Stock
+// is consumed oldest-first, so the value of what remains is the sum of what
+// each surviving lot cost — not a blended average that quietly revalues older
+// stock every time a price moves.
+//
+// Lots live in an array on the item document, not a subcollection: a sale
+// already reads and writes that one document, so FIFO adds no extra round
+// trip to the hot path.
+//
+// `stock` stays the authoritative running total. The lots are the costing
+// ledger beside it. They can drift — an old item has no lots at all — so
+// every reader tolerates a short or missing lot list rather than trusting it
+// blindly.
+
+// Add a lot. qty and price are what this delivery actually brought and cost.
+function lotsAdd(lots,qty,price,ref,when){
+  const list=Array.isArray(lots)?lots.slice():[];
+  const q=Number(qty)||0;
+  if(q<=0) return list;
+  list.push({
+    qty:q,
+    remaining:q,
+    price:Number(price)||0,
+    ref:ref||"",
+    at:when||Date.now()
+  });
+  return list;
+}
+
+// Consume qty oldest-first. Returns the new list and the cost of what was
+// taken, so the caller can record what that movement was actually worth.
+// A shortfall is reported rather than hidden: if the lots do not cover the
+// deduction, whatever is missing is priced at the last known lot price.
+function lotsConsume(lots,qty){
+  const list=(Array.isArray(lots)?lots:[]).map(l=>Object.assign({},l));
+  let need=Number(qty)||0;
+  let cost=0, taken=0;
+  if(need<=0) return {lots:list,cost:0,taken:0,short:0};
+  list.sort((a,b)=>(a.at||0)-(b.at||0));
+  for(const l of list){
+    if(need<=0)break;
+    const avail=Number(l.remaining)||0;
+    if(avail<=0)continue;
+    const use=Math.min(avail,need);
+    l.remaining=Math.round((avail-use)*10000)/10000;
+    cost+=use*(Number(l.price)||0);
+    taken+=use; need-=use;
+  }
+  const short=Math.round(need*10000)/10000;
+  if(short>0){
+    // more was deducted than the lots knew about — value it at the newest
+    // price we have, and let the caller surface the gap
+    const last=list.length?list[list.length-1]:null;
+    cost+=short*((last&&Number(last.price))||0);
+  }
+  return {
+    lots:lotsPrune(list),
+    cost:Math.round(cost*10000)/10000,
+    taken:Math.round(taken*10000)/10000,
+    short:short
+  };
+}
+
+// Drop spent lots so the array cannot grow without bound, but keep the most
+// recent few even at zero — they carry the price used to value a shortfall.
+function lotsPrune(lots){
+  const list=(Array.isArray(lots)?lots:[]).slice()
+    .sort((a,b)=>(a.at||0)-(b.at||0));
+  const live=list.filter(l=>(Number(l.remaining)||0)>0.0001);
+  const spent=list.filter(l=>(Number(l.remaining)||0)<=0.0001).slice(-3);
+  return spent.concat(live).sort((a,b)=>(a.at||0)-(b.at||0));
+}
+
+// What the remaining stock is worth.
+function lotsValue(lots){
+  return Math.round((Array.isArray(lots)?lots:[])
+    .reduce((a,l)=>a+((Number(l.remaining)||0)*(Number(l.price)||0)),0)*100)/100;
+}
+
+// Units the lots still account for. Compared against `stock` this is the
+// drift check — they should match, and where they do not the item needs a
+// physical count rather than a silent correction.
+function lotsQty(lots){
+  return Math.round((Array.isArray(lots)?lots:[])
+    .reduce((a,l)=>a+(Number(l.remaining)||0),0)*10000)/10000;
+}
+
+// Cost per unit implied by the surviving lots. Falls back to the item's own
+// cost field when there are no lots yet, so an un-seeded item still values.
+function lotsUnitCost(lots,fallback){
+  const q=lotsQty(lots);
+  if(q>0) return Math.round((lotsValue(lots)/q)*10000)/10000;
+  return Number(fallback)||0;
+}
+
+// A physical count replaces reality: one lot, at the best price we can
+// justify, because the old lot structure no longer describes what is there.
+function lotsReset(qty,price,ref,when){
+  const q=Number(qty)||0;
+  if(q<=0) return [];
+  return [{qty:q,remaining:q,price:Number(price)||0,
+    ref:ref||"count",at:when||Date.now()}];
+}
+
 // ─── DATE RANGES ──────────────────────────────────────────
 // One definition of "this week" and "this month" for the dashboard and the
 // analytics, so the two can never disagree about the period they are showing.
@@ -5855,7 +5965,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260803-022347";
+const BUILD = "20260803-025654";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -5913,15 +6023,17 @@ async function postReceivedToStock(db,po,byName){
           price:Number(meta.price)||0,
           minStock:0,   // branch sets its own reorder point, not Main's
           branch:invBr,stock:qty,
+          lots:lotsAdd([],qty,Number(it.price)||0,po.poNum||"",Date.now()),
           adoptedFrom:"main",adoptedAt:serverTimestamp(),
           lastRestocked:serverTimestamp()
         }),{merge:true});
         prev=0; res.adopted++;
       }else{
         prev=Number(cur.data().stock)||0;
+        const nlots=lotsAdd(cur.data().lots,qty,Number(it.price)||0,
+             po.poNum||"",Date.now());
         await updateDoc(ref,Object.assign(
-          {stock:increment(qty),lastRestocked:serverTimestamp()},
-          (!isMainDest&&Number(it.price)>0)?{cost:Number(it.price)}:{}));
+          {stock:increment(qty),lastRestocked:serverTimestamp()}, nlots?{lots:nlots}:{}));
       }
       res.added++;
       await addDoc(collection(db,logCol),{
@@ -6289,11 +6401,19 @@ async function performVoid(db, args){
         try{
           const col=await colFor(row.ingId);
           const logCol=col.replace(/^inventory/,"inventory_log");
-          let prev=null;
-          try{const sn=await getDoc(doc(db,col,row.ingId));
-              if(sn.exists())prev=Number(sn.data().stock)||0;}catch(e){}
-          await updateDoc(doc(db,col,row.ingId),{
-            stock:increment(amt),lastUpdated:serverTimestamp()});
+          let prev=null, back=null;
+          try{
+            const sn=await getDoc(doc(db,col,row.ingId));
+            if(sn.exists()){
+              prev=Number(sn.data().stock)||0;
+              const u=lotsUnitCost(sn.data().lots,Number(sn.data().cost)||0);
+              back=lotsAdd(sn.data().lots,amt,u,
+                "void:"+(order.id||""),Date.now());
+            }
+          }catch(e){}
+          await updateDoc(doc(db,col,row.ingId),Object.assign(
+            {stock:increment(amt),lastUpdated:serverTimestamp()},
+            back?{lots:back}:{}));
           out.restocked++;
           await addDoc(collection(db,logCol),{
              itemId:row.ingId, itemName:row.ingName||row.ingId,
@@ -7242,11 +7362,26 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
     if(!reason){showT("Select reason","warn");return;}
     setSaving(true);
     try{
-      await updateDoc(doc(db,invCol, item.id),{
+      let _nl=null;
+      try{
+        const _cs=await getDoc(doc(db,invCol, item.id));
+        const _cur=_cs.exists()?(_cs.data().lots):null;
+        const _unit=lotsUnitCost(_cur,Number( item.cost)||0);
+        if(mode==="set"){
+          // a physical count is the new truth — one lot, at what the stock
+          // it replaces was worth per unit
+          _nl=lotsReset(preview,_unit,"count:"+reason,Date.now());
+        }else if(preview>current){
+          _nl=lotsAdd(_cur,preview-current,_unit,reason,Date.now());
+        }else if(preview<current){
+          _nl=lotsConsume(_cur,current-preview).lots;
+        }
+      }catch(e){}
+      await updateDoc(doc(db,invCol, item.id),Object.assign({
         stock:preview,lastAdjusted:serverTimestamp(),
         adjustedBy:user.name,adjustReason:reason,
         adjustType:mode,prevStock:current
-      });
+      }, _nl?{lots:_nl}:{}));
       await addDoc(collection(db,logCol),{
          itemId: item.id, itemName: item.name,unit: item.unit||"",
         type:mode==="set"?"set":isNeg?"deduct":"add",
@@ -7781,15 +7916,17 @@ function ReceiveItemsModal({po,db,user,showT,branchId,onClose}){
                 price:Number(meta.price)||0,
                 minStock:0,   // branch sets its own reorder point, not Main's
                 branch:invBr,stock:qty,
+                lots:lotsAdd([],qty,Number(it.price)||0,po.poNum||"",Date.now()),
                 adoptedFrom:"main",adoptedAt:serverTimestamp(),
                 lastRestocked:serverTimestamp()
               }),{merge:true});
               prev=0; adopted++;
             }else{
               prev=Number(cur.data().stock)||0;
+              const nlots=lotsAdd(cur.data().lots,qty,Number(it.price)||0,
+                   po.poNum||"",Date.now());
               await updateDoc(ref,Object.assign(
-                {stock:increment(qty),lastRestocked:serverTimestamp()},
-                (!isMainDest&&Number(it.price)>0)?{cost:Number(it.price)}:{}));
+                {stock:increment(qty),lastRestocked:serverTimestamp()}, nlots?{lots:nlots}:{}));
             }
             added++;
             await addDoc(collection(db,
@@ -8313,19 +8450,22 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
         for(const it of delivered){
           if(!it.id||!(it.actualQty>0))continue;
           try{
-            let prev=null;
+            let prev=null, _mlots=null;
             try{
               const ds=await getDoc(doc(db,"inventory",it.id));
-              if(ds.exists())prev=Number(ds.data().stock)||0;
+              if(ds.exists()){
+                prev=Number(ds.data().stock)||0;
+                _mlots=lotsConsume(ds.data().lots,it.actualQty||0).lots;
+              }
             }catch(e1){}
             if(prev!=null&&prev<(it.actualQty||0)){
               shortAtMain.push((it.name||it.id)+": has "+prev+", needed "+it.actualQty);
               continue;
             }
-            await updateDoc(doc(db,"inventory",it.id),{
+            await updateDoc(doc(db,"inventory",it.id),Object.assign({
               stock:increment(-(it.actualQty||0)),
               lastIssued:serverTimestamp()
-            });
+            }, _mlots?{lots:_mlots}:{}));
             moved++;
             await addDoc(collection(db,"inventory_log"),{
               itemId:it.id,itemName:it.name||it.id,unit:it.unit||"",
@@ -10769,15 +10909,19 @@ function App(){
               // Read first so the log can carry before -> after. increment() is
               // atomic server-side, so `next` is computed, not read back; it can
               // drift only if two terminals hit the same ingredient at once.
-              let _prev=null;
+              let _prev=null, _lots=null, _cost=null;
               try{
                 const _s=await getDoc(doc(db,deductCol,row.ingId));
-                if(_s.exists())_prev=Number(_s.data().stock)||0;
+                if(_s.exists()){
+                  _prev=Number(_s.data().stock)||0;
+                  const _r=lotsConsume(_s.data().lots,deductAmt);
+                  _lots=_r.lots; _cost=_r.cost;
+                }
               }catch(e4){}
-              await updateDoc(doc(db,deductCol,row.ingId),{
+              await updateDoc(doc(db,deductCol,row.ingId),Object.assign({
                 stock: increment(-deductAmt),
                 lastDeducted: serverTimestamp()
-              });
+              }, _lots?{lots:_lots}:{}));
               totalDeductions++;
               await addDoc(collection(db,logCol),{
                  itemId:row.ingId,
@@ -10860,15 +11004,19 @@ function App(){
                     continue;   // same rule for pick BOMs
                   }
                 }catch(e3){}
-                let _pprev=null;
+                let _pprev=null, _plots=null, _pcost=null;
                 try{
                   const _ps=await getDoc(doc(db,pCol,row.ingId));
-                  if(_ps.exists())_pprev=Number(_ps.data().stock)||0;
+                  if(_ps.exists()){
+                    _pprev=Number(_ps.data().stock)||0;
+                    const _r=lotsConsume(_ps.data().lots,actualDeduct);
+                    _plots=_r.lots; _pcost=_r.cost;
+                  }
                 }catch(e5){}
-                await updateDoc(doc(db,pCol,row.ingId),{
+                await updateDoc(doc(db,pCol,row.ingId),Object.assign({
                   stock:increment(-actualDeduct),
                   lastDeducted:serverTimestamp()
-                });
+                }, _plots?{lots:_plots}:{}));
                 await addDoc(collection(db,logCol),{
                    itemId:row.ingId, itemName:row.ingName||row.ingId,
                   unit:row.unit||"",type:"deduct",amount:-actualDeduct,
@@ -13781,7 +13929,15 @@ function App(){
             h(Stat,{label:"Low Stock",value:inventory.filter(i=>(Number(i.minStock)||0)>0&&(i.stock||0)<(Number(i.minStock)||0)).length,sub:"Below min level",icon:"⚠️",color:C.danger}),
             (function(){
               const src=invView?invViewData:inventory;
-              const atCost  =src.reduce((a,i)=>a+(Number(i.stock)||0)*(Number(i.cost)||0),0);
+              // FIFO where the lots cover the stock, average where they do not
+              // — one figure, and honest about which items it can prove.
+              const atCost  =src.reduce((a,i)=>{
+                const st=Number(i.stock)||0;
+                if(Array.isArray(i.lots)&&i.lots.length
+                   &&Math.abs(st-lotsQty(i.lots))<=0.01)
+                  return a+lotsValue(i.lots);
+                return a+st*(Number(i.cost)||0);
+              },0);
               const atRetail=src.reduce((a,i)=>a+(Number(i.stock)||0)*(Number(i.price)||0),0);
               // At a branch there is no retail side to an ingredient, so the
               // toggle would only ever show the same number twice.
@@ -13823,6 +13979,161 @@ function App(){
                 :["Name","In Stock","","Cost / unit","Used in","Cat","Action"]
               ).map((h2,hi)=>h("div",{key:h2+hi,style:{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:.5}},h2))
             ),
+            // Lots explain what the stock is worth. When they no longer add up
+            // to the stock itself, the value shown is a guess — say so rather
+            // than let it read as fact.
+            (function(){
+              const src=invView?invViewData:inventory;
+              const off=src.filter(i=>{
+                const st=Number(i.stock)||0;
+                const lq=lotsQty(i.lots);
+                if(!Array.isArray(i.lots)||!i.lots.length) return st>0;
+                return Math.abs(st-lq)>0.01;
+              });
+              if(!off.length) return null;
+              const noLots=off.filter(i=>!Array.isArray(i.lots)||!i.lots.length).length;
+              return h("div",{style:{background:C.bg,
+                border:"1px solid "+C.border,borderRadius:11,
+                padding:"11px 13px",marginBottom:12}},
+                h("div",{style:{fontSize:12,fontWeight:800,color:C.muted,
+                  letterSpacing:1}},"LOT COVERAGE"),
+                h("div",{style:{fontSize:12,color:C.muted,marginTop:3,
+                  lineHeight:1.5}},
+                  off.length+" of "+src.length+" item"+(src.length>1?"s":"")
+                  +" not yet lot-tracked"
+                  +(noLots?" ("+noLots+" with no lots at all)":"")
+                  +". Their value falls back to the average cost until the "
+                  +"next delivery, or a physical count, opens a lot."));
+            })(),
+
+            // Items adopted before the cost fix still carry MAIN's buying
+            // price, so the branch's inventory value reads at Main's cost
+            // instead of what they actually paid. The PO history has the real
+            // figure on every line — this rebuilds from it rather than waiting
+            // for each item's next delivery to correct itself one at a time.
+            (!isMainInv||invView)&&(function(){
+              const bid=invView||branchId;
+              const src=invView?invViewData:inventory;
+              // Reconstruct the lots rather than average them. Under FIFO the
+              // oldest stock left first, so whatever is on hand now came from
+              // the most recent deliveries backwards — walk the PO history
+              // newest-first until it covers the current stock, and that is
+              // the lot structure that must be there.
+              const hist={};
+              advances
+                .filter(a=>a._type==="po"&&a.branch===bid)
+                .slice()
+                .sort((a,b)=>(b.timestamp?.seconds||0)-(a.timestamp?.seconds||0))
+                .forEach(po=>{
+                  (po.receivedItems||po.deliveredItems||po.items||[]).forEach(it=>{
+                    const p=Number(it.price)||0;
+                    const q=Number(it.receivedQty!=null?it.receivedQty
+                      :(it.actualQty!=null?it.actualQty:it.qty))||0;
+                    if(!it.id||p<=0||q<=0)return;
+                    if(!hist[it.id])hist[it.id]=[];
+                    hist[it.id].push({qty:q,price:p,ref:po.poNum||"",
+                      at:(po.timestamp?.seconds||0)*1000});
+                  });
+                });
+              // for each item, the lots that account for what is on hand
+              const rebuild=(id,stock)=>{
+                const h2=hist[id]||[];
+                const out=[]; let need=Number(stock)||0;
+                for(const d of h2){          // already newest-first
+                  if(need<=0)break;
+                  const take=Math.min(d.qty,need);
+                  out.push({qty:take,remaining:take,price:d.price,
+                    ref:d.ref,at:d.at||Date.now()});
+                  need-=take;
+                }
+                out.sort((a,b)=>(a.at||0)-(b.at||0));   // back to oldest-first
+                return {lots:out,short:Math.round(need*10000)/10000};
+              };
+              const paid={};
+              Object.keys(hist).forEach(id=>{
+                const h2=hist[id];
+                if(h2.length) paid[id]=h2[0].price;   // newest price, for display
+              });
+
+              // an item needs seeding when it has no lots, or the lots no
+              // longer add up to the stock they are meant to explain
+              const wrong=src.filter(i=>{
+                const st=Number(i.stock)||0;
+                if(st<=0) return false;
+                if(!hist[i.id]||!hist[i.id].length) return false;
+                const lq=lotsQty(i.lots);
+                return !Array.isArray(i.lots)||!i.lots.length
+                  ||Math.abs(st-lq)>0.01;
+              });
+              if(!wrong.length) return null;
+
+              const plan=wrong.map(i=>{
+                const st=Number(i.stock)||0;
+                const r=rebuild(i.id,st);
+                return {item:i,stock:st,lots:r.lots,short:r.short,
+                  before:st*(Number(i.cost)||0),after:lotsValue(r.lots)};
+              });
+              const now=plan.reduce((a,p)=>a+p.before,0);
+              const fixed=plan.reduce((a,p)=>a+p.after,0);
+              const shortCount=plan.filter(p=>p.short>0.01).length;
+
+              return h("div",{style:{background:C.warning+"14",
+                border:"1px solid "+C.warning,borderRadius:11,
+                padding:"12px 14px",marginBottom:12}},
+                h("div",{style:{display:"flex",gap:10,alignItems:"center",
+                  flexWrap:"wrap"}},
+                  h("div",{style:{flex:1,minWidth:230}},
+                    h("div",{style:{fontSize:13,fontWeight:800,color:C.warning}},
+                      wrong.length+" item"+(wrong.length>1?"s":"")
+                      +" without lot history"),
+                    h("div",{style:{fontSize:11,color:C.muted,marginTop:2,
+                      lineHeight:1.5}},
+                      "Their value is falling back to a single cost figure. "+
+                      "Under FIFO the oldest stock left first, so what is on "+
+                      "hand came from the most recent deliveries — this "+
+                      "rebuilds those lots from the PO history. "+
+                      "Value ₱"+peso(now)+" → ₱"+peso(fixed)+"."
+                      +(shortCount?("  "+shortCount+" item"
+                        +(shortCount>1?"s have":" has")+" more stock than the "
+                        +"POs account for; the excess is left un-lotted."):""))),
+                  h("button",{
+                    onClick:async()=>{
+                      const lines=plan.slice(0,8).map(p=>{
+                        const parts=p.lots.map(l=>l.remaining+" @ ₱"+peso(l.price));
+                        return "  • "+(p.item.name||p.item.id)+": "
+                          +(parts.join(" + ")||"—")
+                          +(p.short>0.01?("  (+"+p.short+" unaccounted)"):"");
+                      });
+                      if(!confirm("Rebuild lots from this branch's PO history?\n\n"
+                        +lines.join("\n")
+                        +(plan.length>8?"\n  …and "+(plan.length-8)+" more":"")
+                        +"\n\nInventory value ₱"+peso(now)+" → ₱"+peso(fixed)
+                        +"\n\nNewest deliveries first, the way FIFO leaves them. "
+                        +"Stock and the POs are untouched."))return;
+                      const col=(bid==="ct-main"||bid==="main")
+                        ?"inventory":"inventory_"+bid;
+                      let done=0;
+                      for(const p of plan){
+                        try{
+                          await updateDoc(doc(db,col,p.item.id),{
+                            lots:p.lots,
+                            cost:lotsUnitCost(p.lots,Number(p.item.cost)||0),
+                            lotsSeededBy:user.name,
+                            lotsSeededAt:serverTimestamp()
+                          });
+                          done++;
+                        }catch(e){console.error("lot seed",p.item.id,e);}
+                      }
+                      showT(done+" item"+(done>1?"s":"")+" lotted — value now ₱"
+                        +peso(fixed));
+                    },
+                    style:{padding:"9px 15px",borderRadius:8,border:"none",
+                      background:C.warning,color:"#fff",fontWeight:800,
+                      fontSize:12,cursor:"pointer"}},
+                    "Rebuild lots from POs"))
+              );
+            })(),
+
             batchMode&&(function(){
               const n=Object.keys(batchEdits).length;
               return h("div",{style:{background:"#FFF3E0",
@@ -14187,9 +14498,14 @@ function App(){
                     const logCol=logColFor(isOwner?"main":branchId);
                     const newQ=Math.max(0,( item.stock||0)+adj);
                     try{
+                      const _u=lotsUnitCost( item.lots,Number( item.cost)||0);
+                      const _nl=adj>0
+                        ? lotsAdd( item.lots,adj,_u,"quick adjust",Date.now())
+                        : lotsConsume( item.lots,-adj).lots;
                       await updateDoc(doc(db,invCol, item.id),{
                         stock:newQ,lastAdjusted:serverTimestamp(),
-                        adjustedBy:user.name,lastAdjAmt:adj
+                        adjustedBy:user.name,lastAdjAmt:adj,
+                        lots:_nl
                       });
                       await addDoc(collection(db,logCol),{
                          itemId: item.id, itemName: item.name,unit: item.unit||"",
@@ -16035,9 +16351,14 @@ function App(){
                                 const ds=await getDoc(doc(db,"inventory",it.id));
                                 if(ds.exists())prev=Number(ds.data().stock)||0;
                               }catch(e1){}
+                              const _u=lotsUnitCost(ds.exists()?ds.data().lots:null,
+                                ds.exists()?(Number(ds.data().cost)||0):0);
+                              const _bk=lotsAdd(ds.exists()?ds.data().lots:null,
+                                it.actualQty||0,_u,"cancel:"+(po.poNum||""),Date.now());
                               await updateDoc(doc(db,"inventory",it.id),{
                                 stock:increment(it.actualQty||0),
-                                lastRestocked:serverTimestamp()
+                                lastRestocked:serverTimestamp(),
+                                lots:_bk
                               });
                               back++;
                               await addDoc(collection(db,"inventory_log"),{
@@ -16148,14 +16469,17 @@ function App(){
                               cost:isMainDest?(Number(meta.cost)||0)
             :(Number(it.price)||Number(meta.price)||0),
                               minStock:0,stock:qty,
+                              lots:lotsAdd([],qty,Number(it.price)||0,
+                                  po.poNum||"",Date.now()),
                               adoptedFrom:"main",adoptedAt:serverTimestamp(),
                               lastRestocked:serverTimestamp()
                             }),{merge:true});
                           }else{
                             prev=Number(cur.data().stock)||0;
+                            const nlots=lotsAdd(cur.data().lots,qty,Number(it.price)||0,
+                                 po.poNum||"",Date.now());
                             await updateDoc(ref,Object.assign(
-                              {stock:increment(qty),lastRestocked:serverTimestamp()},
-                              (!isMainDest&&Number(it.price)>0)?{cost:Number(it.price)}:{}));
+                              {stock:increment(qty),lastRestocked:serverTimestamp()}, nlots?{lots:nlots}:{}));
                           }
                           added++;
                           await addDoc(collection(db,logColFor(invBr)),{
@@ -16213,10 +16537,13 @@ function App(){
                           // tells you nothing, so this was the one movement in
                           // the system with no before and after — the log said
                           // what left, never what remained.
-                          let prev=null;
+                          let prev=null, _plots=null;
                           try{
                             const snap=await getDoc(doc(db,"inventory", item.id));
-                            if(snap.exists())prev=Number(snap.data().stock)||0;
+                            if(snap.exists()){
+                              prev=Number(snap.data().stock)||0;
+                              _plots=lotsConsume(snap.data().lots,qty).lots;
+                            }
                           }catch(e){}
                           if(prev!=null&&prev<qty){
                             showT(( item.name|| item.id)+": Main has "+prev
@@ -16224,10 +16551,10 @@ function App(){
                             continue;
                           }
                           try{
-                            await updateDoc(doc(db,"inventory", item.id),{
+                            await updateDoc(doc(db,"inventory", item.id),Object.assign({
                               stock:increment(-qty),
                               lastDeducted:serverTimestamp()
-                            });
+                            }, _plots?{lots:_plots}:{}));
                           }catch(e){}
                           try{
                             await addDoc(collection(db,"inventory_log"),{
