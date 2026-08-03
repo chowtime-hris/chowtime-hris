@@ -140,7 +140,7 @@
   .cutoff-foot .save-btn{width:auto;padding:8px 16px;font-size:12.5px;}
   .cutoff-foot .cp-status{font-size:11.5px;color:var(--muted);}
 </style>
-<!-- BUILD:20260803-070054 -->
+<!-- BUILD:20260803-071433 -->
 </head>
 <body>
 
@@ -447,6 +447,8 @@
       <div style="margin-top:10px;display:flex;gap:8;flex-wrap:wrap">
         <button class="btn-primary" id="posSaveBtn" style="width:auto">Save links</button>
         <button class="btn-ghost" id="posImportBtn" style="width:auto">Import items from POS</button>
+        <button class="btn-ghost" id="posUndoBtn" style="width:auto">Undo last import</button>
+        <button class="btn-ghost" id="posClearBtn" style="width:auto;color:var(--danger);border-color:var(--danger)">Clear catalog</button>
       </div>
     </div>
 
@@ -1227,71 +1229,187 @@ async function renderPosLinkPanel(){
     if(!POS_ITEMS_CACHE.length){
       toast("No POS items loaded — press Reload POS items"); return;
     }
-    // anything already here, matched loosely by name so a second run does not
-    // duplicate what the first one brought in
+    // Guessing by name is what produced duplicates: this catalog says
+    // "C.fillet" where the POS says "Chiekcn Fillet", and no amount of
+    // normalising bridges that. So propose, and let the person decide each
+    // row — an exact match is pre-selected, everything else is offered.
     const norm = (x)=>String(x||"").toLowerCase().replace(/[^a-z0-9]/g,"");
-    const mineByName = {};
-    Object.keys(items).forEach(id=>{ mineByName[norm(items[id].name)] = id; });
-    const linked = {};
+    const mineList = Object.keys(items)
+      .filter(id=>!items[id].archived)
+      .map(id=>({id, name:items[id].name||id}))
+      .sort((a,b)=>String(a.name).localeCompare(String(b.name)));
+    const exact = {};
+    mineList.forEach(m=>{ exact[norm(m.name)] = m.id; });
+
+    const linkedTo = {};
     Object.keys((saved.items)||{}).forEach(k=>{
       const v=saved.items[k];
-      linked[typeof v==="string"?v:(v&&v.id)] = true;
+      linkedTo[typeof v==="string"?v:(v&&v.id)] = k;
     });
 
-    const toAdd = POS_ITEMS_CACHE.filter(x=>!mineByName[norm(x.name)]);
-    const toLink = POS_ITEMS_CACHE.filter(x=>
-      mineByName[norm(x.name)] && !linked[x.id]);
-
-    if(!toAdd.length && !toLink.length){
-      toast("Everything here is already imported and linked"); return;
-    }
-    const preview = toAdd.slice(0,8).map(x=>"  • "+x.name+(x.unit?(" ("+x.unit+")"):""));
-    if(!confirm(
-      (toAdd.length?(toAdd.length+" item"+(toAdd.length>1?"s":"")+" will be created here:\n"
-        +preview.join("\n")+(toAdd.length>8?("\n  …and "+(toAdd.length-8)+" more"):"")+"\n\n"):"")
-      +(toLink.length?(toLink.length+" existing item"+(toLink.length>1?"s":"")
-        +" will be linked by name.\n\n"):"")
-      +"Name, unit and category come across. The POS cost becomes the charge "
-      +"rate per unit, and the POS pack size becomes the freezer pack — so "
-      +"10 pcs to a bag stays 10 pcs to a bag."))return;
-
     const box2 = document.getElementById("posLinkBox");
-    if(box2) box2.innerHTML = '<p class="sub">Importing…</p>';
-    const map = Object.assign({}, saved.items||{});
-    let made=0;
-    for(const x of toAdd){
-      try{
-        const ref = bref('items').push();
-        await ref.set({
-          name: x.name,
-          unit: x.unit||"pc",
-          category: x.cat||"",
-          // Pricing: what a missing unit is charged at. itemRate() reads this
-          // as cost ÷ size, so one unit at the POS cost gives the right rate.
-          packSize: 1,
-          packCost: x.cost>0 ? Math.round(x.cost*100)/100 : null,
-          // Counting: how many units are in one physical pack. This is what
-          // the POS pack size describes — 10 pcs to a bag, 1000 ml to a
-          // bottle — and it is what lets the crew count packs plus loose.
-          freezerPackSize: x.packSize>0 ? x.packSize : null,
-          archived: false, createdAt: Date.now(),
-          importedFromPos: x.id
+    if(box2){
+      box2.innerHTML =
+        '<div class="msg info">For each POS item, choose whether to link it to '
+        + 'something already in this catalog or create it. Anything already '
+        + 'linked is left alone.</div>'
+        + POS_ITEMS_CACHE.map(x=>{
+            const already = linkedTo[x.id];
+            const guess = exact[norm(x.name)] || "";
+            return '<div style="display:flex;gap:8px;align-items:center;'
+              + 'padding:7px 0;border-top:1px solid var(--line)">'
+              + '<div style="flex:0 0 190px;font-weight:700">'
+              + escapeHtml(x.name)
+              + (x.unit?(' <span class="sub">('+escapeHtml(x.unit)+')</span>'):'')
+              + '</div>'
+              + (already
+                  ? '<div class="sub" style="flex:1">already linked to '
+                    + escapeHtml((items[already]||{}).name||already) + '</div>'
+                  : '<select class="impSel" data-pos="'+x.id+'" style="flex:1">'
+                    + '<option value="__new__">— create it here —</option>'
+                    + mineList.map(m=>'<option value="'+m.id+'"'
+                        + (m.id===guess?' selected':'') + '>'
+                        + escapeHtml(m.name) + '</option>').join('')
+                    + '<option value="__skip__">— skip —</option>'
+                    + '</select>')
+              + '</div>';
+          }).join('')
+        + '<div style="margin-top:10px"><button class="btn-primary" '
+        + 'id="impApplyBtn" style="width:auto">Apply</button></div>';
+
+      const applyBtn = document.getElementById("impApplyBtn");
+      if(applyBtn) applyBtn.onclick = async()=>{
+        const map = Object.assign({}, saved.items||{});
+        const create=[], link=[];
+        document.querySelectorAll(".impSel").forEach(sel2=>{
+          const posId = sel2.dataset.pos;
+          const v = sel2.value;
+          if(v==="__skip__") return;
+          const x = POS_ITEMS_CACHE.find(p=>p.id===posId);
+          if(!x) return;
+          if(v==="__new__") create.push(x); else link.push({x, id:v});
         });
-        map[ref.key] = {id:x.id, per:1};
-        made++;
-      }catch(e){ console.error("import", x.name, e); }
+        if(!create.length && !link.length){ toast("Nothing selected"); return; }
+        if(!confirm(
+          (create.length?(create.length+" item"+(create.length>1?"s":"")
+            +" will be created here.\n"):"")
+          +(link.length?(link.length+" will be linked to an existing item.\n"):"")
+          +"\nThe POS cost becomes the charge rate, and the POS pack size "
+          +"becomes the freezer pack."))return;
+
+        box2.innerHTML = '<p class="sub">Applying…</p>';
+        let made=0;
+        for(const x of create){
+          try{
+            const ref = bref('items').push();
+            await ref.set({
+              name: x.name, unit: x.unit||"pc", category: x.cat||"",
+              packSize: 1,
+              packCost: x.cost>0 ? Math.round(x.cost*100)/100 : null,
+              freezerPackSize: x.packSize>0 ? x.packSize : null,
+              archived: false, createdAt: Date.now(),
+              importedFromPos: x.id
+            });
+            map[ref.key] = {id:x.id, per:1};
+            made++;
+          }catch(e){ console.error("import", x.name, e); }
+        }
+        link.forEach(l=>{ map[l.id] = {id:l.x.id, per:1}; });
+        try{
+          await posDB().collection("settings").doc("stock_map").set(
+            {branches:{[currentBranchId]:{posBranch:bid, items:map}}},{merge:true});
+          toast(made+" created, "+link.length+" linked");
+        }catch(e){ toast("Could not save: "+(e.message||e)); }
+        renderPosLinkPanel();
+      };
     }
-    for(const x of toLink){
-      const id = mineByName[norm(x.name)];
-      if(id) map[id] = {id:x.id, per:1};
+    return;
+
+  };
+
+  // I matched on name and your catalog uses short forms — "C.fillet" against
+  // "Chiekcn Fillet" — so the import created duplicates instead of linking.
+  // Every item it made carries importedFromPos, which makes them removable
+  // without touching anything you set up by hand.
+  const undo = document.getElementById("posUndoBtn");
+  if(undo) undo.onclick = async()=>{
+    const mine = Object.keys(items).filter(id=>items[id].importedFromPos);
+    if(!mine.length){ toast("Nothing here was created by an import"); return; }
+    const withCounts = mine.filter(id=>{
+      // an item that has already been counted is not safe to delete
+      return false;
+    });
+    const names = mine.slice(0,10).map(id=>"  • "+(items[id].name||id));
+    if(!confirm("Remove "+mine.length+" item"+(mine.length>1?"s":"")
+      +" created by the import?\n\n"+names.join("\n")
+      +(mine.length>10?("\n  …and "+(mine.length-10)+" more"):"")
+      +"\n\nItems you added yourself are untouched. Counts already submitted "
+      +"keep their own record — this only removes the catalog entries."))return;
+    let gone=0;
+    for(const id of mine){
+      try{ await bref('items/'+id).remove(); gone++; }
+      catch(e){ console.error("undo import", id, e); }
     }
+    // drop their links too, so the map does not point at nothing
     try{
+      const d = await posDB().collection("settings").doc("stock_map").get();
+      const data = d.exists ? (d.data()||{}) : {};
+      const br = (data.branches||{})[currentBranchId]||{};
+      const map = Object.assign({}, br.items||{});
+      mine.forEach(id=>{ delete map[id]; });
       await posDB().collection("settings").doc("stock_map").set(
-        {branches:{[currentBranchId]:{posBranch:bid, items:map}}},{merge:true});
-      toast(made+" item"+(made===1?"":"s")+" created, "
-        +(made+toLink.length)+" linked");
-    }catch(e){ toast("Links could not be saved: "+(e.message||e)); }
-    // saved is stale now — pull it again on the next draw
+        {branches:{[currentBranchId]:{posBranch:br.posBranch||"", items:map}}},
+        {merge:true});
+    }catch(e){ console.warn("undo links:", e); }
+    toast(gone+" imported item"+(gone===1?"":"s")+" removed");
+    renderPosLinkPanel();
+  };
+
+  // Copying from another branch and then importing from the POS builds the
+  // same catalog twice, under two sets of names. Rather than hunting the
+  // overlaps, empty it and rebuild from one source — but only when nothing
+  // has been counted against it yet, because a count refers to these ids.
+  const clr = document.getElementById("posClearBtn");
+  if(clr) clr.onclick = async()=>{
+    const ids = Object.keys(items);
+    if(!ids.length){ toast("The catalog is already empty"); return; }
+
+    // a count that already happened points at these item ids — deleting the
+    // catalog underneath it leaves that history unreadable
+    let counted = 0;
+    try{
+      const snap = await bref('counts').once('value');
+      const all = snap.val() || {};
+      counted = Object.keys(all).length;
+    }catch(e){ console.warn("counts probe:", e); }
+
+    if(counted>0){
+      if(!confirm("This store has "+counted+" day"+(counted>1?"s":"")
+        +" of counts on record.\n\nThose counts refer to the items you are "
+        +"about to delete — the totals stay, but the item names in them will "
+        +"no longer resolve.\n\nDelete all "+ids.length+" items anyway?"))return;
+    }
+    const names = ids.slice(0,10).map(id=>"  • "+(items[id].name||id));
+    if(!confirm("Delete every item in this catalog?\n\n"+names.join("\n")
+      +(ids.length>10?("\n  …and "+(ids.length-10)+" more"):"")
+      +"\n\nThis cannot be undone. Counts already submitted keep their own "
+      +"figures. Type nothing — press OK only if you mean it."))return;
+
+    let gone=0;
+    for(const id of ids){
+      try{ await bref('items/'+id).remove(); gone++; }
+      catch(e){ console.error("clear", id, e); }
+    }
+    // and the links, so nothing points at a deleted item
+    try{
+      const d = await posDB().collection("settings").doc("stock_map").get();
+      const data = d.exists ? (d.data()||{}) : {};
+      const br = (data.branches||{})[currentBranchId]||{};
+      await posDB().collection("settings").doc("stock_map").set(
+        {branches:{[currentBranchId]:{posBranch:br.posBranch||"", items:{}}}},
+        {merge:true});
+    }catch(e){ console.warn("clear links:", e); }
+    toast(gone+" item"+(gone===1?"":"s")+" removed — import to rebuild");
     renderPosLinkPanel();
   };
 
@@ -2251,6 +2369,6 @@ window.addEventListener('load', ()=>{
   }
 });
 </script>
-<div id="buildStamp" style="text-align:center;padding:14px 8px;font-size:11px;color:#5A5A5A">Chowtime Stock · 20260803-070054</div>
+<div id="buildStamp" style="text-align:center;padding:14px 8px;font-size:11px;color:#5A5A5A">Chowtime Stock · 20260803-071433</div>
 </body>
 </html>
