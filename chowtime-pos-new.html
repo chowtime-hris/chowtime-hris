@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Chowtime POS — 20260803-042836</title>
+<title>Chowtime POS — 20260803-073652</title>
 <meta name="theme-color" content="#6A1B9A"/>
 <meta name="mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260803-042836 -->
+<!-- BUILD:20260803-073652 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -6049,7 +6049,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260803-042836";
+const BUILD = "20260803-073652";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -8783,34 +8783,67 @@ function PermissionsTab({db,showT,companySettings,setCompanySettings}){
   });
   const [saving,setSaving] = useState(false);
 
-  // Nav  items per role with labels
-  const ROLE_NAVS = {
-    cashier: [
+  // Every page the system has, not just the ones a role starts with. The old
+  // list held only each role's defaults, so the screen could take access away
+  // and never give it — which is half a permission system.
+  //
+  // Grouped the way the sidebar is, so granting "PO Monitor" to a Main cashier
+  // means finding it where it already lives rather than hunting a flat list.
+  const PERM_GROUPS = [
+    {label:"Sales & POS", items:[
       {key:"pos",label:"🛒 POS"},
       {key:"orders",label:"📋 Orders"},
-      {key:"x_reading",label:"📊 X-Reading"},
-      {key:"z_reading",label:"📊 Z-Reading"},
-      {key:"cash_count",label:"💵 Cash Count"},
-      {key:"expenses",label:"💸 Expenses"},
-      {key:"inventory",label:"📦 Inventory"},
-      {key:"ca_request",label:"💵 Cash Advance"},
-      {key:"loan_request",label:"🏦 Loan Request"},
-      {key:"void_request",label:"🚫 Void Request"},
-    ],
-    crew: [
+      {key:"all_orders",label:"🗂️ All Orders"},
       {key:"kitchen",label:"🍳 Kitchen"},
-      {key:"ca_request",label:"💵 Cash Advance"},
-      {key:"loan_request",label:"🏦 Loan Request"},
-      {key:"kiosk",label:"📺 Kiosk"},
-    ],
-    stockclerk: [
+      {key:"void_request",label:"🚫 Void Request"},
+      {key:"void_requests",label:"✅ Void Approvals"},
+      {key:"x_reading",label:"📃 X-Reading"},
+      {key:"z_reading",label:"📄 Z-Reading"},
+      {key:"reports",label:"🗂️ Reports"},
+      {key:"analytics",label:"📈 Analytics"},
+      {key:"branch_pl",label:"📊 Branch P&L"},
+    ]},
+    {label:"Cash", items:[
+      {key:"cash_count",label:"💰 Cash Count"},
+      {key:"cash_monitor",label:"💵 Cash Monitor"},
+      {key:"expenses",label:"💸 Expenses"},
+    ]},
+    {label:"Inventory", items:[
       {key:"inventory",label:"📦 Inventory"},
-      {key:"stock_order",label:"🚚 Stock Order"},
-      {key:"stock_receive",label:"📥 Receive Stock"},
+      {key:"inv_log",label:"📋 Inv. Log"},
+      {key:"stock_order",label:"🛒 Order Stocks"},
+      {key:"stock_receive",label:"📥 Receive Stocks"},
+      {key:"po_monitor",label:"📊 PO Monitor"},
+      {key:"bom_mgmt",label:"🧪 BOM"},
+      {key:"ext_production",label:"🏭 Production ↗"},
+      {key:"ext_stock",label:"🧊 Freezer Count ↗"},
+    ]},
+    {label:"Menu", items:[
+      {key:"menu_mgmt",label:"🍽️ Menu"},
+      {key:"branch_menu",label:"🍽️ My Menu"},
+    ]},
+    {label:"People", items:[
+      {key:"crew_mgmt",label:"👥 Branch Staff"},
       {key:"ca_request",label:"💵 Cash Advance"},
       {key:"loan_request",label:"🏦 Loan Request"},
-    ]
+      {key:"ext_kiosk",label:"⏰ Time Clock ↗"},
+      {key:"ext_payroll",label:"💵 Payroll System ↗"},
+    ]},
+    {label:"Setup", items:[
+      {key:"printer",label:"🖨️ Printer"},
+      {key:"branches",label:"🏪 Branches"},
+      {key:"settings",label:"⚙️ Settings"},
+    ]},
+  ];
+
+  // What a role gets without anyone touching this screen. Anything outside it
+  // is off until switched on, and the switch now actually grants it.
+  const ROLE_DEFAULTS = {
+    cashier:    Object.keys(DEFAULT_PERMS.cashier),
+    crew:       Object.keys(DEFAULT_PERMS.crew),
+    stockclerk: Object.keys(DEFAULT_PERMS.stockclerk),
   };
+
 
   const ROLE_COLORS = {
     cashier:"#34C759",
@@ -8822,10 +8855,15 @@ function PermissionsTab({db,showT,companySettings,setCompanySettings}){
   };
 
   const toggle=(role,key)=>{
-    setPerms(p=>({
-      ...p,
-      [role]:{...p[role],[key]:!p[role]?.[key]}
-    }));
+    setPerms(p=>{
+      const cur=p[role]||{};
+      const defs=Object.keys(DEFAULT_PERMS[role]||{});
+      // what the button is showing right now
+      const showing=(cur[key]===true) ? true
+                  : (cur[key]===false) ? false
+                  : defs.indexOf(key)>=0;
+      return {...p,[role]:{...cur,[key]:!showing}};
+    });
   };
 
   const save=async()=>{
@@ -8852,8 +8890,17 @@ function PermissionsTab({db,showT,companySettings,setCompanySettings}){
       "⚠️ All features are ON by default. Switch OFF only what is not needed. Changes take effect on next login."),
 
     h("div",{style:{display:"grid",gap:12}},
-      Object.keys(ROLE_NAVS).map(role=>
-        h("div",{key:role,style:{background:"#fff",borderRadius:12,
+      Object.keys(ROLE_DEFAULTS).map(role=>{
+        const defs=ROLE_DEFAULTS[role]||[];
+        const isOnFor=(k)=>{
+          const v=perms[role]?.[k];
+          if(v===true) return true;
+          if(v===false) return false;
+          return defs.indexOf(k)>=0;      // untouched: the role's own default
+        };
+        const extras=PERM_GROUPS.reduce((a,g)=>
+          a+g.items.filter(n=>defs.indexOf(n.key)<0&&isOnFor(n.key)).length,0);
+        return h("div",{key:role,style:{background:"#fff",borderRadius:12,
           border:"2px solid "+(ROLE_COLORS[role]||C.border),overflow:"hidden"}},
 
           // Role header
@@ -8862,66 +8909,59 @@ function PermissionsTab({db,showT,companySettings,setCompanySettings}){
             padding:"10px 16px",
             display:"flex",justifyContent:"space-between",alignItems:"center"}},
             h("div",{style:{color:"#fff",fontWeight:800,fontSize:13}},
-              ROLE_LABELS[role]||role),
+              (ROLE_LABELS[role]||role)
+              +(extras?("  ·  "+extras+" beyond the default"):"")),
             h("div",{style:{display:"flex",gap:8}},
               h("button",{onClick:()=>resetRole(role),
                 style:{padding:"4px 10px",background:"rgba(255,255,255,.15)",
                   border:"none",borderRadius:6,color:"#fff",
                   fontSize:13,fontWeight:700,cursor:"pointer"}},
-                "↺ Reset"),
-              h("button",{
-                onClick:()=>{
-                  // Enable all
-                  const all={};
-                  ROLE_NAVS[role].forEach(n=>all[n.key]=true);
-                  setPerms(p=>({...p,[role]:all}));
-                },
-                style:{padding:"4px 10px",background:"#F0F0F0",
-                  border:"none",borderRadius:6,color:"#fff",
-                  fontSize:13,fontWeight:700,cursor:"pointer"}},
-                "✅ All On"),
-              h("button",{
-                onClick:()=>{
-                  // Disable optional ones (keep pos for cashier)
-                  const none={};
-                  ROLE_NAVS[role].forEach(n=>none[n.key]=
-                    (role==="cashier"&&n.key==="pos")?true:false);
-                  setPerms(p=>({...p,[role]:none}));
-                },
-                style:{padding:"4px 10px",background:"#F0F0F0",
-                  border:"none",borderRadius:6,color:"#fff",
-                  fontSize:13,fontWeight:700,cursor:"pointer"}},
-                "🚫 All Off")
+                "\u21ba Back to default")
             )
           ),
 
-          // Toggle grid
-          h("div",{style:{padding:"12px 16px",
-            display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",
-            gap:8}},
-            ROLE_NAVS[role].map(nav=>{
-              const isOn=perms[role]?.[nav.key]!==false;
-              const isRequired=
-                (role==="cashier"&&nav.key==="pos")||
-                (role==="crew"&&nav.key==="kitchen");
-              return h("button",{key:nav.key,
-                onClick:()=>!isRequired&&toggle(role,nav.key),
-                style:{padding:"8px 12px",borderRadius:8,
-                  border:"2px solid "+(isOn?ROLE_COLORS[role]:C.border),
-                  background:isOn?(ROLE_COLORS[role]+"15"):"#f9f9f9",
-                  cursor:isRequired?"not-allowed":"pointer",
-                  display:"flex",alignItems:"center",gap:6,
-                  fontSize:13,fontWeight:isOn?700:400,
-                  color:isOn?ROLE_COLORS[role]:C.muted,
-                  opacity:isRequired?0.7:1}},
-                h("span",null,isOn?"✅":"⬜"),
-                h("span",null,nav.label),
-                isRequired&&h("span",{style:{fontSize:11,color:C.muted}}," (required)")
-              );
-            })
+          // Grouped the way the sidebar is, defaults marked so it is obvious
+          // what is standard for the role and what has been added on top.
+          h("div",{style:{padding:"12px 16px"}},
+            PERM_GROUPS.map(g=>h("div",{key:g.label,style:{marginBottom:10}},
+              h("div",{style:{fontSize:11,fontWeight:800,color:C.muted,
+                letterSpacing:1,marginBottom:6}},g.label.toUpperCase()),
+              h("div",{style:{display:"grid",
+                gridTemplateColumns:"repeat(auto-fill,minmax(178px,1fr))",
+                gap:8}},
+                g.items.map(nav=>{
+                  const isOn=isOnFor(nav.key);
+                  const isDefault=defs.indexOf(nav.key)>=0;
+                  const isRequired=
+                    (role==="cashier"&&nav.key==="pos")||
+                    (role==="crew"&&nav.key==="kitchen");
+                  return h("button",{key:nav.key,
+                    onClick:()=>!isRequired&&toggle(role,nav.key),
+                    title:isDefault?"Standard for this role"
+                                   :"Not standard — switching this on grants it",
+                    style:{padding:"8px 11px",borderRadius:8,textAlign:"left",
+                      border:"2px solid "+(isOn?(ROLE_COLORS[role]||C.primary):C.border),
+                      background:isOn?((ROLE_COLORS[role]||C.primary)+"15"):"#f9f9f9",
+                      cursor:isRequired?"not-allowed":"pointer",
+                      display:"flex",alignItems:"center",gap:6,
+                      fontSize:13,fontWeight:isOn?700:400,
+                      color:isOn?(ROLE_COLORS[role]||C.primary):C.muted,
+                      opacity:isRequired?0.7:1}},
+                    h("span",null,isOn?"\u2705":"\u2b1c"),
+                    h("span",{style:{flex:1}},nav.label),
+                    isRequired
+                      ? h("span",{style:{fontSize:10,color:C.muted}},"required")
+                      : (!isDefault&&isOn
+                          ? h("span",{style:{fontSize:10,fontWeight:800,
+                              color:ROLE_COLORS[role]||C.primary}},"+")
+                          : null)
+                  );
+                })
+              )
+            ))
           )
-        )
-      )
+        );
+      })
     ),
 
     h("div",{style:{marginTop:14,display:"flex",gap:8}},
@@ -12041,13 +12081,21 @@ function App(){
       ),
       h("nav",{style:{flex:1,padding:"3px 6px",overflowY:"auto",minHeight:0}},
         (function(){
-          // permitted pages for this role, in the role's own order
-          const allowed=(role?.nav||[]).filter(p=>{
-            if(user?.role==="owner"||user?.role==="commissary"||user?.role==="manager")return true;
-            const rolePerms=(companySettings?.rolePerms||{})[user?.role];
-            if(!rolePerms)return true;
-            return rolePerms[p]!==false;
+          // A role's own list is the starting point, not the ceiling: a page
+          // switched ON in Permissions is granted even when the role never had
+          // it, which is what "permissions" ought to mean.
+          const _rp=(companySettings?.rolePerms||{})[user?.role];
+          const _full=(user?.role==="owner"||user?.role==="commissary"
+                       ||user?.role==="manager");
+          const base=(role?.nav||[]).filter(p=>{
+            if(_full)return true;
+            if(!_rp)return true;
+            return _rp[p]!==false;
           });
+          const granted=(_full||!_rp)?[]
+            : Object.keys(_rp).filter(p=>_rp[p]===true&&base.indexOf(p)<0
+                &&NAV_META[p]);
+          const allowed=base.concat(granted);
 
           const badgeFor=(p)=>{
             var cnt=0;
