@@ -140,7 +140,7 @@
   .cutoff-foot .save-btn{width:auto;padding:8px 16px;font-size:12.5px;}
   .cutoff-foot .cp-status{font-size:11.5px;color:var(--muted);}
 </style>
-<!-- BUILD:20260803-063441 -->
+<!-- BUILD:20260803-070054 -->
 </head>
 <body>
 
@@ -444,7 +444,10 @@
           <button class="btn-ghost" id="posReloadBtn" style="width:auto">Reload POS items</button></div>
       </div>
       <div id="posLinkBox" class="sub">Pick a POS branch to load its items.</div>
-      <div style="margin-top:10px"><button class="btn-primary" id="posSaveBtn" style="width:auto">Save links</button></div>
+      <div style="margin-top:10px;display:flex;gap:8;flex-wrap:wrap">
+        <button class="btn-primary" id="posSaveBtn" style="width:auto">Save links</button>
+        <button class="btn-ghost" id="posImportBtn" style="width:auto">Import items from POS</button>
+      </div>
     </div>
 
     <div class="card">
@@ -565,6 +568,8 @@ const POS_CFG = {
 };
 let POS_FS = null;
 let POS_LAST_ERR = "";
+let POS_LAST_CODE = "";
+let POS_AUTH_STATE = "";
 let POS_APP = null;
 let POS_AUTH_TRIED = false;
 function posDB(){
@@ -578,8 +583,16 @@ function posDB(){
     // permission-denied — which looks exactly like an empty inventory.
     if(!POS_AUTH_TRIED && POS_APP.auth){
       POS_AUTH_TRIED = true;
-      POS_APP.auth().signInAnonymously().catch(e=>
-        console.warn("POS anon sign-in:", e && e.code));
+      POS_AUTH_STATE = "signing in…";
+      POS_APP.auth().signInAnonymously()
+        .then(()=>{ POS_AUTH_STATE = "anonymous"; })
+        .catch(e=>{
+          const c=(e&&e.code)||"";
+          POS_AUTH_STATE = (c.indexOf("operation-not-allowed")>=0)
+            ? "anonymous sign-in is turned off on the POS project"
+            : ("failed — "+c);
+          console.warn("POS anon sign-in:", c);
+        });
     }
   }catch(e){ console.error("POS bridge:", e); POS_FS = null; }
   return POS_FS;
@@ -1085,11 +1098,21 @@ async function posLoadItems(branchId){
   try{
     const snap = await fs.collection(col).get();
     const out=[];
-    snap.forEach(d=>out.push({id:d.id, name:(d.data()||{}).name||d.id,
-      unit:(d.data()||{}).unit||"", stock:Number((d.data()||{}).stock)||0}));
+    snap.forEach(d=>{
+      const v=d.data()||{};
+      out.push({id:d.id, name:v.name||d.id, unit:v.unit||"",
+        stock:Number(v.stock)||0,
+        packUnit:v.packUnit||"", packSize:Number(v.packSize)||0,
+        cost:Number(v.cost)||0, cat:v.cat||v.category||""});
+    });
     out.sort((a,b)=>String(a.name).localeCompare(String(b.name)));
     return out;
-  }catch(e){ console.error("pos items:", e); return []; }
+  }catch(e){
+    console.error("pos items:", e);
+    POS_LAST_ERR = posErrText(e);
+    POS_LAST_CODE = (e&&e.code)||"";
+    return [];
+  }
 }
 
 async function renderPosLinkPanel(){
@@ -1121,12 +1144,34 @@ async function renderPosLinkPanel(){
     const bid = sel.value;
     if(!bid){ box.innerHTML = '<p class="sub">Pick a POS branch to load its items.</p>'; return; }
     box.innerHTML = '<p class="sub">Loading POS items…</p>';
+    POS_LAST_ERR = ""; POS_LAST_CODE = "";
     POS_ITEMS_CACHE = await posLoadItems(bid);
     if(!POS_ITEMS_CACHE.length){
-      box.innerHTML = '<p class="sub">That POS branch has no inventory items yet.</p>';
+      if(POS_LAST_ERR){
+        box.innerHTML = '<div class="msg warn"><b>Could not read the POS items.</b><br>'
+          + escapeHtml(POS_LAST_ERR)
+          + '<br><br><span class="sub">Collection: <code>'
+          + escapeHtml(posInvCollection(bid)) + '</code>'
+          + (POS_LAST_CODE?(' · code <code>'+escapeHtml(POS_LAST_CODE)+'</code>'):'')
+          + (POS_AUTH_STATE?(' · sign-in: '+escapeHtml(POS_AUTH_STATE)):'')
+          + '</span></div>';
+      }else{
+        box.innerHTML = '<p class="sub">That POS branch has no inventory items yet — '
+          + 'its <code>' + escapeHtml(posInvCollection(bid))
+          + '</code> collection is empty.</p>';
+      }
       return;
     }
     const keys = Object.keys(items).filter(id=>!items[id].archived);
+    if(!keys.length){
+      // mark it so the item listener can redraw once they arrive
+      box.dataset.awaitingItems='1';
+      box.innerHTML = '<div class="msg warn">This store has no items to link yet. '
+        + 'Add them under <b>Items</b> above — the list here mirrors your own '
+        + 'items, and each one gets a picker for the matching POS item.</div>';
+      return;
+    }
+    box.dataset.awaitingItems='0';
     box.innerHTML = keys.map(id=>{
       const it = items[id];
       const cfg = saved.items && saved.items[id];
@@ -1171,12 +1216,99 @@ async function renderPosLinkPanel(){
     }catch(e){ toast("Could not save: "+(e.message||e)); }
   };
 
+  // Re-typing twenty items that already exist in the POS, then linking each
+  // one by hand, is work the machine can do. This creates the missing items
+  // here and links them in the same pass — names and units come across, the
+  // counting details stay for the person who knows the freezer.
+  const imp = document.getElementById("posImportBtn");
+  if(imp) imp.onclick = async()=>{
+    const bid = sel.value;
+    if(!bid){ toast("Pick the POS branch first"); return; }
+    if(!POS_ITEMS_CACHE.length){
+      toast("No POS items loaded — press Reload POS items"); return;
+    }
+    // anything already here, matched loosely by name so a second run does not
+    // duplicate what the first one brought in
+    const norm = (x)=>String(x||"").toLowerCase().replace(/[^a-z0-9]/g,"");
+    const mineByName = {};
+    Object.keys(items).forEach(id=>{ mineByName[norm(items[id].name)] = id; });
+    const linked = {};
+    Object.keys((saved.items)||{}).forEach(k=>{
+      const v=saved.items[k];
+      linked[typeof v==="string"?v:(v&&v.id)] = true;
+    });
+
+    const toAdd = POS_ITEMS_CACHE.filter(x=>!mineByName[norm(x.name)]);
+    const toLink = POS_ITEMS_CACHE.filter(x=>
+      mineByName[norm(x.name)] && !linked[x.id]);
+
+    if(!toAdd.length && !toLink.length){
+      toast("Everything here is already imported and linked"); return;
+    }
+    const preview = toAdd.slice(0,8).map(x=>"  • "+x.name+(x.unit?(" ("+x.unit+")"):""));
+    if(!confirm(
+      (toAdd.length?(toAdd.length+" item"+(toAdd.length>1?"s":"")+" will be created here:\n"
+        +preview.join("\n")+(toAdd.length>8?("\n  …and "+(toAdd.length-8)+" more"):"")+"\n\n"):"")
+      +(toLink.length?(toLink.length+" existing item"+(toLink.length>1?"s":"")
+        +" will be linked by name.\n\n"):"")
+      +"Name, unit and category come across. The POS cost becomes the charge "
+      +"rate per unit, and the POS pack size becomes the freezer pack — so "
+      +"10 pcs to a bag stays 10 pcs to a bag."))return;
+
+    const box2 = document.getElementById("posLinkBox");
+    if(box2) box2.innerHTML = '<p class="sub">Importing…</p>';
+    const map = Object.assign({}, saved.items||{});
+    let made=0;
+    for(const x of toAdd){
+      try{
+        const ref = bref('items').push();
+        await ref.set({
+          name: x.name,
+          unit: x.unit||"pc",
+          category: x.cat||"",
+          // Pricing: what a missing unit is charged at. itemRate() reads this
+          // as cost ÷ size, so one unit at the POS cost gives the right rate.
+          packSize: 1,
+          packCost: x.cost>0 ? Math.round(x.cost*100)/100 : null,
+          // Counting: how many units are in one physical pack. This is what
+          // the POS pack size describes — 10 pcs to a bag, 1000 ml to a
+          // bottle — and it is what lets the crew count packs plus loose.
+          freezerPackSize: x.packSize>0 ? x.packSize : null,
+          archived: false, createdAt: Date.now(),
+          importedFromPos: x.id
+        });
+        map[ref.key] = {id:x.id, per:1};
+        made++;
+      }catch(e){ console.error("import", x.name, e); }
+    }
+    for(const x of toLink){
+      const id = mineByName[norm(x.name)];
+      if(id) map[id] = {id:x.id, per:1};
+    }
+    try{
+      await posDB().collection("settings").doc("stock_map").set(
+        {branches:{[currentBranchId]:{posBranch:bid, items:map}}},{merge:true});
+      toast(made+" item"+(made===1?"":"s")+" created, "
+        +(made+toLink.length)+" linked");
+    }catch(e){ toast("Links could not be saved: "+(e.message||e)); }
+    // saved is stale now — pull it again on the next draw
+    renderPosLinkPanel();
+  };
+
   if(saved.posBranch) draw();
 }
 
 function loadItemsTable(){
   bref('items').on('value', snap=>{
     items = snap.val() || {};
+    // Redraw the POS link panel only when it drew before these items existed.
+    // Redrawing unconditionally would rebuild every picker and throw away
+    // selections someone is part-way through making.
+    const _plb=document.getElementById('posLinkBox');
+    if(_plb && _plb.dataset.awaitingItems==='1' && Object.keys(items).length){
+      _plb.dataset.awaitingItems='0';
+      try{ renderPosLinkPanel(); }catch(e){}
+    }
     const tbody = document.getElementById('itemsTbody');
     tbody.innerHTML='';
     const keys = Object.keys(items);
@@ -2119,6 +2251,6 @@ window.addEventListener('load', ()=>{
   }
 });
 </script>
-<div id="buildStamp" style="text-align:center;padding:14px 8px;font-size:11px;color:#5A5A5A">Chowtime Stock · 20260803-063441</div>
+<div id="buildStamp" style="text-align:center;padding:14px 8px;font-size:11px;color:#5A5A5A">Chowtime Stock · 20260803-070054</div>
 </body>
 </html>
