@@ -140,7 +140,7 @@
   .cutoff-foot .save-btn{width:auto;padding:8px 16px;font-size:12.5px;}
   .cutoff-foot .cp-status{font-size:11.5px;color:var(--muted);}
 </style>
-<!-- BUILD:20260802-234526 -->
+<!-- BUILD:20260803-063441 -->
 </head>
 <body>
 
@@ -564,14 +564,37 @@ const POS_CFG = {
   appId:             "1:446140959237:web:c58f75db697223ef33ea6c"
 };
 let POS_FS = null;
+let POS_LAST_ERR = "";
+let POS_APP = null;
+let POS_AUTH_TRIED = false;
 function posDB(){
   if(POS_FS) return POS_FS;
   try{
-    const app = firebase.apps.find(a=>a.name==="pos")
+    POS_APP = firebase.apps.find(a=>a.name==="pos")
       || firebase.initializeApp(POS_CFG,"pos");
-    POS_FS = app.firestore();
+    POS_FS = POS_APP.firestore();
+    // Sign in anonymously on the POS project too. Rules there are likely to
+    // require an authenticated request, and without this every read comes back
+    // permission-denied — which looks exactly like an empty inventory.
+    if(!POS_AUTH_TRIED && POS_APP.auth){
+      POS_AUTH_TRIED = true;
+      POS_APP.auth().signInAnonymously().catch(e=>
+        console.warn("POS anon sign-in:", e && e.code));
+    }
   }catch(e){ console.error("POS bridge:", e); POS_FS = null; }
   return POS_FS;
+}
+
+// Surface why a read came back empty. An empty dropdown and a blocked read
+// look identical to the person using it, and they need different fixes.
+function posErrText(e){
+  const c=(e&&e.code)||"";
+  if(c.indexOf("permission-denied")>=0)
+    return "The POS database refused the request. Its security rules need to "
+      +"allow this app to read inventory and settings.";
+  if(c.indexOf("unavailable")>=0||c.indexOf("network")>=0)
+    return "Could not reach the POS database — check the connection.";
+  return (e&&e.message)||"Unknown error.";
 }
 
 // itemId -> {id, per}  ·  and which POS branch this stock branch counts for
@@ -604,6 +627,7 @@ async function loadPosStock(){
     return true;
   }catch(e){
     console.error("loadPosStock:", e);
+    POS_LAST_ERR = posErrText(e);
     return false;
   }
 }
@@ -1035,11 +1059,24 @@ let POS_ITEMS_CACHE = [];
 
 async function posLoadBranches(){
   const fs = posDB(); if(!fs) return [];
+  let arr = [];
   try{
     const d = await fs.collection("settings").doc("branches").get();
-    const arr = d.exists ? ((d.data()||{}).branches||[]) : [];
-    return arr.filter(b=>b&&b.id);
-  }catch(e){ console.error("pos branches:", e); return []; }
+    arr = d.exists ? ((d.data()||{}).branches||[]) : [];
+    arr = arr.filter(b=>b&&b.id);
+  }catch(e){ console.error("pos branches:", e); POS_LAST_ERR=posErrText(e); }
+  // MAIN is the POS's built-in store rather than one the owner created, so it
+  // can be missing from settings/branches while its inventory is very much
+  // there. Put it back, and confirm it really has stock before offering it.
+  if(!arr.some(b=>b.id==="ct-main"||b.id==="main")){
+    let exists=false;
+    try{
+      const probe = await fs.collection("inventory").limit(1).get();
+      exists = !probe.empty;
+    }catch(e){}
+    if(exists) arr = [{id:"ct-main",name:"CT-MAIN",full:"Chowtime Main"}].concat(arr);
+  }
+  return arr;
 }
 
 async function posLoadItems(branchId){
@@ -1070,6 +1107,13 @@ async function renderPosLinkPanel(){
   }catch(e){ console.warn("load stock_map:", e); }
 
   const brs = await posLoadBranches();
+  if(!brs.length){
+    box.innerHTML = '<div class="msg warn">No POS branches came back. '
+      + escapeHtml(POS_LAST_ERR || "The POS database returned an empty list — "
+        + "check that its security rules allow this app to read settings and "
+        + "inventory.") + '</div>';
+    return;
+  }
   sel.innerHTML = '<option value="">— select —</option>' + brs.map(b=>
     `<option value="${b.id}"${saved.posBranch===b.id?' selected':''}>${escapeHtml(b.full||b.id)}</option>`).join("");
 
@@ -2075,6 +2119,6 @@ window.addEventListener('load', ()=>{
   }
 });
 </script>
-<div id="buildStamp" style="text-align:center;padding:14px 8px;font-size:11px;color:#5A5A5A">Chowtime Stock · 20260802-234526</div>
+<div id="buildStamp" style="text-align:center;padding:14px 8px;font-size:11px;color:#5A5A5A">Chowtime Stock · 20260803-063441</div>
 </body>
 </html>
