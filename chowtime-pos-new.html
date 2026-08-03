@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Chowtime POS — 20260803-033747</title>
+<title>Chowtime POS — 20260803-040022</title>
 <meta name="theme-color" content="#6A1B9A"/>
 <meta name="mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260803-033747 -->
+<!-- BUILD:20260803-040022 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -392,8 +392,11 @@ function ss(obj){return JSON.parse(JSON.stringify(obj,(_,v)=>v===undefined?null:
 function Toast({msg,type,onDone}){
   useEffect(()=>{const t=setTimeout(onDone,2800);return()=>clearTimeout(t);},[]);
   const bg=type==="err"?C.danger:type==="warn"?C.warning:type==="info"?C.info:"#1C1C1E";
-  return h("div",{style:{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",background:bg,color:"#111111",padding:"11px 22px",borderRadius:14,fontWeight:600,fontSize:13,zIndex:9999,boxShadow:"0 8px 40px rgba(0,0,0,.3)",display:"flex",alignItems:"center",gap:9,whiteSpace:"nowrap"}},
-    h("span",{style:{color:C.accent}},"●"),msg
+  // The fill is always dark — the label has to stay light. My contrast pass
+  // could not see a background computed in a ternary above the style object,
+  // so it darkened this to near-black on near-black and the toast vanished.
+  return h("div",{style:{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",background:bg,color:"#fff",padding:"11px 22px",borderRadius:14,fontWeight:600,fontSize:13,zIndex:9999,boxShadow:"0 8px 40px rgba(0,0,0,.3)",display:"flex",alignItems:"center",gap:9,whiteSpace:"nowrap"}},
+    h("span",{style:{color:"rgba(255,255,255,.7)"}},"●"),msg
   );
 }
 
@@ -1296,7 +1299,7 @@ function ItemCustomizer({ item,onAdd,onClose,optionGroups=[],priceType="retail",
           h("div",null,
             h("div",{style:{fontWeight:900,fontSize:16}}, item.name),
             h("div",{style:{fontSize:13,color:C.muted,marginTop:2,lineHeight:1.4}}, item.desc),
-            h("div",{style:{fontSize:14,fontWeight:900,color:C.primary,marginTop:4}},"₱"+ item.basePrice)
+            h("div",{style:{fontSize:14,fontWeight:900,color:C.primary,marginTop:4}},"₱"+cardPrice( item))
           )
         )
       ),
@@ -3544,7 +3547,7 @@ function MenuEditor({menuItems,setMenuItems,db,user,showT}){
             h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:4}},
               h("div",{style:{fontWeight:800,fontSize:14,color: item.avail?C.text:"#999",flex:1,marginRight:4}}, item.name),
               h("div",{style:{fontSize:13,fontWeight:900,flexShrink:0,color: item.avail?C.primary:"#bbb"}},
-                "₱"+ item.basePrice)
+                "₱"+cardPrice( item))
             ),
             h("div",{style:{fontSize:11,color:C.muted,marginBottom:3}}, item.cat),
              item.desc&&h("div",{style:{fontSize:12,color:C.muted,lineHeight:1.4,marginBottom:6,
@@ -3588,7 +3591,12 @@ function MenuEditor({menuItems,setMenuItems,db,user,showT}){
     const rmPromo   = (pid)=>setEditItem(p=>({...p,promos:p.promos.filter(pr=>pr.id!==pid)}));
     const setPromo  = (pid,k,v)=>setEditItem(p=>({...p,promos:p.promos.map(pr=>pr.id===pid?{...pr,[k]:v}:pr)}));
 
-    const canSave =  item.name.trim()&& item.basePrice>0;
+    // Sizes can carry the whole price, in which case the base price is not
+    // used at all — requiring one forced a figure that is never charged, and
+    // then showed it on the card as if it were the price.
+    const sizesPriced=( item.variants||[]).length>1
+      &&( item.variants||[]).every(v=>Number(v.priceAdd)>0);
+    const canSave =  item.name.trim()&&(Number( item.basePrice)>0||sizesPriced);
 
     return h("div",null,
       // Header
@@ -3684,15 +3692,19 @@ function MenuEditor({menuItems,setMenuItems,db,user,showT}){
 
             // Base price
             h("div",{style:{marginBottom:10}},
-              h("div",{style:{fontSize:12,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"RETAIL PRICE (₱) *"),
+              h("div",{style:{fontSize:12,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},
+                sizesPriced?"RETAIL PRICE (₱) — not used, sizes carry it"
+                          :"RETAIL PRICE (₱) *"),
               h("input",{type:"number",onFocus:e=>e.target.select(),value: item.basePrice||"",onChange:e=>setField("basePrice",parseFloat(e.target.value)||0),
                 placeholder:"0",
-                style:{width:"100%",padding:"9px",border:`1px solid ${ item.basePrice>0?C.border:C.danger}`,borderRadius:7,fontSize:16,fontWeight:700,outline:"none",boxSizing:"border-box",color:C.primary}})
+                style:{width:"100%",padding:"9px",border:`1px solid ${( item.basePrice>0||sizesPriced)?C.border:C.danger}`,borderRadius:7,fontSize:16,fontWeight:700,outline:"none",boxSizing:"border-box",color:C.primary}})
             ),
             // Manual cost per serving
             h("div",{style:{marginBottom:10}},
               h("div",{style:{fontSize:12,fontWeight:700,color:C.muted,
-                marginBottom:4,letterSpacing:1}},"COST PER SERVING (₱)"),
+                marginBottom:4,letterSpacing:1}},
+                "COST PER SERVING (₱)"
+                +((( item.variants||[]).length>1)?" — FALLBACK":"")),
               h("input",{type:"number",step:"0.01",
                 onFocus:e=>e.target.select(),
                 value: item.manualCost!=null? item.manualCost:"",
@@ -3705,6 +3717,13 @@ function MenuEditor({menuItems,setMenuItems,db,user,showT}){
               (function(){
                 const c=Number( item.manualCost)||0;
                 const p=Number( item.basePrice)||0;
+                const hasSizes=(( item.variants||[]).length>1);
+                if(hasSizes)
+                  return h("div",{style:{fontSize:11,color:C.muted,marginTop:4,
+                    lineHeight:1.5}},
+                    "This item is priced by size, so cost it by size too — "+
+                    "the box beside each size on the right. What you enter "+
+                    "here is only used for a size left blank.");
                 if(!(c>0&&p>0))
                   return h("div",{style:{fontSize:11,color:C.muted,marginTop:4,
                     lineHeight:1.5}},
@@ -3809,7 +3828,32 @@ function MenuEditor({menuItems,setMenuItems,db,user,showT}){
                 h("span",{style:{fontSize:13,color:C.muted}},"₱+"),
                 h("input",{type:"number",onFocus:e=>e.target.select(),value:v.priceAdd||"",onChange:e=>setVariant(v.id,"priceAdd",parseFloat(e.target.value)||0),
                   placeholder:"0",
+                  title:"Selling price for this size",
                   style:{width:65,padding:"7px",border:"1px solid "+C.border,borderRadius:6,fontSize:13,outline:"none",textAlign:"center"}})
+              ),
+              h("div",{style:{display:"flex",alignItems:"center",gap:4,flexShrink:0}},
+                h("span",{style:{fontSize:12,color:C.muted}},"cost"),
+                h("input",{type:"number",step:"0.01",
+                  onFocus:e=>e.target.select(),
+                  value:v.cost!=null?v.cost:"",
+                  onChange:e=>setVariant(v.id,"cost",
+                    e.target.value===""?null:(parseFloat(e.target.value)||0)),
+                  placeholder:"—",
+                  title:"What one of this size actually costs you, including "
+                    +"packaging and anything the recipe does not list",
+                  style:{width:70,padding:"7px",
+                    border:"1px solid "+((v.cost!=null&&v.cost!=="")?C.primary:C.border),
+                    background:(v.cost!=null&&v.cost!=="")?C.primary+"0D":"#fff",
+                    borderRadius:6,fontSize:13,outline:"none",textAlign:"center"}}),
+                (function(){
+                  const c=Number(v.cost)||0;
+                  const p=Number(v.priceAdd)||0;
+                  if(!(c>0&&p>0))return null;
+                  const m2=p-c;
+                  return h("span",{style:{fontSize:11,fontWeight:700,
+                    minWidth:44,color:m2>0?C.success:C.danger}},
+                    ((m2/p)*100).toFixed(0)+"%");
+                })()
               ),
               h("input",{value:v.tag||"",onChange:e=>setVariant(v.id,"tag",e.target.value),
                 placeholder:"Label (opt)",
@@ -4197,7 +4241,7 @@ function BranchMenuPage({menuItems,setMenuItems,branchId,curBranch,user,db,showT
                 background:priceChanged?"#FFFDE7":"#fff"}})
           ),
           // Main price (reference)
-          h("div",{style:{fontSize:13,color:C.muted}},"₱"+ item.basePrice),
+          h("div",{style:{fontSize:13,color:C.muted}},"₱"+cardPrice( item)),
           // Toggle
           h("button",{onClick:()=>toggleAvail( item),
             style:{padding:"5px 10px",borderRadius:20,border:"none",
@@ -4606,6 +4650,15 @@ const GUIDES=[
     "Save. The before and after are written to the log with your name."],
    note:"Use Batch edit for many items at once — the toolbar button. Every change still writes its own log line, so a batch and a single adjustment read the same afterwards."},
 ];
+
+// The price to show on a card. When sizes carry the whole price the base is
+// blank, so fall back to the cheapest size rather than printing ₱0.
+function cardPrice(it){
+  const base=Number(it&&it.basePrice)||0;
+  if(base>0) return base;
+  const vs=((it&&it.variants)||[]).map(v=>Number(v.priceAdd)||0).filter(n=>n>0);
+  return vs.length?Math.min.apply(null,vs):0;
+}
 
 // ─── FIFO LOTS ────────────────────────────────────────────
 // Each delivery becomes a lot carrying the price actually paid for it. Stock
@@ -5996,7 +6049,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260803-033747";
+const BUILD = "20260803-040022";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -9062,9 +9115,10 @@ function SettingsPage({db,user,showT,branches,companySettings,setCompanySettings
         h("div",{style:{fontSize:11,color:C.muted,lineHeight:1.6,
           background:C.bg,borderRadius:9,padding:"11px 13px",marginTop:4}},
           h("b",{style:{color:C.text}},"Set a manual cost: "),
-          "Menu → pick the item → Cost per serving. An item left blank counts "+
-          "as zero under the manual setting, so cost every item you sell or "+
-          "the gross profit will read high.")
+          "Menu → pick the item → the cost box beside each size. Items with no "+
+          "sizes use the Cost per serving field on the left instead. Anything "+
+          "left blank counts as zero under the manual setting, so cost every "+
+          "size you sell or the gross profit will read high.")
       )
     ),
 
@@ -9730,7 +9784,7 @@ function PayrollPage({db,hrisDB,user,showT,branches,branchId,staff,advances}){
             h("div",null,
               h("div",{style:{fontWeight:700,fontSize:14}},s.name),
               h("div",{style:{fontSize:12}},
-                h("span",{style:{background:ri.color,color:"#111111",
+                h("span",{style:{background:ri.color,color:"#fff",
                   borderRadius:6,padding:"1px 6px",fontWeight:700,fontSize:11}},
                   ri.emoji+" "+ri.label))
             ),
@@ -12610,7 +12664,7 @@ function App(){
                         (o.branch||"").replace("ct-","").toUpperCase()+" · "+
                         (o. items||[]).slice(0,2).map(function(i){return i.name;}).join(", ")),
                       h("span",{style:{fontSize:11,padding:"1px 6px",borderRadius:8,
-                        background:stCol,color:"#111111",fontWeight:700}},
+                        background:stCol,color:"#fff",fontWeight:700}},
                         (o.status||"").toUpperCase())
                     )
                   );
@@ -12999,7 +13053,7 @@ function App(){
                     h("div",{style:{display:"flex",alignItems:"center",
                       justifyContent:"space-between",marginTop:4}},
                       h("div",{style:{fontSize:13,fontWeight:900,
-                        color:C.primary}},"₱"+ item.basePrice),
+                        color:C.primary}},"₱"+cardPrice( item)),
                       h("div",{style:{width:24,height:24,background:C.primary,
                         borderRadius:"50%",display:"flex",alignItems:"center",
                         justifyContent:"center",color:"#fff",
@@ -14786,10 +14840,18 @@ function App(){
           const cogsMissing=(src==="bom")
             ? fifoRows.filter(l=>l.cogs==null).length : 0;
 
-          // per-serving cost from the menu, for the manual setting
-          const manualOf=(id)=>{
+          // Cost follows the same shape as the price: per size where sizes
+          // exist, on the item where they do not. An order line records the
+          // size it was rung at, so it can be matched back by label.
+          const manualOf=(id,variantLabel)=>{
             const mi=menuItems.find(x=>x.id===id);
-            const c=mi&&mi.manualCost;
+            if(!mi) return null;
+            if(variantLabel){
+              const v=(mi.variants||[]).find(x=>
+                (x.label||x.name)===variantLabel);
+              if(v&&v.cost!=null&&v.cost!=="") return Number(v.cost)||0;
+            }
+            const c=mi.manualCost;
             return (c==null||c==="")?null:(Number(c)||0);
           };
           let manualCogs=0, uncosted=0;
@@ -14798,9 +14860,13 @@ function App(){
             (o.items||[]).forEach(li=>{
               const q=Number(li.qty)||0;
               if(q<=0)return;
-              const mc=manualOf(li.id||li.itemId);
+              const mc=manualOf(li.id||li.itemId,li.variant);
               if(mc!=null){ manualCogs+=q*mc; }
-              else { uncosted+=q; uncostedNames[li.name||li.id]=true; }
+              else {
+                uncosted+=q;
+                uncostedNames[(li.name||li.id)
+                  +(li.variant?(" · "+li.variant):"")]=true;
+              }
             });
           });
 
@@ -15309,7 +15375,7 @@ function App(){
                       h("div",{style:{flex:1}},
                         h("div",{style:{fontWeight:700,fontSize:14}},s.name),
                         h("div",{style:{fontSize:12,display:"flex",gap:6,marginTop:2}},
-                          h("span",{style:{background:roleInfo.color,color:"#111111",
+                          h("span",{style:{background:roleInfo.color,color:"#fff",
                             borderRadius:8,padding:"1px 6px",fontWeight:700}},
                             roleInfo.label||s.role),
                           h("span",{style:{color:C.muted}},
@@ -15793,7 +15859,7 @@ function App(){
                       h("div",{style:{flex:1}},
                         h("div",{style:{fontWeight:700,fontSize:14}},s.name),
                         h("div",{style:{fontSize:12,marginTop:2}},
-                          h("span",{style:{background:ri.color,color:"#111111",
+                          h("span",{style:{background:ri.color,color:"#fff",
                             borderRadius:8,padding:"1px 6px",fontWeight:700}},ri.label))
                       ),
                       h("button",{onClick:e=>{e.stopPropagation();
@@ -16108,7 +16174,7 @@ function App(){
                     h("div",{style:{display:"flex",gap:8,alignItems:"center"}},
                       h("span",{style:{fontWeight:900,color:stColor,fontSize:13}},po.poNum),
                       h("span",{style:{fontSize:12,padding:"2px 8px",background:stColor,
-                        color:"#111111",borderRadius:10,fontWeight:700}},stLabel)
+                        color:"#fff",borderRadius:10,fontWeight:700}},stLabel)
                     ),
                     // Three independent dimensions. One badge cannot say
                     // "delivered but unpaid", which is the state that matters
@@ -16417,7 +16483,7 @@ function App(){
                     h("div",{style:{display:"flex",gap:8,alignItems:"center"}},
                       h("span",{style:{fontWeight:900,color:stColor,fontSize:13}},po.poNum),
                       h("span",{style:{fontSize:12,padding:"2px 8px",
-                        background:stColor,color:"#111111",borderRadius:10,fontWeight:700}},stLabel)
+                        background:stColor,color:"#fff",borderRadius:10,fontWeight:700}},stLabel)
                     ),
                     h("div",{style:{fontSize:12,color:C.muted,marginTop:2}},
                       (po.branchName||po.branch)+" · "+po.date+
