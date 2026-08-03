@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Chowtime POS — 20260803-003904</title>
+<title>Chowtime POS — 20260803-011744</title>
 <meta name="theme-color" content="#6A1B9A"/>
 <meta name="mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260803-003904 -->
+<!-- BUILD:20260803-011744 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -3629,7 +3629,7 @@ function MenuEditor({menuItems,setMenuItems,db,user,showT}){
                       background:linked?C.primary:"#fff",
                       display:"flex",alignItems:"center",justifyContent:"center",
                       flexShrink:0}},
-                      linked&&h("span",{style:{color:"#111111",fontSize:13,fontWeight:900}},"✓")),
+                      linked&&h("span",{style:{color:"#fff",fontSize:13,fontWeight:900}},"✓")),
                     h("div",null,
                       h("div",{style:{fontSize:13,fontWeight:linked?700:400,
                         color:linked?C.primary:C.text}},g.name),
@@ -5852,7 +5852,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260803-003904";
+const BUILD = "20260803-011744";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -8618,7 +8618,7 @@ function PermissionsTab({db,showT,companySettings,setCompanySettings}){
             background:ROLE_COLORS[role]||C.primary,
             padding:"10px 16px",
             display:"flex",justifyContent:"space-between",alignItems:"center"}},
-            h("div",{style:{color:"#111111",fontWeight:800,fontSize:13}},
+            h("div",{style:{color:"#fff",fontWeight:800,fontSize:13}},
               ROLE_LABELS[role]||role),
             h("div",{style:{display:"flex",gap:8}},
               h("button",{onClick:()=>resetRole(role),
@@ -9860,6 +9860,7 @@ function App(){
   const [dashBranch,setDashBranch]=useState("");         // "" = all branches
   const [showGuide,setShowGuide]=useState(false);        // how-to panel
   const [openGuide,setOpenGuide]=useState("");           // expanded topic
+  const [poOpen,setPoOpen]=useState("");                 // expanded PO row
   const [editSub,setEditSub]=useState(null);             // subscription being edited
   const [newBuild,setNewBuild]=useState(null);           // a newer build is live
   const [subs,setSubs]=useState([]);                     // subscriptions, all branches
@@ -10583,6 +10584,10 @@ function App(){
     return()=>{alive=false;unsub();};
   },[invView]);
 
+  // PO Monitor and Order Stocks share the expanded-row state, so clear it on
+  // a page change — otherwise a card shows with no row above it.
+  useEffect(()=>{ setPoOpen(""); },[page]);
+
   // Check on mount and every 30 minutes. A tablet that stays open all day
   // would otherwise never notice a deploy.
   useEffect(()=>{
@@ -11184,7 +11189,7 @@ function App(){
                               border:"2px solid "+(on?C.primary:C.border),
                               background:on?C.primary:"#fff",display:"flex",
                               alignItems:"center",justifyContent:"center"}},
-                              on&&h("span",{style:{color:"#111111",fontSize:14,fontWeight:900}},"✓")),
+                              on&&h("span",{style:{color:"#fff",fontSize:14,fontWeight:900}},"✓")),
                             h("span",{style:{flex:1,fontSize:13,fontWeight:on?700:400}},"▸ "+f.label),
                             h("span",{style:{fontSize:14,fontWeight:700,
                               color:on?C.primary:C.muted}},on?"T/O":"dine-in")
@@ -11221,7 +11226,7 @@ function App(){
                   h("div",{style:{width:16,height:16,borderRadius:4,flexShrink:0,
                     border:"2px solid "+(on?C.primary:C.border),background:on?C.primary:"#fff",
                     display:"flex",alignItems:"center",justifyContent:"center"}},
-                    on&&h("span",{style:{color:"#111111",fontSize:14,fontWeight:900}},"✓")),
+                    on&&h("span",{style:{color:"#fff",fontSize:14,fontWeight:900}},"✓")),
                   h("div",{style:{flex:1}},
                     h("div",{style:{fontSize:13,fontWeight:on?700:400}},lineLabel(i)),
                     lineSub(i)&&h("div",{style:{fontSize:14,color:C.muted}},lineSub(i))
@@ -12756,7 +12761,7 @@ function App(){
         // ══ KITCHEN ══
         page==="kitchen"&&h("div",{style:{height:"100%",overflow:"auto",padding:14,background:"#0f0f1a"}},
           h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:12}},
-            h("div",{style:{color:"#111111",fontSize:14,fontWeight:900}},"🍳 Kitchen — "+curBranch.name),
+            h("div",{style:{color:"#fff",fontSize:14,fontWeight:900}},"🍳 Kitchen — "+curBranch.name),
             h("div",{style:{color:C.accent,fontSize:13,fontWeight:700}},new Date().toLocaleTimeString("en-PH",{hour:"2-digit",minute:"2-digit"}))
           ),
           h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
@@ -14356,19 +14361,19 @@ function App(){
             h("div",null,
               h("div",{style:{color:"rgba(255,255,255,.6)",fontSize:11,fontWeight:700,letterSpacing:2}},
                 "YOUR BRANCH"),
-              h("div",{style:{color:"#111111",fontSize:20,fontWeight:900,marginTop:2}},
+              h("div",{style:{color:"#fff",fontSize:20,fontWeight:900,marginTop:2}},
                 curBranch.name||curBranch.full),
-              h("div",{style:{color:"#5A5A5A",fontSize:12,marginTop:2}},
+              h("div",{style:{color:"rgba(255,255,255,.75)",fontSize:12,marginTop:2}},
                 curBranch.address||"")
             ),
             h("div",{style:{textAlign:"right"}},
-              h("div",{style:{color:"#5A5A5A",fontSize:12}},"LIVE SALES"),
-              h("div",{style:{color:"#111111",fontSize:22,fontWeight:900}},
+              h("div",{style:{color:"rgba(255,255,255,.75)",fontSize:12}},"LIVE SALES"),
+              h("div",{style:{color:"#fff",fontSize:22,fontWeight:900}},
                 "₱"+myOrders.filter(function(o){
                   return o.date===localDate();
                 }).filter(function(o){return o.status!=="void"&&o.status!=="cancelled";})
                   .reduce(function(s,o){return s+(o.total||0);},0).toLocaleString()),
-              h("div",{style:{color:"#5A5A5A",fontSize:12}},
+              h("div",{style:{color:"rgba(255,255,255,.75)",fontSize:12}},
                 myOrders.filter(function(o){
                   return o.date===localDate();
                 }).length+" orders today")
@@ -14421,7 +14426,7 @@ function App(){
                 (a.status==="received_by_main"||a.status==="discrepancy");
             }).length>0&&h("div",{style:{background:"#FFF3E0",border:"1px solid #FFE0B2",
               borderRadius:10,padding:"10px 14px"}},
-              h("div",{style:{fontSize:13,fontWeight:700,color:"#BF360C",marginBottom:6}},
+              h("div",{style:{fontSize:13,fontWeight:700,color:"rgba(255,255,255,.85)",marginBottom:6}},
                 "⚠️ Needs Action"),
               advances.filter(function(a){
                 return a._type==="po"&&
@@ -14460,7 +14465,7 @@ function App(){
                   ),
                   h("div",{style:{display:"flex",gap:8,alignItems:"center"}},
                     h("span",{style:{fontSize:12,padding:"2px 7px",borderRadius:8,
-                      background:stCol,color:"#111111",fontWeight:700}},
+                      background:stCol,color:"#fff",fontWeight:700}},
                       (o.status||"").toUpperCase()),
                     h("span",{style:{fontWeight:800,fontSize:14}},
                       "₱"+peso(o.subtotal||0))
@@ -15151,7 +15156,7 @@ function App(){
                   border:"1px solid "+C.border,overflow:"hidden"}},
                   h("div",{style:{background:ROLES[editingStaff.role]?.color||C.primary,
                     padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}},
-                    h("div",{style:{color:"#111111",fontWeight:800,fontSize:13}},
+                    h("div",{style:{color:"#fff",fontWeight:800,fontSize:13}},
                       editingStaff._isNew?"New Staff":"Edit: "+editingStaff.name),
                     h("button",{onClick:()=>setEditingStaff(null),
                       style:{background:"rgba(255,255,255,.15)",border:"none",
@@ -15322,12 +15327,86 @@ function App(){
             )
           ),
 
-          // PO List
+          // Same table as the PO Monitor. A branch has fewer orders but the
+          // same question — what is still owed, what has not arrived — and a
+          // card per order buries that under a scroll.
+          (function(){
+            const rows=advances
+              .filter(a=>a._type==="po"&&a.branch===branchId&&
+                (poFilter==="all"||(a.status||"pending")===poFilter))
+              .sort((a,b)=>(b.timestamp?.seconds||0)-(a.timestamp?.seconds||0));
+            const COLS="132px 88px 104px 104px 96px 116px 100px 100px 46px";
+            const HEAD=["PO NUMBER","ITEMS","TOTAL","PAID","BALANCE",
+                        "STATUS","ORDERED","ARRIVING",""];
+            return h("div",{style:{background:"#fff",border:"1px solid "+C.border,
+              borderRadius:12,overflow:"auto",marginBottom:12}},
+              h("div",{style:{minWidth:920}},
+                h("div",{style:{display:"grid",gridTemplateColumns:COLS,gap:6,
+                  padding:"10px 14px",background:C.bg,
+                  borderBottom:"1px solid "+C.border}},
+                  HEAD.map((k,ix)=>h("div",{key:k+ix,
+                    style:{fontSize:11,fontWeight:800,color:C.muted,letterSpacing:1,
+                      textAlign:(ix>=1&&ix<=4)?"right":"left"}},k))),
+                rows.length===0
+                  ? h("div",{style:{padding:"30px",textAlign:"center",
+                      color:C.muted,fontSize:13}},"No orders yet")
+                  : rows.map(po=>{
+                      const st=po.status||"pending";
+                      const stC={received_by_main:C.warning,processing:C.primary,
+                        paid:C.info,discrepancy:C.danger,
+                        completed:C.success,cancelled:C.muted}[st]||C.muted;
+                      const stL={received_by_main:"Pending at Main",
+                        processing:"Processing",paid:"Ready to receive",
+                        discrepancy:"Discrepancy",completed:"Completed",
+                        cancelled:"Cancelled"}[st]||st;
+                      const paid=(po.payments||[]).reduce((a,p)=>a+(p.amount||0),0);
+                      const val=poValue(po);
+                      const bal=val-paid;
+                      const open=poOpen===po._docId;
+                      const nItems=((po.receivedItems||po.deliveredItems||po.items)||[]).length;
+                      const needsPost=(st==="completed"||st==="discrepancy")
+                        &&!po.stockPosted&&((po.receivedItems||[]).length>0);
+                      return h("div",{key:po._docId},
+                        h("div",{onClick:()=>setPoOpen(open?"":po._docId),
+                          style:{display:"grid",gridTemplateColumns:COLS,gap:6,
+                            padding:"11px 14px",alignItems:"center",cursor:"pointer",
+                            borderBottom:"1px solid "+C.border,
+                            background:open?C.primary+"0D":"#fff"}},
+                          h("div",{style:{fontSize:12,fontFamily:"monospace",
+                            fontWeight:700}},po.poNum||"—",
+                            needsPost&&h("div",{style:{fontSize:10,color:C.warning,
+                              fontWeight:800,fontFamily:"inherit"}},"not in stock")),
+                          h("div",{style:{fontSize:13,textAlign:"right"}},nItems),
+                          h("div",{style:{fontSize:13,textAlign:"right",
+                            fontWeight:700}},"₱"+peso(val)),
+                          h("div",{style:{fontSize:13,textAlign:"right",
+                            color:paid>0?C.success:C.muted}},"₱"+peso(paid)),
+                          h("div",{style:{fontSize:13,textAlign:"right",
+                            fontWeight:bal>0?800:400,
+                            color:bal>0?C.danger:C.muted}},
+                            bal>0?"₱"+peso(bal):"—"),
+                          h("div",null,h("span",{style:{fontSize:11,fontWeight:800,
+                            padding:"3px 9px",borderRadius:20,
+                            background:stC+"18",color:stC}},stL)),
+                          h("div",{style:{fontSize:12,color:C.muted}},po.date||"—"),
+                          h("div",{style:{fontSize:12,color:C.muted}},
+                            po.deliveryDate||"—"),
+                          h("div",{style:{fontSize:12,color:C.muted,
+                            textAlign:"right"}},open?"▾":"▸")
+                        )
+                      );
+                    })
+              )
+            );
+          })(),
+
+          // The full card for the open row — Edit, Cancel, Receive Items and
+          // the recovery banner all stay where they were.
           h("div",{style:{display:"grid",gap:10}},
             advances
             .filter(a=>a._type==="po"&&a.branch===branchId&&
               (poFilter==="all"||(a.status||"pending")===poFilter))
-            .sort((a,b)=>(b.timestamp?.seconds||0)-(a.timestamp?.seconds||0))
+            .filter(a=>a._docId===poOpen)
             .map(po=>{
               const st=po.status||"pending";
               const stColor={
@@ -15541,11 +15620,91 @@ function App(){
                   color:poFilter===s?C.primary:C.muted,fontWeight:poFilter===s?700:400}},lbl))
           ),
 
-          // PO List
+          // A table, not a stack of cards: the point of a monitor is reading
+          // twenty POs at a glance and spotting the one that is wrong. Cards
+          // force a scroll per row and hide exactly that comparison.
+          (function(){
+            const rows=advances
+              .filter(a=>a._type==="po"&&(poFilter==="all"||a.status===poFilter))
+              .sort((a,b)=>(b.timestamp?.seconds||0)-(a.timestamp?.seconds||0));
+            const COLS="150px 128px 100px 100px 96px 112px 116px 96px 96px 46px";
+            const HEAD=["BRANCH","PO NUMBER","TOTAL","PAID","BALANCE","PAYMENT",
+                        "STATUS","ORDERED","DELIVERY",""];
+            return h("div",{style:{background:"#fff",border:"1px solid "+C.border,
+              borderRadius:12,overflow:"auto",marginBottom:12}},
+              h("div",{style:{minWidth:1040}},
+                h("div",{style:{display:"grid",gridTemplateColumns:COLS,gap:6,
+                  padding:"10px 14px",background:C.bg,
+                  borderBottom:"1px solid "+C.border}},
+                  HEAD.map((k,ix)=>h("div",{key:k+ix,
+                    style:{fontSize:11,fontWeight:800,color:C.muted,letterSpacing:1,
+                      textAlign:(ix>=2&&ix<=4)?"right":"left"}},k))),
+                rows.length===0
+                  ? h("div",{style:{padding:"30px",textAlign:"center",
+                      color:C.muted,fontSize:13}},"No purchase orders here")
+                  : rows.map(po=>{
+                      const st=po.status||"pending";
+                      const stC={received_by_main:C.warning,processing:C.primary,
+                        paid:C.success,discrepancy:C.danger,
+                        completed:C.muted,cancelled:C.muted}[st]||C.muted;
+                      const stL={received_by_main:"New PO",processing:"Processing",
+                        paid:"Ready to receive",discrepancy:"Discrepancy",
+                        completed:"Completed",cancelled:"Cancelled"}[st]||st;
+                      const paid=(po.payments||[]).reduce((a,p)=>a+(p.amount||0),0);
+                      const val=poValue(po);
+                      const bal=val-paid;
+                      const pay=po.paymentStatus
+                        ||(paid>0?(bal>0?"Partial":"Paid"):"Unpaid");
+                      const payC=pay==="Paid"?C.success
+                        :(pay==="Partial"?C.warning:C.muted);
+                      const open=poOpen===po._docId;
+                      const needsPost=(st==="completed"||st==="discrepancy")
+                        &&!po.stockPosted&&((po.receivedItems||[]).length>0);
+                      return h("div",{key:po._docId},
+                        h("div",{onClick:()=>setPoOpen(open?"":po._docId),
+                          style:{display:"grid",gridTemplateColumns:COLS,gap:6,
+                            padding:"11px 14px",alignItems:"center",cursor:"pointer",
+                            borderBottom:"1px solid "+C.border,
+                            background:open?C.primary+"0D":"#fff"}},
+                          h("div",{style:{fontSize:13,fontWeight:700,overflow:"hidden",
+                            textOverflow:"ellipsis",whiteSpace:"nowrap"}},
+                            po.branchName||po.branch||"—"),
+                          h("div",{style:{fontSize:12,fontFamily:"monospace"}},
+                            po.poNum||"—",
+                            needsPost&&h("div",{style:{fontSize:10,color:C.warning,
+                              fontWeight:800,fontFamily:"inherit"}},"not in stock")),
+                          h("div",{style:{fontSize:13,textAlign:"right",
+                            fontWeight:700}},"₱"+peso(val)),
+                          h("div",{style:{fontSize:13,textAlign:"right",
+                            color:paid>0?C.success:C.muted}},"₱"+peso(paid)),
+                          h("div",{style:{fontSize:13,textAlign:"right",
+                            fontWeight:bal>0?800:400,
+                            color:bal>0?C.danger:C.muted}},
+                            bal>0?"₱"+peso(bal):"—"),
+                          h("div",null,h("span",{style:{fontSize:11,fontWeight:800,
+                            padding:"3px 9px",borderRadius:20,
+                            background:payC+"18",color:payC}},pay)),
+                          h("div",null,h("span",{style:{fontSize:11,fontWeight:800,
+                            padding:"3px 9px",borderRadius:20,
+                            background:stC+"18",color:stC}},stL)),
+                          h("div",{style:{fontSize:12,color:C.muted}},po.date||"—"),
+                          h("div",{style:{fontSize:12,color:C.muted}},
+                            po.deliveryDate||"—"),
+                          h("div",{style:{fontSize:12,color:C.muted,
+                            textAlign:"right"}},open?"▾":"▸")
+                        )
+                      );
+                    })
+              )
+            );
+          })(),
+
+          // The full card still renders, but only for the row that is open —
+          // the actions and the discrepancy report stay where they were.
           h("div",{style:{display:"grid",gap:10}},
             advances
             .filter(a=>a._type==="po"&&(poFilter==="all"||a.status===poFilter))
-            .sort((a,b)=>(b.timestamp?.seconds||0)-(a.timestamp?.seconds||0))
+            .filter(a=>a._docId===poOpen)
             .map(po=>{
               const st=po.status||"pending";
               const stColor={received_by_main:C.warning,processing:"#6A1B9A",
@@ -16241,8 +16400,8 @@ class ErrorBoundary extends React.Component {
         fontFamily:"monospace",padding:30,display:"flex",flexDirection:"column",
         alignItems:"center",justifyContent:"center"}},
         h("div",{style:{fontSize:30,marginBottom:12}},"⚠️ Render Error"),
-        h("div",{style:{fontSize:13,color:"#C62828",marginBottom:8}},err&&err.message||"Unknown"),
-        h("pre",{style:{fontSize:12,color:"#5A5A5A",background:"#0d0d1a",padding:12,
+        h("div",{style:{fontSize:13,color:"#FF8A80",marginBottom:8}},err&&err.message||"Unknown"),
+        h("pre",{style:{fontSize:12,color:"#B9B9C6",background:"#0d0d1a",padding:12,
           borderRadius:8,maxWidth:700,overflow:"auto",whiteSpace:"pre-wrap"}},
           err&&err.stack||""),
         h("button",{onClick:()=>location.reload(),
