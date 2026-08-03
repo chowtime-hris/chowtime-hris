@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Chowtime POS — 20260803-014847</title>
+<title>Chowtime POS — 20260803-022347</title>
 <meta name="theme-color" content="#6A1B9A"/>
 <meta name="mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260803-014847 -->
+<!-- BUILD:20260803-022347 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -2313,6 +2313,7 @@ function DRCheckForm({po,db,branchId,user,showT,INIT_INVENTORY,setAdvances,advan
       });
       // Update branch inventory with actual received qty
       const invCol="inventory_"+branchId;
+    const isMainDest=false;   // this path only ever writes to a branch
       for(const  item of received){
         try{
           const ref=doc(db,invCol, item.id);
@@ -2331,7 +2332,9 @@ function DRCheckForm({po,db,branchId,user,showT,INIT_INVENTORY,setAdvances,advan
               cat:meta.cat||"Other",
               packUnit:meta.packUnit|| item.packUnit||"",
               packSize:Number(meta.packSize|| item.packSize)||0,
-              cost:Number(meta.cost)||0,
+              // what THIS branch paid Main for it, not Main's own cost
+              cost:isMainDest?(Number(meta.cost)||0)
+                :(Number( item.price)||Number(meta.price)||0),
               price:Number(meta.price)||0,
               minStock:0,   // branch sets its own reorder point, not Main's
               branch:branchId,
@@ -5852,7 +5855,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260803-014847";
+const BUILD = "20260803-022347";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -5876,6 +5879,7 @@ async function postReceivedToStock(db,po,byName){
   const invBr=po.branch||"";
   if(!invBr){res.errors.push("no branch on PO");return res;}
   const isMain=(invBr==="ct-main"||invBr==="main");
+  const isMainDest=isMain;   // never overwrite Main's own buying price
   const invCol=isMain?"inventory":"inventory_"+invBr;
   const logCol=logColFor(invBr);
   const items=(po.receivedItems||po.deliveredItems||po.items||[]);
@@ -5903,7 +5907,9 @@ async function postReceivedToStock(db,po,byName){
           cat:meta.cat||"Other",
           packUnit:meta.packUnit||it.packUnit||"",
           packSize:Number(meta.packSize||it.packSize)||0,
-          cost:Number(meta.cost)||0,
+          // what THIS branch paid Main, not Main's own cost
+          cost:isMainDest?(Number(meta.cost)||0)
+            :(Number(it.price)||Number(meta.price)||0),
           price:Number(meta.price)||0,
           minStock:0,   // branch sets its own reorder point, not Main's
           branch:invBr,stock:qty,
@@ -5913,7 +5919,9 @@ async function postReceivedToStock(db,po,byName){
         prev=0; res.adopted++;
       }else{
         prev=Number(cur.data().stock)||0;
-        await updateDoc(ref,{stock:increment(qty),lastRestocked:serverTimestamp()});
+        await updateDoc(ref,Object.assign(
+          {stock:increment(qty),lastRestocked:serverTimestamp()},
+          (!isMainDest&&Number(it.price)>0)?{cost:Number(it.price)}:{}));
       }
       res.added++;
       await addDoc(collection(db,logCol),{
@@ -7738,60 +7746,71 @@ function ReceiveItemsModal({po,db,user,showT,branchId,onClose}){
       // goods belong to the branch that ordered them.
       const invBr=po.branch||branchId;
       const invCol=(invBr==="ct-main"||invBr==="main")?"inventory":"inventory_"+invBr;
+      const isMainDest=(invBr==="ct-main"||invBr==="main");
       let adopted=0, added=0;
-      for(const it of finalItems){
-        const qty=Number(it.receivedQty)||0;
-        if(!it.id||qty<=0)continue;
-        try{
-          const ref=doc(db,invCol,it.id);
-          const cur=await getDoc(ref);
-          let prev=null;
-          if(!cur.exists()){
-            // first delivery of this item to this branch — adopt it from Main
-            let meta={};
-            try{
-              const m=await getDoc(doc(db,"inventory",it.id));
-              if(m.exists())meta=m.data();
-            }catch(e0){}
-            await setDoc(ref,Object.assign({},meta,{
-              id:it.id,
-              name:meta.name||it.name||it.id,
-              unit:meta.unit||it.unit||"pc",
-              cat:meta.cat||"Other",
-              packUnit:meta.packUnit||it.packUnit||"",
-              packSize:Number(meta.packSize||it.packSize)||0,
-              cost:Number(meta.cost)||0,
-              price:Number(meta.price)||0,
-              minStock:0,   // branch sets its own reorder point, not Main's
-              branch:invBr,stock:qty,
-              adoptedFrom:"main",adoptedAt:serverTimestamp(),
-              lastRestocked:serverTimestamp()
-            }),{merge:true});
-            prev=0; adopted++;
-          }else{
-            prev=Number(cur.data().stock)||0;
-            await updateDoc(ref,{stock:increment(qty),
-              lastRestocked:serverTimestamp()});
-          }
-          added++;
-          await addDoc(collection(db,
-            logColFor(invBr)),{
-            itemId:it.id,itemName:it.name||it.id,unit:it.unit||"",
-            type:"add",amount:qty,
-            prevStock:prev,newStock:Math.round((prev+qty)*1000)/1000,
-            desc:"Received from Main: "+qty+" "+(it.unit||"")
-              +" · "+(po.drNum||po.poNum||""),
-            source:"TRANSFER",ref:po.poNum||"",
-            branch:invBr,by:user.name,
-            date:localDate(),timestamp:serverTimestamp()
-          });
-        }catch(e2){console.error("receive into inventory failed",it.id,e2);}
+
+      // A reported shortage is a claim, not a settled fact. Nothing enters
+      // stock until Main approves it — otherwise the branch's inventory shows
+      // goods that are still in dispute, and correcting it afterwards means
+      // unpicking a movement that already happened.
+      if(!hasDisc){
+        for(const it of finalItems){
+          const qty=Number(it.receivedQty)||0;
+          if(!it.id||qty<=0)continue;
+          try{
+            const ref=doc(db,invCol,it.id);
+            const cur=await getDoc(ref);
+            let prev=null;
+            if(!cur.exists()){
+              // first delivery of this item to this branch — adopt it from Main
+              let meta={};
+              try{
+                const m=await getDoc(doc(db,"inventory",it.id));
+                if(m.exists())meta=m.data();
+              }catch(e0){}
+              await setDoc(ref,Object.assign({},meta,{
+                id:it.id,
+                name:meta.name||it.name||it.id,
+                unit:meta.unit||it.unit||"pc",
+                cat:meta.cat||"Other",
+                packUnit:meta.packUnit||it.packUnit||"",
+                packSize:Number(meta.packSize||it.packSize)||0,
+                // what THIS branch paid Main, not Main's own cost
+                cost:isMainDest?(Number(meta.cost)||0)
+            :(Number(it.price)||Number(meta.price)||0),
+                price:Number(meta.price)||0,
+                minStock:0,   // branch sets its own reorder point, not Main's
+                branch:invBr,stock:qty,
+                adoptedFrom:"main",adoptedAt:serverTimestamp(),
+                lastRestocked:serverTimestamp()
+              }),{merge:true});
+              prev=0; adopted++;
+            }else{
+              prev=Number(cur.data().stock)||0;
+              await updateDoc(ref,Object.assign(
+                {stock:increment(qty),lastRestocked:serverTimestamp()},
+                (!isMainDest&&Number(it.price)>0)?{cost:Number(it.price)}:{}));
+            }
+            added++;
+            await addDoc(collection(db,
+              logColFor(invBr)),{
+              itemId:it.id,itemName:it.name||it.id,unit:it.unit||"",
+              type:"add",amount:qty,
+              prevStock:prev,newStock:Math.round((prev+qty)*1000)/1000,
+              desc:"Received from Main: "+qty+" "+(it.unit||"")
+                +" · "+(po.drNum||po.poNum||""),
+              source:"TRANSFER",ref:po.poNum||"",
+              branch:invBr,by:user.name,
+              date:localDate(),timestamp:serverTimestamp()
+            });
+          }catch(e2){console.error("receive into inventory failed",it.id,e2);}
+        }
       }
 
       if(hasDisc){
         await updateDoc(doc(db,"advances",po._docId),{
           status:"discrepancy",
-          stockPosted:true,
+          stockPosted:false,          // held until Main approves the shortage
           deliveryStatus:"Short",   // arrived, but not in full
           receivedItems:finalItems,
           receivedBy:user.name,receivedAt:serverTimestamp(),
@@ -7802,7 +7821,7 @@ function ReceiveItemsModal({po,db,user,showT,branchId,onClose}){
             remark:remarks[i.id]||""
           })),discrepancyStatus:"pending_approval"
         });
-        showT("Discrepancy reported — awaiting Main approval","warn");
+        showT("Shortage reported — nothing enters stock until Main approves","warn");
       } else {
         await updateDoc(doc(db,"advances",po._docId),{
           status:"completed",
@@ -13640,7 +13659,12 @@ function App(){
         ),
 
         // ══ INVENTORY ══
-        page==="inventory"&&h("div",null,
+        page==="inventory"&&(function(){
+          // Main buys from suppliers and sells to branches, so it needs both
+          // numbers. A branch has one — what Main charged — and that figure
+          // feeds the BOM, which is where a menu item's cost comes from.
+          const isMainInv=(branchId==="ct-main"||branchId==="main")&&!invView;
+          return h("div",null,
           // Low stock alert banner
           (()=>{
             const lowItems=inventory.filter(i=>(Number(i.minStock)||0)>0&&(i.stock||0)<=(Number(i.minStock)||0)&&(i.stock||0)>=0);
@@ -13759,17 +13783,20 @@ function App(){
               const src=invView?invViewData:inventory;
               const atCost  =src.reduce((a,i)=>a+(Number(i.stock)||0)*(Number(i.cost)||0),0);
               const atRetail=src.reduce((a,i)=>a+(Number(i.stock)||0)*(Number(i.price)||0),0);
-              const retail=invValMode==="retail";
+              // At a branch there is no retail side to an ingredient, so the
+              // toggle would only ever show the same number twice.
+              const retail=isMainInv&&invValMode==="retail";
               const noPrice=src.filter(i=>(Number(i.stock)||0)>0
                 &&!(Number(retail?i.price:i.cost)||0)).length;
               return h("div",{style:{flex:1,minWidth:0}},
                 h(Stat,{
                   label:retail?"Inv. Value — Benta":"Inv. Value — Puhunan",
                   value:"₱"+peso(retail?atRetail:atCost),
-                  sub:retail?("Puhunan ₱"+peso(atCost)):("Benta ₱"+peso(atRetail)),
+                  sub:!isMainInv?"Halaga ng binili sa Main"
+                    :retail?("Puhunan ₱"+peso(atCost)):("Benta ₱"+peso(atRetail)),
                   icon:retail?"🏷️":"💰",
                   color:retail?C.info:C.success}),
-                h("div",{style:{display:"flex",gap:4,marginTop:5}},
+                isMainInv&&h("div",{style:{display:"flex",gap:4,marginTop:5}},
                   [["cost","💰 Puhunan"],["retail","🏷️ Benta"]].map(([m,lbl])=>
                     h("button",{key:m,onClick:()=>setInvValMode(m),
                       style:{flex:1,padding:"4px",borderRadius:6,fontSize:12,
@@ -13791,7 +13818,10 @@ function App(){
           ),
           h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
             h("div",{style:{display:"grid",gridTemplateColumns:"2fr 90px 80px 80px 80px 70px 110px",padding:"8px 14px",borderBottom:"1px solid #f0f0f0",background:"#f9f9f9"}},
-              ["Name","In Stock","Price","Cost","Margin","Cat","Action"].map(h2=>h("div",{key:h2,style:{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:.5}},h2))
+              (isMainInv
+                ?["Name","In Stock","Price","Cost","Margin","Cat","Action"]
+                :["Name","In Stock","","Cost / unit","Used in","Cat","Action"]
+              ).map((h2,hi)=>h("div",{key:h2+hi,style:{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:.5}},h2))
             ),
             batchMode&&(function(){
               const n=Object.keys(batchEdits).length;
@@ -14069,6 +14099,16 @@ function App(){
                       background:ed[f]!==undefined?"#FFF8E1":"#fff"}});
                   if(!batchMode){
                     const pc=Number( item.price)||0, cs=Number( item.cost)||0;
+                    // A branch does not sell ingredients — it turns them into
+                    // menu items, and the BOM is where that cost lands. So a
+                    // selling price and a margin here mean nothing.
+                    if(!isMainInv) return [
+                      h("div",{key:"p",style:{fontSize:13,color:C.border}},"—"),
+                      h("div",{key:"c",style:{fontSize:13,fontWeight:700}},
+                        "₱"+peso(cs)),
+                      h("div",{key:"m",style:{fontSize:12,color:C.muted}},
+                        "in BOM")
+                    ];
                     return [
                       h("div",{key:"p",style:{fontSize:13}},"₱"+peso(pc)),
                       h("div",{key:"c",style:{fontSize:13}},"₱"+peso(cs)),
@@ -14303,7 +14343,8 @@ function App(){
                   "Set 'Daily Rate' on inventory  items to see consumption tracking")
               : null
           )
-        ),
+        );
+        })(),
 
         // ══ SALES REPORT ══
         page==="sales_report"&&h("div",null,
@@ -15573,6 +15614,22 @@ function App(){
                       fontSize:13,fontWeight:800,cursor:"pointer"}},
                     "📥 Receive Items"),
 
+                  // Closed without a receipt: the goods never entered this
+                  // branch's stock and no shortage could be reported. Only
+                  // MAIN can reopen it, so say so instead of showing a locked
+                  // card with no way forward.
+                  (st==="completed"&&!((po.receivedItems||[]).length))&&h("div",{
+                    style:{width:"100%",background:C.warning+"18",
+                      border:"1px solid "+C.warning,borderRadius:9,
+                      padding:"9px 12px",marginBottom:6}},
+                    h("div",{style:{fontSize:12,fontWeight:800,color:C.warning}},
+                      "Closed before you received it"),
+                    h("div",{style:{fontSize:11,color:C.muted,marginTop:2,
+                      lineHeight:1.5}},
+                      "These items are not in your stock and no shortage can be "+
+                      "reported. Ask Main to reopen it — PO Monitor, "+
+                      "↩ Reopen for receiving.")),
+
                   // DISCREPANCY → View/edit report
                   st==="discrepancy"&&h("button",{
                     onClick:()=>setModal("receive_"+po._docId),
@@ -16021,14 +16078,123 @@ function App(){
                     "✕ Cancel PO"),
 
                   // DISCREPANCY → Approve
+                  // Approval settles the shortage: the PO lines are rewritten
+                  // to what actually arrived, the bill drops to match, and only
+                  // then does the stock move. Approving without correcting the
+                  // figures would leave the branch billed for goods that were
+                  // never delivered.
                   st==="discrepancy"&&h("button",{
                     onClick:async()=>{
+                      const lines=(po.receivedItems||po.deliveredItems||po.items||[]);
+                      const short=lines.filter(i=>{
+                        const exp=(i.expectedQty!=null)?i.expectedQty
+                          :(i.actualQty!=null?i.actualQty:(i.qty||0));
+                        return (Number(i.receivedQty)||0)!==Number(exp);
+                      });
+                      const oldTotal=poValue(po);
+                      // rewrite each line to the received quantity
+                      const corrected=lines.map(i=>{
+                        const got=Number(i.receivedQty)||0;
+                        const exp=(i.expectedQty!=null)?i.expectedQty
+                          :(i.actualQty!=null?i.actualQty:(i.qty||0));
+                        return Object.assign({},i,{
+                          qty:got, actualQty:got,
+                          orderedQty:(i.orderedQty!=null?i.orderedQty:i.qty),
+                          issuedQty:exp,
+                          correctedFrom:(got!==Number(exp))?exp:undefined
+                        });
+                      });
+                      const newTotal=corrected.reduce((a,i)=>
+                        a+((Number(i.qty)||0)*(Number(i.price)||0)),0);
+                      const credit=Math.round((oldTotal-newTotal)*100)/100;
+
+                      const lines6=short.slice(0,6).map(i=>{
+                        const exp=(i.expectedQty!=null)?i.expectedQty
+                          :(i.actualQty!=null?i.actualQty:(i.qty||0));
+                        return "  • "+(i.name||i.id)+": "+exp+" → "
+                          +(Number(i.receivedQty)||0)+" "+(i.unit||"");
+                      });
+                      if(!confirm("Approve the shortage on "+po.poNum+"?\n\n"
+                        +lines6.join("\n")
+                        +(short.length>6?"\n  …and "+(short.length-6)+" more":"")
+                        +"\n\nBill: ₱"+peso(oldTotal)+" → ₱"+peso(newTotal)
+                        +(credit>0?"  (₱"+peso(credit)+" less)":"")
+                        +"\n\nThe corrected quantities then enter "
+                        +(po.branchName||po.branch)+"'s stock."))return;
+
+                      // 1. stock, at the quantities everyone has now agreed
+                      const invBr=po.branch;
+                      const invCol=(invBr==="ct-main"||invBr==="main")
+                        ?"inventory":"inventory_"+invBr;
+                      const isMainDest=(invBr==="ct-main"||invBr==="main");
+                      let added=0;
+                      for(const it of corrected){
+                        const qty=Number(it.qty)||0;
+                        if(!it.id||qty<=0)continue;
+                        try{
+                          const ref=doc(db,invCol,it.id);
+                          const cur=await getDoc(ref);
+                          let prev=0;
+                          if(!cur.exists()){
+                            let meta={};
+                            try{
+                              const mainDoc=await getDoc(doc(db,"inventory",it.id));
+                              if(mainDoc.exists())meta=mainDoc.data()||{};
+                            }catch(e1){}
+                            await setDoc(ref,Object.assign({},meta,{
+                              name:it.name||meta.name||it.id,
+                              unit:it.unit||meta.unit||"",
+                              // what this branch paid, not Main's cost
+                              cost:isMainDest?(Number(meta.cost)||0)
+            :(Number(it.price)||Number(meta.price)||0),
+                              minStock:0,stock:qty,
+                              adoptedFrom:"main",adoptedAt:serverTimestamp(),
+                              lastRestocked:serverTimestamp()
+                            }),{merge:true});
+                          }else{
+                            prev=Number(cur.data().stock)||0;
+                            await updateDoc(ref,Object.assign(
+                              {stock:increment(qty),lastRestocked:serverTimestamp()},
+                              (!isMainDest&&Number(it.price)>0)?{cost:Number(it.price)}:{}));
+                          }
+                          added++;
+                          await addDoc(collection(db,logColFor(invBr)),{
+                            itemId:it.id,itemName:it.name||it.id,
+                            unit:it.unit||"",type:"add",amount:qty,
+                            prevStock:prev,
+                            newStock:Math.round((prev+qty)*1000)/1000,
+                            desc:"Received after approved shortage: "+qty+" "
+                              +(it.unit||"")+" · "+(po.drNum||po.poNum||""),
+                            source:"TRANSFER",ref:po.poNum||"",
+                            branch:invBr,by:user.name,
+                            date:localDate(),timestamp:serverTimestamp()
+                          });
+                        }catch(e2){console.error("approve→stock",it.id,e2);}
+                      }
+
+                      // 2. the PO now reads as what was actually delivered
                       await updateDoc(doc(db,"advances",po._docId),{
                         status:"completed",
+                        stockPosted:true,
+                        items:corrected,
+                        deliveredItems:corrected,
+                        receivedItems:corrected,
+                        totalBeforeDiscrepancy:oldTotal,
+                        discrepancyCredit:credit,
+                        discrepancyStatus:"approved",
                         discrepancyApprovedBy:user.name,
                         discrepancyApprovedAt:serverTimestamp()
                       });
-                      showT("Discrepancy approved — "+po.poNum+" COMPLETED ✅");
+
+                      await notify(db,{to:po.branch,type:"success",
+                        title:"Shortage approved — "+po.poNum,
+                        message:"Bill corrected to ₱"+peso(newTotal)
+                          +(credit>0?" (₱"+peso(credit)+" less)":"")
+                          +". "+added+" item(s) added to your stock.",
+                        page:"stock_order",ref:po.poNum,by:user.name});
+
+                      showT(po.poNum+" settled — bill ₱"+peso(newTotal)
+                        +", "+added+" item(s) in stock");
                     },
                     style:{padding:"7px 14px",background:C.danger,
                       border:"none",borderRadius:8,color:"#fff",
@@ -16099,7 +16265,7 @@ function App(){
                   // arrived — a payment does not prove that, and closing it
                   // here removed their Receive button and any chance to report
                   // a shortage.
-                  (st==="completed"&&!po.receivedItems)&&h("button",{
+                  (st==="completed"&&!((po.receivedItems||[]).length))&&h("button",{
                     onClick:async()=>{
                       if(!confirm("Reopen "+po.poNum+" so the branch can receive it?\n\n"
                         +"It was marked completed without a receipt, so the stock "
