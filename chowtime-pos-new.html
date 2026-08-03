@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Chowtime POS — 20260803-073652</title>
+<title>Chowtime POS — 20260803-080827</title>
 <meta name="theme-color" content="#6A1B9A"/>
 <meta name="mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260803-073652 -->
+<!-- BUILD:20260803-080827 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -2968,8 +2968,10 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
             style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:13,outline:"none",resize:"none",height:52,boxSizing:"border-box",fontFamily:"inherit"}})
         ),
 
-        // Action buttons
-        h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7}},
+        // Action buttons — pinned, because a full count runs past the fold
+        h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,
+          position:"sticky",bottom:0,background:"#fff",padding:"9px 0",
+          borderTop:"1px solid "+C.border,zIndex:4}},
           h("button",{onClick:()=>{saveCashCount(false);printCount(false);},
             style:{padding:"11px",background:"#fff",border:"1px solid "+C.border,borderRadius:9,fontWeight:700,fontSize:13,cursor:"pointer"}},
             "💾 Save Count"),
@@ -3446,14 +3448,35 @@ function MenuEditor({menuItems,setMenuItems,db,user,showT}){
   const openEdit = ( item)=>{ setEditItem(JSON.parse(JSON.stringify( item))); setView("edit"); };
   const openAdd  = ()=>{ setEditItem(blankItem()); setView("add item"); };
 
+  // Firestore refuses an undefined field, and a blank cost box is exactly
+  // that. Strip them — a field left empty means "no value", which is null.
+  const clean=(o)=>{
+    if(Array.isArray(o)) return o.map(clean);
+    if(o&&typeof o==="object"&&!(o instanceof Date)){
+      const out={};
+      Object.keys(o).forEach(k=>{
+        if(o[k]===undefined) return;
+        out[k]=clean(o[k]);
+      });
+      return out;
+    }
+    return o;
+  };
+
   const saveItem = async( item)=>{
     setSaving(true);
     const isNew = view==="add item";
-    // Save to Firestore
     try{
-      await setDoc(doc(db,"menu", item.id),{... item,updatedBy:user.name,updatedAt:serverTimestamp()});
-    }catch(e){ console.warn("Menu save:",e); }
-    // Update local state
+      await setDoc(doc(db,"menu", item.id),
+        clean({... item,updatedBy:user.name,updatedAt:serverTimestamp()}));
+    }catch(e){
+      // Reporting success on a failed write is worse than the failure: the
+      // screen agreed with you until the next reload disagreed.
+      console.error("Menu save:",e);
+      showT("Not saved — "+String(e&&e.message||e).slice(0,70),"err");
+      setSaving(false);
+      return;
+    }
     if(isNew){
       setMenuItems(p=>[...p, item]);
       showT( item.name+" added to menu ✓");
@@ -3468,7 +3491,13 @@ function MenuEditor({menuItems,setMenuItems,db,user,showT}){
 
   const deleteItem = async( item)=>{
     if(!confirm("Delete "+ item.name+"? This cannot be undone."))return;
-    try{ await deleteDoc(doc(db,"menu", item.id)); }catch(e){}
+    try{
+      await deleteDoc(doc(db,"menu", item.id));
+    }catch(e){
+      console.error("menu delete:",e);
+      showT("Not deleted — "+String(e&&e.message||e).slice(0,60),"err");
+      return;
+    }
     setMenuItems(p=>p.filter(m=>m.id!== item.id));
     showT( item.name+" deleted","warn");
     setView("list");setEditItem(null);
@@ -3476,7 +3505,14 @@ function MenuEditor({menuItems,setMenuItems,db,user,showT}){
 
   const toggleAvail = async( item)=>{
     const updated={... item,avail:! item.avail};
-    try{ await updateDoc(doc(db,"menu", item.id),{avail:updated.avail,updatedBy:user.name}); }catch(e){}
+    try{
+      await updateDoc(doc(db,"menu", item.id),{avail:updated.avail,updatedBy:user.name});
+    }catch(e){
+      // the list would have shown it hidden while the tills kept selling it
+      console.error("toggle avail:",e);
+      showT("Not saved — "+String(e&&e.message||e).slice(0,60),"err");
+      return;
+    }
     setMenuItems(p=>p.map(m=>m.id=== item.id?updated:m));
     showT( item.name+" "+(updated.avail?"enabled ✓":"hidden 🚫"));
   };
@@ -3600,7 +3636,7 @@ function MenuEditor({menuItems,setMenuItems,db,user,showT}){
 
     return h("div",null,
       // Header
-      h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}},
+      h("div",{style:{position:"sticky",top:0,zIndex:20,background:"#fff",paddingTop:8,paddingBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}},
         h("div",{style:{display:"flex",alignItems:"center",gap:10}},
           h("button",{onClick:()=>{setView("list");setEditItem(null);},
             style:{padding:"6px 12px",background:C.bg,border:"1px solid "+C.border,borderRadius:7,fontSize:13,cursor:"pointer"}},"← Back"),
@@ -5132,7 +5168,7 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
       )
       );
     }),
-    h("div",{style:{display:"flex",gap:8,marginTop:10}},
+    h("div",{style:{display:"flex",gap:8,marginTop:10,position:"sticky",bottom:0,background:"#fff",padding:"8px 0",borderTop:"1px solid "+C.border,zIndex:4}},
       h("button",{
         onClick:()=>setRows([...rows,{ingId:"",ingName:"",unit:"",qty:1,convFactor:1,markup:0}]),
         style:{padding:"7px 14px",borderRadius:8,border:"1px dashed "+C.border,
@@ -6049,7 +6085,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260803-073652";
+const BUILD = "20260803-080827";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -8782,6 +8818,9 @@ function PermissionsTab({db,showT,companySettings,setCompanySettings}){
     return companySettings.rolePerms || DEFAULT_PERMS;
   });
   const [saving,setSaving] = useState(false);
+  // Three roles open at once is ninety-six toggles on screen. One at a time,
+  // and lead with what each role actually has.
+  const [openRole,setOpenRole] = useState("");
 
   // Every page the system has, not just the ones a role starts with. The old
   // list held only each role's defaults, so the screen could take access away
@@ -8900,6 +8939,8 @@ function PermissionsTab({db,showT,companySettings,setCompanySettings}){
         };
         const extras=PERM_GROUPS.reduce((a,g)=>
           a+g.items.filter(n=>defs.indexOf(n.key)<0&&isOnFor(n.key)).length,0);
+        const onCount=PERM_GROUPS.reduce((a,g)=>
+          a+g.items.filter(n=>isOnFor(n.key)).length,0);
         return h("div",{key:role,style:{background:"#fff",borderRadius:12,
           border:"2px solid "+(ROLE_COLORS[role]||C.border),overflow:"hidden"}},
 
@@ -8908,9 +8949,16 @@ function PermissionsTab({db,showT,companySettings,setCompanySettings}){
             background:ROLE_COLORS[role]||C.primary,
             padding:"10px 16px",
             display:"flex",justifyContent:"space-between",alignItems:"center"}},
-            h("div",{style:{color:"#fff",fontWeight:800,fontSize:13}},
-              (ROLE_LABELS[role]||role)
-              +(extras?("  ·  "+extras+" beyond the default"):"")),
+            h("button",{
+              onClick:()=>setOpenRole(openRole===role?"":role),
+              style:{flex:1,textAlign:"left",background:"none",border:"none",
+                cursor:"pointer",padding:0,color:"#fff",fontWeight:800,
+                fontSize:13,display:"flex",alignItems:"center",gap:8}},
+              h("span",null,openRole===role?"\u25be":"\u25b8"),
+              h("span",null,(ROLE_LABELS[role]||role)),
+              h("span",{style:{fontWeight:500,opacity:.85}},
+                "\u00b7 "+onCount+" page"+(onCount===1?"":"s")
+                +(extras?("  \u00b7  "+extras+" added"):""))),
             h("div",{style:{display:"flex",gap:8}},
               h("button",{onClick:()=>resetRole(role),
                 style:{padding:"4px 10px",background:"rgba(255,255,255,.15)",
@@ -8922,7 +8970,7 @@ function PermissionsTab({db,showT,companySettings,setCompanySettings}){
 
           // Grouped the way the sidebar is, defaults marked so it is obvious
           // what is standard for the role and what has been added on top.
-          h("div",{style:{padding:"12px 16px"}},
+          openRole===role&&h("div",{style:{padding:"12px 16px"}},
             PERM_GROUPS.map(g=>h("div",{key:g.label,style:{marginBottom:10}},
               h("div",{style:{fontSize:11,fontWeight:800,color:C.muted,
                 letterSpacing:1,marginBottom:6}},g.label.toUpperCase()),
@@ -8964,12 +9012,14 @@ function PermissionsTab({db,showT,companySettings,setCompanySettings}){
       })
     ),
 
-    h("div",{style:{marginTop:14,display:"flex",gap:8}},
+    h("div",{style:{position:"sticky",bottom:0,marginTop:14,
+      display:"flex",gap:8,padding:"12px 0",background:"#fff",
+      borderTop:"1px solid "+C.border,zIndex:5}},
       h("button",{onClick:()=>setPerms(DEFAULT_PERMS),
         style:{padding:"10px 20px",background:"#fff",
           border:"1px solid "+C.border,borderRadius:9,
-          fontSize:14,fontWeight:700,cursor:"pointer"}},
-        "↺ Reset All to Default"),
+          fontSize:14,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}},
+        "↺ Reset All"),
       h("button",{onClick:save,disabled:saving,
         style:{flex:1,padding:"11px",
           background:saving?"#8A8A8A":"linear-gradient(135deg,"+C.primary+","+C.dark+")",
@@ -9963,7 +10013,10 @@ function NewInventoryItemForm({db,user,branchId,showT,onClose,invBranch}){
     try{
       const custom=newList.filter(c=>!DEFAULT_CATS.includes(c));
       await setDoc(doc(db,"settings","inv_cats"),{cats:custom},{merge:true});
-    }catch(e){}
+    }catch(e){
+      console.error("save categories:",e);
+      showT("Category not saved — "+String(e&&e.message||e).slice(0,55),"err");
+    }
   };
 
   const save=async()=>{
