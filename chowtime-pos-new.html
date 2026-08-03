@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Chowtime POS — 20260803-081637</title>
+<title>Chowtime POS — 20260803-082913</title>
 <meta name="theme-color" content="#6A1B9A"/>
 <meta name="mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260803-081637 -->
+<!-- BUILD:20260803-082913 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -2031,6 +2031,7 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
               source:"transfer",
               ref:drNum,
               reason:"DR "+drNum+" — issued to "+(po.branch||""),
+              date:localDate(),
               drNum:drNum,poId:po._docId,branch:po.branch||"",
               by:user.name,at:serverTimestamp(),timestamp:serverTimestamp()
             });
@@ -4696,6 +4697,20 @@ function cardPrice(it){
   return vs.length?Math.min.apply(null,vs):0;
 }
 
+// Pages a role can be granted beyond its own defaults. The permissions screen
+// offers exactly this set, and the sidebar honours exactly this set — a page
+// retired from here cannot be resurrected by a permission saved before it went.
+const GRANTABLE = [
+  "pos","orders","all_orders","kitchen","void_request","void_requests",
+  "x_reading","z_reading","reports","analytics","branch_pl",
+  "cash_count","cash_monitor","expenses",
+  "inventory","inv_log","stock_order","stock_receive","po_monitor","bom_mgmt",
+  "ext_production","ext_stock",
+  "menu_mgmt","branch_menu",
+  "crew_mgmt","ca_request","loan_request","ext_kiosk","ext_payroll",
+  "printer","branches","settings"
+];
+
 // ─── FIFO LOTS ────────────────────────────────────────────
 // Each delivery becomes a lot carrying the price actually paid for it. Stock
 // is consumed oldest-first, so the value of what remains is the sum of what
@@ -6085,7 +6100,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260803-081637";
+const BUILD = "20260803-082913";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -6545,6 +6560,7 @@ async function performVoid(db, args){
               +" from the void of order "+(order.id||"")+" ("+ itemName+(label?" / "+label:"")+")",
             source:"void",ref:order.id||"",branch:branch,
             reason:"VOID: "+(order.id||"")+" — "+ itemName,
+            date:localDate(),
             by:byName,at:serverTimestamp(),timestamp:serverTimestamp()});
         }catch(e){out.restockFailed++;console.warn("Restock failed",row.ingId,e);}
       }
@@ -7507,7 +7523,7 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
         type:mode==="set"?"set":isNeg?"deduct":"add",
         amount:mode==="adjust"?(isNeg?-numVal:numVal):numVal,
         prevStock:current,newStock:preview,
-        reason:reason,by:user.name,at:serverTimestamp()
+        reason:reason,by:user.name,date:localDate(),at:serverTimestamp()
       });
       showT("Stock updated: "+ item.name+" → "+String(preview)+" "+( item.unit||"")+" ✓");
       onClose();
@@ -7570,7 +7586,7 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
           cost:details.cost!== item.cost?{from: item.cost,to:details.cost}:null,
           minStock:details.minStock!== item.minStock?{from: item.minStock,to:details.minStock}:null,
         },
-        reason:"Details edited",by:user.name,at:serverTimestamp()
+        reason:"Details edited",by:user.name,date:localDate(),at:serverTimestamp()
       });
       showT(details.name+" details updated ✓");
       onClose();
@@ -8801,16 +8817,16 @@ function PermissionsTab({db,showT,companySettings,setCompanySettings}){
       pos:true, orders:true, x_reading:true, z_reading:true,
       cash_count:true, expenses:true, inventory:true,
       ca_request:true, loan_request:true,
-      void_request:true, kiosk:true
+      void_request:true
     },
     crew: {
       kitchen:true, pos:true, orders:true,
-      ca_request:true, loan_request:true, kiosk:true
+      ca_request:true, loan_request:true
     },
     stockclerk: {
       inventory:true, stock_order:true, stock_receive:true,
       pos:true, orders:true, expenses:true,
-      ca_request:true, loan_request:true, kiosk:true
+      ca_request:true, loan_request:true
     }
   };
 
@@ -10408,7 +10424,7 @@ function App(){
     try{
       const lc=logColFor(bId);
       unsubs.push(onSnapshot(
-        query(collection(db,lc),where("type","==","deduct"),limit(900)),
+        query(collection(db,lc),where("type","==","deduct"),limit(4000)),
         snap=>setPlLogs(snap.docs.map(d=>({...d.data(),_id:d.id}))),
         err=>console.warn("P&L logs:",err.message)));
     }catch(e){console.warn("P&L log query:",e);}
@@ -11196,6 +11212,8 @@ function App(){
                 type:"deduct",
                 amount:-deductAmt,
                 cogs:_cost,          // what FIFO says these units cost
+                date:localDate(),    // the trading day, for the P&L range
+                timestamp:serverTimestamp(),
                 convFactor:convFactor,
                 invCol:deductCol,
                 prevStock:_prev,
@@ -11288,6 +11306,8 @@ function App(){
                    itemId:row.ingId, itemName:row.ingName||row.ingId,
                   unit:row.unit||"",type:"deduct",amount:-actualDeduct,
                   cogs:_pcost,       // what FIFO says these units cost
+                  date:localDate(),
+                  timestamp:serverTimestamp(),
                   prevStock:_pprev,
                   newStock:_pprev==null?null:Math.round((_pprev-actualDeduct)*1000)/1000,
                   convFactor:row.convFactor||1,invCol:pCol,
@@ -12166,9 +12186,12 @@ function App(){
             if(!_rp)return true;
             return _rp[p]!==false;
           });
+          // Only pages the permissions screen lists can be granted. A record
+          // saved before a page was retired must not be able to bring it back
+          // — that is how a cashier ended up looking at payroll.
           const granted=(_full||!_rp)?[]
             : Object.keys(_rp).filter(p=>_rp[p]===true&&base.indexOf(p)<0
-                &&NAV_META[p]);
+                &&NAV_META[p]&&GRANTABLE.indexOf(p)>=0);
           const allowed=base.concat(granted);
 
           const badgeFor=(p)=>{
@@ -14841,13 +14864,13 @@ function App(){
                          itemId: item.id, itemName: item.name,unit: item.unit||"",
                         type:adj>0?"add":"deduct",
                         amount:adj,prevStock: item.stock||0,newStock:newQ,
-                        reason:"Quick adjust",by:user.name,at:serverTimestamp()
+                        reason:"Quick adjust",by:user.name,date:localDate(),at:serverTimestamp()
                       });
                       await addDoc(collection(db,logCol),{
                          itemId: item.id, itemName: item.name,unit: item.unit||"",
                         type:adj>0?"add":"deduct",amount:adj,
                         prevStock: item.stock||0,newStock:newQ,
-                        reason:"Quick adjust",by:user.name,at:serverTimestamp()
+                        reason:"Quick adjust",by:user.name,date:localDate(),at:serverTimestamp()
                       });
                       showT((adj>0?"+":"")+String(adj)+" "+ item.name+" ✓");
                       e.target.value="";
@@ -15124,6 +15147,18 @@ function App(){
                   +(uncostedList.length>1?"s have":" has")+" no cost set: "
                   +uncostedList.slice(0,4).join(", ")
                   +(uncostedList.length>4?"…":"")):"")),
+
+            plLogs.length>=4000&&h("div",{style:{background:C.warning+"14",
+              border:"1px solid "+C.warning,borderRadius:11,
+              padding:"11px 13px",marginBottom:12}},
+              h("div",{style:{fontSize:12,fontWeight:800,color:C.warning}},
+                "Stock history is at its limit"),
+              h("div",{style:{fontSize:11,color:C.muted,marginTop:2,
+                lineHeight:1.5}},
+                "Only the most recent 4,000 movements are loaded, so a long "+
+                "range may be missing its earliest days — which makes cost of "+
+                "goods read lower than it is. Use a shorter period for an "+
+                "exact figure.")),
 
             cogsMissing>0&&h("div",{style:{background:C.warning+"14",
               border:"1px solid "+C.warning,borderRadius:11,
