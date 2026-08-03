@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Chowtime POS — 20260803-025654</title>
+<title>Chowtime POS — 20260803-033747</title>
 <meta name="theme-color" content="#6A1B9A"/>
 <meta name="mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260803-025654 -->
+<!-- BUILD:20260803-033747 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -211,9 +211,9 @@ const BRANCHES = [
 
 const ROLES = {
   owner:     {label:"Owner / Admin",    emoji:"\u{1F451}", color:"#6A1B9A",
-    nav:["dashboard","branches","subs","pos","orders","void_requests","all_orders","analytics","z_reading","reports","cash_count","expenses","cash_monitor","inventory","inv_log","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","settings","printer","ext_payroll","ext_kiosk","hris_dash","ext_production","ext_stock"]},
+    nav:["dashboard","branches","subs","pos","orders","void_requests","all_orders","analytics","z_reading","reports","cash_count","expenses","cash_monitor","inventory","inv_log","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","settings","printer","ext_payroll","ext_kiosk","hris_dash","ext_production","ext_stock","branch_pl"]},
   manager:   {label:"Branch Manager",   emoji:"\u{1F3EA}", color:"#007AFF",
-    nav:["branch_dash","pos","orders","analytics","z_reading","reports","cash_count","expenses","inventory","inv_log","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","bom_mgmt","branch_settings","printer","ext_kiosk","ext_stock"]},
+    nav:["branch_dash","pos","orders","analytics","z_reading","reports","cash_count","expenses","inventory","inv_log","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","bom_mgmt","branch_settings","printer","ext_kiosk","ext_stock","branch_pl"]},
   cashier:   {label:"Cashier",          emoji:"\u{1F4B3}", color:"#34C759",
     nav:["pos","orders","x_reading","printer","z_reading","cash_count","expenses","inventory","ca_request","loan_request","void_request","ext_kiosk","ext_stock"]},
   crew:      {label:"Crew / Kitchen",   emoji:"\u{1F9D1}\u{200D}\u{1F373}", color:"#FF9500",
@@ -221,7 +221,7 @@ const ROLES = {
   stockclerk:{label:"Stock Clerk",      emoji:"\u{1F4E6}", color:"#AF52DE",
     nav:["inventory","inv_log","stock_order","stock_receive","ca_request","loan_request","pos","orders","expenses","ext_kiosk","ext_stock"]},
   commissary:{label:"Commissary Staff", emoji:"\u{1F3ED}", color:"#32ADE6",
-    nav:["comm_dash","comm_inv","comm_orders","comm_dr","printer","ext_payroll","ext_kiosk","hris_dash","ext_production","ext_stock"]},
+    nav:["comm_dash","comm_inv","comm_orders","comm_dr","printer","ext_payroll","ext_kiosk","hris_dash","ext_production","ext_stock","branch_pl"]},
 };
 
 // Sidebar grouping. Any page not listed here stays top-level, so adding a new
@@ -230,7 +230,7 @@ const NAV_GROUPS = [
   {id:"sales", icon:"\u{1F6D2}", label:"POS & Sales",
    pages:["pos","orders","all_orders","kitchen","void_request","void_requests",
           "cash_count","cash_monitor","cash_in_out","z_reading","x_reading",
-          "reports","sales_report","analytics"]},
+          "reports","sales_report","analytics","branch_pl"]},
   {id:"stock", icon:"\u{1F4E6}", label:"Inventory",
    pages:["inventory","inv_log","stock_order","stock_receive","po_monitor",
           "bom_mgmt","commissary","comm_inv","comm_orders","comm_dr","ext_production","ext_stock"]},
@@ -258,6 +258,7 @@ const NAV_META = {
   ext_kiosk:   {icon:"⏰",label:"Time Clock ↗"},
   ext_production:{icon:"🏭",label:"Production ↗"},
   ext_stock:   {icon:"🧊",label:"Freezer Count ↗"},
+  branch_pl:   {icon:"📊",label:"Branch P&L"},
   x_reading:   {icon:"📃",label:"X-Reading"},
   expenses:    {icon:"💸",label:"Expenses"},
   cash_monitor:{icon:"💵",label:"Cash Monitor"},
@@ -3688,6 +3689,36 @@ function MenuEditor({menuItems,setMenuItems,db,user,showT}){
                 placeholder:"0",
                 style:{width:"100%",padding:"9px",border:`1px solid ${ item.basePrice>0?C.border:C.danger}`,borderRadius:7,fontSize:16,fontWeight:700,outline:"none",boxSizing:"border-box",color:C.primary}})
             ),
+            // Manual cost per serving
+            h("div",{style:{marginBottom:10}},
+              h("div",{style:{fontSize:12,fontWeight:700,color:C.muted,
+                marginBottom:4,letterSpacing:1}},"COST PER SERVING (₱)"),
+              h("input",{type:"number",step:"0.01",
+                onFocus:e=>e.target.select(),
+                value: item.manualCost!=null? item.manualCost:"",
+                onChange:e=>setField("manualCost",
+                  e.target.value===""?null:(parseFloat(e.target.value)||0)),
+                placeholder:"Optional — leave blank to use the BOM",
+                style:{width:"100%",padding:"9px",
+                  border:"1px solid "+C.border,borderRadius:7,fontSize:14,
+                  outline:"none",boxSizing:"border-box"}}),
+              (function(){
+                const c=Number( item.manualCost)||0;
+                const p=Number( item.basePrice)||0;
+                if(!(c>0&&p>0))
+                  return h("div",{style:{fontSize:11,color:C.muted,marginTop:4,
+                    lineHeight:1.5}},
+                    "What one serving actually costs you, including anything "+
+                    "the recipe does not list — packaging, oil, gas, "+
+                    "condiments. Used when Settings › Costing is set to "+
+                    "manual.");
+                const m=p-c;
+                return h("div",{style:{fontSize:11,marginTop:4,
+                  color:m>0?C.success:C.danger,fontWeight:700}},
+                  "Margin ₱"+peso(m)+"  ·  "+((m/p)*100).toFixed(1)+"%");
+              })()
+            ),
+
             // Franchisee + Wholesale prices
             h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}},
               h("div",null,
@@ -5965,7 +5996,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260803-025654";
+const BUILD = "20260803-033747";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -8985,7 +9016,58 @@ function SettingsPage({db,user,showT,branches,companySettings,setCompanySettings
   return h("div",{style:{maxWidth:660}},
     h(SectionHeader,{title:"Settings"}),
     h("div",{style:{display:"flex",gap:0,marginBottom:14,borderBottom:"2px solid "+C.border}},
-      T("print","🖨️ Print & Printer"),T("company","🏢 Company"),T("branches","🏪 Branches"),T("cats","📦 Inv. Categories"),T("perms","🔐 Permissions")),
+      T("print","🖨️ Print & Printer"),T("company","🏢 Company"),T("branches","🏪 Branches"),T("cats","📦 Inv. Categories"),T("costing","💰 Costing"),T("perms","🔐 Permissions")),
+
+    // Where cost of goods comes from. The BOM only knows the ingredients
+    // someone wrote into it — packaging, oil, gas and condiments usually are
+    // not there, so a BOM-only figure reads better than the business is doing.
+    tab==="costing"&&h("div",{style:{display:"flex",flexDirection:"column",gap:14}},
+      h("div",{style:{background:"#fff",border:"1px solid "+C.border,
+        borderRadius:12,padding:"16px 18px"}},
+        h("div",{style:{fontSize:14,fontWeight:800,marginBottom:4}},
+          "Cost of goods sold"),
+        h("div",{style:{fontSize:12,color:C.muted,marginBottom:14,
+          lineHeight:1.6}},
+          "How the P&L values what a sale consumed."),
+
+        [["bom","From the BOM",
+          "Adds up what the recipe actually took out of stock, at the FIFO "+
+          "price of those units. Exact for everything in the BOM — and blind "+
+          "to anything that is not."],
+         ["manual","Manual cost per menu item",
+          "Uses a cost you set on each menu item. Covers packaging, oil, gas "+
+          "and anything else the recipe never lists, but it is a figure you "+
+          "maintain rather than one the system observes."],
+        ].map(([val,label,why])=>{
+          const on=(companySettings.cogsSource||"bom")===val;
+          return h("button",{key:val,
+            onClick:()=>{
+              setCompanySettings(p=>Object.assign({},p,{cogsSource:val}));
+              setTimeout(()=>save("Costing source saved"),0);
+            },
+            style:{width:"100%",textAlign:"left",cursor:"pointer",
+              marginBottom:9,padding:"12px 14px",borderRadius:10,
+              border:"1px solid "+(on?C.primary:C.border),
+              background:on?C.primary+"12":"#fff"}},
+            h("div",{style:{display:"flex",gap:9,alignItems:"center"}},
+              h("div",{style:{width:16,height:16,borderRadius:"50%",
+                flexShrink:0,border:"2px solid "+(on?C.primary:C.border),
+                background:on?C.primary:"#fff"}}),
+              h("div",{style:{fontSize:13,fontWeight:800,
+                color:on?C.primary:C.text}},label)),
+            h("div",{style:{fontSize:11,color:C.muted,marginTop:5,
+              lineHeight:1.6,paddingLeft:25}},why));
+        }),
+
+        h("div",{style:{fontSize:11,color:C.muted,lineHeight:1.6,
+          background:C.bg,borderRadius:9,padding:"11px 13px",marginTop:4}},
+          h("b",{style:{color:C.text}},"Set a manual cost: "),
+          "Menu → pick the item → Cost per serving. An item left blank counts "+
+          "as zero under the manual setting, so cost every item you sell or "+
+          "the gross profit will read high.")
+      )
+    ),
+
     tab==="company"&&h("div",{style:{display:"flex",flexDirection:"column",gap:12}},
       h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,padding:"16px"}},
         h("div",{style:{fontSize:14,fontWeight:800,marginBottom:10}},"🏢 Company Info"),
@@ -10028,6 +10110,10 @@ function App(){
   const [dashBranch,setDashBranch]=useState("");         // "" = all branches
   const [showGuide,setShowGuide]=useState(false);        // how-to panel
   const [openGuide,setOpenGuide]=useState("");           // expanded topic
+  const [plRange,setPlRange]=useState("month");          // P&L period
+  const [plFrom,setPlFrom]=useState(localDate());
+  const [plTo,setPlTo]=useState(localDate());
+  const [plLogs,setPlLogs]=useState([]);                 // deducts with FIFO cost
   const [poOpen,setPoOpen]=useState("");                 // expanded PO row
   const [editSub,setEditSub]=useState(null);             // subscription being edited
   const [newBuild,setNewBuild]=useState(null);           // a newer build is live
@@ -10146,6 +10232,17 @@ function App(){
         setDbReady(true);
       },err=>{console.warn("Orders:",err.message);setDbReady(true);}));
     }catch(e){console.warn("Orders query:",e);}
+
+    // Stock movements carrying a FIFO cost — the cost-of-goods side of the
+    // branch P&L. Only deducts matter, and only recent ones: the page works a
+    // period at a time, not the whole history.
+    try{
+      const lc=logColFor(bId);
+      unsubs.push(onSnapshot(
+        query(collection(db,lc),where("type","==","deduct"),limit(900)),
+        snap=>setPlLogs(snap.docs.map(d=>({...d.data(),_id:d.id}))),
+        err=>console.warn("P&L logs:",err.message)));
+    }catch(e){console.warn("P&L log query:",e);}
 
     // Expenses
     try{
@@ -10929,6 +11026,7 @@ function App(){
                 unit:row.unit||"",
                 type:"deduct",
                 amount:-deductAmt,
+                cogs:_cost,          // what FIFO says these units cost
                 convFactor:convFactor,
                 invCol:deductCol,
                 prevStock:_prev,
@@ -11020,6 +11118,7 @@ function App(){
                 await addDoc(collection(db,logCol),{
                    itemId:row.ingId, itemName:row.ingName||row.ingId,
                   unit:row.unit||"",type:"deduct",amount:-actualDeduct,
+                  cogs:_pcost,       // what FIFO says these units cost
                   prevStock:_pprev,
                   newStock:_pprev==null?null:Math.round((_pprev-actualDeduct)*1000)/1000,
                   convFactor:row.convFactor||1,invCol:pCol,
@@ -14662,6 +14761,170 @@ function App(){
         );
         })(),
 
+        // ══ BRANCH P&L ══
+        // Scoped to this branch, always. A manager is accountable for what
+        // they can move — their sales, their cost of goods, their expenses.
+        // Rent, franchise fees and anything above the branch stay out, because
+        // a number nobody at this store can change is not management
+        // information, it is just a number to argue about.
+        page==="branch_pl"&&(function(){
+          const R=rangeFor(plRange,plFrom,plTo);
+          const mine=orders.filter(o=>o.branch===branchId&&inRange(o,R));
+          const sales=mine.reduce((a,o)=>a+(o.total||0),0);
+          const disc =mine.reduce((a,o)=>a+(o.discAmt||0),0);
+          const txns=mine.length;
+
+          // Cost of goods, from whichever source is configured. The BOM is
+          // exact for what it lists and silent about the rest; a manual figure
+          // covers the rest but is only as current as the last time someone
+          // updated it. Hybrid takes the manual figure where one exists.
+          const src=(companySettings.cogsSource||"bom");
+          const fifoRows=plLogs.filter(l=>
+            String(l.date||"")>=R.from&&String(l.date||"")<=R.to
+            &&l.type==="deduct");
+          const fifoCogs=fifoRows.reduce((a,l)=>a+(Number(l.cogs)||0),0);
+          const cogsMissing=(src==="bom")
+            ? fifoRows.filter(l=>l.cogs==null).length : 0;
+
+          // per-serving cost from the menu, for the manual setting
+          const manualOf=(id)=>{
+            const mi=menuItems.find(x=>x.id===id);
+            const c=mi&&mi.manualCost;
+            return (c==null||c==="")?null:(Number(c)||0);
+          };
+          let manualCogs=0, uncosted=0;
+          const uncostedNames={};
+          mine.forEach(o=>{
+            (o.items||[]).forEach(li=>{
+              const q=Number(li.qty)||0;
+              if(q<=0)return;
+              const mc=manualOf(li.id||li.itemId);
+              if(mc!=null){ manualCogs+=q*mc; }
+              else { uncosted+=q; uncostedNames[li.name||li.id]=true; }
+            });
+          });
+
+          const cogsFinal = (src==="manual") ? manualCogs : fifoCogs;
+          const uncostedList=Object.keys(uncostedNames);
+
+          const exp=expenses
+            .filter(e=>e.branch===branchId
+              &&String(e.date||"")>=R.from&&String(e.date||"")<=R.to)
+            .reduce((a,e)=>a+(Number(e.amount)||0),0);
+          const expRows={};
+          expenses
+            .filter(e=>e.branch===branchId
+              &&String(e.date||"")>=R.from&&String(e.date||"")<=R.to)
+            .forEach(e=>{
+              const k=e.category||e.type||"Other";
+              expRows[k]=(expRows[k]||0)+(Number(e.amount)||0);
+            });
+
+          const gross=sales-cogsFinal;
+          const left=gross-exp;
+          const pct=(v)=>sales>0?((v/sales)*100).toFixed(1)+"%":"—";
+
+          const line=(label,value,opts)=>{
+            opts=opts||{};
+            return h("div",{key:label,style:{display:"flex",
+              justifyContent:"space-between",alignItems:"baseline",
+              padding:opts.big?"11px 0":"6px 0",
+              borderTop:opts.rule?("1px solid "+C.border):"none"}},
+              h("div",{style:{fontSize:opts.big?14:13,
+                fontWeight:opts.big?800:(opts.sub?400:600),
+                color:opts.sub?C.muted:C.text,
+                paddingLeft:opts.sub?14:0}},label),
+              h("div",{style:{display:"flex",gap:12,alignItems:"baseline"}},
+                h("div",{style:{fontSize:11,color:C.muted,minWidth:44,
+                  textAlign:"right"}},opts.noPct?"":pct(Math.abs(value))),
+                h("div",{style:{fontSize:opts.big?16:13,
+                  fontWeight:opts.big?900:600,minWidth:104,textAlign:"right",
+                  color:opts.color||C.text}},
+                  (value<0?"−₱":"₱")+peso(Math.abs(value)))));
+          };
+
+          return h("div",null,
+            h(SectionHeader,{title:"📊 Branch P&L — "+curBranch.name}),
+
+            h("div",{style:{background:"#fff",border:"1px solid "+C.border,
+              borderRadius:12,padding:"11px 13px",marginBottom:12}},
+              h("div",{style:{display:"flex",gap:6,flexWrap:"wrap"}},
+                RANGE_KEYS.map(([k,lbl])=>h("button",{key:k,
+                  onClick:()=>setPlRange(k),
+                  style:{padding:"7px 13px",borderRadius:8,fontSize:13,
+                    cursor:"pointer",fontWeight:plRange===k?800:500,
+                    border:"1px solid "+(plRange===k?C.primary:C.border),
+                    background:plRange===k?C.primary+"18":"#fff",
+                    color:plRange===k?C.primary:C.text}},lbl))),
+              plRange==="custom"&&h("div",{style:{display:"flex",gap:8,
+                marginTop:9,alignItems:"center",flexWrap:"wrap"}},
+                h("span",{style:{fontSize:12,color:C.muted}},"From"),
+                h("input",{type:"date",value:plFrom,
+                  onChange:e=>setPlFrom(e.target.value),
+                  style:{padding:"7px",border:"1px solid "+C.border,
+                    borderRadius:8,fontSize:13,outline:"none"}}),
+                h("span",{style:{fontSize:12,color:C.muted}},"to"),
+                h("input",{type:"date",value:plTo,
+                  onChange:e=>setPlTo(e.target.value),
+                  style:{padding:"7px",border:"1px solid "+C.border,
+                    borderRadius:8,fontSize:13,outline:"none"}})),
+              h("div",{style:{fontSize:11,color:C.muted,marginTop:7}},
+                (R.from===R.to?R.from:(R.from+" → "+R.to))
+                +"  ·  "+txns+" transaction"+(txns===1?"":"s"))),
+
+            h("div",{style:{fontSize:11,color:C.muted,marginBottom:10}},
+              "Cost of goods from "
+              +(src==="manual"?"the cost set on each menu item"
+                :"the BOM, at FIFO prices")
+              +(uncostedList.length&&src==="manual"
+                ?("  ·  "+uncostedList.length+" item"
+                  +(uncostedList.length>1?"s have":" has")+" no cost set: "
+                  +uncostedList.slice(0,4).join(", ")
+                  +(uncostedList.length>4?"…":"")):"")),
+
+            cogsMissing>0&&h("div",{style:{background:C.warning+"14",
+              border:"1px solid "+C.warning,borderRadius:11,
+              padding:"11px 13px",marginBottom:12}},
+              h("div",{style:{fontSize:12,fontWeight:800,color:C.warning}},
+                "Cost of goods is incomplete"),
+              h("div",{style:{fontSize:11,color:C.muted,marginTop:2,
+                lineHeight:1.5}},
+                cogsMissing+" stock movement"+(cogsMissing>1?"s":"")
+                +" in this period predate lot costing, so what is shown below "
+                +"is lower than the real cost. Figures become exact from the "
+                +"first sale after the lots were seeded.")),
+
+            h("div",{style:{background:"#fff",border:"1px solid "+C.border,
+              borderRadius:12,padding:"16px 18px",marginBottom:12}},
+              line("Sales",sales,{big:true,noPct:true}),
+              disc>0&&line("of which discounts given",-disc,{sub:true}),
+              line("Cost of goods sold",-cogsFinal,{rule:true,
+                color:cogsFinal>0?C.danger:C.muted}),
+              line("Gross profit",gross,{big:true,rule:true,
+                color:gross>=0?C.success:C.danger}),
+
+              Object.keys(expRows).length>0&&h("div",{style:{marginTop:6}},
+                h("div",{style:{fontSize:11,fontWeight:800,color:C.muted,
+                  letterSpacing:1,paddingTop:9,
+                  borderTop:"1px solid "+C.border}},"EXPENSES"),
+                Object.keys(expRows).sort((a,b)=>expRows[b]-expRows[a])
+                  .map(k=>line(k,-expRows[k],{sub:true}))),
+              line("Total expenses",-exp,{rule:true,
+                color:exp>0?C.danger:C.muted}),
+
+              line("Left after branch costs",left,{big:true,rule:true,
+                color:left>=0?C.success:C.danger})),
+
+            h("div",{style:{fontSize:11,color:C.muted,lineHeight:1.6,
+              background:C.bg,borderRadius:10,padding:"11px 13px"}},
+              h("b",{style:{color:C.text}},"What this covers: "),
+              "sales rung at this branch, the FIFO cost of the stock those "+
+              "sales consumed, and expenses recorded here. It stops at what "+
+              "this branch controls — rent, franchise fees and head-office "+
+              "costs are not in it, so this is not the company's profit.")
+          );
+        })(),
+
         // ══ SALES REPORT ══
         page==="sales_report"&&h("div",null,
           h(SectionHeader,{title:"Sales Report (Firebase)"}),
@@ -14719,6 +14982,50 @@ function App(){
 
         // ══ BRANCH DASH ══
         page==="branch_dash"&&h("div",null,
+
+          // Month so far. A P&L only read at the end of the month is a
+          // post-mortem; seeing the direction daily is what lets anyone change
+          // it. Deliberately terse — the full statement lives in Branch P&L.
+          (function(){
+            const R=rangeFor("month");
+            const mine=orders.filter(o=>o.branch===branchId&&inRange(o,R));
+            const sales=mine.reduce((a,o)=>a+(o.total||0),0);
+            const cogs=plLogs
+              .filter(l=>String(l.date||"")>=R.from&&String(l.date||"")<=R.to)
+              .reduce((a,l)=>a+(Number(l.cogs)||0),0);
+            const exp=expenses
+              .filter(e=>e.branch===branchId
+                &&String(e.date||"")>=R.from&&String(e.date||"")<=R.to)
+              .reduce((a,e)=>a+(Number(e.amount)||0),0);
+            const left=sales-cogs-exp;
+            if(sales<=0) return null;
+            return h("div",{style:{background:"#fff",
+              border:"1px solid "+C.border,borderRadius:12,
+              padding:"12px 15px",marginBottom:12}},
+              h("div",{style:{display:"flex",justifyContent:"space-between",
+                alignItems:"baseline",marginBottom:9}},
+                h("div",{style:{fontSize:11,fontWeight:800,color:C.muted,
+                  letterSpacing:1}},"THIS MONTH SO FAR"),
+                h("button",{onClick:()=>setPage("branch_pl"),
+                  style:{fontSize:12,fontWeight:700,color:C.primary,
+                    background:"none",border:"none",cursor:"pointer",
+                    padding:0}},"Full P&L →")),
+              h("div",{style:{display:"grid",
+                gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",
+                gap:12}},
+                [["Sales",sales,C.text],
+                 ["Cost of goods",-cogs,C.muted],
+                 ["Expenses",-exp,C.muted],
+                 ["Left over",left,left>=0?C.success:C.danger]
+                ].map(([lbl,v,col],ix)=>
+                  h("div",{key:lbl,style:{borderLeft:ix?("1px solid "+C.border):"none",
+                    paddingLeft:ix?12:0}},
+                    h("div",{style:{fontSize:11,color:C.muted}},lbl),
+                    h("div",{style:{fontSize:ix===3?18:15,
+                      fontWeight:ix===3?900:700,color:col,marginTop:2}},
+                      (v<0?"−₱":"₱")+peso(Math.abs(v))))))
+            );
+          })(),
 
           // Branch hero card
           h("div",{style:{background:"linear-gradient(135deg,"+C.primary+","+C.dark+")",
