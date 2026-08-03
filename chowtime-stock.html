@@ -140,7 +140,7 @@
   .cutoff-foot .save-btn{width:auto;padding:8px 16px;font-size:12.5px;}
   .cutoff-foot .cp-status{font-size:11.5px;color:var(--muted);}
 </style>
-<!-- BUILD:20260803-071433 -->
+<!-- BUILD:20260803-072210 -->
 </head>
 <body>
 
@@ -414,7 +414,9 @@
         <div><label>Unit</label>
           <select id="itemUnit"><option>pcs</option><option>kg</option><option>pack</option><option>tray</option><option>box</option><option>L</option><option>g</option></select>
         </div>
-        <div><label>Category</label><input id="itemCategory" placeholder="e.g. Meat"></div>
+        <div><label>Category</label>
+          <input id="itemCategory" list="itemCategories" placeholder="e.g. frozen">
+          <datalist id="itemCategories"></datalist></div>
       </div>
       <div class="row">
         <div><label>Pricing: units per charge</label><input id="itemPackSize" type="number" min="1" step="any" placeholder="e.g. 5" value="1"></div>
@@ -1303,7 +1305,8 @@ async function renderPosLinkPanel(){
           try{
             const ref = bref('items').push();
             await ref.set({
-              name: x.name, unit: x.unit||"pc", category: x.cat||"",
+              name: x.name, unit: x.unit||"pc",
+              category: String(x.cat||"").trim().toLowerCase(),
               packSize: 1,
               packCost: x.cost>0 ? Math.round(x.cost*100)/100 : null,
               freezerPackSize: x.packSize>0 ? x.packSize : null,
@@ -1416,9 +1419,26 @@ async function renderPosLinkPanel(){
   if(saved.posBranch) draw();
 }
 
+function refreshCategoryList(){
+  const dl = document.getElementById('itemCategories');
+  if(!dl) return;
+  const seen = {};
+  Object.values(items).forEach(it=>{
+    const c = String(it.category||"").trim();
+    if(c) seen[c] = (seen[c]||0)+1;
+  });
+  // common starting points, so a brand-new store is not staring at nothing
+  ["frozen","chilled","dry goods","sauce","packaging","supplies","beverage"]
+    .forEach(c=>{ if(seen[c]===undefined) seen[c]=0; });
+  dl.innerHTML = Object.keys(seen)
+    .sort((a,b)=>(seen[b]-seen[a])||a.localeCompare(b))
+    .map(c=>'<option value="'+escapeHtml(c)+'">').join('');
+}
+
 function loadItemsTable(){
   bref('items').on('value', snap=>{
     items = snap.val() || {};
+    refreshCategoryList();
     // Redraw the POS link panel only when it drew before these items existed.
     // Redrawing unconditionally would rebuild every picker and throw away
     // selections someone is part-way through making.
@@ -1429,14 +1449,38 @@ function loadItemsTable(){
     }
     const tbody = document.getElementById('itemsTbody');
     tbody.innerHTML='';
-    const keys = Object.keys(items);
+    const keys = Object.keys(items).sort((a,b)=>{
+      const A=items[a]||{}, B=items[b]||{};
+      // archived sink to the bottom whatever their category
+      if(!!A.archived !== !!B.archived) return A.archived?1:-1;
+      const ca=String(A.category||"~").toLowerCase();
+      const cb=String(B.category||"~").toLowerCase();
+      if(ca!==cb) return ca<cb?-1:1;
+      return String(A.name||"").localeCompare(String(B.name||""));
+    });
     document.getElementById('itemsEmpty').style.display = keys.length?'none':'block';
+    let lastCat = null;
     keys.forEach(id=>{
       const it = items[id];
       const tr = document.createElement('tr');
       const rate = itemRate(id);
       const isCustom = it.packCost !== undefined && it.packCost !== null && it.packCost !== '';
       const fps = parseFloat(it.freezerPackSize);
+      // a heading row each time the category changes, so the groups are
+      // visible rather than merely sorted
+      const thisCat = it.archived ? "\u200barchived"
+        : String(it.category||"").trim().toLowerCase();
+      if(thisCat !== lastCat){
+        lastCat = thisCat;
+        const hr = document.createElement('tr');
+        hr.innerHTML = '<td colspan="6" style="background:var(--bg);'
+          + 'font-size:11px;font-weight:800;letter-spacing:1px;'
+          + 'color:var(--muted);padding:6px 8px">'
+          + escapeHtml((it.archived ? "ARCHIVED"
+              : (String(it.category||"").trim().toUpperCase() || "UNCATEGORISED")))
+          + '</td>';
+        tbody.appendChild(hr);
+      }
       if(it.archived) tr.style.opacity = '0.5';
       tr.innerHTML = `<td>${escapeHtml(it.name)}${it.archived?' <small style="color:var(--muted);">(archived)</small>':''}</td><td>${escapeHtml(it.unit)}</td><td>${escapeHtml(it.category||'—')}</td>
         <td class="num">₱${fmt(rate)}${isCustom?'':' <small style="color:var(--muted);">(default)</small>'}</td>
@@ -2086,12 +2130,33 @@ function posField(id, it){
 
 function renderItemsList(){
   const list = document.getElementById('itemsList'); list.innerHTML='';
-  const keys = Object.keys(items).filter(id => !items[id].archived);
+  const keys = Object.keys(items).filter(id => !items[id].archived)
+    .sort((a,b)=>{
+      const A=items[a]||{}, B=items[b]||{};
+      const ca=String(A.category||"~").toLowerCase();
+      const cb=String(B.category||"~").toLowerCase();
+      if(ca!==cb) return ca<cb?-1:1;
+      return String(A.name||"").localeCompare(String(B.name||""));
+    });
   if(!keys.length){ list.innerHTML='<p class="sub">No items in catalog yet. Ask the owner to add items in Setup.</p>'; return; }
+  let lastCountCat = null;
   keys.forEach(id=>{
     const it = items[id];
     const freezerPackSize = parseFloat(it.freezerPackSize) || 1;
     const usesPack = freezerPackSize > 1;
+    // a heading each time the group changes, so the crew works one part of
+    // the room at a time
+    const cat = String(it.category||"").trim().toLowerCase();
+    if(cat !== lastCountCat){
+      lastCountCat = cat;
+      const head = document.createElement('div');
+      head.style.cssText = 'font-size:11px;font-weight:800;letter-spacing:1px;'
+        + 'color:var(--muted);margin:14px 0 4px;padding-bottom:4px;'
+        + 'border-bottom:1px solid var(--line)';
+      head.textContent = (String(it.category||"").trim().toUpperCase()
+        || "UNCATEGORISED");
+      list.appendChild(head);
+    }
     const block = document.createElement('div'); block.className='item-block';
     if(usesPack){
       block.innerHTML = `<div class="name">${escapeHtml(it.name)} <span class="unit">(${freezerPackSize} ${escapeHtml(it.unit)}/pack)</span></div>
@@ -2369,6 +2434,6 @@ window.addEventListener('load', ()=>{
   }
 });
 </script>
-<div id="buildStamp" style="text-align:center;padding:14px 8px;font-size:11px;color:#5A5A5A">Chowtime Stock · 20260803-071433</div>
+<div id="buildStamp" style="text-align:center;padding:14px 8px;font-size:11px;color:#5A5A5A">Chowtime Stock · 20260803-072210</div>
 </body>
 </html>
