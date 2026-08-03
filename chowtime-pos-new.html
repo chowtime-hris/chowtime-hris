@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Chowtime POS — 20260803-000711</title>
+<title>Chowtime POS — 20260803-003904</title>
 <meta name="theme-color" content="#6A1B9A"/>
 <meta name="mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260803-000711 -->
+<!-- BUILD:20260803-003904 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -3143,7 +3143,7 @@ function CALoanPage({user,branchId,curBranch,db,hrisDB,showT,mode,hrisEmps=[]}){
           h("button",{onClick:submit,
             style:{width:"100%",padding:"13px",
               background:isCA?`linear-gradient(135deg,${C.primary},${C.dark})`:`linear-gradient(135deg,#1565C0,#0D47A1)`,
-              border:"none",borderRadius:10,color:"#111111",fontWeight:800,fontSize:13,cursor:"pointer"}},
+              border:"none",borderRadius:10,color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer"}},
             isCA?"📤 Submit CA Request":"📤 Submit Loan Request")
         )
       ),
@@ -5852,7 +5852,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260803-000711";
+const BUILD = "20260803-003904";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -7344,7 +7344,7 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
       padding:"14px 18px",display:"flex",justifyContent:"space-between",alignItems:"center"}},
       h("div",null,
         h("div",{style:{color:"rgba(255,255,255,.6)",fontSize:12,letterSpacing:2,fontWeight:700}},"INVENTORY ITEM"),
-        h("div",{style:{color:"#111111",fontWeight:900,fontSize:15}}, item.name),
+        h("div",{style:{color:"#fff",fontWeight:900,fontSize:15}}, item.name),
         h("div",{style:{color:"rgba(255,255,255,.5)",fontSize:13}},
           "Stock: "+fmtStock( item,current)+" · ₱"+peso( item.price||0))
       ),
@@ -11045,7 +11045,7 @@ function App(){
         // Login button
         h("button",{onClick:handleLogin,disabled:loginLoading,
           style:{width:"100%",padding:"13px",background:loginLoading?"#555":`linear-gradient(135deg,${C.primary},${C.dark})`,
-            border:"none",borderRadius:11,color:"#111111",fontWeight:800,fontSize:14,cursor:loginLoading?"not-allowed":"pointer",
+            border:"none",borderRadius:11,color:"#fff",fontWeight:800,fontSize:14,cursor:loginLoading?"not-allowed":"pointer",
             marginBottom:12}},
           loginLoading?"Signing in...":"Sign In →"
         ),
@@ -11502,8 +11502,8 @@ function App(){
         h("div",{style:{background:`linear-gradient(135deg,${C.primary},${C.dark})`,padding:"13px 15px 10px",textAlign:"center"}},
           h("div",{style:{fontSize:19}},"🍽️"),
           h("div",{style:{color:"#fff",fontWeight:900,fontSize:15,letterSpacing:2}},"CHOWTIME"),
-          h("div",{style:{color:"#5A5A5A",fontSize:11,letterSpacing:2}},"FAST-FOOD CHAIN"),
-          h("div",{style:{color:"#5A5A5A",fontSize:12}},curBranch.full)
+          h("div",{style:{color:"rgba(255,255,255,.8)",fontSize:11,letterSpacing:2}},"FAST-FOOD CHAIN"),
+          h("div",{style:{color:"rgba(255,255,255,.8)",fontSize:12}},curBranch.full)
         ),
         h("div",{style:{padding:"12px 16px"}},
           h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:5}},
@@ -12636,7 +12636,7 @@ function App(){
               ),
               h("button",{onClick:handleSignOut,
                 style:{padding:"7px 12px",background:"rgba(0,0,0,.3)",
-                  border:"none",borderRadius:20,color:"#111111",
+                  border:"none",borderRadius:20,color:"#fff",
                   fontWeight:700,fontSize:13,cursor:"pointer"}},
                 "Sign Out")
             )
@@ -12677,7 +12677,7 @@ function App(){
                 display:"flex",gap:10,alignItems:"center"}},
                 h("div",{style:{fontSize:24}},"🔥"),
                 h("div",null,
-                  h("div",{style:{color:"#111111",fontWeight:900,fontSize:14}},"BOGO Deals!"),
+                  h("div",{style:{color:"#fff",fontWeight:900,fontSize:14}},"BOGO Deals!"),
                   h("div",{style:{color:"rgba(255,255,255,.8)",fontSize:12}},
                     menuWithOverrides.filter(i=>i.promos&&i.promos.length>0)
                       .map(i=>i.name).join(" · "))
@@ -13635,9 +13635,9 @@ function App(){
               borderRadius:12,padding:"12px 16px",marginBottom:12,
               display:"flex",justifyContent:"space-between",alignItems:"center"}},
               h("div",null,
-                h("div",{style:{color:"#111111",fontWeight:900,fontSize:13}},
+                h("div",{style:{color:"#fff",fontWeight:900,fontSize:13}},
                   "⚠️ "+lowItems.length+"  item(s) LOW on stock!"),
-                h("div",{style:{color:"#111111",fontSize:13,marginTop:2}},
+                h("div",{style:{color:"rgba(255,255,255,.85)",fontSize:13,marginTop:2}},
                   lowItems.slice(0,3).map(i=>i.name+"("+i.stock+")").join(" · ")+
                   (lowItems.length>3?" +more":""))
               ),
