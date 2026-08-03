@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Chowtime POS — 20260803-080827</title>
+<title>Chowtime POS — 20260803-081637</title>
 <meta name="theme-color" content="#6A1B9A"/>
 <meta name="mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260803-080827 -->
+<!-- BUILD:20260803-081637 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -6085,7 +6085,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260803-080827";
+const BUILD = "20260803-081637";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -9152,9 +9152,18 @@ function SettingsPage({db,user,showT,branches,companySettings,setCompanySettings
       style:{width:"100%",padding:"8px",border:"1px solid "+C.border,
         borderRadius:7,fontSize:13,outline:"none",boxSizing:"border-box",cursor:"text"}})
   );
-  const save=async(msg)=>{
-    try{await setDoc(doc(db,"settings","company"),companySettings,{merge:true});showT(msg||"Saved");}
-    catch(e){showT("Error","err");}
+  const save=async(msg,patch)=>{
+    // Take an explicit patch when the caller has one: state has not re-rendered
+    // yet at the moment a radio is clicked, so reading it back here would
+    // persist the option that was selected a moment ago.
+    const body=patch?Object.assign({},companySettings,patch):companySettings;
+    try{
+      await setDoc(doc(db,"settings","company"),body,{merge:true});
+      showT(msg||"Saved");
+    }catch(e){
+      console.error("settings save:",e);
+      showT("Not saved — "+String(e&&e.message||e).slice(0,60),"err");
+    }
   };
   return h("div",{style:{maxWidth:660}},
     h(SectionHeader,{title:"Settings"}),
@@ -9186,7 +9195,7 @@ function SettingsPage({db,user,showT,branches,companySettings,setCompanySettings
           return h("button",{key:val,
             onClick:()=>{
               setCompanySettings(p=>Object.assign({},p,{cogsSource:val}));
-              setTimeout(()=>save("Costing source saved"),0);
+              save("Costing source saved",{cogsSource:val});
             },
             style:{width:"100%",textAlign:"left",cursor:"pointer",
               marginBottom:9,padding:"12px 14px",borderRadius:10,
@@ -9208,7 +9217,19 @@ function SettingsPage({db,user,showT,branches,companySettings,setCompanySettings
           "Menu → pick the item → the cost box beside each size. Items with no "+
           "sizes use the Cost per serving field on the left instead. Anything "+
           "left blank counts as zero under the manual setting, so cost every "+
-          "size you sell or the gross profit will read high.")
+          "size you sell or the gross profit will read high."),
+
+        h("div",{style:{display:"flex",gap:9,alignItems:"center",marginTop:12,
+          paddingTop:12,borderTop:"1px solid "+C.border}},
+          h("button",{
+            onClick:()=>save("Costing source saved",
+              {cogsSource:companySettings.cogsSource||"bom"}),
+            style:{padding:"9px 20px",background:C.primary,border:"none",
+              borderRadius:8,color:"#fff",fontWeight:800,fontSize:13,
+              cursor:"pointer"}},
+            "💾 Save Costing"),
+          h("div",{style:{fontSize:11,color:C.muted}},
+            "Saved as soon as you pick one — this only confirms it."))
       )
     ),
 
