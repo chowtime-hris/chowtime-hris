@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Chowtime POS — 20260803-082913</title>
+<title>Chowtime POS — 20260803-085259</title>
 <meta name="theme-color" content="#6A1B9A"/>
 <meta name="mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260803-082913 -->
+<!-- BUILD:20260803-085259 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -1999,6 +1999,17 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
         drNotes,
         issuedBy:user.name, issuedAt:serverTimestamp()
       });
+
+      // Only the branch's own submit was announced; every step after it was
+      // silent, so nobody learned anything without opening the page and
+      // looking.
+      await notify(db,{to:po.branch,type:"info",
+        title:"DR issued — "+po.poNum,
+        message:"Main has dispatched "+delivered.length+" item"
+          +(delivered.length===1?"":"s")+" on "+drNum
+          +(deliveryDate?(", arriving "+deliveryDate):"")
+          +". Receive it once payment is recorded.",
+        page:"stock_order",ref:po.poNum,by:user.name});
 
       // Issuing a DR moves goods OUT of main. Without this the branch gained
       // stock on receipt while main never lost any — stock from nothing.
@@ -6100,7 +6111,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260803-082913";
+const BUILD = "20260803-085259";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -8094,6 +8105,12 @@ function ReceiveItemsModal({po,db,user,showT,branchId,onClose}){
             remark:remarks[i.id]||""
           })),discrepancyStatus:"pending_approval"
         });
+        await notify(db,{to:"ct-main",type:"warning",
+          title:"Shortage reported — "+po.poNum,
+          message:(po.branchName||po.branch)+" received "+discItems.length
+            +" item"+(discItems.length===1?"":"s")+" short. Nothing enters "
+            +"their stock until you approve it in PO Monitor.",
+          page:"po_monitor",ref:po.poNum,by:user.name});
         showT("Shortage reported — nothing enters stock until Main approves","warn");
       } else {
         await updateDoc(doc(db,"advances",po._docId),{
@@ -8103,6 +8120,11 @@ function ReceiveItemsModal({po,db,user,showT,branchId,onClose}){
           receivedItems:finalItems,
           receivedBy:user.name,receivedAt:serverTimestamp()
         });
+        await notify(db,{to:"ct-main",type:"success",
+          title:"Received in full — "+po.poNum,
+          message:(po.branchName||po.branch)+" confirmed "+finalItems.length
+            +" item"+(finalItems.length===1?"":"s")+" received. PO closed.",
+          page:"po_monitor",ref:po.poNum,by:user.name});
         showT("Items received — PO Completed · "+added+" item/s into stock"
           +(adopted?" ("+adopted+" new)":""));
       }
@@ -8232,6 +8254,16 @@ function PaymentModal({po,db,user,showT,onClose}){
         status:newStatus,
         ...(newStatus==="paid"?{paidAt:serverTimestamp(),paidBy:user.name}:{})
       });
+      // Receiving is gated on payment, so this is the one message the branch
+      // is actually waiting for — and it was the one nobody sent.
+      await notify(db,{to:po.branch,
+        type:newStatus==="paid"?"success":"info",
+        title:(newStatus==="paid"?"Paid — ":"Payment recorded — ")+po.poNum,
+        message:newStatus==="paid"
+          ? ("₱"+peso(newTotalPaid)+" settled. You can receive the items now.")
+          : ("₱"+peso(newTotalPaid)+" of ₱"+peso(grandTotal)+" recorded. "
+             +"₱"+peso(grandTotal-newTotalPaid)+" still due before you can receive."),
+        page:"stock_order",ref:po.poNum,by:user.name});
       showT("Payment recorded ✓ — "+newPayStatus);
       onClose();
     }catch(e){showT("Error saving payment","err");}
@@ -8576,6 +8608,14 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
         issuedBy:user.name,
         issuedAt:serverTimestamp()
       });
+
+      await notify(db,{to:po.branch,type:"info",
+        title:"DR issued — "+po.poNum,
+        message:"Main has dispatched "+delivered.length+" item"
+          +(delivered.length===1?"":"s")
+          +(deliveryDate?(", arriving "+deliveryDate):"")
+          +". Receive it once payment is recorded.",
+        page:"stock_order",ref:po.poNum,by:user.name});
 
       // This is the second DR path. The other one deducts Main's stock, sets
       // deliveryStatus and notifies the branch — this one did none of the
@@ -17187,6 +17227,12 @@ function App(){
                         reopenedBy:user.name,
                         reopenedAt:serverTimestamp()
                       });
+                      await notify(db,{to:po.branch,type:"warning",
+                        title:"Reopened for receiving — "+po.poNum,
+                        message:"This was closed before you received it. It is "
+                          +"open again — confirm what arrived, and report any "
+                          +"shortage.",
+                        page:"stock_order",ref:po.poNum,by:user.name});
                       showT(po.poNum+" reopened — the branch can receive it now");
                     },
                     style:{padding:"7px 14px",background:C.warning,
