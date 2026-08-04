@@ -2677,12 +2677,20 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
       // Nag-uupsert ang daily doc, kaya buburahin ng pangalawang count ng araw
       // ang una. Ito ang permanenteng bakas ng bawat save. Sariling try: ang
       // kulang na security rule dito ay hindi dapat pumatay sa mismong count.
+      // Isang entry lang kada TALAGANG naiibang count. Ang pagpindot ulit ng
+      // Save na walang binago ay hindi na nagsusulat — pareho lang naman ang
+      // laman, kaya walang naidaragdag kundi gastos sa quota at kalat sa trail.
       try{
-        await addDoc(collection(db,"cash_count_log"), Object.assign({},payload,{
-          countDocId: branchId+"_"+today,
-          time: new Date().toLocaleTimeString("en-PH",{hour:"2-digit",minute:"2-digit"}),
-          savedAt: serverTimestamp()
-        }));
+        const fp=JSON.stringify([counts,remitField,remitLogged,
+          countNote,isClosing,totalCash]);
+        const lastToday=countLog.find(l=>l.date===today);
+        if(!lastToday||lastToday.fingerprint!==fp){
+          await addDoc(collection(db,"cash_count_log"), Object.assign({},payload,{
+            countDocId: branchId+"_"+today, fingerprint: fp,
+            time: new Date().toLocaleTimeString("en-PH",{hour:"2-digit",minute:"2-digit"}),
+            savedAt: serverTimestamp()
+          }));
+        }
       }catch(e2){ console.warn("cash_count_log failed:",e2); }
       setSaved(true);
       showT(isClosing?"Closing count saved! ₱"+peso(closingBalance)+" carried over ✓":"Cash count saved ✓");
