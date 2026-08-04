@@ -2540,7 +2540,11 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
       const todayCount = all.find(c=>c.date===today);
       if(todayCount){
         setCounts(todayCount.counts||DENOMS.reduce((a,d)=>({...a,[d.value]:0}),{}));
-        setRemit(todayCount.remittance?.toString()||"");
+        // Ang FIELD lang ang ibabalik sa input. Kung ang kabuuan ang isasalin,
+        // ang naunang cash out ay mabibilang ulit sa susunod na save.
+        setRemit((todayCount.remittanceField!==undefined
+          ? todayCount.remittanceField
+          : todayCount.remittance)?.toString()||"");
         setNote(todayCount.note||"");
         setSaved(true);
       }
@@ -2598,8 +2602,17 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
   const openingFund = loggedOpening>0 ? loggedOpening : carriedOpening;
   const openingSource = loggedOpening>0 ? "logged" : (carriedOpening>0?"carried":"none");
 
-  const remittanceAmt = parseFloat(remit)||0;
-  const closingBalance = totalCash - remittanceAmt;
+  // Dalawa ang ruta ng remit: (a) ang field sa ibaba — nasa drawer pa ang pera
+  // habang binibilang, kaya ito ang ibinabawas sa closing balance; at (b) isang
+  // Cash Out entry — nauna nang lumabas, wala na sa bilang, hindi na dapat
+  // bawasin ulit. Pareho silang naipadala, kaya pareho silang bahagi ng
+  // iniuulat na remittance — dito nagkaiba dati ang summary at ang resibo.
+  const remitLogged = todayCash
+    .filter(c=>c.type==="out"&&/remit/i.test(c.desc||""))
+    .reduce((s,c)=>s+(Number(c.amount)||0),0);
+  const remitField = parseFloat(remit)||0;
+  const remittanceAmt = remitField + remitLogged;
+  const closingBalance = totalCash - remitField;
   const expectedCash = openingFund + todaySales + cashIn - cashOut;
   const variance = totalCash - expectedCash;
 
@@ -2648,6 +2661,8 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
         expectedCash,
         variance,
         remittance: remittanceAmt,
+        remittanceField: remitField,
+        remittanceLogged: remitLogged,
         closingBalance,
         note: countNote,
         countedBy: user.name,
@@ -2659,9 +2674,9 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
         doc(db,"cash_counts",branchId+"_"+today),
         payload
       );
-      // The daily doc upserts, so a second count of the same day would erase
-      // the first. This is the permanent trail of every save. Its own try:
-      // a missing security rule here must not kill the count itself.
+      // Nag-uupsert ang daily doc, kaya buburahin ng pangalawang count ng araw
+      // ang una. Ito ang permanenteng bakas ng bawat save. Sariling try: ang
+      // kulang na security rule dito ay hindi dapat pumatay sa mismong count.
       try{
         await addDoc(collection(db,"cash_count_log"), Object.assign({},payload,{
           countDocId: branchId+"_"+today,
@@ -2677,13 +2692,14 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
   // Snapshot ng count na nasa screen — fallback kapag walang ipinasang record.
   const liveCount = {date:today, counts, totalCash, billsTotal, coinsTotal,
     openingFund, todaySales, cashIn, cashOut, expectedCash, variance,
-    remittance:remittanceAmt, closingBalance, note:countNote,
+    remittance:remittanceAmt, remittanceField:remitField,
+    remittanceLogged:remitLogged, closingBalance, note:countNote,
     countedBy:user.name, branchName:curBranch.full};
 
   const printCount = (isClosing=false, rec=null)=>{
-    // A reprint has to render the record that was picked. Reading live state
-    // instead meant an old count came out stamped with today's date and with
-    // whatever figures happened to be on screen.
+    // Ang reprint ay dapat ang PINILING record ang ilabas. Ang pagbasa ng live
+    // state ang dahilan kung bakit lumalabas ang lumang count na may petsa
+    // ngayon at may numerong hindi kanya.
     const R = Object.assign({}, liveCount, rec||{});
     const num=(k)=>Number(R[k])||0;
     const counts        = R.counts||{};
@@ -2704,38 +2720,76 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
     const closingBalance= num("closingBalance");
     const w=window.open("","_blank","width=400,height=700");
     if(!w)return;
-    w.document.write(`<!DOCTYPE html><html><head><title>Cash Count</title>
-    <style>*{margin:0;padding:0;}body{font-family:'Courier New',monospace;font-size:11px;width:80mm;margin:0 auto;padding:8px;}
-    .c{text-align:center;}.b{font-weight:bold;}.hr{border-top:1px dashed #000;margin:6px 0;}
-    .row{display:flex;justify-content:space-between;margin-bottom:2px;}</style></head><body>
-    <div class="c"><b>${isClosing?"CLOSING":"CASH COUNT"} REPORT</b><br>
-    CHOWTIME - ${branchFull}<br>${today}<br>Counted by: ${countedBy}</div>
+    const esc=(t)=>String(t==null?"":t)
+      .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    const P=(v)=>"P"+peso(v);
+    const dRows=DENOMS.map(d=>{
+      const q=counts[d.value]||0;
+      return q>0?`<div class="r"><span>${String(d.label).replace(/\u20B1/g,"P")} x ${q}</span><span>${P(q*d.value)}</span></div>`:"";
+    }).join("");
+    // Lumang record: walang breakdown, kaya ang buong remittance ay ituturing
+    // na galing sa field.
+    const remitField  = R.remittanceField===undefined
+      ? remittanceAmt : (Number(R.remittanceField)||0);
+    const remitLogged = Number(R.remittanceLogged)||0;
+    const remitTotal  = remitField+remitLogged;
+    const showRemit   = isClosing||remitTotal>0;
+    const remitRows=[
+      remitField>0 ?`<div class="r"><span>Mula sa bilang</span><span>${P(remitField)}</span></div>`:"",
+      remitLogged>0?`<div class="r"><span>Naunang cash out</span><span>${P(remitLogged)}</span></div>`:""
+    ].join("");
+    const vTag=variance===0?"BALANCED":(variance>0?"OVER":"SHORT");
+    const printedAt=new Date().toLocaleString("en-PH",
+      {year:"numeric",month:"short",day:"2-digit",hour:"2-digit",minute:"2-digit"});
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
+    <title>Cash Count ${today}</title><style>
+    @page{size:80mm auto;margin:4mm}
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:'Courier New',monospace;font-size:11px;line-height:1.4;
+      width:72mm;margin:0 auto;color:#000}
+    .c{text-align:center}.b{font-weight:700}
+    .t{font-size:14px;font-weight:700;letter-spacing:1px}
+    .s{font-size:10px}
+    .hr{border-top:1px dashed #000;margin:5px 0}
+    .sec{font-size:10px;font-weight:700;letter-spacing:1px;margin-bottom:2px}
+    .r{display:flex;justify-content:space-between;gap:8px}
+    .r>span:first-child{flex:1;min-width:0;word-break:break-word}
+    .r>span:last-child{white-space:nowrap;text-align:right}
+    .big{font-size:13px;font-weight:700}
+    .note{font-size:10px;white-space:pre-line;word-break:break-word}
+    .sg{margin-top:15px;border-top:1px solid #000;font-size:9px;padding-top:2px}
+    .f{font-size:9px;text-align:center;margin-top:8px}
+    </style></head><body>
+    <div class="c t">${isClosing?"CLOSING REPORT":"CASH COUNT"}</div>
+    <div class="c s">CHOWTIME &middot; ${esc(branchFull)}<br>
+    Business date: ${today}<br>Counted by: ${esc(countedBy)}</div>
     <div class="hr"></div>
-    <div class="b">DENOMINATION BREAKDOWN:</div>
-    ${DENOMS.map(d=>(counts[d.value]||0)>0?
-      `<div class="row"><span>${d.label} x ${counts[d.value]}</span><span>P${peso(((counts[d.value]||0)*d.value))}</span></div>`:""
-    ).join("")}
+    <div class="sec">DENOMINATIONS</div>
+    ${dRows||`<div class="r"><span>(walang naitalang piraso)</span><span>P0.00</span></div>`}
     <div class="hr"></div>
-    <div class="row"><span>Bills Total:</span><span>P${peso(billsTotal)}</span></div>
-    <div class="row"><span>Coins Total:</span><span>P${peso(coinsTotal)}</span></div>
-    <div class="row b"><span>TOTAL CASH:</span><span>P${peso(totalCash)}</span></div>
+    <div class="r"><span>Bills</span><span>${P(billsTotal)}</span></div>
+    <div class="r"><span>Coins</span><span>${P(coinsTotal)}</span></div>
+    <div class="r big"><span>TOTAL CASH</span><span>${P(totalCash)}</span></div>
     <div class="hr"></div>
-    <div class="row"><span>Opening Fund:</span><span>P${peso(openingFund)}</span></div>
-    <div class="row"><span>Today's Sales:</span><span>P${peso(todaySales)}</span></div>
-    <div class="row"><span>Cash In:</span><span>P${peso(cashIn)}</span></div>
-    <div class="row"><span>Cash Out:</span><span>-P${peso(cashOut)}</span></div>
-    <div class="row"><span>Expected:</span><span>P${peso(expectedCash)}</span></div>
-    <div class="row ${variance!==0?'b':''}"><span>Variance:</span><span>${variance>=0?"+":""}P${peso(variance)}</span></div>
-    ${(isClosing||remittanceAmt>0)?`<div class="hr"></div>
-    <div class="row"><span>Total Cash:</span><span>P${peso(totalCash)}</span></div>
-    <div class="row"><span>Remittance:</span><span>-P${peso(remittanceAmt)}</span></div>
-    <div class="row b"><span>CLOSING BALANCE:</span><span>P${peso(closingBalance)}</span></div>
-    <div style="font-size:9px;margin-top:4px">(This amount stays in cash box as tomorrow's opening fund)</div>`:""}
+    <div class="sec">RECONCILIATION</div>
+    <div class="r"><span>Opening fund</span><span>${P(openingFund)}</span></div>
+    <div class="r"><span>Cash sales</span><span>${P(todaySales)}</span></div>
+    <div class="r"><span>Cash in</span><span>+${P(cashIn)}</span></div>
+    <div class="r"><span>Cash out</span><span>-${P(cashOut)}</span></div>
+    <div class="r"><span>Expected</span><span>${P(expectedCash)}</span></div>
+    <div class="r b"><span>Variance &middot; ${vTag}</span><span>${variance>=0?"+":"-"}${P(Math.abs(variance))}</span></div>
+    ${showRemit?`<div class="hr"></div>
+    <div class="sec">REMITTANCE</div>
+    ${remitRows}
+    <div class="r b"><span>TOTAL REMITTED</span><span>${P(remitTotal)}</span></div>
+    <div class="r big"><span>CLOSING BALANCE</span><span>${P(closingBalance)}</span></div>
+    <div class="s">Nananatili sa cash box bilang opening fund bukas.</div>`:""}
+    ${countNote?`<div class="hr"></div><div class="sec">NOTES</div>
+    <div class="note">${esc(countNote)}</div>`:""}
     <div class="hr"></div>
-    ${countNote?`<div>Notes: ${countNote}</div><div class="hr"></div>`:""}
-    <div>Counted by: ________________</div>
-    <div>Manager: ________________</div>
-    <div>Date/Time: ${new Date().toLocaleString("en-PH")}</div>
+    <div class="sg">Counted by: ${esc(countedBy)}</div>
+    <div class="sg">Verified by (Manager)</div>
+    <div class="f">Printed ${printedAt}<br>Chowtime POS &middot; hindi ito official receipt</div>
     </body></html>`);
     w.document.close();setTimeout(()=>w.print(),400);
   };
@@ -2824,9 +2878,15 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
                ["Opening Fund","₱"+peso(selHistory.openingFund||0),C.success],
                ["Today's Sales","₱"+peso(selHistory.todaySales||0),C.primary],
                ["Variance",(selHistory.variance||0)>=0?"+"+(selHistory.variance||0).toFixed(2):(selHistory.variance||0).toFixed(2),(selHistory.variance||0)>=0?C.success:C.danger],
-               ["Remittance","₱"+peso(selHistory.remittance||0),C.warning],
+               ["Remittance (total)","₱"+peso(selHistory.remittance||0),C.warning],
+              ].concat(
+               (selHistory.remittanceLogged||0)>0
+                 ?[["   \u00B7 mula sa bilang","₱"+peso(selHistory.remittanceField||0),C.muted],
+                   ["   \u00B7 naunang cash out","₱"+peso(selHistory.remittanceLogged||0),C.muted]]
+                 :[]
+              ).concat([
                ["Closing Balance","₱"+peso(selHistory.closingBalance||0),C.success],
-              ].map(([l,v,col])=>h("div",{key:l,style:{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #f5f5f5"}},
+              ]).map(([l,v,col])=>h("div",{key:l,style:{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #f5f5f5"}},
                 h("span",{style:{fontSize:13,color:C.muted}},l),
                 h("span",{style:{fontSize:13,fontWeight:800,color:col}},v)
               ))
@@ -2838,7 +2898,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
         ),
         h("div",{style:{background:"#fff",borderRadius:12,padding:"13px 15px",
           border:"1px solid "+C.border,marginTop:10}},
-          h("b",{style:{fontSize:14}},"\uD83E\uDDFE Save trail — "+selDate),
+          h("b",{style:{fontSize:14}},"\uD83E\uDDFE Save trail \u2014 "+selDate),
           (function(){
             const rows=countLog.filter(l=>l.date===selDate);
             if(!rows.length)return h("div",{style:{fontSize:13,color:C.muted,
@@ -3058,6 +3118,13 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
             h("input",{type:"number",onFocus:e=>e.target.select(),value:remit,onChange:e=>setRemit(e.target.value),placeholder:"0.00",
               style:{width:"100%",padding:"10px 12px",border:"2px solid "+C.warning,borderRadius:9,fontSize:16,fontWeight:700,outline:"none",boxSizing:"border-box",color:C.warning}})
           ),
+          remitLogged>0&&h("div",{style:{background:"#FFF8E1",
+            border:"1px solid #FFE082",borderRadius:8,padding:"8px 11px",
+            marginBottom:8,fontSize:12,lineHeight:1.5}},
+            h("b",null,"\u20B1"+peso(remitLogged)+" ang naitala nang Cash Out \u2014 Remittance."),
+            h("br"),
+            "Wala na ito sa bilang, kaya huwag mo nang ulitin sa taas. Kabuuang remittance ngayong araw: ",
+            h("b",null,"\u20B1"+peso(remittanceAmt))),
           h("div",{style:{background:"#F3E5F5",borderRadius:9,padding:"10px 13px",display:"flex",justifyContent:"space-between",alignItems:"center"}},
             h("div",null,
               h("div",{style:{fontSize:12,color:"#6A1B9A",fontWeight:700}},"CLOSING BALANCE"),
