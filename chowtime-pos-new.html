@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Chowtime POS — 20260804-144349</title>
+<title>Chowtime POS — 20260804-145038</title>
 <meta name="theme-color" content="#6A1B9A"/>
 <meta name="mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260804-144349 -->
+<!-- BUILD:20260804-145038 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -4840,6 +4840,18 @@ const GRANTABLE = [
   "printer","branches","settings"
 ];
 
+// The unit a batch row is being entered in. The picker defaults to the pack
+// when the item has one, and the save has to reach the same answer — a default
+// applied only while drawing meant the screen and the write disagreed.
+function batchUnitOf(item,edit){
+  const pS=Number(item&&item.packSize)||0;
+  const pU=((item&&item.packUnit)||"").trim();
+  const canPack=pS>0&&!!pU;
+  const chosen=(edit&&edit._unit)||(canPack?pU:((item&&item.unit)||"unit"));
+  return {packSize:pS,packUnit:pU,canPack:canPack,chosen:chosen,
+          inPacks:canPack&&chosen===pU};
+}
+
 // Which inventory collection a branch's stock lives in. MAIN owns the plain
 // one; every other branch has its own. Declared here because components
 // outside App need it too.
@@ -6234,7 +6246,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260804-144349";
+const BUILD = "20260804-145038";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -14810,10 +14822,9 @@ function App(){
                           // convert by the unit chosen on that row — the
                           // preview and the write have to agree, or the saved
                           // figure is not the one anyone approved
-                          const _pS=Number(srcRow.packSize)||0;
-                          const _pU=(srcRow.packUnit||"").trim();
-                          const _inP=_pS>0&&!!_pU&&e._unit===_pU;
-                          const typed=(Number(e._stock)||0)*(_inP?_pS:1);
+                          const _bu=batchUnitOf(srcRow,e);
+                          const typed=(Number(e._stock)||0)
+                            *(_bu.inPacks?_bu.packSize:1);
                           const next=batchStockMode==="set"?typed
                             :batchStockMode==="add"?cur+typed:cur-typed;
                           if(next<0){
@@ -14953,12 +14964,10 @@ function App(){
                     // The row offers exactly the units this item is stocked
                     // in — ml, or the bottle that holds 1000 of them. Nothing
                     // to remember, and no wrong-mode mistake to make.
-                    const pSz=Number( item.packSize)||0;
-                    const pUnit=( item.packUnit||"").trim();
-                    const canPack=pSz>0&&!!pUnit;
-                    // default to the container it actually comes in
-                    const chosen=ed._unit||(canPack?pUnit:( item.unit||"unit"));
-                    const inPacks=canPack&&chosen===pUnit;
+                    const _bu=batchUnitOf( item,ed);
+                    const pSz=_bu.packSize, pUnit=_bu.packUnit;
+                    const canPack=_bu.canPack, chosen=_bu.chosen;
+                    const inPacks=_bu.inPacks;
                     const amt=(Number(typed)||0)*(inPacks?pSz:1);
                     const nextStock=!has?cur
                       :(batchStockMode==="set"?amt
