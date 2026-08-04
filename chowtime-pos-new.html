@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Chowtime POS — 20260804-134721</title>
+<title>Chowtime POS — 20260804-144349</title>
 <meta name="theme-color" content="#6A1B9A"/>
 <meta name="mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260804-134721 -->
+<!-- BUILD:20260804-144349 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -4737,7 +4737,7 @@ const GUIDES=[
     "Count what is physically in the freezer and enter it. Full packs and loose pieces have separate boxes.",
     "The POS column fills itself — you do not enter it.",
     "Submit. The variance appears afterwards."],
-   note:"You cannot see the POS figure while counting. That is on purpose: a count only means something if the answer is not known in advance."},
+   note:"You cannot see the POS figure while counting — a count only means something if the answer is not known in advance. Nothing in the variance report is deducted from anyone's pay; it is a figure to look into, and any penalty is raised separately as a Fine."},
 
   {id:"cash",roles:["cashier","manager","owner"],icon:"💰",
    title:"How to do the cash count",
@@ -4768,6 +4768,45 @@ const GUIDES=[
     "Do the same when you leave."],
    note:"Clock out before you go. A punch left open counts as no day worked at all until a manager closes it."},
 
+  {id:"pl",roles:["manager","owner","commissary"],icon:"📊",
+   title:"How to read your branch P&L",
+   steps:[
+    "Open POS & Sales → Branch P&L.",
+    "Pick the period along the top — today, this week, this month, or a custom range.",
+    "Sales is what you rang up. Cost of goods is what those sales took out of stock, priced at what you actually paid Main for it.",
+    "Gross profit is the gap between them. Expenses recorded at this branch come off after.",
+    "What is left is yours to work on — staffing, waste, ordering."],
+   note:"This stops at what this branch controls. Rent, franchise fees and head-office costs are not in it, so it is not the company's profit. The Dashboard shows the same four numbers for the month so far."},
+
+  {id:"cost",roles:["owner","commissary"],icon:"💰",
+   title:"How the cost of a menu item is worked out",
+   steps:[
+    "Settings → Costing decides the source for the whole company.",
+    "From the BOM: the recipe's ingredients are priced at what the branch paid for the exact units it used. Exact for what the BOM lists, blind to anything it does not.",
+    "Manual: you set a cost on each menu item instead. Menu → the item → the cost box beside each size.",
+    "Sizes carry their own cost, because a BOGO with a drink does not cost what a solo costs.",
+    "The margin appears beside the box as you type it."],
+   note:"Under the manual setting an item left blank counts as zero, which makes gross profit read high. The P&L names any item still uncosted."},
+
+  {id:"fifo",roles:["owner","commissary","manager","stockclerk"],icon:"🧊",
+   title:"Why stock value changes when prices move",
+   steps:[
+    "Each delivery becomes its own lot, carrying the price that delivery cost.",
+    "Stock is used oldest first, so the older lot empties before the newer one is touched.",
+    "What remains is worth the sum of the lots still standing — not a blended average.",
+    "So 34 pieces bought at ₱18.50 plus 600 at ₱21.00 is ₱13,229, not 634 at one price."],
+   note:"A physical count replaces the lots with one line at the current value, because the old structure no longer describes what is on the shelf. Items stocked before lots existed fall back to their cost until the next delivery opens one."},
+
+  {id:"perms",roles:["owner"],icon:"🛡️",
+   title:"How to give someone extra access",
+   steps:[
+    "Settings → Permissions.",
+    "Tap a role to open it. The header shows how many pages it has.",
+    "Ticked is on. A page marked + is one you have added beyond the role's normal set.",
+    "Switch on anything they need — PO Monitor for a Main cashier, for instance.",
+    "Save Permissions. It takes effect at their next sign-in."],
+   note:"Branch managers always have full access to their own branch and cannot be restricted. Turning a page off removes it; turning one on grants it, which is new — the screen used to only take away."},
+
   {id:"inventory",roles:["manager","stockclerk","owner"],icon:"📊",
    title:"How to adjust stock",
    steps:[
@@ -4775,7 +4814,7 @@ const GUIDES=[
     "Choose Add, Deduct or Set exact.",
     "Enter the amount and pick a reason — Physical Count, Spoilage, Wastage, Correction.",
     "Save. The before and after are written to the log with your name."],
-   note:"Use Batch edit for many items at once — the toolbar button. Every change still writes its own log line, so a batch and a single adjustment read the same afterwards."},
+   note:"Use Batch edit for many items at once — the toolbar button. Each row lets you enter the figure in its own unit or in packs, tubs or bottles, and shows the conversion before you save. Every change still writes its own log line."},
 ];
 
 // The price to show on a card. When sizes carry the whole price the base is
@@ -6195,7 +6234,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260804-134721";
+const BUILD = "20260804-144349";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -7524,7 +7563,9 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
   var packSz=packSizeOf( item);
   // When an  item has a pack size, physical counting is far easier in packs:
   // enter "149" packs + "14" loose instead of computing 4,484 by hand.
-  var [byPack,setByPack]=useState(false);
+  // Start in packs when the item has one — that is how it arrives, and how
+  // whoever is typing is already counting it.
+  var [byPack,setByPack]=useState(()=>packSizeOf( item)>0);
   var [looseVal,setLooseVal]=useState("");
   var rawVal=parseFloat(display)||0;
   var isNeg=display.startsWith("-");
@@ -10183,7 +10224,9 @@ function NewInventoryItemForm({db,user,branchId,showT,onClose,invBranch}){
     if(!form.name.trim()){showT("Enter  item name","warn");return;}
     setSaving(true);
     const isOwner=user.role==="owner"||user.role==="commissary";
-    const col=isOwner?(invBranch==="main"?"inventory":"inventory_"+invBranch):"inventory_"+branchId;
+    // The signed-in branch decides where it lands; the owner may point
+    // somewhere else on purpose with the branch selector.
+    const col=invColFor(isOwner?(invBranch||"main"):branchId);
     try{
       const id="inv_"+Date.now();
       await setDoc(doc(db,col,id),{
@@ -10202,7 +10245,7 @@ function NewInventoryItemForm({db,user,branchId,showT,onClose,invBranch}){
          itemId:id, itemName:form.name,unit:form.unit,
         type:"created",amount:parseFloat(form.stock)||0,
         prevStock:0,newStock:parseFloat(form.stock)||0,
-        reason:"New  item",by:user.name,at:serverTimestamp()
+        reason:"New  item",by:user.name,date:localDate(),at:serverTimestamp()
       });
       showT(form.name+" added ✓");
       onClose();
@@ -10421,6 +10464,7 @@ function App(){
   const [plFrom,setPlFrom]=useState(localDate());
   const [plTo,setPlTo]=useState(localDate());
   const [plLogs,setPlLogs]=useState([]);                 // deducts with FIFO cost
+  const [addLogs,setAddLogs]=useState([]);              // arrivals, for lot dating
   const [poOpen,setPoOpen]=useState("");                 // expanded PO row
   const [editSub,setEditSub]=useState(null);             // subscription being edited
   const [newBuild,setNewBuild]=useState(null);           // a newer build is live
@@ -10550,6 +10594,12 @@ function App(){
         query(collection(db,lc),where("type","==","deduct"),limit(4000)),
         snap=>setPlLogs(snap.docs.map(d=>({...d.data(),_id:d.id}))),
         err=>console.warn("P&L logs:",err.message)));
+      // Stock coming in, for dating a lot rebuild. Far fewer of these than
+      // deductions, so a smaller window covers a long stretch.
+      unsubs.push(onSnapshot(
+        query(collection(db,lc),where("type","==","add"),limit(800)),
+        snap=>setAddLogs(snap.docs.map(d=>({...d.data(),_id:d.id}))),
+        err=>console.warn("add logs:",err.message)));
     }catch(e){console.warn("P&L log query:",e);}
 
     // Expenses
@@ -14537,6 +14587,27 @@ function App(){
               // the most recent deliveries backwards — walk the PO history
               // newest-first until it covers the current stock, and that is
               // the lot structure that must be there.
+              // Stock added by hand leaves no PO, but it does leave a log
+              // line with a date. Newest first, so the most recent addition
+              // is the one an unexplained quantity is matched against.
+              const manualAdds={};
+              (addLogs||[])
+                .filter(l=>l&&l.itemId
+                  &&(Number(l.amount)||0)>0
+                  &&String(l.source||"")!=="TRANSFER")
+                .forEach(l=>{
+                  if(!manualAdds[l.itemId]) manualAdds[l.itemId]=[];
+                  manualAdds[l.itemId].push({
+                    qty:Number(l.amount)||0,
+                    at:(l.timestamp&&l.timestamp.seconds)
+                       ? l.timestamp.seconds*1000
+                       : (l.date?Date.parse(l.date):0),
+                    ref:l.reason||l.desc||"manual"
+                  });
+                });
+              Object.keys(manualAdds).forEach(k=>
+                manualAdds[k].sort((a,b)=>(b.at||0)-(a.at||0)));
+
               const hist={};
               advances
                 .filter(a=>a._type==="po"&&a.branch===bid)
@@ -14554,18 +14625,37 @@ function App(){
                   });
                 });
               // for each item, the lots that account for what is on hand
-              const rebuild=(id,stock)=>{
-                const h2=hist[id]||[];
+              const rebuild=(id,stock,fallbackCost)=>{
+                // Deliveries and hand-added stock, newest first together, so
+                // what is on the shelf is matched against the most recent
+                // arrivals whichever way they came in.
+                const px=Number(fallbackCost)||0;
+                const h2=(hist[id]||[]).concat(
+                  (manualAdds[id]||[]).map(m=>({
+                    qty:m.qty, price:px, ref:m.ref, at:m.at })))
+                  .sort((a,b)=>(b.at||0)-(a.at||0));
                 const out=[]; let need=Number(stock)||0;
-                for(const d of h2){          // already newest-first
+                for(const d of h2){          // newest-first
                   if(need<=0)break;
                   const take=Math.min(d.qty,need);
                   out.push({qty:take,remaining:take,price:d.price,
                     ref:d.ref,at:d.at||Date.now()});
                   need-=take;
                 }
+                const short=Math.round(need*10000)/10000;
+                if(short>0){
+                  // Whatever the POs cannot explain came from somewhere the
+                  // history cannot see — a manual add, or a delivery from
+                  // before lots existed. Its age is genuinely unknown, so it
+                  // takes the oldest slot and clears first rather than sitting
+                  // there distorting later figures.
+                  const px=Number(fallbackCost)||
+                    (h2.length?Number(h2[h2.length-1].price)||0:0);
+                  out.push({qty:short,remaining:short,price:px,
+                    ref:"unmatched",at:1});
+                }
                 out.sort((a,b)=>(a.at||0)-(b.at||0));   // back to oldest-first
-                return {lots:out,short:Math.round(need*10000)/10000};
+                return {lots:out,short:short};
               };
               const paid={};
               Object.keys(hist).forEach(id=>{
@@ -14587,7 +14677,7 @@ function App(){
 
               const plan=wrong.map(i=>{
                 const st=Number(i.stock)||0;
-                const r=rebuild(i.id,st);
+                const r=rebuild(i.id,st,Number(i.cost)||0);
                 return {item:i,stock:st,lots:r.lots,short:r.short,
                   before:st*(Number(i.cost)||0),after:lotsValue(r.lots)};
               });
@@ -14613,14 +14703,16 @@ function App(){
                       "Value ₱"+peso(now)+" → ₱"+peso(fixed)+"."
                       +(shortCount?("  "+shortCount+" item"
                         +(shortCount>1?"s have":" has")+" more stock than the "
-                        +"POs account for; the excess is left un-lotted."):""))),
+                        +"POs explain. That difference is lotted at the item's "
+                        +"current cost so the totals still add up — check it "
+                        +"against your own records."):""))),
                   h("button",{
                     onClick:async()=>{
                       const lines=plan.slice(0,8).map(p=>{
                         const parts=p.lots.map(l=>l.remaining+" @ ₱"+peso(l.price));
                         return "  • "+(p.item.name||p.item.id)+": "
                           +(parts.join(" + ")||"—")
-                          +(p.short>0.01?("  (+"+p.short+" unaccounted)"):"");
+                          +(p.short>0.01?("  — includes "+p.short+" as opening stock"):"");
                       });
                       if(!confirm("Rebuild lots from this branch's PO history?\n\n"
                         +lines.join("\n")
@@ -14751,7 +14843,7 @@ function App(){
                       // One log entry per item, same shape the Adjust modal
                       // writes, so a batch count is indistinguishable from a
                       // manual one when you read the log back.
-                      const logCol=logColFor(invView||"main");
+                      const logCol=logColFor(invView||branchId);
                       for(const lg of stockLogs){
                         try{
                           await addDoc(collection(db,logCol),{
@@ -14864,7 +14956,8 @@ function App(){
                     const pSz=Number( item.packSize)||0;
                     const pUnit=( item.packUnit||"").trim();
                     const canPack=pSz>0&&!!pUnit;
-                    const chosen=ed._unit||( item.unit||"unit");
+                    // default to the container it actually comes in
+                    const chosen=ed._unit||(canPack?pUnit:( item.unit||"unit"));
                     const inPacks=canPack&&chosen===pUnit;
                     const amt=(Number(typed)||0)*(inPacks?pSz:1);
                     const nextStock=!has?cur
@@ -15050,11 +15143,15 @@ function App(){
                         newStock:0,
                         reason:"Item deleted",
                         by:user.name,
+                        date:localDate(),
                         at:serverTimestamp()
                       });
                       await deleteDoc(doc(db,col, item.id));
                       showT( item.name+" deleted ✓");
-                    }catch(e){showT("Error deleting","err");}
+                    }catch(e){
+                      console.error("item delete:",e);
+                      showT("Not deleted — "+String(e&&e.message||e).slice(0,60),"err");
+                    }
                   },
                   style:{padding:"4px 10px",background:"#FFEBEE",border:"1px solid #FFCDD2",
                     borderRadius:6,color:C.danger,fontSize:13,fontWeight:700,cursor:"pointer"}},
@@ -15084,13 +15181,8 @@ function App(){
                          itemId: item.id, itemName: item.name,unit: item.unit||"",
                         type:adj>0?"add":"deduct",
                         amount:adj,prevStock: item.stock||0,newStock:newQ,
-                        reason:"Quick adjust",by:user.name,date:localDate(),at:serverTimestamp()
-                      });
-                      await addDoc(collection(db,logCol),{
-                         itemId: item.id, itemName: item.name,unit: item.unit||"",
-                        type:adj>0?"add":"deduct",amount:adj,
-                        prevStock: item.stock||0,newStock:newQ,
-                        reason:"Quick adjust",by:user.name,date:localDate(),at:serverTimestamp()
+                        reason:"Quick adjust",by:user.name,date:localDate(),
+                        at:serverTimestamp()
                       });
                       showT((adj>0?"+":"")+String(adj)+" "+ item.name+" ✓");
                       e.target.value="";
