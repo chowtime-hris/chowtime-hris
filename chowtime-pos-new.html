@@ -6558,6 +6558,151 @@ function daysBetween(fromISO,toISO){
   if(isNaN(a)||isNaN(b))return 0;
   return Math.round((b-a)/86400000);
 }
+// ─── PAYMENT PROOF MODAL ─────────────────────────────────
+// A branch cannot confirm its own subscription — that stays with the owner.
+// What it can do is file the proof, so the reference number stops living in
+// a Viber thread and starts living next to the record it pays for.
+function PaymentProofModal({db,branchId,curBranch,user,mySub,myProofs,onClose,showT}){
+  const [amount,setAmount]=useState(String((mySub&&mySub.amount)||""));
+  const [payRef,setPayRef]=useState("");
+  const [paidOn,setPaidOn]=useState(localDate());
+  const [method,setMethod]=useState("GCash");
+  const [note,setNote]=useState("");
+  const [shot,setShot]=useState("");
+  const [shotName,setShotName]=useState("");
+  const [busy,setBusy]=useState(false);
+
+  // Firestore caps a document at 1MB and this project has no Storage bucket.
+  // Downscaling in the browser keeps a readable screenshot well under that
+  // without needing one.
+  const pickShot=(file)=>{
+    if(!file)return;
+    if(!/^image\//.test(file.type||"")){showT("Larawan lang ang pwede","warn");return;}
+    const r=new FileReader();
+    r.onload=()=>{
+      const img=new Image();
+      img.onload=()=>{
+        const sc=Math.min(1,900/Math.max(img.width,img.height));
+        const cv=document.createElement("canvas");
+        cv.width=Math.max(1,Math.round(img.width*sc));
+        cv.height=Math.max(1,Math.round(img.height*sc));
+        cv.getContext("2d").drawImage(img,0,0,cv.width,cv.height);
+        let out=cv.toDataURL("image/jpeg",0.6);
+        if(out.length>700000)out=cv.toDataURL("image/jpeg",0.4);
+        if(out.length>700000){showT("Masyadong malaki ang larawan","warn");return;}
+        setShot(out);setShotName(file.name||"screenshot.jpg");
+      };
+      img.onerror=()=>showT("Hindi mabasa ang larawan","err");
+      img.src=r.result;
+    };
+    r.onerror=()=>showT("Hindi mabasa ang file","err");
+    r.readAsDataURL(file);
+  };
+
+  const submit=async()=>{
+    const amt=parseFloat(amount)||0;
+    if(!payRef.trim()){showT("Kailangan ang reference number","warn");return;}
+    if(amt<=0){showT("Ilagay ang halagang binayad","warn");return;}
+    setBusy(true);
+    try{
+      const bFull=(curBranch&&curBranch.full)||branchId;
+      await addDoc(collection(db,"subscription_proofs"),{
+        branch:branchId,branchName:bFull,
+        amount:amt,ref:payRef.trim(),paidOn:paidOn||localDate(),
+        method:method,note:note.trim(),shot:shot||"",
+        status:"pending",submittedBy:user.name,
+        submittedOn:localDate(),at:serverTimestamp()});
+      await notify(db,{to:"ct-main",type:"info",
+        title:"Payment proof submitted",
+        message:bFull+" \u00B7 \u20B1"+peso(amt)+" \u00B7 ref "+payRef.trim(),
+        page:"subs",ref:payRef.trim(),by:user.name});
+      showT("Naipadala ang patunay \u2713");
+      onClose();
+    }catch(e){
+      console.error("proof submit:",e);
+      showT("Failed: "+String(e&&e.message||e).slice(0,60),"err");
+    }
+    setBusy(false);
+  };
+
+  const lbl=(t)=>h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,
+    marginBottom:4,letterSpacing:1}},t);
+  const inp={width:"100%",padding:"9px",border:"1px solid "+C.border,
+    borderRadius:8,fontSize:13,outline:"none",boxSizing:"border-box"};
+  const mine=(myProofs||[]).filter(x=>x.branch===branchId).slice(0,3);
+
+  return h("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",
+    display:"flex",alignItems:"center",justifyContent:"center",zIndex:2000,
+    padding:14,fontFamily:"'Segoe UI',system-ui,sans-serif"}},
+    h("div",{style:{background:"#fff",borderRadius:14,width:400,maxWidth:"100%",
+      maxHeight:"92vh",overflowY:"auto",padding:18,
+      boxShadow:"0 20px 60px rgba(0,0,0,.3)"}},
+      h("div",{style:{display:"flex",justifyContent:"space-between",
+        alignItems:"center",marginBottom:12}},
+        h("b",{style:{fontSize:15}},"\uD83D\uDCE4 Ipadala ang patunay ng bayad"),
+        h("button",{onClick:onClose,style:{background:"none",border:"none",
+          fontSize:18,cursor:"pointer"}},"\u00D7")),
+      (mySub&&mySub.gcashNumber)&&h("div",{style:{background:"#F3E5F5",
+        borderRadius:9,padding:"9px 12px",marginBottom:12,fontSize:13}},
+        h("b",null,"GCash: "+mySub.gcashNumber),
+        (mySub.amount?h("div",{style:{color:C.muted,marginTop:2}},
+          "Buwanang bayad: \u20B1"+peso(mySub.amount)):null)),
+      h("div",{style:{display:"grid",gap:9}},
+        h("div",null,lbl("PETSA NG BAYAD"),
+          h("input",{type:"date",value:paidOn,max:localDate(),
+            onChange:e=>setPaidOn(e.target.value),style:inp})),
+        h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}},
+          h("div",null,lbl("PARAAN"),
+            h("select",{value:method,onChange:e=>setMethod(e.target.value),
+              style:inp},["GCash","Bank transfer","Maya","Cash"].map(m=>
+                h("option",{key:m},m)))),
+          h("div",null,lbl("HALAGA (\u20B1)"),
+            h("input",{type:"number",onFocus:e=>e.target.select(),value:amount,
+              onChange:e=>setAmount(e.target.value),placeholder:"0.00",
+              style:Object.assign({},inp,{fontWeight:700})}))),
+        h("div",null,lbl("REFERENCE NUMBER"),
+          h("input",{value:payRef,onChange:e=>setPayRef(e.target.value),
+            onFocus:e=>e.target.select(),
+            placeholder:"hal. 1234567890123",
+            style:Object.assign({},inp,{fontWeight:700,letterSpacing:1})})),
+        h("div",null,lbl("SCREENSHOT (opsyonal)"),
+          h("input",{type:"file",accept:"image/*",
+            onChange:e=>pickShot(e.target.files&&e.target.files[0]),
+            style:Object.assign({},inp,{padding:"7px"})}),
+          shot&&h("div",{style:{marginTop:7,position:"relative"}},
+            h("img",{src:shot,alt:shotName,
+              style:{width:"100%",borderRadius:8,border:"1px solid "+C.border}}),
+            h("button",{onClick:()=>{setShot("");setShotName("");},
+              style:{marginTop:5,padding:"4px 10px",fontSize:12,
+                border:"1px solid "+C.border,borderRadius:6,background:"#fff",
+                cursor:"pointer"}},"Alisin ang larawan"))),
+        h("div",null,lbl("PAALALA (opsyonal)"),
+          h("textarea",{value:note,onChange:e=>setNote(e.target.value),rows:2,
+            placeholder:"hal. partial payment, kalahati muna",
+            style:Object.assign({},inp,{resize:"vertical",
+              fontFamily:"inherit",lineHeight:1.4})})),
+        h("button",{onClick:submit,disabled:busy,
+          style:{padding:"11px",borderRadius:9,border:"none",
+            background:busy?"#8A8A8A":C.primary,color:"#fff",fontWeight:800,
+            fontSize:14,cursor:busy?"not-allowed":"pointer"}},
+          busy?"Ipinapadala...":"Ipadala sa main office")
+      ),
+      h("div",{style:{fontSize:12,color:C.muted,marginTop:10,lineHeight:1.5}},
+        "Ang main office ang magko-confirm nito. Babalik ang access pagkatapos \u2014 hindi ito awtomatiko."),
+      mine.length>0&&h("div",{style:{marginTop:13,borderTop:"1px solid "+C.border,
+        paddingTop:10}},
+        h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,
+          letterSpacing:1,marginBottom:6}},"MGA NAIPADALA NA"),
+        mine.map(x=>h("div",{key:x._docId,style:{display:"flex",
+          justifyContent:"space-between",gap:8,padding:"5px 0",
+          borderBottom:"1px solid #f7f7f7",fontSize:12}},
+          h("span",null,x.paidOn+" \u00B7 ref "+(x.ref||"\u2014")),
+          h("b",{style:{color:x.status==="approved"?C.success
+            :(x.status==="rejected"?C.danger:C.warning)}},x.status))))
+    )
+  );
+}
+
 const TRIAL_DAYS=5;   // deployment + setup window for a brand-new branch
 
 // Order of authority: a paid period always wins; otherwise the setup trial;
@@ -10628,6 +10773,8 @@ function App(){
   const [editSub,setEditSub]=useState(null);             // subscription being edited
   const [newBuild,setNewBuild]=useState(null);           // a newer build is live
   const [subs,setSubs]=useState([]);                     // subscriptions, all branches
+  const [proofs,setProofs]=useState([]);                 // submitted payment proofs
+  const [proofOpen,setProofOpen]=useState(false);        // proof modal
   const [openDisc,setOpenDisc]=useState({});             // expanded discrepancy reports
   const [editBr,setEditBr]=useState(null);               // branch being added/edited
   const [expMonth,setExpMonth]=useState("");             // "" = all months
@@ -10782,6 +10929,16 @@ function App(){
     try{
       unsubs.push(onSnapshot(collection(db,"subscriptions"),
         snap=>setSubs(snap.docs.map(d=>({...d.data(),_docId:d.id}))),
+        ()=>{}));
+    }catch(e){}
+
+    // Submitted payment proofs. No orderBy — that needs a composite index
+    // this project does not have, and the failure is silent.
+    try{
+      unsubs.push(onSnapshot(query(collection(db,"subscription_proofs"),limit(200)),
+        snap=>setProofs(snap.docs.map(d=>({...d.data(),_docId:d.id}))
+          .sort((a,b)=>String((b.submittedOn||"")+(b.paidOn||""))
+            .localeCompare(String((a.submittedOn||"")+(a.paidOn||""))))),
         ()=>{}));
     }catch(e){}
 
@@ -12464,15 +12621,25 @@ function App(){
           h("div",{style:{fontSize:12,fontWeight:800,color:C.muted,
             letterSpacing:1,marginBottom:7}},"TO RESTORE ACCESS"),
           h("div",{style:{fontSize:13,lineHeight:1.8,color:C.text}},
-            "1. Pay via GCash or bank",h("br"),
-            "2. Send the reference number to main office",h("br"),
-            "3. Owner confirms it and access returns")),
+            "1. Magbayad sa GCash o bangko",h("br"),
+            "2. Ipadala ang patunay dito sa ibaba",h("br"),
+            "3. Ico-confirm ito ng main office at babalik ang access")),
         (mySub&&mySub.gcashNumber)&&h("div",{style:{fontSize:14,fontWeight:800,
           marginBottom:14}},"GCash: "+mySub.gcashNumber),
-        h("button",{onClick:handleSignOut,
+        h("button",{onClick:()=>setProofOpen(true),
           style:{width:"100%",padding:"12px",borderRadius:10,border:"none",
-            background:C.primary,color:"#fff",fontWeight:800,fontSize:13,
-            cursor:"pointer"}},"Sign Out")
+            background:C.primary,color:"#fff",fontWeight:800,fontSize:14,
+            cursor:"pointer",marginBottom:8}},
+          "\uD83D\uDCE4 Ipadala ang patunay ng bayad"),
+        h("button",{onClick:handleSignOut,
+          style:{width:"100%",padding:"11px",borderRadius:10,
+            border:"1px solid "+C.border,background:"#fff",color:C.text,
+            fontWeight:700,fontSize:13,cursor:"pointer"}},"Sign Out"),
+        // The modal has to live inside this branch too — a suspended screen
+        // returns early, so anything rendered below never gets here.
+        proofOpen&&h(PaymentProofModal,{db:db,branchId:branchId,
+          curBranch:curBranch,user:user,mySub:mySub,myProofs:proofs,
+          showT:showT,onClose:()=>setProofOpen(false)})
       )
     );
   }
@@ -12925,8 +13092,16 @@ function App(){
               ? "pay the first month before it ends"
               : "pay to keep the POS running"))),
         (mySub&&mySub.gcashNumber)&&h("span",{style:{fontSize:13,fontWeight:800,
-          color:C.text}},"GCash: "+mySub.gcashNumber)
+          color:C.text}},"GCash: "+mySub.gcashNumber),
+        h("button",{onClick:()=>setProofOpen(true),
+          style:{padding:"7px 13px",borderRadius:8,border:"none",
+            background:C.primary,color:"#fff",fontSize:13,fontWeight:800,
+            cursor:"pointer"}},"\uD83D\uDCE4 Ipadala ang patunay")
       ),
+
+      proofOpen&&h(PaymentProofModal,{db:db,branchId:branchId,
+        curBranch:curBranch,user:user,mySub:mySub,myProofs:proofs,
+        showT:showT,onClose:()=>setProofOpen(false)}),
 
       h("div",{key:page,style:{flex:1,display:"flex",flexDirection:"column"}},
 
@@ -13857,6 +14032,75 @@ function App(){
             }
           };
 
+          const pending=proofs.filter(x=>x.status==="pending");
+
+          // Approving a proof is the same extension as a manual confirm —
+          // it just takes the reference from what the branch filed instead
+          // of from a prompt, and closes the proof so it stops queueing.
+          const approveProof=async(x)=>{
+            const r=rows.find(z=>z.b.id===x.branch);
+            const t=localDate();
+            const cur=r&&r.sub;
+            const base=(cur&&cur.paidUntil&&daysBetween(t,cur.paidUntil)>=0)
+              ? cur.paidUntil : t;
+            const next=addMonths(base,1);
+            try{
+              await setDoc(doc(db,"subscriptions",x.branch),{
+                branch:x.branch,
+                startDate:(cur&&cur.startDate)||t,
+                paidUntil:next,status:"active",
+                amount:Number(x.amount)||Number(cur&&cur.amount)||0,
+                gcashNumber:(cur&&cur.gcashNumber)||"",
+                lastPaymentAt:x.paidOn||t,lastRef:x.ref||"",
+                confirmedBy:user.name,confirmedAt:serverTimestamp()
+              },{merge:true});
+              await addDoc(collection(db,"subscription_payments"),{
+                branch:x.branch,branchName:x.branchName||x.branch,
+                amount:Number(x.amount)||0,ref:x.ref||"",
+                paidOn:x.paidOn||t,coversUntil:next,method:x.method||"",
+                proofId:x._docId,confirmedBy:user.name,at:serverTimestamp()});
+              await updateDoc(doc(db,"subscription_proofs",x._docId),{
+                status:"approved",coversUntil:next,
+                reviewedBy:user.name,reviewedAt:serverTimestamp()});
+              await notify(db,{to:x.branch,type:"info",
+                title:"Payment confirmed",
+                message:"Active until "+next,page:"dashboard",
+                ref:x.ref||"",by:user.name});
+              showT((x.branchName||x.branch)+" active until "+next+" ✓");
+            }catch(e){
+              console.error("approve proof:",e);
+              showT("Failed: "+String(e&&e.message||e).slice(0,60),"err");
+            }
+          };
+
+          const rejectProof=async(x)=>{
+            const why=prompt("Dahilan ng pagtanggi (makikita ng branch):","");
+            if(why===null)return;
+            try{
+              await updateDoc(doc(db,"subscription_proofs",x._docId),{
+                status:"rejected",reason:why.trim(),
+                reviewedBy:user.name,reviewedAt:serverTimestamp()});
+              await notify(db,{to:x.branch,type:"warning",
+                title:"Payment proof rejected",
+                message:why.trim()||"Tingnan ang reference number",
+                page:"dashboard",ref:x.ref||"",by:user.name});
+              showT("Tinanggihan ang patunay","warn");
+            }catch(e){
+              console.error("reject proof:",e);
+              showT("Failed: "+String(e&&e.message||e).slice(0,60),"err");
+            }
+          };
+
+          const viewShot=(x)=>{
+            if(!x.shot)return;
+            const w=window.open("","_blank","width=520,height=760");
+            if(!w)return;
+            w.document.write('<title>'+(x.branchName||"")+' '+(x.ref||"")
+              +'</title><body style="margin:0;background:#111;text-align:center">'
+              +'<img src="'+x.shot+'" style="max-width:100%">');
+            w.document.close();
+          };
+
           return h("div",null,
             h(SectionHeader,{title:"💳 Subscriptions"}),
 
@@ -13868,6 +14112,52 @@ function App(){
                 sub:"3 days or less",icon:"⏳",color:C.warning}),
               h(Stat,{label:"Suspended",value:expired.length,
                 icon:"🔒",color:C.danger})
+            ),
+
+            // Pending proofs sit above the table: this is the queue that
+            // needs a decision, and it should not be something you scroll
+            // past to find.
+            pending.length>0&&h("div",{style:{background:"#fff",
+              borderRadius:12,border:"1px solid #FFE082",
+              overflow:"hidden",marginBottom:14}},
+              h("div",{style:{padding:"10px 14px",background:"#FFF8E1",
+                borderBottom:"1px solid #FFE082",fontSize:13,fontWeight:800,
+                color:"#E65100"}},
+                "\uD83D\uDCE4 Naghihintay ng kumpirmasyon ("+pending.length+")"),
+              pending.map(x=>h("div",{key:x._docId,style:{display:"flex",
+                gap:10,alignItems:"center",padding:"11px 14px",
+                borderBottom:"1px solid #f5f5f5",flexWrap:"wrap"}},
+                x.shot
+                  ? h("img",{src:x.shot,alt:"proof",onClick:()=>viewShot(x),
+                      style:{width:44,height:44,objectFit:"cover",borderRadius:8,
+                        border:"1px solid "+C.border,cursor:"zoom-in",
+                        flexShrink:0}})
+                  : h("div",{style:{width:44,height:44,borderRadius:8,
+                      background:C.bg,display:"flex",alignItems:"center",
+                      justifyContent:"center",fontSize:17,flexShrink:0}},
+                      "\uD83E\uDDFE"),
+                h("div",{style:{flex:1,minWidth:170}},
+                  h("div",{style:{fontSize:13,fontWeight:700}},
+                    (x.branchName||x.branch)+" \u00B7 \u20B1"+peso(x.amount||0)),
+                  h("div",{style:{fontSize:12,color:C.muted}},
+                    (x.method||"\u2014")+" \u00B7 ref "+(x.ref||"\u2014")
+                    +" \u00B7 binayad "+(x.paidOn||"\u2014")),
+                  h("div",{style:{fontSize:11,color:C.muted}},
+                    "Isinumite ni "+(x.submittedBy||"\u2014")
+                    +" \u00B7 "+(x.submittedOn||"\u2014")),
+                  x.note&&h("div",{style:{fontSize:12,color:C.muted,
+                    marginTop:2,whiteSpace:"pre-line"}},"\uD83D\uDCDD "+x.note)),
+                h("div",{style:{display:"flex",gap:6}},
+                  h("button",{onClick:()=>approveProof(x),
+                    style:{padding:"7px 13px",background:C.success,border:"none",
+                      borderRadius:7,color:"#fff",fontSize:12,fontWeight:800,
+                      cursor:"pointer"}},"Confirm"),
+                  h("button",{onClick:()=>rejectProof(x),
+                    style:{padding:"7px 11px",background:"#fff",
+                      border:"1px solid "+C.border,borderRadius:7,
+                      color:C.danger,fontSize:12,fontWeight:700,
+                      cursor:"pointer"}},"Reject"))
+              ))
             ),
 
             h("div",{style:{background:"#fff",borderRadius:12,
