@@ -5181,6 +5181,8 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
   const [editBom,setEditBom]     = useState([]);
   const [saving,setSaving]       = useState(false);
   const [costTab,setCostTab]     = useState("bom");
+  const [quickAdd,setQuickAdd]   = useState("");   // paste-a-recipe box
+  const [quickMsg,setQuickMsg]   = useState("");
   // Item Options sub-tab state
   const [selItemOpt,setSelItemOpt]       = useState(null);
   const [editItemOptBom,setEditItemOptBom] = useState([]);
@@ -5356,7 +5358,136 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
   // NOTE: call this as BOMEditor({...}), NOT h(BOMEditor,{...}).
   // It is defined inside the parent, so h() would give React a new element type
   // on every render and remount the inputs (focus loss after each keystroke).
+  // ── QUICK ENTRY ────────────────────────────────────────
+  // Picking an ingredient from a 100-row dropdown, then tabbing to qty, then
+  // to unit, for every line of every choice, is where BOM setup dies. These
+  // two shortcuts do the same writes, just without the hunting.
+  const normName=(t)=>String(t||"").toLowerCase()
+    .replace(/[^a-z0-9 ]/g," ").replace(/\s+/g," ").trim();
+
+  const matchIng=(q)=>{
+    const n=normName(q); if(!n)return null;
+    const exact=ingredients.find(x=>normName(x.name)===n);
+    if(exact)return exact;
+    const starts=ingredients.filter(x=>normName(x.name).startsWith(n));
+    if(starts.length===1)return starts[0];
+    const inc=ingredients.filter(x=>normName(x.name).includes(n)
+      ||n.includes(normName(x.name)));
+    if(inc.length===1)return inc[0];
+    // Ambiguity is reported, never guessed — a silently wrong ingredient
+    // deducts from the wrong stock every single sale.
+    const toks=n.split(" ");
+    const scored=ingredients.map(x=>({x:x,
+      s:normName(x.name).split(" ").filter(t=>toks.includes(t)).length}))
+      .filter(o=>o.s>0).sort((a,b)=>b.s-a.s);
+    if(scored.length&&(scored.length===1||scored[0].s>scored[1].s))
+      return scored[0].x;
+    return null;
+  };
+
+  // "sauce 20 ml" · "sauce, 20, ml" · "20ml sauce" · "meal box" (defaults to 1)
+  const parseQuickLine=(ln)=>{
+    const t=String(ln||"").trim(); if(!t)return null;
+    let m=t.match(/^(.+?)[\s,=:\-]+([0-9]*\.?[0-9]+)\s*([a-zA-Z%]{0,8})\.?$/);
+    if(m)return {name:m[1],qty:parseFloat(m[2]),unit:(m[3]||"").trim()};
+    m=t.match(/^([0-9]*\.?[0-9]+)\s*([a-zA-Z]{0,8})[\s,=:\-]+(.+)$/);
+    if(m)return {name:m[3],qty:parseFloat(m[1]),unit:(m[2]||"").trim()};
+    return {name:t,qty:1,unit:""};
+  };
+
+  const blankRow=()=>({ingId:"",ingName:"",unit:"",qty:1,convFactor:1,markup:0});
+
+  const applyQuick=(rows,setRows)=>{
+    const lines=String(quickAdd||"").split(/[\n;]+/)
+      .map(x=>x.trim()).filter(Boolean);
+    if(!lines.length){setQuickMsg("Walang mababasang linya.");return;}
+    const keep=rows.filter(r=>r.ingId||r.ingName);
+    const missed=[]; let added=0;
+    lines.forEach(ln=>{
+      const p=parseQuickLine(ln); if(!p)return;
+      const ing=matchIng(p.name);
+      if(!ing){missed.push(ln);return;}
+      if(keep.some(r=>r.ingId===ing.id)){missed.push(ln+" (nasa listahan na)");return;}
+      keep.push({ingId:ing.id,ingName:ing.name,unit:ing.unit||"",
+        deductUnit:p.unit||ing.unit||"",convUnit:ing.unit||"",
+        convFactor:1,markup:0,qty:p.qty||0});
+      added++;
+    });
+    setRows(keep.concat([blankRow()]));
+    setQuickAdd("");
+    setQuickMsg(added+" naidagdag"
+      +(missed.length?"  \u00B7  hindi natugma: "+missed.join(" / "):"")
+      +(added?"  \u00B7  pindutin ang Save":""));
+  };
+
+  // Every BOM already saved, as a copy source. R1/R2/R3 share a meal box and
+  // a sauce; copying beats retyping them three times.
+  const bomSources=(function(){
+    const out=[];
+    Object.keys(boms||{}).forEach(function(docId){
+      const d=boms[docId]||{};
+      Object.keys(d).forEach(function(k){
+        const rws=d[k];
+        if(!Array.isArray(rws)||!rws.length)return;
+        let label;
+        if(docId.indexOf("optgrp_")===0){
+          const g=groups.find(x=>("optgrp_"+x.id)===docId);
+          const chId=String(k).split("__")[1]||"";
+          const ch=g&&(g.choices||[]).find(c=>String(c.id)===chId);
+          label=(g?g.name:docId)+" \u203A "+(ch?(ch.label||ch.name||chId):chId);
+        }else{
+          const mi=(menuItems||[]).find(x=>x.id===docId);
+          label=(mi?mi.name:docId)+((k&&k!=="default")?(" \u00B7 "+k):"");
+        }
+        out.push({key:docId+"|"+k,label:label+"  ("+rws.length+")",rows:rws});
+      });
+    });
+    return out.sort((a,b)=>String(a.label).localeCompare(String(b.label)));
+  })();
+
+  const copyFrom=(key,rows,setRows)=>{
+    const src=bomSources.find(x=>x.key===key);
+    if(!src)return;
+    const keep=rows.filter(r=>r.ingId||r.ingName);
+    const add=src.rows.filter(r=>!keep.some(k=>k.ingId===r.ingId))
+      .map(r=>Object.assign({},r));
+    setRows(keep.concat(add,[blankRow()]));
+    setQuickMsg(add.length+" hilera mula sa "+src.label
+      +(add.length?"  \u00B7  pindutin ang Save":"  \u00B7  nadoble lahat, walang idinagdag"));
+  };
+
   const BOMEditor=({rows,setRows,onSave,saving:sv})=>h("div",null,
+    h("div",{style:{background:"#F7F4FB",border:"1px solid #E4D8EE",
+      borderRadius:10,padding:"10px 12px",marginBottom:10}},
+      h("div",{style:{display:"flex",gap:8,alignItems:"center",
+        flexWrap:"wrap",marginBottom:7}},
+        h("b",{style:{fontSize:12,letterSpacing:1,color:C.primary}},
+          "\u26A1 MABILISANG PAGPASOK"),
+        bomSources.length>0&&h("select",{value:"",
+          onChange:e=>{copyFrom(e.target.value,rows,setRows);e.target.value="";},
+          style:{marginLeft:"auto",padding:"5px 7px",fontSize:12,
+            border:"1px solid "+C.border,borderRadius:6,cursor:"pointer",
+            maxWidth:250}},
+          [h("option",{key:"_",value:""},"\u2398 Kopyahin mula sa\u2026")]
+            .concat(bomSources.map(x=>h("option",{key:x.key,value:x.key},x.label))))
+      ),
+      h("textarea",{value:quickAdd,onChange:e=>setQuickAdd(e.target.value),
+        rows:3,placeholder:"Isa bawat linya:\nchicken fillet 1 pc\nsauce 20 ml\nmeal box 1",
+        style:{width:"100%",padding:"7px 9px",border:"1px solid "+C.border,
+          borderRadius:7,fontSize:13,outline:"none",boxSizing:"border-box",
+          resize:"vertical",fontFamily:"inherit",lineHeight:1.45}}),
+      h("div",{style:{display:"flex",gap:8,alignItems:"center",marginTop:6,
+        flexWrap:"wrap"}},
+        h("button",{onClick:()=>applyQuick(rows,setRows),
+          style:{padding:"6px 14px",background:C.primary,border:"none",
+            borderRadius:7,color:"#fff",fontSize:12,fontWeight:800,
+            cursor:"pointer"}},"Idagdag sa listahan"),
+        h("span",{style:{fontSize:11,color:C.muted}},
+          "Pangalan lang ang kailangan \u2014 hinahanap nito ang tugma sa inventory."),
+        quickMsg&&h("span",{style:{fontSize:12,fontWeight:700,
+          color:/hindi natugma/.test(quickMsg)?C.warning:C.success,
+          width:"100%"}},quickMsg))
+    ),
     h("div",{style:{display:"grid",
       gridTemplateColumns:"1fr 80px 70px 110px 60px 80px 36px",
       gap:6,marginBottom:6,padding:"0 2px"}},
