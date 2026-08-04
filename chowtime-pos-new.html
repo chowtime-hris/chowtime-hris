@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Chowtime POS — 20260803-085259</title>
+<title>Chowtime POS — 20260804-134721</title>
 <meta name="theme-color" content="#6A1B9A"/>
 <meta name="mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260803-085259 -->
+<!-- BUILD:20260804-134721 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -175,6 +175,29 @@ try {
   const hrisApp = initializeApp(hrisConfig, "chowtime-hris");
   hrisDB = getDatabase(hrisApp);
 } catch(e) { console.warn("HRIS DB:", e.message); }
+
+// A franchise runs its own HRIS project, so an approval for their crew has to
+// be written there — not into Main's. One app instance per franchise, made
+// once and kept.
+const _franchiseDBs = {};
+function franchiseHrisDB(branch){
+  if(!branch||!branch.hrisUrl) return null;
+  const key=branch.id||branch.hrisUrl;
+  if(_franchiseDBs[key]) return _franchiseDBs[key];
+  try{
+    const cfg={
+      apiKey:      branch.hrisApiKey||hrisConfig.apiKey,
+      projectId:   branch.hrisProjectId||"",
+      databaseURL: branch.hrisUrl
+    };
+    const app=initializeApp(cfg,"hris-"+key);
+    _franchiseDBs[key]=getDatabase(app);
+    return _franchiseDBs[key];
+  }catch(e){
+    console.warn("franchise HRIS:",key,e.message);
+    return null;
+  }
+}
 
 // ─── BRAND ───────────────────────────────────────────────
 const PUR="#6A1B9A";
@@ -2331,7 +2354,7 @@ function DRCheckForm({po,db,branchId,user,showT,INIT_INVENTORY,setAdvances,advan
         confirmedAt:serverTimestamp()
       });
       // Update branch inventory with actual received qty
-      const invCol="inventory_"+branchId;
+      const invCol=invColFor(branchId);
     const isMainDest=false;   // this path only ever writes to a branch
       for(const  item of received){
         try{
@@ -3223,11 +3246,23 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
       balance: req.amount,
     });
 
-    // 2. Push to HRIS Realtime DB as loan deduction entry
-    if(hrisDB && req.hrisEmpId){
+    // 2. Push the deduction into whichever payroll actually pays this person
+    const reqBranch=(BRANCHES||[]).find(b=>b&&b.id===req.branch);
+    const isFranchiseReq=!!(reqBranch&&reqBranch.ownership==="franchise");
+    const targetDB=isFranchiseReq
+      ? franchiseHrisDB(Object.assign({},reqBranch,fKeys[reqBranch.id]||{}))
+      : hrisDB;
+    if(isFranchiseReq&&!targetDB){
+      // no database configured for them yet — say so rather than quietly
+      // writing it into Main's payroll
+      showT("Approved — but this branch has no payroll database set. "
+        +"Add it in Branches, or record the deduction manually.","warn");
+      return;
+    }
+    if(targetDB && req.hrisEmpId){
       try{
         // Load current loans
-        const snap = await get(ref(hrisDB,"loans"));
+        const snap = await get(ref(targetDB,"loans"));
         const existing = snap.val();
         const loans = existing ? (Array.isArray(existing)?existing:Object.values(existing)) : [];
         const newLoan = {
@@ -3244,8 +3279,9 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
           reason:   req.reason,
         };
         loans.push(newLoan);
-        await set(ref(hrisDB,"loans"), loans);
-        showT("Approved & synced to HRIS payroll ✓");
+        await set(ref(targetDB,"loans"), loans);
+        showT("Approved & synced to "
+          +(isFranchiseReq?(reqBranch.name||reqBranch.full)+"'s payroll":"HRIS payroll")+" ✓");
       }catch(e){
         console.warn("HRIS sync failed:",e);
         showT("Approved in POS — HRIS sync failed, add manually","warn");
@@ -3267,11 +3303,52 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
     showT("Request rejected");
   };
 
+  // Fetched on demand by whoever is approving, not carried in the branch list
+  // that every signed-in user reads.
+  const [fKeys,setFKeys]=useState({});
+  useEffect(()=>{
+    let alive=true;
+    (async()=>{
+      try{
+        const d=await getDoc(doc(db,"settings","franchise_keys"));
+        if(alive&&d.exists())setFKeys(d.data()||{});
+      }catch(e){ console.warn("franchise keys:",e.message); }
+    })();
+    return()=>{alive=false;};
+  },[]);
+
+  // The nav decides who sees this, but this page approves deductions — so it
+  // checks for itself rather than trusting that the nav was set correctly.
+  const _mayApprove=(user.role==="owner"||user.role==="commissary"
+    ||(user.role==="manager"
+       &&(BRANCHES||[]).some(b=>b&&b.id===user.branch
+          &&b.ownership==="franchise")));
+  if(!_mayApprove){
+    return h("div",{style:{padding:"30px",textAlign:"center"}},
+      h("div",{style:{fontSize:30,marginBottom:9}},"🔒"),
+      h("div",{style:{fontSize:14,fontWeight:800}},"Not available"),
+      h("div",{style:{fontSize:12,color:C.muted,marginTop:4}},
+        "Cash advance approvals are handled by the owner, or by a franchisee "+
+        "for their own crew."));
+  }
+
+  const franchiseIds=(BRANCHES||[])
+    .filter(b=>b&&b.ownership==="franchise").map(b=>b.id);
+  // A franchisee answers their own crew only. Everyone else sees the
+  // company-owned branches, never a franchise's private pay matters.
+  const ownBranch=(BRANCHES||[]).find(b=>b&&b.id===user.branch);
+  const isFranchisee=(user.role==="manager"
+    &&ownBranch&&ownBranch.ownership==="franchise");
   const filtered = requests
+    .filter(r=>isFranchisee
+      ? r.branch===user.branch
+      : franchiseIds.indexOf(r.branch)<0)
     .filter(r=>filterStatus==="all"||r.status===filterStatus)
     .filter(r=>filterBranch==="all"||r.branch===filterBranch);
 
-  const pending  = requests.filter(r=>r.status==="pending");
+  const pending  = requests.filter(r=>r.status==="pending"
+    &&(isFranchisee ? r.branch===user.branch
+                    : franchiseIds.indexOf(r.branch)<0));
   const approved = requests.filter(r=>r.status==="approved");
   const totalCA  = approved.filter(r=>r.type==="Cash Advance").reduce((s,r)=>s+r.amount,0);
   const totalLoan= approved.filter(r=>r.type==="Cash Loan").reduce((s,r)=>s+r.amount,0);
@@ -3305,8 +3382,10 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
       ),
       h("select",{value:filterBranch,onChange:e=>setFilterBranch(e.target.value),
         style:{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:7,fontSize:13,outline:"none"}},
-        h("option",{value:"all"},"All Branches"),
-        ...BRANCHES.map(b=>h("option",{key:b.id,value:b.id},b.name))
+        h("option",{value:"all"},isFranchisee?"My branch":"All Branches"),
+        ...BRANCHES
+          .filter(b=>!isFranchisee||b.id===user.branch)
+          .map(b=>h("option",{key:b.id,value:b.id},b.name))
       )
     ),
 
@@ -4716,11 +4795,16 @@ const GRANTABLE = [
   "x_reading","z_reading","reports","analytics","branch_pl",
   "cash_count","cash_monitor","expenses",
   "inventory","inv_log","stock_order","stock_receive","po_monitor","bom_mgmt",
-  "ext_production","ext_stock",
+  "ext_stock",
   "menu_mgmt","branch_menu",
   "crew_mgmt","ca_request","loan_request","ext_kiosk","ext_payroll",
   "printer","branches","settings"
 ];
+
+// Which inventory collection a branch's stock lives in. MAIN owns the plain
+// one; every other branch has its own. Declared here because components
+// outside App need it too.
+const invColFor=(bid)=>(bid==="ct-main"||bid==="main")?"inventory":"inventory_"+bid;
 
 // ─── FIFO LOTS ────────────────────────────────────────────
 // Each delivery becomes a lot carrying the price actually paid for it. Stock
@@ -6111,7 +6195,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260803-085259";
+const BUILD = "20260804-134721";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -7410,7 +7494,7 @@ function VoidBadge({branchId,db,setPage,visible=true}){
 function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
   if(! item)return null;
   var isOwner=user.role==="owner"||user.role==="commissary";
-  var invCol=isOwner?"inventory":"inventory_"+branchId;
+  var invCol=invColFor(branchId);
   var logCol=logColFor(isOwner?"main":branchId);
 
   var DEFAULT_CATS=["Frozen","Produce","Protein","Sauce","Dry Goods","Packaging","Beverage","Other"];
@@ -8910,7 +8994,6 @@ function PermissionsTab({db,showT,companySettings,setCompanySettings}){
       {key:"stock_receive",label:"📥 Receive Stocks"},
       {key:"po_monitor",label:"📊 PO Monitor"},
       {key:"bom_mgmt",label:"🧪 BOM"},
-      {key:"ext_production",label:"🏭 Production ↗"},
       {key:"ext_stock",label:"🧊 Freezer Count ↗"},
     ]},
     {label:"Menu", items:[
@@ -10863,7 +10946,6 @@ function App(){
   // One rule for every stock collection, driven by the SAME branch the order
   // is filed under. Previously this keyed off role, so an owner's sale was
   // tagged WSFP but deducted from Main.
-  const invColFor=(bid)=>(bid==="ct-main"||bid==="main")?"inventory":"inventory_"+bid;
   // logColFor lives at module scope — see above
   // Get price based on type
   const getPriceByType=( item)=>{
@@ -12232,7 +12314,25 @@ function App(){
           const granted=(_full||!_rp)?[]
             : Object.keys(_rp).filter(p=>_rp[p]===true&&base.indexOf(p)<0
                 &&NAV_META[p]&&GRANTABLE.indexOf(p)>=0);
-          const allowed=base.concat(granted);
+          let allowed=base.concat(granted);
+
+          // A franchise runs its own pay. Their cash advance and loan requests
+          // would land in your approval queue and come off your payslips, and
+          // the payroll link would open your system — so neither is offered.
+          const _br=branches.find(b=>b.id===branchId);
+          if(_br&&_br.ownership==="franchise"){
+            const isMgr=(user?.role==="manager");
+            allowed=allowed.filter(p=>{
+              // Payroll opens their own system, or nothing at all.
+              if(p==="ext_payroll") return !!_br.payrollUrl;
+              // The franchisee is the business — they do not ask themselves
+              // for an advance. Their crew still does.
+              if(p==="ca_request"||p==="loan_request") return !isMgr;
+              return true;
+            });
+            // and they answer their own crew, so they need the queue
+            if(isMgr&&allowed.indexOf("hris_dash")<0) allowed.push("hris_dash");
+          }
 
           const badgeFor=(p)=>{
             var cnt=0;
@@ -12272,7 +12372,14 @@ function App(){
             const m=NAV_META[p]; if(!m)return null;
             return h("button",{key:p,
               onClick:()=>{
-                if(EXT_APPS[p]){ window.open(EXT_APPS[p],"_blank","noopener"); return; }
+                if(EXT_APPS[p]){
+                  // a franchise opens their own payroll, never yours
+                  const br=branches.find(b=>b.id===branchId);
+                  const url=(p==="ext_payroll"&&br&&br.ownership==="franchise"
+                             &&br.payrollUrl) ? br.payrollUrl : EXT_APPS[p];
+                  window.open(url,"_blank","noopener");
+                  return;
+                }
                 setPage(p);
               },
               style:{width:"100%",display:"flex",alignItems:"center",gap:6,
@@ -12971,6 +13078,62 @@ function App(){
                       color:editable?C.text:C.muted}}),
                   k==="id"&&!editBr._isNew&&h("div",{style:{fontSize:12,color:C.muted,marginTop:2}},
                     "Cannot be changed — orders and inventory are tagged to it"))),
+              h("div",null,
+                h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,
+                  letterSpacing:1,marginBottom:3}},"OWNERSHIP"),
+                h("div",{style:{display:"flex",gap:8}},
+                  [["company","🏢 Company-owned"],["franchise","🤝 Franchise"]]
+                    .map(([v,lbl])=>{
+                      const on=(editBr.ownership||"company")===v;
+                      return h("button",{key:v,
+                        onClick:()=>setEditBr(p=>Object.assign({},p,{ownership:v})),
+                        style:{flex:1,padding:"9px",borderRadius:8,fontSize:13,
+                          cursor:"pointer",fontWeight:on?800:500,
+                          border:"1px solid "+(on?C.primary:C.border),
+                          background:on?C.primary+"18":"#fff",
+                          color:on?C.primary:C.text}},lbl);
+                    })),
+                h("div",{style:{fontSize:11,color:C.muted,marginTop:5,
+                  lineHeight:1.6}},
+                  (editBr.ownership||"company")==="franchise"
+                    ? "Their crew's pay is theirs to run. Cash advance and loan "
+                      +"requests stop coming to you, and Payroll opens their own "
+                      +"system instead of yours. Stock ordering, deliveries and "
+                      +"sales are unchanged — they still buy from you."
+                    : "You run their payroll. Cash advance and loan requests "
+                      +"come to you for approval and land on your payslips.")),
+
+              (editBr.ownership==="franchise")&&h("div",null,
+                h("div",{style:{fontSize:11,color:C.muted,marginBottom:8,
+                  background:C.bg,borderRadius:8,padding:"9px 11px",
+                  lineHeight:1.6}},
+                  "Their database details are stored separately from the branch "+
+                  "list, so a cashier reading the sidebar never sees them. "+
+                  "Re-enter them here if you change them."),
+                [["payrollUrl","THEIR PAYROLL LINK",
+                  "https://…/chowtime-payroll.html"],
+                 ["hrisUrl","THEIR PAYROLL DATABASE URL",
+                  "https://…-default-rtdb.asia-southeast1.firebasedatabase.app"],
+                 ["hrisApiKey","THEIR FIREBASE API KEY","AIza…"],
+                 ["hrisProjectId","THEIR PROJECT ID","chowtime-wgapan"]
+                ].map(([k,lbl,ph])=>h("div",{key:k,style:{marginBottom:8}},
+                  h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,
+                    letterSpacing:1,marginBottom:3}},lbl),
+                  h("input",{value:editBr[k]||"",placeholder:ph,
+                    onChange:e=>setEditBr(p=>Object.assign({},p,
+                      {[k]:e.target.value.trim()})),
+                    style:{width:"100%",padding:"9px 10px",fontSize:13,
+                      border:"1px solid "+C.border,borderRadius:8,
+                      outline:"none",boxSizing:"border-box"}}))),
+                h("div",{style:{fontSize:11,color:C.muted,marginTop:2,
+                  lineHeight:1.6,background:C.bg,borderRadius:9,
+                  padding:"10px 12px"}},
+                  "From their own Firebase project — Project settings › Your "+
+                  "apps. With the database URL set, an approved cash advance "+
+                  "lands in their payroll the same way it does for a "+
+                  "company-owned branch. Leave it blank and approvals stop, "+
+                  "rather than falling into yours.")),
+
               // Editing an existing branch showed no sign of who signs into
               // it — the login was only ever visible at the moment of
               // creation, so a forgotten address meant guessing.
@@ -13062,12 +13225,28 @@ function App(){
                     showT("ID already in use: "+b.id,"err");return;
                   }
                   const clean={id:b.id,name:b.name||b.id.toUpperCase(),
-                    full:b.full,loc:b.loc||"",status:b.status||"open"};
+                    full:b.full,loc:b.loc||"",status:b.status||"open",
+                    // whether their pay runs through you or their own system
+                    ownership:b.ownership||"company",
+                    payrollUrl:(b.ownership==="franchise")?(b.payrollUrl||""):""};
                   const next=b._isNew
                     ? branches.concat([clean])
-                    : branches.map(x=>x.id===b.id?clean:x);
+                    // keep whatever else the record carries — the delivery
+                    // address and the active flag are not on this form, and
+                    // replacing the object outright quietly deleted them
+                    : branches.map(x=>x.id===b.id?Object.assign({},x,clean):x);
                   try{
                     await setDoc(doc(db,"settings","branches"),{branches:next},{merge:true});
+                    // Credentials live apart from the branch list, so a
+                    // cashier reading the sidebar never reads them.
+                    if(b.ownership==="franchise"){
+                      await setDoc(doc(db,"settings","franchise_keys"),
+                        {[b.id]:{
+                          hrisUrl:b.hrisUrl||"",
+                          hrisApiKey:b.hrisApiKey||"",
+                          hrisProjectId:b.hrisProjectId||""
+                        }},{merge:true});
+                    }
                   }catch(e){
                     console.error("branch save:",e);
                     showT("Save failed: "+String(e&&e.message||e).slice(0,60),"err");
@@ -14449,8 +14628,7 @@ function App(){
                         +"\n\nInventory value ₱"+peso(now)+" → ₱"+peso(fixed)
                         +"\n\nNewest deliveries first, the way FIFO leaves them. "
                         +"Stock and the POs are untouched."))return;
-                      const col=(bid==="ct-main"||bid==="main")
-                        ?"inventory":"inventory_"+bid;
+                      const col=invColFor(bid);
                       let done=0;
                       for(const p of plan){
                         try{
@@ -14517,7 +14695,9 @@ function App(){
                     const skipped=[]; const stockLogs=[];
                     setBatchSaving(true);
                     try{
-                      const col=invView?("inventory_"+invView):"inventory";
+                      // invView is set only when viewing another branch;
+                      // otherwise this is the signed-in branch's own stock
+                      const col=invColFor(invView||branchId);
                       let batch=writeBatch(db),k=0;
                       for(const id of ids){
                         const e=batchEdits[id]||{};
@@ -14856,7 +15036,7 @@ function App(){
                     }
                     if(!confirm("Delete "+ item.name+"?"))return;
                     const isOwner=user.role==="owner"||user.role==="commissary";
-                    const col=isOwner?"inventory":"inventory_"+branchId;
+                    const col=invColFor(branchId);
                     try{
                       // Log the deletion first
                       const logCol2=logColFor(isOwner?"main":branchId);
@@ -14887,7 +15067,7 @@ function App(){
                     const adj=parseFloat(e.target.value);
                     if(!adj)return;
                     const isOwner=user.role==="owner"||user.role==="commissary";
-                    const invCol=isOwner?"inventory":"inventory_"+branchId;
+                    const invCol=invColFor(branchId);
                     const logCol=logColFor(isOwner?"main":branchId);
                     const newQ=Math.max(0,( item.stock||0)+adj);
                     try{

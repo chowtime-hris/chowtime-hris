@@ -140,7 +140,7 @@
   .cutoff-foot .save-btn{width:auto;padding:8px 16px;font-size:12.5px;}
   .cutoff-foot .cp-status{font-size:11.5px;color:var(--muted);}
 </style>
-<!-- BUILD:20260803-134018 -->
+<!-- BUILD:20260804-130057 -->
 </head>
 <body>
 
@@ -482,6 +482,12 @@
     </div>
     <div class="card">
       <h2>Variance Report — Per Cutoff</h2>
+      <div class="msg info" style="margin-bottom:10px">
+        <b>Nothing here is deducted from anyone's pay.</b> These are computed
+        figures for you to look into. If a shortage turns out to be someone's
+        fault, raise it as a Fine in the payroll system — that is the only
+        place a deduction is ever made.
+      </div>
       <p class="sub">Only <strong>new</strong> shortage since the last checkpoint gets charged — the same standing gap (until POS is officially adjusted by the auditor) won't be charged twice. Red = new shortage (charged). Orange = recovered (credited). Numbers are editable if a crew member mis-typed something — edit and press Save Corrections.</p>
       <div id="varianceContainer"></div>
       <div id="varianceEmpty" class="empty" style="display:none;">Crew hasn't submitted counts for this date yet.</div>
@@ -2463,6 +2469,6 @@ window.addEventListener('load', ()=>{
   }
 });
 </script>
-<div id="buildStamp" style="text-align:center;padding:14px 8px;font-size:11px;color:#5A5A5A">Chowtime Stock · 20260803-134018</div>
+<div id="buildStamp" style="text-align:center;padding:14px 8px;font-size:11px;color:#5A5A5A">Chowtime Stock · 20260804-130057</div>
 </body>
 </html>
