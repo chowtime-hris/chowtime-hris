@@ -2514,6 +2514,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
   const [remit,setRemit]     = useState("");
   const [countNote,setNote]  = useState("");
   const [history,setHistory] = useState([]);
+  const [countLog,setCountLog] = useState([]);
   const [loading,setLoading] = useState(true);
   const [saved,setSaved]     = useState(false);
   const [selDate,setSelDate] = useState(today);
@@ -2549,7 +2550,15 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
       showT("Cash count: "+String(err&&err.message||"query failed").slice(0,90),"err");
       setLoading(false);
     });
-    return()=>unsub();
+    // walang orderBy — kailangan noon ng composite index na wala pa rito
+    const qLog = query(collection(db,"cash_count_log"),
+      where("branch","==",branchId), limit(300));
+    const unsubLog = onSnapshot(qLog, s=>{
+      setCountLog(s.docs.map(d=>({...d.data(),_docId:d.id}))
+        .sort((a,b)=>String((b.date||"")+" "+(b.time||""))
+          .localeCompare(String((a.date||"")+" "+(a.time||"")))));
+    }, err=>console.warn("cash_count_log query:",err));
+    return()=>{unsub();unsubLog();};
   },[branchId,today]);
 
   const totalCash = DENOMS.reduce((s,d)=>s+(counts[d.value]||0)*d.value, 0);
@@ -2650,12 +2659,49 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
         doc(db,"cash_counts",branchId+"_"+today),
         payload
       );
+      // The daily doc upserts, so a second count of the same day would erase
+      // the first. This is the permanent trail of every save. Its own try:
+      // a missing security rule here must not kill the count itself.
+      try{
+        await addDoc(collection(db,"cash_count_log"), Object.assign({},payload,{
+          countDocId: branchId+"_"+today,
+          time: new Date().toLocaleTimeString("en-PH",{hour:"2-digit",minute:"2-digit"}),
+          savedAt: serverTimestamp()
+        }));
+      }catch(e2){ console.warn("cash_count_log failed:",e2); }
       setSaved(true);
       showT(isClosing?"Closing count saved! ₱"+peso(closingBalance)+" carried over ✓":"Cash count saved ✓");
     }catch(e){showT("Save failed","err");console.error(e);}
   };
 
-  const printCount = (isClosing=false)=>{
+  // Snapshot ng count na nasa screen — fallback kapag walang ipinasang record.
+  const liveCount = {date:today, counts, totalCash, billsTotal, coinsTotal,
+    openingFund, todaySales, cashIn, cashOut, expectedCash, variance,
+    remittance:remittanceAmt, closingBalance, note:countNote,
+    countedBy:user.name, branchName:curBranch.full};
+
+  const printCount = (isClosing=false, rec=null)=>{
+    // A reprint has to render the record that was picked. Reading live state
+    // instead meant an old count came out stamped with today's date and with
+    // whatever figures happened to be on screen.
+    const R = Object.assign({}, liveCount, rec||{});
+    const num=(k)=>Number(R[k])||0;
+    const counts        = R.counts||{};
+    const today         = R.date||liveCount.date;
+    const countNote     = R.note||"";
+    const countedBy     = R.countedBy||user.name;
+    const branchFull    = R.branchName||curBranch.full;
+    const totalCash     = num("totalCash");
+    const billsTotal    = num("billsTotal");
+    const coinsTotal    = num("coinsTotal");
+    const openingFund   = num("openingFund");
+    const todaySales    = num("todaySales");
+    const cashIn        = num("cashIn");
+    const cashOut       = num("cashOut");
+    const expectedCash  = num("expectedCash");
+    const variance      = num("variance");
+    const remittanceAmt = num("remittance");
+    const closingBalance= num("closingBalance");
     const w=window.open("","_blank","width=400,height=700");
     if(!w)return;
     w.document.write(`<!DOCTYPE html><html><head><title>Cash Count</title>
@@ -2663,7 +2709,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
     .c{text-align:center;}.b{font-weight:bold;}.hr{border-top:1px dashed #000;margin:6px 0;}
     .row{display:flex;justify-content:space-between;margin-bottom:2px;}</style></head><body>
     <div class="c"><b>${isClosing?"CLOSING":"CASH COUNT"} REPORT</b><br>
-    CHOWTIME - ${curBranch.full}<br>${today}<br>Counted by: ${user.name}</div>
+    CHOWTIME - ${branchFull}<br>${today}<br>Counted by: ${countedBy}</div>
     <div class="hr"></div>
     <div class="b">DENOMINATION BREAKDOWN:</div>
     ${DENOMS.map(d=>(counts[d.value]||0)>0?
@@ -2680,7 +2726,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
     <div class="row"><span>Cash Out:</span><span>-P${peso(cashOut)}</span></div>
     <div class="row"><span>Expected:</span><span>P${peso(expectedCash)}</span></div>
     <div class="row ${variance!==0?'b':''}"><span>Variance:</span><span>${variance>=0?"+":""}P${peso(variance)}</span></div>
-    ${isClosing?`<div class="hr"></div>
+    ${(isClosing||remittanceAmt>0)?`<div class="hr"></div>
     <div class="row"><span>Total Cash:</span><span>P${peso(totalCash)}</span></div>
     <div class="row"><span>Remittance:</span><span>-P${peso(remittanceAmt)}</span></div>
     <div class="row b"><span>CLOSING BALANCE:</span><span>P${peso(closingBalance)}</span></div>
@@ -2786,9 +2832,35 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
               ))
             ),
             selHistory.note&&h("div",{style:{marginTop:8,padding:"7px 10px",background:C.bg,borderRadius:7,fontSize:13,color:C.muted}},"📝 "+selHistory.note),
-            h("button",{onClick:()=>printCount(selHistory.isClosing),
+            h("button",{onClick:()=>printCount(selHistory.isClosing,selHistory),
               style:{marginTop:10,width:"100%",padding:"8px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:7,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}},"🖨️ Reprint")
           )
+        ),
+        h("div",{style:{background:"#fff",borderRadius:12,padding:"13px 15px",
+          border:"1px solid "+C.border,marginTop:10}},
+          h("b",{style:{fontSize:14}},"\uD83E\uDDFE Save trail — "+selDate),
+          (function(){
+            const rows=countLog.filter(l=>l.date===selDate);
+            if(!rows.length)return h("div",{style:{fontSize:13,color:C.muted,
+              marginTop:8,lineHeight:1.6}},
+              "Walang naitalang save para sa petsang ito. Sa mga bagong count pa lang nagsisimula ang trail.");
+            return h("div",{style:{marginTop:9}}, rows.map(l=>
+              h("div",{key:l._docId,style:{display:"flex",alignItems:"center",gap:9,
+                padding:"7px 0",borderBottom:"1px solid #f5f5f5"}},
+                h("div",{style:{flex:1}},
+                  h("div",{style:{fontSize:13,fontWeight:700}},
+                    (l.time||"\u2014")+" \u00B7 \u20B1"+peso(l.totalCash||0)
+                    +(l.isClosing?"  \uD83C\uDFC1 Closing":"")),
+                  h("div",{style:{fontSize:12,color:C.muted}},
+                    "Counted by "+(l.countedBy||"\u2014")
+                    +" \u00B7 Remit \u20B1"+peso(l.remittance||0)
+                    +" \u00B7 Var "+((l.variance||0)>=0?"+":"")+peso(l.variance||0))),
+                h("button",{onClick:()=>printCount(!!l.isClosing,l),
+                  style:{padding:"4px 10px",background:"#fff",
+                    border:"1px solid "+C.border,borderRadius:6,fontSize:12,
+                    cursor:"pointer"}},"\uD83D\uDDA8\uFE0F")
+              )));
+          })()
         )
       ):h("div",{style:{textAlign:"center",padding:"30px",color:C.muted}},"No record for this date")
     ),
@@ -3007,7 +3079,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
         h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,
           position:"sticky",bottom:0,background:"#fff",padding:"9px 0",
           borderTop:"1px solid "+C.border,zIndex:4}},
-          h("button",{onClick:()=>{saveCashCount(false);printCount(false);},
+          h("button",{onClick:()=>{saveCashCount(false);},
             style:{padding:"11px",background:"#fff",border:"1px solid "+C.border,borderRadius:9,fontWeight:700,fontSize:13,cursor:"pointer"}},
             "💾 Save Count"),
           h("button",{onClick:()=>{saveCashCount(true);printCount(true);},
@@ -14226,7 +14298,7 @@ function App(){
             rows.map(e=>h("div",{key:e._docId||e.id,style:{display:"flex",alignItems:"center",gap:9,padding:"10px 14px",borderBottom:"1px solid #f9f9f9"}},
               h("div",{style:{width:32,height:32,background:"#FFEBEE",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}},"💸"),
               h("div",{style:{flex:1}},
-                h("div",{style:{fontSize:13,fontWeight:700}},e.desc),
+                h("div",{style:{fontSize:13,fontWeight:700,whiteSpace:"pre-line"}},e.desc),
                 h("div",{style:{fontSize:12,color:C.muted}},e.cat+" · "+e.by+" · "+e.date+" · "+(branches.find(b=>b.id===e.branch)?.name||e.branch))
               ),
               h("div",{style:{fontSize:14,fontWeight:800,color:C.danger,marginRight:7}},"₱"+(e.amount||0).toLocaleString()),
@@ -14255,7 +14327,7 @@ function App(){
                     color:"rgba(255,255,255,.85)",fontWeight:700,marginTop:3}},
                     "Will be filed under "+newExp.date+", not today")),
                 h("div",null,h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"CATEGORY"),h("select",{value:newExp.cat,onChange:e=>setNewExp(p=>({...p,cat:e.target.value})),style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:13,outline:"none"}},EXPENSE_CATS.map(c=>h("option",{key:c},c)))),
-                h("div",null,h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"DESCRIPTION"),h("input",{value:newExp.desc,onChange:e=>setNewExp(p=>({...p,desc:e.target.value})),placeholder:"Description",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:13,outline:"none",boxSizing:"border-box"}})),
+                h("div",null,h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"DESCRIPTION"),h("textarea",{value:newExp.desc,onChange:e=>setNewExp(p=>({...p,desc:e.target.value})),rows:3,placeholder:"Isa bawat linya:\nIce \u2014 2 bag\nLPG refill",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:13,outline:"none",boxSizing:"border-box",resize:"vertical",fontFamily:"inherit",lineHeight:1.45}})),
                 h("div",null,h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"AMOUNT (₱)"),h("input",{type:"number",onFocus:e=>e.target.select(),value:newExp.amount,onChange:e=>setNewExp(p=>({...p,amount:e.target.value})),placeholder:"0.00",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:14,fontWeight:700,outline:"none",boxSizing:"border-box"}})),
                 h("button",{onClick:async()=>{
                   if(!newExp.desc||!newExp.amount){showT("Fill all fields","warn");return;}
