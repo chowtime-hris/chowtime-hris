@@ -676,7 +676,15 @@ function buildEscPos(ord,bName,cs,paperSize){
   a([ESC,0x21,0x00]);a([ESC,0x45,0x00]);
 
   var paid=(ord.payments&&ord.payments.reduce(function(s,p){return s+(p.amount||0);},0))||parseFloat(ord.cash||0)||net;
-  a(row("Payment ("+(ord.payMethod||"CASH").toUpperCase()+")","P"+peso(paid)));
+  if(Array.isArray(ord.payments)&&ord.payments.length>1){
+    a(row("Payment (SPLIT)","P"+peso(paid)));
+    ord.payments.forEach(function(pt){
+      a(row("  "+String(pt.method||"").toUpperCase(),
+        "P"+peso(Number(pt.amount)||0)));
+    });
+  }else{
+    a(row("Payment ("+(ord.payMethod||"CASH").toUpperCase()+")","P"+peso(paid)));
+  }
   if(paid>net)a(row("CHANGE","P"+peso((paid-net))));
 
   a(dash());
@@ -933,6 +941,14 @@ function printReceipt(ord, branchName, companySettings, paperSize){
   (zerovat?"<div class='row sub'><span>Zero-Rated Sales</span><span>\u20b1"+net.toFixed(2)+"</span></div>":"")+
   (!isVAT?"<div class='row sub'><span>Non-VAT</span><span></span></div>":"")+
   "<div class='row total'><span>TOTAL</span><span>\u20b1"+net.toFixed(2)+"</span></div>"+
+  ((Array.isArray(ord.payments)&&ord.payments.length>1)
+    ? ("<div class='row'><span>Payment (SPLIT)</span><span>\u20B1"+peso(ord.total||0)+"</span></div>"
+       +ord.payments.map(function(pt){
+           return "<div class='row'><span style='padding-left:10px'>"
+             +String(pt.method||"").toUpperCase()+"</span><span>\u20B1"
+             +peso(Number(pt.amount)||0)+"</span></div>";
+         }).join(""))
+    : "")+
   "<div class='row'><span>Payment ("+((ord.payments&&ord.payments[0]&&ord.payments[0].method)||ord.payMethod||"Cash").toUpperCase()+")</span>"+
   "<span>\u20b1"+((ord.payments&&ord.payments.reduce(function(s,p){return s+(p.amount||0);},0))||ord.cashPaid||net).toFixed(2)+"</span></div>"+
   (ord.change>0?"<div class='row b'><span>CHANGE</span><span>\u20b1"+ord.change.toFixed(2)+"</span></div>":"")+
@@ -2602,9 +2618,8 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
   const todaySales = orders
     .filter(o=>o.branch===branchId
       &&o.status!=="cancelled"&&o.status!=="void"
-      &&(o.payMethod||"cash")==="cash"
       &&isToday(o))
-    .reduce((s,o)=>s+(o.total||0),0);
+    .reduce((s,o)=>s+payAmtOf(o,"cash"),0);
 
   const todayCash=(cashLog||[]).filter(c=>c.branch===branchId&&(c.date===today||isToday(c)));
   const isOpeningEntry=(c)=>c.type==="in"&&/opening/i.test(c.desc||"");
@@ -3095,12 +3110,15 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
             borderTop:"1px dashed "+C.border}},
             h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:5}},
               "TODAY ("+todayCash.length+")"),
-            todayCash.slice(0,6).map((c,ci)=>h("div",{key:c._docId||ci,
-              style:{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:2}},
-              h("span",{style:{color:C.muted}},(c.time?c.time+" · ":"")+(c.desc||"")),
-              h("span",{style:{fontWeight:700,color:c.type==="in"?C.success:C.danger}},
-                (c.type==="in"?"+":"-")+"\u20B1"+(Number(c.amount)||0).toFixed(2))
-            ))
+            // The header counts every entry but only six were drawn, so the
+            // rest were invisible with nothing saying so. Scroll instead.
+            h("div",{style:{maxHeight:150,overflowY:"auto"}},
+              todayCash.map((c,ci)=>h("div",{key:c._docId||ci,
+                style:{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:2}},
+                h("span",{style:{color:C.muted}},(c.time?c.time+" · ":"")+(c.desc||"")),
+                h("span",{style:{fontWeight:700,color:c.type==="in"?C.success:C.danger}},
+                  (c.type==="in"?"+":"-")+"\u20B1"+(Number(c.amount)||0).toFixed(2))
+              )))
           )
         ),
 
@@ -6930,8 +6948,7 @@ function buildDailyRollup(dayOrders,dayCash,branch,date,vatMode){
     s2+((num(o.originalTotal)||num(o.subtotal))-num(o.total)),0);
 
   const isVATreg=vatMode!=="nonvat", zeroRated=vatMode==="zerovat";
-  const payTotal=(m)=>live.filter(o=>(o.payMethod||"cash")===m)
-    .reduce((s2,o)=>s2+num(o.total),0);
+  const payTotal=(m)=>live.reduce((s2,o)=>s2+payAmtOf(o,m),0);
   const discBy=(id)=>live.filter(o=>(o.discType&&o.discType.id)===id)
     .reduce((s2,o)=>s2+num(o.discAmt),0);
 
@@ -6968,8 +6985,14 @@ function buildDailyRollup(dayOrders,dayCash,branch,date,vatMode){
     discEmp:discBy("emp"),discOther:discBy("promo")+discBy("custom"),
     scTxns:live.filter(o=>(o.discType&&o.discType.id)==="sc").length,
     pwdTxns:live.filter(o=>(o.discType&&o.discType.id)==="pwd").length,
+    // Every tender the POS offers. Maya and bank transfer were missing, so
+    // those sales landed in no line at all and the breakdown did not add up
+    // to net — and a split order needs each leg stated separately anyway.
     cashSales:payTotal("cash"),gcash:payTotal("gcash"),
+    maya:payTotal("maya"),bank:payTotal("bank"),
     foodpanda:payTotal("foodpanda"),grabfood:payTotal("grabfood"),
+    tenderTotal:["cash","gcash","maya","bank","foodpanda","grabfood"]
+      .reduce((s2,m)=>s2+payTotal(m),0),
     opening:opening,cashIn:cashIn,cashOut:cashOut,
     cashOnHand:opening+net+cashIn-cashOut,
     siFrom:ids.length?ids[0]:"",siTo:ids.length?ids[ids.length-1]:"",
@@ -7122,6 +7145,18 @@ async function syncPackFromMain(db,col,itemId){
     return {id:itemId,from:(cd.packUnit||"")+"/"+(Number(cd.packSize)||0),
       to:mu+"/"+ms};
   }catch(e){console.warn("pack sync:",itemId,e);return null;}
+}
+
+// How much of one order was settled in a given tender. A split order carries
+// a payments[] that sums to the total; everything older has a single
+// payMethod and the whole total sits in it. Every drawer figure, Z-reading
+// and payment mix has to read through here — filtering on payMethod alone
+// counts a split sale as entirely cash or entirely GCash.
+function payAmtOf(o,method){
+  if(o&&Array.isArray(o.payments)&&o.payments.length)
+    return o.payments.filter(p=>p&&p.method===method)
+      .reduce((s,p)=>s+(Number(p.amount)||0),0);
+  return ((o&&o.payMethod)||"cash")===method?(Number(o&&o.total)||0):0;
 }
 
 async function performVoid(db, args){
@@ -7834,9 +7869,14 @@ function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inve
   // Payment breakdown
   const payMap={};
   filtOrders.forEach(o=>{
-    const p=o.payMethod||"cash";
-    if(!payMap[p])payMap[p]={method:p,count:0,total:0};
-    payMap[p].count++; payMap[p].total+=(Number(o.total)||0);
+    const parts=(Array.isArray(o.payments)&&o.payments.length)
+      ? o.payments.filter(x=>x&&(Number(x.amount)||0)>0)
+      : [{method:o.payMethod||"cash",amount:Number(o.total)||0}];
+    parts.forEach(pt=>{
+      const p=pt.method||"cash";
+      if(!payMap[p])payMap[p]={method:p,count:0,total:0};
+      payMap[p].count++; payMap[p].total+=(Number(pt.amount)||0);
+    });
   });
   const payList=Object.values(payMap).sort((a,b)=>b.total-a.total);
 
@@ -11170,6 +11210,11 @@ function App(){
   const [ordPage,setOrdPage]=useState(1);                // orders list pagination
   const [placing,setPlacing]=useState(false);            // order submit in flight
   const [kitchenFlow,setKitchenFlow]=useState(true);     // pending→preparing→served
+  // Split payment: the non-cash legs are listed here and whatever is left of
+  // the total is settled in cash. Storing only the non-cash parts keeps one
+  // number the cashier never has to compute.
+  const [chkSplit,setChkSplit]=useState(false);
+  const [chkSplitRows,setChkSplitRows]=useState([{method:"gcash",amount:""}]);
   const [repSrch,setRepSrch]=useState("");
   const [repMonth,setRepMonth]=useState("");
   const [zSel,setZSel]=useState("");                     // "" = live reading
@@ -11992,6 +12037,9 @@ function App(){
     }
   };
 
+  const splitOtherTotal=()=>chkSplit
+    ? chkSplitRows.reduce((s2,r)=>s2+(parseFloat(r.amount)||0),0) : 0;
+
   // ── PLACE ORDER (Firebase) ───────────────────────────────
   // placeOrder runs for a while: it reads and writes the branch counter, saves
   // the order, loads every BOM, then updates each ingredient. Nothing on
@@ -12043,7 +12091,17 @@ function App(){
       // queue counts would mean nothing. Closed flow marks it done on sale.
       status:kitchenFlow?"pending":"served",orderType:chkType,mixedType:mixedType,
       takeoutCount:toCount,
-      payMethod:chkPay,priceType,cashier:user.name,
+      payMethod:chkSplit?"split":chkPay,
+      // Applied amounts, not tendered — they sum to the total so every
+      // downstream reader can add them without knowing about change.
+      payments:chkSplit
+        ? chkSplitRows.filter(r=>(parseFloat(r.amount)||0)>0)
+            .map(r=>({method:r.method,amount:parseFloat(r.amount)||0}))
+            .concat((chkTotal-splitOtherTotal())>0.001
+              ? [{method:"cash",amount:Math.round((chkTotal-splitOtherTotal())*100)/100}]
+              : [])
+        : null,
+      priceType,cashier:user.name,
       bomDeducted:false,
       timestamp:serverTimestamp()
     };
@@ -12252,6 +12310,7 @@ function App(){
       setCurOrd(ord);setOrdCounter(c=>c+1);
       setCart([]);setChkCash("");setChkCust("");setChkTable("");
       setChkDisc(DISCS[0]);setChkDiscId("");setChkPay("cash");
+      setChkSplit(false);setChkSplitRows([{method:"gcash",amount:""}]);
       setCartOpen(false);setModal("receipt");
       // Cash drawer opens on its own for cash sales, before the receipt is
       // even printed — the cashier needs it open to make change.
@@ -12284,8 +12343,7 @@ function App(){
     const bc=cashLog.filter(c=>c.branch===bid&&sameDay(c));
     const voided=bo.filter(o=>o.status==="void"||o.status==="partial-void");
     const live=bo.filter(o=>o.status!=="void"&&o.status!=="cancelled");
-    const payTotal=(m)=>live.filter(o=>(o.payMethod||"cash")===m)
-      .reduce((s2,o)=>s2+(Number(o.total)||0),0);
+    const payTotal=(m)=>live.reduce((s2,o)=>s2+payAmtOf(o,m),0);
     const gross=live.reduce((s,o)=>s+(o.subtotal||0),0);
     const discounts=live.reduce((s,o)=>s+(o.discAmt||0),0);
     const net=bo.reduce((s,o)=>s+(o.total||0),0);
@@ -12323,7 +12381,10 @@ function App(){
     const cashOut=bc.filter(c=>c.type==="out").reduce((s,c)=>s+(c.amount||0),0);
     return{gross,discounts,net,voidAmt,voidCount,opening,cashIn,cashOut,
       cashSales:payTotal("cash"),gcash:payTotal("gcash"),
+      maya:payTotal("maya"),bank:payTotal("bank"),
       foodpanda:payTotal("foodpanda"),grabfood:payTotal("grabfood"),
+      tenderTotal:["cash","gcash","maya","bank","foodpanda","grabfood"]
+        .reduce((s2,m)=>s2+payTotal(m),0),
       discSC,discPWD,discEmp,discOther,scTxns,pwdTxns,
       vatableSales,vatAmount,vatExempt,zeroSales,isVATreg,zeroRated,
       siFrom,siTo,qtySold,cancelled,
@@ -12634,19 +12695,87 @@ function App(){
               {id:"bank",     label:"Bank Transfer", icon:"🏦", color:"#1565C0"},
               {id:"foodpanda",label:"FoodPanda",     icon:"🐼", color:"#D70F64"},
               {id:"grabfood", label:"GrabFood",      icon:"🟢", color:"#00B14F"},
-            ].map(pm=>h("button",{key:pm.id,onClick:()=>setChkPay(pm.id),
-              style:{padding:"8px 4px",borderRadius:8,border:`2px solid ${chkPay===pm.id?pm.color:C.border}`,
-                background:chkPay===pm.id?pm.color+"18":"#fff",
-                color:chkPay===pm.id?pm.color:C.muted,
-                fontWeight:chkPay===pm.id?800:500,fontSize:13,cursor:"pointer",
-                display:"flex",flexDirection:"column",alignItems:"center",gap:2}},
-              h("span",{style:{fontSize:16}},pm.icon),
-              pm.label
-            ))
+              // Split sits beside the six, not in place of any of them.
+              {id:"split",    label:"Split",         icon:"✂️", color:"#6A1B9A"},
+            ].map(pm=>{
+              const on=(pm.id==="split")?chkSplit:(chkPay===pm.id&&!chkSplit);
+              return h("button",{key:pm.id,
+                onClick:()=>{
+                  if(pm.id==="split"){
+                    setChkSplit(true);
+                    setChkSplitRows([{method:"gcash",amount:""}]);
+                  }else{
+                    setChkSplit(false); setChkPay(pm.id);
+                  }
+                },
+                style:{padding:"8px 4px",borderRadius:8,border:`2px solid ${on?pm.color:C.border}`,
+                  background:on?pm.color+"18":"#fff",
+                  color:on?pm.color:C.muted,
+                  fontWeight:on?800:500,fontSize:13,cursor:"pointer",
+                  display:"flex",flexDirection:"column",alignItems:"center",gap:2}},
+                h("span",{style:{fontSize:16}},pm.icon),
+                pm.label
+              );
+            })
           ),
           // Hide cash tendered for non-cash
-          chkPay!=="cash"&&h("div",{style:{marginTop:6,padding:"7px 11px",background:"#F3E9F7",borderRadius:8,fontSize:13,color:C.primary,fontWeight:600}},
+          !chkSplit&&chkPay!=="cash"&&h("div",{style:{marginTop:6,padding:"7px 11px",background:"#F3E9F7",borderRadius:8,fontSize:13,color:C.primary,fontWeight:600}},
             "📱 "+{gcash:"GCash",maya:"Maya/PayMaya",bank:"Bank Transfer",foodpanda:"FoodPanda",grabfood:"GrabFood"}[chkPay]+" — no change needed"
+          ),
+
+          chkSplit&&h("div",{style:{marginTop:8,background:"#F3E9F7",
+            borderRadius:9,padding:"10px 11px"}},
+            h("div",{style:{fontSize:12,fontWeight:800,color:C.primary,
+              letterSpacing:1,marginBottom:6}},"HINDI CASH NA BAHAGI"),
+            chkSplitRows.map((r,ri)=>h("div",{key:ri,style:{display:"flex",
+              gap:6,marginBottom:6,alignItems:"center"}},
+              h("select",{value:r.method,
+                onChange:e=>setChkSplitRows(p=>p.map((x,i)=>
+                  i===ri?{...x,method:e.target.value}:x)),
+                style:{flex:1,padding:"7px",border:"1px solid "+C.border,
+                  borderRadius:7,fontSize:13,fontWeight:700,outline:"none"}},
+                [["gcash","GCash"],["maya","Maya"],["bank","Bank"],
+                 ["foodpanda","FoodPanda"],["grabfood","GrabFood"]].map(([v,l])=>
+                  h("option",{key:v,value:v},l))),
+              h("input",{type:"number",onFocus:e=>e.target.select(),
+                value:r.amount,placeholder:"0.00",
+                onChange:e=>setChkSplitRows(p=>p.map((x,i)=>
+                  i===ri?{...x,amount:e.target.value}:x)),
+                style:{width:100,padding:"7px",border:"1px solid "+C.border,
+                  borderRadius:7,fontSize:13,fontWeight:800,textAlign:"right",
+                  outline:"none"}}),
+              chkSplitRows.length>1&&h("button",{
+                onClick:()=>setChkSplitRows(p=>p.filter((_,i)=>i!==ri)),
+                style:{width:28,height:28,borderRadius:7,cursor:"pointer",
+                  border:"1px solid "+C.border,background:"#fff",
+                  color:C.danger,fontSize:14}},"\u00D7")
+            )),
+            chkSplitRows.length<3&&h("button",{
+              onClick:()=>setChkSplitRows(p=>p.concat([{method:"maya",amount:""}])),
+              style:{padding:"5px 11px",borderRadius:7,fontSize:12,
+                fontWeight:700,cursor:"pointer",border:"1px dashed "+C.primary,
+                background:"#fff",color:C.primary}},"+ Isa pa"),
+            (function(){
+              const oth=splitOtherTotal();
+              const due=Math.max(0,(Number(chkTotal)||0)-oth);
+              const over=oth>(Number(chkTotal)||0)+0.001;
+              return h("div",{style:{marginTop:8,paddingTop:7,
+                borderTop:"1px dashed "+C.primary,fontSize:13}},
+                h("div",{style:{display:"flex",justifyContent:"space-between"}},
+                  h("span",{style:{color:C.muted}},"Total"),
+                  h("b",null,"\u20B1"+peso(chkTotal))),
+                h("div",{style:{display:"flex",justifyContent:"space-between"}},
+                  h("span",{style:{color:C.muted}},"Hindi cash"),
+                  h("b",null,"\u20B1"+peso(oth))),
+                h("div",{style:{display:"flex",justifyContent:"space-between",
+                  marginTop:2}},
+                  h("span",{style:{fontWeight:800,
+                    color:over?C.danger:C.success}},
+                    over?"Sobra sa total":"Bayaran sa cash"),
+                  h("b",{style:{color:over?C.danger:C.success}},
+                    over?("\u20B1"+peso(oth-(Number(chkTotal)||0)))
+                        :("\u20B1"+peso(due)))));
+            })()
           )
         ),
         // ── STEP 2 ───────────────────────────────────────────
@@ -12845,10 +12974,22 @@ function App(){
               return;
             }
             const cash=parseFloat(chkCash)||0;
-            const isCredit=chkPay==="credit"||chkPay==="gcash"||chkPay==="maya"||chkPay==="bank";
-            if(!isCredit&&cash<chkTotal){
-              showT("₱"+peso((chkTotal-cash))+" short — enter full payment","err");
-              return;
+            if(chkSplit){
+              const oth=splitOtherTotal();
+              if(oth<=0){showT("Ilagay ang hindi-cash na bahagi","warn");return;}
+              if(oth>chkTotal+0.001){
+                showT("₱"+peso(oth-chkTotal)+" sobra sa total","err");return;
+              }
+              const due=chkTotal-oth;
+              if(due>0.001&&cash<due-0.001){
+                showT("₱"+peso(due-cash)+" kulang sa cash","err");return;
+              }
+            }else{
+              const isCredit=chkPay==="credit"||chkPay==="gcash"||chkPay==="maya"||chkPay==="bank";
+              if(!isCredit&&cash<chkTotal){
+                showT("₱"+peso((chkTotal-cash))+" short — enter full payment","err");
+                return;
+              }
             }
             setTimeout(placeOrder,50);
           },
@@ -14711,14 +14852,15 @@ function App(){
           const CSV=[
             ["Date","Branch","Gross","Discounts","Voids","VoidAmt","Net",
              "VATable","VAT","VATExempt","Txns","DineIn","Takeout",
-             "CashSales","GCash","FoodPanda","GrabFood",
+             "CashSales","GCash","Maya","Bank","FoodPanda","GrabFood",
              "Opening","CashIn","CashOut","CashOnHand","SIFrom","SITo","ClosedBy"]
           ];
           const toCSV=(list)=>{
             const out=CSV.slice();
             list.forEach(r=>out.push([r.date,bName(r.branch),r.gross,r.discounts,
               r.voidCount,r.voidAmt,r.net,r.vatableSales,r.vatAmount,r.vatExempt,
-              r.txns,r.dineIn,r.takeout,r.cashSales,r.gcash,r.foodpanda,r.grabfood,
+              r.txns,r.dineIn,r.takeout,r.cashSales,r.gcash,r.maya,r.bank,
+              r.foodpanda,r.grabfood,
               r.opening,r.cashIn,r.cashOut,r.cashOnHand,r.siFrom,r.siTo,r.closedBy]
               .map(v=>{
                 const t=(v===undefined||v===null)?"":String(v);
@@ -14918,8 +15060,16 @@ function App(){
                    ["SC/PWD",zd.scPwd+" txns"],["Avg Transaction","₱"+(zd.txns>0?peso(zd.net/zd.txns):"0.00")],
                    ["Cash Sales","₱"+peso(zd.cashSales)],
                    ["GCash","₱"+peso(zd.gcash)],
+                   ["Maya/PayMaya","₱"+peso(zd.maya||0)],
+                   ["Bank Transfer","₱"+peso(zd.bank||0)],
                    ["FoodPanda","₱"+peso(zd.foodpanda)],
-                   ["GrabFood","₱"+peso(zd.grabfood)]
+                   ["GrabFood","₱"+peso(zd.grabfood)],
+                   // A split sale lands in two lines. This is the check that
+                   // no peso fell outside them.
+                   ["Total tender","₱"+peso(zd.tenderTotal!=null
+                     ?zd.tenderTotal
+                     :((zd.cashSales||0)+(zd.gcash||0)+(zd.maya||0)
+                       +(zd.bank||0)+(zd.foodpanda||0)+(zd.grabfood||0)))]
                   ].map(([l,v])=>h("div",{key:l,style:{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f5f5f5"}},
                     h("span",{style:{fontSize:13,color:C.muted}},l),
                     h("span",{style:{fontSize:14,fontWeight:800,color:C.text}},v)
@@ -16534,7 +16684,7 @@ function App(){
                   {id:"foodpanda",label:"🐼 FoodPanda",     color:"#D70F64"},
                   {id:"grabfood", label:"🟢 GrabFood",      color:"#00B14F"},
                 ].map(pm=>{
-                  const pmOrders=orders.filter(o=>(o.payMethod||"cash")===pm.id);
+                  const pmOrders=orders.filter(o=>payAmtOf(o,pm.id)>0);
                   if(!pmOrders.length&&pm.id!=="cash")return null;
                   return h("div",{key:pm.id,style:{display:"flex",alignItems:"center",gap:8,padding:"7px 0",borderBottom:"1px solid #f5f5f5"}},
                     h("div",{style:{width:28,height:28,background:pm.color+"18",borderRadius:7,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13}},pm.label.split(" ")[0]),
