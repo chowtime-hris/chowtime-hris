@@ -1882,9 +1882,24 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
                 packUnitOf( item)+" → "+( item.orderQty||0)+" "+baseUnitOf( item))
             );
           })(),
-          // Last price (from  item data)
-          h("div",{style:{fontSize:13,color:C.muted,textAlign:"center"}},
-            ( item.price||0)>0?"₱"+peso( item.price||0):"—"),
+          // Price. The qty beside it is counted in packs, so a per-piece
+          // figure here reads as the price of what is being ordered and is
+          // wrong by the pack size. Lead with the pack, keep the per-piece.
+          (function(){
+            const pr=Number( item.price)||0;
+            const sz=packSizeOf( item)||1;
+            if(pr<=0)return h("div",{style:{fontSize:13,color:C.muted,
+              textAlign:"center"}},"—");
+            if(sz<=1)return h("div",{style:{fontSize:13,color:C.muted,
+              textAlign:"center"}},"₱"+peso(pr)+" / "+baseUnitOf( item));
+            return h("div",{style:{textAlign:"center",lineHeight:1.3}},
+              h("div",{style:{fontSize:13,fontWeight:700,color:C.text}},
+                "₱"+peso(pr*sz)),
+              h("div",{style:{fontSize:11,color:C.muted}},
+                "kada "+packUnitOf( item)),
+              h("div",{style:{fontSize:11,color:C.muted}},
+                "₱"+peso(pr)+" / "+baseUnitOf( item)));
+          })(),
           // Note
           h("input",{value: item.note||"",
             onChange:e=>setItems(p=>p.map((x,i)=>i===idx?{...x,note:e.target.value}:x)),
@@ -2007,6 +2022,12 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
       ...i,
       actualQty: actualQtys[i.id]??i.qty,
       price: prices[i.id]||0,
+      // price stays per base unit — stock, lots and BOM all read it that way.
+      // pricePack is the same figure stated as the branch ordered it, kept on
+      // the line so the DR is not re-deriving it from an item that may have
+      // been repriced since.
+      pricePack: (Number(i.packSize)>1)
+        ? (prices[i.id]||0)*Number(i.packSize) : null,
       total: (actualQtys[i.id]??i.qty)*(prices[i.id]||0),
       discrepancy: (actualQtys[i.id]??i.qty) - i.qty
     }));
@@ -6162,13 +6183,18 @@ const FEATURE_DEFS = {
 
 function BranchSettingsPage({branchId,curBranch,user,db,showT}){
   const [perms,setPerms]   = useState({});
+  const [kitchenFlow,setKitchenFlow] = useState(true);
   const [saving,setSaving] = useState(false);
   const [activeTab,setTab] = useState("cashier");
 
   // Load saved permissions for this branch
   useEffect(()=>{
     const unsub = onSnapshot(doc(db,"branch_settings",branchId), snap=>{
-      if(snap.exists()) setPerms(snap.data().permissions||{});
+      if(snap.exists()){
+        setPerms(snap.data().permissions||{});
+        // Absent means on: the flow existed before the switch did.
+        setKitchenFlow(snap.data().kitchenFlow!==false);
+      }
       else {
         // Default — all enabled
         const def={};
@@ -6195,13 +6221,34 @@ function BranchSettingsPage({branchId,curBranch,user,db,showT}){
       await setDoc(doc(db,"branch_settings",branchId),{
         branchId, branchName:curBranch.full,
         permissions:perms,
+        kitchenFlow:!!kitchenFlow,
         updatedBy:user.name,
         updatedAt:serverTimestamp()
-      });
+      },{merge:true});
       showT("Access settings saved ✓");
     }catch(e){showT("Save failed","err");}
     setSaving(false);
   };
+
+  const kitchenCard = h("div",{style:{background:"#fff",borderRadius:12,
+    border:"1px solid "+C.border,padding:"13px 15px",marginBottom:14}},
+    h("div",{style:{display:"flex",gap:12,alignItems:"center",flexWrap:"wrap"}},
+      h("div",{style:{flex:1,minWidth:220}},
+        h("b",{style:{fontSize:14}},"\uD83D\uDD25 Kitchen flow"),
+        h("div",{style:{fontSize:13,color:C.muted,marginTop:3,lineHeight:1.5}},
+          kitchenFlow
+            ? "BUKAS \u2014 bagong order ay pending, dadaan sa Prepare at Served. Kailangan ng dispatcher o crew na maglilipat ng status."
+            : "SARADO \u2014 bagong order ay agad served. Nakatago ang Prepare at Served. Gamitin kapag walang dispatcher.")),
+      h("button",{onClick:()=>setKitchenFlow(v=>!v),
+        style:{width:64,height:32,borderRadius:16,border:"none",cursor:"pointer",
+          background:kitchenFlow?C.success:"#C8C8C8",position:"relative",
+          flexShrink:0}},
+        h("span",{style:{position:"absolute",top:3,left:kitchenFlow?35:3,
+          width:26,height:26,borderRadius:"50%",background:"#fff",
+          transition:"left .15s",display:"block"}}))),
+    h("div",{style:{fontSize:12,color:C.muted,marginTop:8}},
+      "Hindi nito binubura ang dating order \u2014 ang bago lang ang apektado. Pindutin ang Save sa ibaba.")
+  );
 
   const roleColors = {cashier:"#34C759",crew:"#FF9500",stockclerk:"#AF52DE"};
   const roleLabels = {cashier:"💳 Cashier",crew:"👨‍🍳 Crew",stockclerk:"📦 Stock Clerk"};
@@ -6214,6 +6261,8 @@ function BranchSettingsPage({branchId,curBranch,user,db,showT}){
       padding:"10px 14px",marginBottom:14,fontSize:13,color:"#1B5E20"}},
       "🛡️ Control which features each role can access in this branch. Manager always has full access. Changes take effect after staff re-login."
     ),
+
+    kitchenCard,
 
     // Role tabs
     h("div",{style:{display:"flex",gap:0,borderBottom:"2px solid "+C.border,marginBottom:14}},
@@ -9338,6 +9387,10 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
         ...i,
         actualQty: actualQtys[i.id]!=null?actualQtys[i.id]:i.qty,
         price: prices[i.id]||0,
+        // per base unit, as everything downstream expects; the pack figure is
+        // recorded beside it so the printed DR matches what was ordered.
+        pricePack: (Number(i.packSize)>1)
+          ? (prices[i.id]||0)*Number(i.packSize) : null,
         total: ((actualQtys[i.id]!=null?actualQtys[i.id]:i.qty)||0)*(prices[i.id]||0),
         discrepancy: ((actualQtys[i.id]!=null?actualQtys[i.id]:i.qty)||0)-(i.qty||0)
       }));
@@ -9558,9 +9611,26 @@ function printPODR(po,cs){
     grand+=cTotal;
     cItems.forEach(function(i){
       const q=i.actualQty!=null?i.actualQty:(i.qty||0);
+      // Qty and unit price must speak the same unit as the order. The line was
+      // priced per piece while the branch ordered packs, so the paper and the
+      // screen described the same delivery two different ways. The total is
+      // unchanged either way — 10 x P120 and 100 x P12 are both P1,200.
+      const sz=Number(i.packSize)||0;
+      const pu=i.packUnit||"";
+      const usePack=(sz>1&&pu);
+      const qCell=usePack
+        ? (_n(q/sz)+" "+pu+"<div style='font-size:9px;color:#666'>"
+            +_n(q)+" "+(i.unit||"")+"</div>")
+        : (_n(q)+" "+(i.unit||""));
+      const packPrice=(Number(i.pricePack)>0)
+        ? Number(i.pricePack) : (i.price||0)*sz;
+      const pCell=usePack
+        ? ("₱"+peso(packPrice)+"<div style='font-size:9px;color:#666'>₱"
+            +peso(i.price||0)+" / "+(i.unit||"")+"</div>")
+        : ("₱"+peso(i.price||0));
       rows+="<tr><td>"+ itemNo+++"</td><td>"+cat+"</td><td>"+i.name+"</td>"+
-        "<td>"+q+" "+(i.unit||"")+"</td>"+
-        "<td style='text-align:right'>"+"₱"+peso(i.price||0)+"</td>"+
+        "<td>"+qCell+"</td>"+
+        "<td style='text-align:right'>"+pCell+"</td>"+
         "<td style='text-align:right'>"+"₱"+peso(((i.price||0)*q))+"</td></tr>";
     });
     rows+="<tr style='background:#f5f5f5;font-weight:bold'>"+
@@ -11099,6 +11169,7 @@ function App(){
   const [ordDate,setOrdDate]=useState("");               // "" = today, "all" = no filter
   const [ordPage,setOrdPage]=useState(1);                // orders list pagination
   const [placing,setPlacing]=useState(false);            // order submit in flight
+  const [kitchenFlow,setKitchenFlow]=useState(true);     // pending→preparing→served
   const [repSrch,setRepSrch]=useState("");
   const [repMonth,setRepMonth]=useState("");
   const [zSel,setZSel]=useState("");                     // "" = live reading
@@ -11464,7 +11535,10 @@ function App(){
     const bPermsId=(user.branch==="all"||user.branch==="comm")?"ct-main":user.branch;
     try{
       const unsub=onSnapshot(doc(db,"branch_settings",bPermsId),snap=>{
-        if(snap.exists())setBranchPerms(snap.data().permissions||{});
+        if(snap.exists()){
+          setBranchPerms(snap.data().permissions||{});
+          setKitchenFlow(snap.data().kitchenFlow!==false);
+        }
       },()=>{});
       return()=>unsub();
     }catch(e){}
@@ -11965,7 +12039,9 @@ function App(){
       discItems:discAll?[]:cart.filter(i=>discTargets.includes(i.cartId)).map(i=>i.name),
       discId:chkDiscId,custName:chkCust,tableNo:chkTable,
       cash:chkCash,total:chkTotal,time:now,date:localDate(),
-      status:"pending",orderType:chkType,mixedType:mixedType,
+      // With no dispatcher, every order would sit at pending forever and the
+      // queue counts would mean nothing. Closed flow marks it done on sale.
+      status:kitchenFlow?"pending":"served",orderType:chkType,mixedType:mixedType,
       takeoutCount:toCount,
       payMethod:chkPay,priceType,cashier:user.name,
       bomDeducted:false,
@@ -14294,7 +14370,7 @@ function App(){
                   color:ordDate===d?C.primary:C.text}},
                 d.slice(5)+" ("+orders.filter(o=>o.branch===branchId&&_dayOf(o)===d).length+")"))
           ),
-          h("div",{style:{display:"flex",gap:8,marginBottom:12}},
+          kitchenFlow&&h("div",{style:{display:"flex",gap:8,marginBottom:12}},
             ["pending","preparing","served"].map(s=>h(Stat,{key:s,label:s,value:shown.filter(o=>o.status===s).length,color:{pending:C.warning,preparing:C.info,served:C.success}[s],icon:{pending:"⏳",preparing:"🔥",served:"✅"}[s]}))
           ),
           h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
@@ -14323,8 +14399,8 @@ function App(){
                   ((o.date&&o.date!==localDate())?(o.date+" \u00B7 "):"")+(o.time||""))
               ),
               h("div",{style:{display:"flex",gap:4,flexShrink:0,alignItems:"center"}},
-                o.status==="pending"&&h("button",{onClick:()=>{if(o._docId)updateStatus(o._docId,"preparing");showT((o.id||"")+"→Prep","info");},style:{padding:"3px 7px",background:"#E3F2FD",border:"none",borderRadius:6,color:C.info,fontSize:12,fontWeight:700,cursor:"pointer"}},"Prepare"),
-                o.status==="preparing"&&h("button",{onClick:()=>{if(o._docId)updateStatus(o._docId,"served");showT((o.id||"")+" ✓");},style:{padding:"3px 7px",background:"#E8F5E9",border:"none",borderRadius:6,color:C.success,fontSize:12,fontWeight:700,cursor:"pointer"}},"Served✓"),
+                kitchenFlow&&o.status==="pending"&&h("button",{onClick:()=>{if(o._docId)updateStatus(o._docId,"preparing");showT((o.id||"")+"→Prep","info");},style:{padding:"3px 7px",background:"#E3F2FD",border:"none",borderRadius:6,color:C.info,fontSize:12,fontWeight:700,cursor:"pointer"}},"Prepare"),
+                kitchenFlow&&o.status==="preparing"&&h("button",{onClick:()=>{if(o._docId)updateStatus(o._docId,"served");showT((o.id||"")+" ✓");},style:{padding:"3px 7px",background:"#E8F5E9",border:"none",borderRadius:6,color:C.success,fontSize:12,fontWeight:700,cursor:"pointer"}},"Served✓"),
                 h(Badge,{label:o.status||"—",color:({"pending":C.warning,"preparing":C.info,"served":C.success})[o.status]||C.muted}),
                 h("button",{onClick:()=>{setCurOrd(o);setModal("receipt");},style:{width:24,height:24,background:"#F3E9F7",border:"none",borderRadius:5,color:C.primary,cursor:"pointer",fontSize:13}},"🖨️"),
                 // Void button - manager/owner only, non-voided orders
