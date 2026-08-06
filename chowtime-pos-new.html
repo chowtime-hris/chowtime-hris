@@ -7391,7 +7391,7 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
             h("div",{style:{fontWeight:700,fontSize:14,color:C.danger}},
               "Select Order to Void"),
             h("div",{style:{marginLeft:"auto",display:"flex",gap:4}},
-              [[0,"Ngayon"],[7,"Huling 7 araw"]].map(([d,l])=>
+              [[0,"Ngayon"],[7,"7 araw"],[99999,"Lahat"]].map(([d,l])=>
                 h("button",{key:d,onClick:()=>setVoidDays(d),
                   style:{padding:"4px 11px",fontSize:12,borderRadius:7,
                     cursor:"pointer",fontWeight:voidDays===d?800:600,
@@ -7402,8 +7402,8 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
             ?h("div",{style:{padding:"20px",textAlign:"center",color:C.muted,
                 background:"#fff",borderRadius:10,border:"1px solid "+C.border,fontSize:13}},
               voidDays===0
-                ?"Walang order ngayong araw — subukan ang Huling 7 araw."
-                :"Walang mavo-void na order sa huling 7 araw.")
+                ?"Walang order ngayong araw — subukan ang 7 araw o Lahat."
+                :"Walang mavo-void na order sa saklaw na ito.")
             :h("div",{style:{display:"grid",gap:5,maxHeight:380,overflowY:"auto"}},
               todayOrders.map(o=>h("div",{key:o.id,
                 style:{padding:"10px 13px",borderRadius:9,
@@ -10962,6 +10962,7 @@ function App(){
   const [expMonth,setExpMonth]=useState("");             // "" = all months
   const [expCat,setExpCat]=useState("");
   const [ordDate,setOrdDate]=useState("");               // "" = today, "all" = no filter
+  const [ordPage,setOrdPage]=useState(1);                // orders list pagination
   const [repSrch,setRepSrch]=useState("");
   const [repMonth,setRepMonth]=useState("");
   const [zSel,setZSel]=useState("");                     // "" = live reading
@@ -14084,6 +14085,19 @@ function App(){
           // days that actually have orders for this branch, newest first
           const _days=[...new Set(orders.filter(o=>o.branch===branchId)
             .map(_dayOf).filter(Boolean))].sort().reverse();
+
+          // Newest first, then paged. Firestore hands these back in document
+          // order, not time order — without an explicit sort the "latest"
+          // order is wherever it happens to land, and on All dates the list
+          // grows until it is unusable.
+          const _sorted=[...shown].sort((a,b)=>
+            String(_dayOf(b)+" "+(b.time||"")+" "+(b.id||""))
+              .localeCompare(String(_dayOf(a)+" "+(a.time||"")+" "+(a.id||""))));
+          const PER=25;
+          const _pages=Math.max(1,Math.ceil(_sorted.length/PER));
+          const _pg=Math.min(Math.max(1,ordPage),_pages);
+          const _from=(_pg-1)*PER;
+          const pageRows=_sorted.slice(_from,_from+PER);
           return h("div",null,
           h(SectionHeader,{title:page==="all_orders"
             ?"All Orders — "+orders.length+" total, all branches"
@@ -14128,7 +14142,7 @@ function App(){
               page==="all_orders"?"No orders on Firebase"
                 :(ordDate==="all"?"No orders on "+curBranch.name
                   :"No orders on "+_pick+" sa "+curBranch.name)),
-            shown.map(o=>h("div",{key:o._docId||o.id,style:{display:"flex",alignItems:"flex-start",gap:9,padding:"9px 14px",borderBottom:"1px solid #f5f5f5"}},
+            pageRows.map(o=>h("div",{key:o._docId||o.id,style:{display:"flex",alignItems:"flex-start",gap:9,padding:"9px 14px",borderBottom:"1px solid #f5f5f5"}},
               h("div",{style:{width:33,height:33,background:"#F3E9F7",border:"2px solid #D9BFE4",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,color:C.primary,fontSize:11,flexShrink:0}},(o.id||"—").slice(-3)),
               h("div",{style:{flex:1}},
                 h("div",{style:{fontSize:13,fontWeight:700,display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}},
@@ -14143,7 +14157,10 @@ function App(){
               h("div",{style:{textAlign:"right",flexShrink:0}},
                 h("div",{style:{fontSize:13,fontWeight:900}},"₱"+peso(o.total||0)),
                 (o.discAmt||0)>0&&h("div",{style:{fontSize:11,color:C.danger}},"-₱"+peso(o.discAmt||0)),
-                h("div",{style:{fontSize:11,color:C.muted}},o.time||"")
+                h("div",{style:{fontSize:11,color:C.muted}},
+                  // Viewing "All", every row read as if it happened today —
+                  // the time alone cannot tell Jul 28 from this morning.
+                  ((o.date&&o.date!==localDate())?(o.date+" \u00B7 "):"")+(o.time||""))
               ),
               h("div",{style:{display:"flex",gap:4,flexShrink:0,alignItems:"center"}},
                 o.status==="pending"&&h("button",{onClick:()=>{if(o._docId)updateStatus(o._docId,"preparing");showT((o.id||"")+"→Prep","info");},style:{padding:"3px 7px",background:"#E3F2FD",border:"none",borderRadius:6,color:C.info,fontSize:12,fontWeight:700,cursor:"pointer"}},"Prepare"),
@@ -14172,6 +14189,40 @@ function App(){
               )
             )),
             orders.length===0&&h("div",{style:{textAlign:"center",padding:"30px",color:C.muted,fontSize:14}},"Loading from Firebase...")
+          ),
+
+          // Pager. Shown whenever there is more than one page — the counts
+          // stay visible either way so it is clear how much is behind them.
+          _sorted.length>0&&h("div",{style:{display:"flex",alignItems:"center",
+            gap:8,flexWrap:"wrap",marginTop:10,padding:"9px 13px",
+            background:"#fff",borderRadius:10,border:"1px solid "+C.border}},
+            h("span",{style:{fontSize:13,color:C.muted}},
+              (_from+1)+"\u2013"+Math.min(_from+PER,_sorted.length)
+              +" ng "+_sorted.length+" order"),
+            h("div",{style:{marginLeft:"auto",display:"flex",gap:6,
+              alignItems:"center"}},
+              h("button",{onClick:()=>setOrdPage(1),disabled:_pg<=1,
+                style:{padding:"5px 10px",fontSize:12,borderRadius:7,
+                  border:"1px solid "+C.border,background:"#fff",
+                  color:_pg<=1?C.muted:C.text,
+                  cursor:_pg<=1?"not-allowed":"pointer"}},"\u00AB"),
+              h("button",{onClick:()=>setOrdPage(_pg-1),disabled:_pg<=1,
+                style:{padding:"5px 12px",fontSize:12,borderRadius:7,
+                  border:"1px solid "+C.border,background:"#fff",
+                  color:_pg<=1?C.muted:C.text,fontWeight:700,
+                  cursor:_pg<=1?"not-allowed":"pointer"}},"\u2039 Prev"),
+              h("span",{style:{fontSize:13,fontWeight:800,minWidth:74,
+                textAlign:"center"}},"Page "+_pg+" / "+_pages),
+              h("button",{onClick:()=>setOrdPage(_pg+1),disabled:_pg>=_pages,
+                style:{padding:"5px 12px",fontSize:12,borderRadius:7,
+                  border:"1px solid "+C.border,background:"#fff",
+                  color:_pg>=_pages?C.muted:C.text,fontWeight:700,
+                  cursor:_pg>=_pages?"not-allowed":"pointer"}},"Next \u203A"),
+              h("button",{onClick:()=>setOrdPage(_pages),disabled:_pg>=_pages,
+                style:{padding:"5px 10px",fontSize:12,borderRadius:7,
+                  border:"1px solid "+C.border,background:"#fff",
+                  color:_pg>=_pages?C.muted:C.text,
+                  cursor:_pg>=_pages?"not-allowed":"pointer"}},"\u00BB"))
           )
           );
         })(),
