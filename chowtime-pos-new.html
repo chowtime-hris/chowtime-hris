@@ -2392,6 +2392,7 @@ function DRCheckForm({po,db,branchId,user,showT,INIT_INVENTORY,setAdvances,advan
               stock:increment( item.receivedQty||0),
               lastRestocked:serverTimestamp()
             });
+            await syncPackFromMain(db,invCol, item.id);
           }
         }catch(e){
           const base=INIT_INVENTORY.find(i=>i.id=== item.id)||{};
@@ -6593,6 +6594,7 @@ async function postReceivedToStock(db,po,byName){
              po.poNum||"",Date.now());
         await updateDoc(ref,Object.assign(
           {stock:increment(qty),lastRestocked:serverTimestamp()}, nlots?{lots:nlots}:{}));
+        await syncPackFromMain(db,invCol,it.id);
       }
       res.added++;
       await addDoc(collection(db,logCol),{
@@ -7050,6 +7052,29 @@ const NOTIF_META={
 // the owner role has neither void page in its nav — so the only void an owner
 // could reach did nothing but flip a status flag.
 // One implementation now, called by both.
+// Pack unit and pack size are physical facts of the product, not a branch
+// decision — 10 pc per pack at Main cannot be 12 at WMBL. Adoption copies them
+// once, on the first delivery; this keeps them true on every later one.
+// Deliberately does NOT touch cost, minStock or the base unit: those ARE the
+// branch's own (cost includes gas and fare Main never billed).
+async function syncPackFromMain(db,col,itemId){
+  if(!col||col==="inventory"||!itemId)return null;
+  try{
+    const m=await getDoc(doc(db,"inventory",itemId));
+    if(!m.exists())return null;
+    const md=m.data();
+    const mu=md.packUnit||"", ms=Number(md.packSize)||0;
+    const c=await getDoc(doc(db,col,itemId));
+    if(!c.exists())return null;
+    const cd=c.data();
+    if((cd.packUnit||"")===mu&&(Number(cd.packSize)||0)===ms)return null;
+    await updateDoc(doc(db,col,itemId),
+      {packUnit:mu,packSize:ms,packSyncedAt:serverTimestamp()});
+    return {id:itemId,from:(cd.packUnit||"")+"/"+(Number(cd.packSize)||0),
+      to:mu+"/"+ms};
+  }catch(e){console.warn("pack sync:",itemId,e);return null;}
+}
+
 async function performVoid(db, args){
   const order   = args.order || {};
   const  items   = args.voidedItems || order. items || [];
@@ -8549,16 +8574,65 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
           h("div",null,
             h("div",{style:{fontSize:12,fontWeight:700,color:"#5A5A5A",letterSpacing:1,marginBottom:4}},"SELL PRICE — BRANCH PAYS (₱/"+(details.unit||"pc")+")"),
             h("input",{type:"number",onFocus:e=>e.target.select(),value:details.price,
-              onChange:e=>setDetails(p=>({...p,price:e.target.value})),
+              onChange:e=>setDetails(p=>({...p,price:e.target.value,_pricePack:undefined})),
               style:{width:"100%",padding:"8px",border:"1px solid #ddd",borderRadius:7,fontSize:13,fontWeight:700,outline:"none",boxSizing:"border-box",color:"#1565C0"}})
           ),
           h("div",null,
             h("div",{style:{fontSize:12,fontWeight:700,color:"#5A5A5A",letterSpacing:1,marginBottom:4}},"COST — USED BY BOM (₱/"+(details.unit||"pc")+")"),
             h("input",{type:"number",onFocus:e=>e.target.select(),value:details.cost,
-              onChange:e=>setDetails(p=>({...p,cost:e.target.value})),
+              onChange:e=>setDetails(p=>({...p,cost:e.target.value,_costPack:undefined})),
               style:{width:"100%",padding:"8px",border:"1px solid #ddd",borderRadius:7,fontSize:13,fontWeight:700,outline:"none",boxSizing:"border-box",color:"#C62828"}})
           )
         ),
+
+        // Per-pack entry. Both fields above are stored per BASE unit because
+        // that is what the BOM deducts against — but nobody buys per piece.
+        // Typing the pack price and dividing by hand is where the wrong figure
+        // gets in, so let the pack be typed and do the division here.
+        (function(){
+          const packN=Number(details.packSize)||0;
+          if(!(packN>1))return null;
+          const packLbl=details.packUnit||"pack";
+          const base=details.unit||"pc";
+          const show=(raw,per)=>(raw!==undefined&&raw!==null)?raw
+            :(Number(per)>0?String(Math.round(Number(per)*packN*10000)/10000):"");
+          const setPack=(key,perKey)=>(e)=>{
+            const v=e.target.value;
+            const per=(v===""||isNaN(parseFloat(v)))?""
+              :String(Math.round((parseFloat(v)/packN)*1000000)/1000000);
+            setDetails(p=>Object.assign({},p,{[key]:v,[perKey]:per}));
+          };
+          const box={width:"100%",padding:"8px",border:"1px solid #90CAF9",
+            borderRadius:7,fontSize:13,fontWeight:700,outline:"none",
+            boxSizing:"border-box"};
+          return h("div",{style:{background:"#E3F2FD",borderRadius:8,
+            padding:"9px 11px",marginBottom:10}},
+            h("div",{style:{fontSize:12,fontWeight:800,color:"#1565C0",
+              letterSpacing:1,marginBottom:6}},
+              "O ILAGAY KADA "+packLbl.toUpperCase()+" ("+packN+" "+base+")"),
+            h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}},
+              h("div",null,
+                h("div",{style:{fontSize:12,color:"#1565C0",marginBottom:3}},
+                  "Sell kada "+packLbl),
+                h("input",{type:"number",onFocus:e=>e.target.select(),
+                  value:show(details._pricePack,details.price),
+                  onChange:setPack("_pricePack","price"),placeholder:"0.00",
+                  style:Object.assign({},box,{color:"#1565C0"})})),
+              h("div",null,
+                h("div",{style:{fontSize:12,color:"#C62828",marginBottom:3}},
+                  "Cost kada "+packLbl),
+                h("input",{type:"number",onFocus:e=>e.target.select(),
+                  value:show(details._costPack,details.cost),
+                  onChange:setPack("_costPack","cost"),placeholder:"0.00",
+                  style:Object.assign({},box,{color:"#C62828"})}))),
+            h("div",{style:{fontSize:12,color:"#1565C0",marginTop:6}},
+              "Naka-save kada "+base+": sell \u20B1"
+              +peso(parseFloat(details.price)||0)+"  \u00B7  cost \u20B1"
+              +peso(parseFloat(details.cost)||0)
+              +" \u2014 iyon ang ginagamit ng BOM.")
+          );
+        })(),
+
         h("div",{style:{marginBottom:12}},
           h("div",{style:{fontSize:12,fontWeight:700,color:"#5A5A5A",letterSpacing:1,marginBottom:4,
             display:"flex",justifyContent:"space-between"}},
@@ -8745,6 +8819,7 @@ function ReceiveItemsModal({po,db,user,showT,branchId,onClose}){
                    po.poNum||"",Date.now());
               await updateDoc(ref,Object.assign(
                 {stock:increment(qty),lastRestocked:serverTimestamp()}, nlots?{lots:nlots}:{}));
+              await syncPackFromMain(db,invCol,it.id);
             }
             added++;
             await addDoc(collection(db,
@@ -11023,6 +11098,7 @@ function App(){
   const [expCat,setExpCat]=useState("");
   const [ordDate,setOrdDate]=useState("");               // "" = today, "all" = no filter
   const [ordPage,setOrdPage]=useState(1);                // orders list pagination
+  const [placing,setPlacing]=useState(false);            // order submit in flight
   const [repSrch,setRepSrch]=useState("");
   const [repMonth,setRepMonth]=useState("");
   const [zSel,setZSel]=useState("");                     // "" = live reading
@@ -11843,7 +11919,23 @@ function App(){
   };
 
   // ── PLACE ORDER (Firebase) ───────────────────────────────
+  // placeOrder runs for a while: it reads and writes the branch counter, saves
+  // the order, loads every BOM, then updates each ingredient. Nothing on
+  // screen changed during that window and the button stayed live, so a second
+  // tap produced a second complete order — the double punch WPAN reported.
+  const placingRef=useRef(false);
   const placeOrder=async()=>{
+    if(placingRef.current)return;
+    placingRef.current=true;
+    setPlacing(true);
+    try{
+      await placeOrderInner();
+    }finally{
+      placingRef.current=false;
+      setPlacing(false);
+    }
+  };
+  const placeOrderInner=async()=>{
     // Sequential order number per branch — starts at 01
     let orderNum=1;
     try{
@@ -12669,6 +12761,7 @@ function App(){
         // Confirm button - with payment validation
         h("button",{
           onClick:()=>{
+            if(placing)return;
             // Out of stock beats everything — never sell what cannot be made.
             const short=cartShort();
             if(short.length){
@@ -12683,11 +12776,16 @@ function App(){
             }
             setTimeout(placeOrder,50);
           },
-          style:{width:"100%",padding:"13px",opacity:cartShort().length?.5:1,
-            background:`linear-gradient(135deg,${C.primary},${C.dark})`,
+          disabled:placing,
+          style:{width:"100%",padding:"13px",
+            opacity:(placing||cartShort().length)?.5:1,
+            background:placing?"#8A8A8A"
+              :`linear-gradient(135deg,${C.primary},${C.dark})`,
             border:"none",borderRadius:10,color:"#fff",
-            fontSize:14,fontWeight:800,cursor:"pointer"}},
-          "✓ Confirm & Print Receipt"),
+            fontSize:14,fontWeight:800,
+            cursor:placing?"not-allowed":"pointer"}},
+          placing?"⏳ Sinesave — huwag pindutin ulit"
+                 :"✓ Confirm & Print Receipt"),
 
       )
     )
@@ -15241,6 +15339,66 @@ function App(){
                 style:{padding:"7px 10px",borderRadius:7,fontSize:13,cursor:"pointer",
                   border:"none",background:"none",color:C.muted,
                   textDecoration:"underline"}},"Clear"),
+              // One-time catch-up for branches that adopted an item before
+              // Main's pack setup was corrected. Reads Main, previews the
+              // differences, then writes only packUnit and packSize.
+              !invView&&user.role==="owner"&&h("button",{
+                onClick:async()=>{
+                  try{
+                    showT("Sinusuri ang lahat ng branch...","info");
+                    const mainSnap=await getDocs(collection(db,"inventory"));
+                    const mainMap={};
+                    mainSnap.docs.forEach(d=>{mainMap[d.id]=d.data();});
+                    const targets=(branches||[]).filter(b=>
+                      b.id!=="ct-main"&&b.id!=="main");
+                    const jobs=[];
+                    for(const b of targets){
+                      const col="inventory_"+b.id;
+                      let snap=null;
+                      try{ snap=await getDocs(collection(db,col)); }
+                      catch(e0){ continue; }
+                      snap.docs.forEach(d=>{
+                        const m=mainMap[d.id]; if(!m)return;
+                        const cd=d.data();
+                        const mu=m.packUnit||"", ms=Number(m.packSize)||0;
+                        if((cd.packUnit||"")===mu
+                          &&(Number(cd.packSize)||0)===ms)return;
+                        jobs.push({col:col,id:d.id,packUnit:mu,packSize:ms,
+                          name:cd.name||d.id,branch:b.name||b.full||b.id,
+                          from:(cd.packUnit||"\u2014")+" / "+(Number(cd.packSize)||0),
+                          to:(mu||"\u2014")+" / "+ms});
+                      });
+                    }
+                    if(!jobs.length){
+                      showT("Pareho na lahat sa Main \u2014 walang babaguhin","ok");
+                      return;
+                    }
+                    const prev=jobs.slice(0,8).map(j=>
+                      j.branch+": "+j.name+"   "+j.from+" \u2192 "+j.to).join("\n");
+                    if(!confirm(jobs.length+" item sa "+targets.length
+                      +" branch ang iaayon sa Main.\n\n"+prev
+                      +(jobs.length>8?"\n\u2026 at "+(jobs.length-8)+" pa":"")
+                      +"\n\nPack unit at pack size LANG ang mababago. "
+                      +"Hindi gagalawin ang stock, cost, at min stock."))return;
+                    let ok=0,bad=0;
+                    for(const j of jobs){
+                      try{
+                        await updateDoc(doc(db,j.col,j.id),{
+                          packUnit:j.packUnit,packSize:j.packSize,
+                          packAlignedAt:serverTimestamp(),
+                          packAlignedBy:user.name});
+                        ok++;
+                      }catch(e1){ bad++; console.warn("align",j.id,e1); }
+                    }
+                    showT(ok+" na-align sa Main"+(bad?"  \u00B7  "+bad+" bigo":""),
+                      bad?"warn":"ok");
+                  }catch(e){
+                    showT("Failed: "+String(e&&e.message||e).slice(0,60),"err");
+                  }
+                },
+                style:{padding:"7px 12px",background:"#fff",
+                  border:"1px solid "+C.border,borderRadius:7,fontSize:13,
+                  cursor:"pointer"}},"\uD83E\uDDE9 Align pack sa branches"),
               h("button",{onClick:()=>showT("Import — coming soon","info"),style:{padding:"7px 12px",background:"#fff",border:"1px solid "+C.border,borderRadius:7,fontSize:13,cursor:"pointer"}},"⬆️ Import"),
               h("button",{
   onClick:()=>setModal("new_inv_ item"),
@@ -18134,6 +18292,7 @@ function App(){
                                  po.poNum||"",Date.now());
                             await updateDoc(ref,Object.assign(
                               {stock:increment(qty),lastRestocked:serverTimestamp()}, nlots?{lots:nlots}:{}));
+                            await syncPackFromMain(db,invCol,it.id);
                           }
                           added++;
                           await addDoc(collection(db,logColFor(invBr)),{
