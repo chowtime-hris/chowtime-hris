@@ -12704,7 +12704,28 @@ function App(){
     const opening=bc.filter(c=>c.type==="in"&&(c.desc||"").includes("Opening")).reduce((s,c)=>s+(c.amount||0),0);
     const cashIn=bc.filter(c=>c.type==="in"&&!(c.desc||"").includes("Opening")).reduce((s,c)=>s+(c.amount||0),0);
     const cashOut=bc.filter(c=>c.type==="out").reduce((s,c)=>s+(c.amount||0),0);
+    // This is the LIVE reading — a second builder alongside buildDailyRollup,
+    // which is used only once a day is closed. Fields added to one and not the
+    // other are why the manager's Today view showed blank expenses while the
+    // saved reading had them.
+    const expensesOut=bc.filter(c=>c.type==="out"
+      &&(c.subType==="expense"||/^expense/i.test(c.desc||"")))
+      .reduce((s,c)=>s+(c.amount||0),0);
+    const remitOut=bc.filter(c=>c.type==="out"&&/remit/i.test(c.desc||""))
+      .reduce((s,c)=>s+(c.amount||0),0);
+    const cashSalesOnly=payTotal("cash");
+    const skuTally={};
+    live.forEach(o=>(o. items||[]).forEach(i=>{
+      const k=i.name||i.id||"?"; skuTally[k]=(skuTally[k]||0)+(Number(i.qty)||0);
+    }));
     return{gross,discounts,net,voidAmt,voidCount,opening,cashIn,cashOut,
+      expenses:expensesOut,remittance:remitOut,
+      otherCashOut:Math.max(0,cashOut-expensesOut-remitOut),
+      skuCount:Object.keys(skuTally).length,
+      // opening + CASH sales + cashIn - cashOut. Using net counted GCash and
+      // delivery money as if it were sitting in the drawer.
+      cashOnHand:opening+cashSalesOnly+cashIn-cashOut,
+      remainingFunds:opening+cashSalesOnly+cashIn-cashOut-remitOut,
       cashSales:payTotal("cash"),gcash:payTotal("gcash"),
       maya:payTotal("maya"),bank:payTotal("bank"),
       foodpanda:payTotal("foodpanda"),grabfood:payTotal("grabfood"),
@@ -12713,7 +12734,7 @@ function App(){
       discSC,discPWD,discEmp,discOther,scTxns,pwdTxns,
       vatableSales,vatAmount,vatExempt,zeroSales,isVATreg,zeroRated,
       siFrom,siTo,qtySold,cancelled,
-      totalCash:opening+net+cashIn-cashOut,
+      totalCash:opening+cashSalesOnly+cashIn-cashOut,
       dineIn:bo.filter(o=>o.orderType==="dine-in").length,
       takeout:bo.filter(o=>o.orderType==="takeout").length,
       scPwd:bo.filter(o=>o.discType?.id==="sc"||o.discType?.id==="pwd").length,
