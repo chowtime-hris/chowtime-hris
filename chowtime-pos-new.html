@@ -14757,18 +14757,30 @@ function App(){
           )
         ),
 
-        // Branch add / edit
-        editBr&&h("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",
+        // Branch add / edit — a new branch is two steps: the branch itself,
+        // then the manager account. Both on one screen meant scrolling past
+        // half a form before reaching Save.
+        editBr&&(function(){
+        const brStep=editBr._isNew?(editBr._step||1):1;
+        return h("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",
           display:"flex",alignItems:"center",justifyContent:"center",zIndex:900,padding:16},
           onClick:e=>e.target===e.currentTarget&&setEditBr(null)},
           h("div",{style:{background:"#fff",width:380,borderRadius:14,padding:"18px"}},
-            h("div",{style:{fontSize:14,fontWeight:800,marginBottom:14}},
+            h("div",{style:{fontSize:14,fontWeight:800,marginBottom:4}},
               editBr._isNew?"➕ New Branch":"✏️ Edit Branch"),
+            editBr._isNew&&h("div",{style:{display:"flex",gap:6,
+              alignItems:"center",marginBottom:13}},
+              [[1,"Branch"],[2,"Manager"]].map(([n,l])=>
+                h("div",{key:n,style:{flex:1,padding:"5px 0",textAlign:"center",
+                  fontSize:12,fontWeight:brStep===n?800:500,
+                  color:brStep===n?C.primary:C.muted,
+                  borderBottom:"3px solid "+(brStep===n?C.primary:C.border)}},
+                  n+". "+l))),
             h("div",{style:{display:"grid",gap:9}},
               [["id","BRANCH ID (e.g. ct-wsfp)",!!editBr._isNew],
                ["name","SHORT CODE (e.g. CT-WSFP)",true],
                ["full","FULL NAME",true],
-               ["loc","LOCATION",true]].map(([k,lbl,editable])=>
+               ["loc","LOCATION",true]].map(([k,lbl,editable])=>brStep!==1?null:
                 h("div",{key:k},
                   h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,
                     letterSpacing:1,marginBottom:3}},lbl),
@@ -14795,7 +14807,7 @@ function App(){
                       color:editable?C.text:C.muted}}),
                   k==="id"&&!editBr._isNew&&h("div",{style:{fontSize:12,color:C.muted,marginTop:2}},
                     "Cannot be changed — orders and inventory are tagged to it"))),
-              h("div",null,
+              brStep===1&&h("div",null,
                 h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,
                   letterSpacing:1,marginBottom:3}},"OWNERSHIP"),
                 h("div",{style:{display:"flex",gap:8}},
@@ -14820,7 +14832,7 @@ function App(){
                     : "You run their payroll. Cash advance and loan requests "
                       +"come to you for approval and land on your payslips.")),
 
-              (editBr.ownership==="franchise")&&h("div",null,
+              brStep===1&&(editBr.ownership==="franchise")&&h("div",null,
                 h("div",{style:{fontSize:11,color:C.muted,marginBottom:8,
                   background:C.bg,borderRadius:8,padding:"9px 11px",
                   lineHeight:1.6}},
@@ -14889,7 +14901,7 @@ function App(){
                 );
               })(),
 
-              editBr._isNew&&h("div",{style:{background:"#FFFDE7",
+              editBr._isNew&&brStep===2&&h("div",{style:{background:"#FFFDE7",
                 border:"1px solid #FFE082",borderRadius:9,padding:"10px 11px"}},
                 h("div",{style:{fontSize:12,fontWeight:800,color:"#BF360C",
                   letterSpacing:1,marginBottom:3}},"BRANCH MANAGER ACCOUNT"),
@@ -14911,7 +14923,7 @@ function App(){
                         outline:"none",boxSizing:"border-box",
                         border:"1px solid "+C.border}})))
               ),
-              h("div",null,
+              brStep===1&&h("div",null,
                 h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,
                   letterSpacing:1,marginBottom:3}},"STATUS"),
                 h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}},
@@ -14926,10 +14938,24 @@ function App(){
               )
             ),
             h("div",{style:{display:"flex",gap:8,marginTop:16}},
-              h("button",{onClick:()=>setEditBr(null),
+              h("button",{onClick:()=>{
+                  if(brStep===2)setEditBr(p=>Object.assign({},p,{_step:1}));
+                  else setEditBr(null);
+                },
                 style:{flex:1,padding:"10px",borderRadius:9,border:"1px solid "+C.border,
-                  background:"#fff",fontSize:14,cursor:"pointer"}},"Cancel"),
-              h("button",{
+                  background:"#fff",fontSize:14,cursor:"pointer"}},
+                brStep===2?"← Back":"Cancel"),
+              (editBr._isNew&&brStep===1)&&h("button",{
+                onClick:()=>{
+                  if(!editBr.id||!editBr.full){
+                    showT("ID and full name are required","warn");return;
+                  }
+                  setEditBr(p=>Object.assign({},p,{_step:2}));
+                },
+                style:{flex:1,padding:"10px",borderRadius:9,border:"none",
+                  background:C.primary,color:"#fff",fontSize:14,fontWeight:800,
+                  cursor:"pointer"}},"Next →"),
+              (!editBr._isNew||brStep===2)&&h("button",{
                 onClick:async()=>{
                   const b=editBr;
                   if(!b.id||!b.full){showT("ID and full name are required","warn");return;}
@@ -15026,7 +15052,8 @@ function App(){
                 "💾 Save")
             )
           )
-        ),
+        );
+        })(),
 
         // ══ POS ══
         page==="pos"&&h("div",{style:{height:"100%",display:"flex",
