@@ -1047,7 +1047,7 @@ function printZ(zd,branchName,cashier){
   <div class="row"><span>Opening Fund:</span><span>P${peso((zd.opening||0))}</span></div>
   <div class="row"><span>Gross Sales:</span><span>P${peso((zd.gross||0))}</span></div>
   <div class="row"><span>Discounts:</span><span>-P${peso((zd.discounts||0))}</span></div>
-  <div class="row"><span>Voids (${zd.voidCount||0}):</span><span>-P${peso((zd.voidAmt||0))}</span></div>
+  <div class="row"><span>Voids (${zd.voidCount||0}) excl.:</span><span>P${peso((zd.voidAmt||0))}</span></div>
   <div class="row"><span>Net Sales:</span><span>P${peso((zd.net||0))}</span></div>
   <div class="row"><span>Cash In:</span><span>P${peso((zd.cashIn||0))}</span></div>
   <div class="row"><span>Expenses:</span><span>-P${peso((zd.expenses||0))}</span></div>
@@ -1128,7 +1128,7 @@ function buildEscPosZ(zd,branchName,cashier,cs,paperSize,isZ){
   a(row("Opening Fund","P"+n(zd.opening)));
   a(row("Gross Sales","P"+n(zd.gross)));
   a(row("Discounts","- P"+n(zd.discounts)));
-  a(row("Voids ("+(zd.voidCount||0)+")","- P"+n(zd.voidAmt)));
+  a(row("Voids ("+(zd.voidCount||0)+") excl.","P"+n(zd.voidAmt)));
   a([ESC,0x45,0x01]);
   a(row("Net Sales","P"+n(zd.net)));
   a([ESC,0x45,0x00]);
@@ -2691,7 +2691,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
   const todayExpenses=(expenses||[])
     .filter(e=>e.branch===branchId&&String(e.date||"")===today)
     .reduce((s2,e)=>s2+(Number(e.amount)||0),0);
-  const cashOut = todayCash.filter(c=>c.type==="out"&&c.subType!=="expense")
+  const cashOut = todayCash.filter(c=>c.type==="out"&&!isExpenseCopy(c))
     .reduce((s,c)=>s+(Number(c.amount)||0),0);
 
   // Opening fund, in order of authority:
@@ -3222,15 +3222,38 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
                 const k=(e.cat||"Expense")+" — "+((e.desc||"").split("\n")[0]||"");
                 expByCat[k]=(expByCat[k]||0)+(Number(e.amount)||0);
               });
+            // The Expenses line is ALWAYS drawn, even at zero. With the Cash
+            // Out door closed, this is the only place a shortage can be
+            // explained — an absent line reads as "nothing to check here"
+            // exactly when there is.
+            const voidRef=todayCash.filter(c=>c.type==="void_refund")
+              .reduce((s2,c)=>s2+(Number(c.amount)||0),0);
             return h("div",null,
               grp(todayCash.filter(c=>c.type==="in"&&!isOpeningEntry(c)),1),
+              h("div",{style:{display:"flex",justifyContent:"space-between",
+                marginBottom:3}},
+                h("span",{style:{fontSize:13,color:C.muted}},
+                  "Expenses"+(Object.keys(expByCat).length
+                    ?(" ("+Object.keys(expByCat).length+")"):"")),
+                h("span",{style:{fontSize:13,fontWeight:700,
+                  color:todayExpenses>0?C.danger:C.muted}},
+                  "-₱"+peso(todayExpenses))),
               Object.keys(expByCat).sort().map(k=>
                 h("div",{key:"e"+k,style:{display:"flex",
-                  justifyContent:"space-between",marginBottom:3}},
-                  h("span",{style:{fontSize:13,color:C.muted}},k),
-                  h("span",{style:{fontSize:13,fontWeight:700,color:C.danger}},
+                  justifyContent:"space-between",marginBottom:3,
+                  paddingLeft:12}},
+                  h("span",{style:{fontSize:12,color:C.muted}},k),
+                  h("span",{style:{fontSize:12,color:C.danger}},
                     "-₱"+peso(expByCat[k])))),
-              grp(todayCash.filter(c=>c.type==="out"),-1)
+              grp(todayCash.filter(c=>c.type==="out"&&!isExpenseCopy(c)),-1),
+              // Shown but never added: zeroing the order already took this out
+              // of sales, so counting it here would remove the same peso twice.
+              voidRef>0&&h("div",{style:{display:"flex",
+                justifyContent:"space-between",marginBottom:3}},
+                h("span",{style:{fontSize:12,color:C.muted,fontStyle:"italic"}},
+                  "Void refund (hindi binibilang \u2014 bawas na sa benta)"),
+                h("span",{style:{fontSize:12,color:C.muted}},
+                  "\u20B1"+peso(voidRef)))
             );
           })(),
           h("div",{style:{display:"flex",justifyContent:"space-between",padding:"6px 0",borderTop:"1px dashed #ddd",marginTop:3}},
@@ -7259,7 +7282,8 @@ function buildDailyRollup(dayOrders,dayCash,branch,date,vatMode,dayExpenses){
     .reduce((s2,c)=>s2+num(c.amount),0);
   const cashIn=bc.filter(c=>c.type==="in"&&!/opening/i.test(c.desc||""))
     .reduce((s2,c)=>s2+num(c.amount),0);
-  const cashOut=bc.filter(c=>c.type==="out").reduce((s2,c)=>s2+num(c.amount),0);
+  const cashOut=bc.filter(c=>c.type==="out"&&!isExpenseCopy(c))
+    .reduce((s2,c)=>s2+num(c.amount),0);
 
   // Cash out is one bucket in the log but three different questions on a
   // reading: what was spent, what was handed over, and what else moved.
@@ -7544,10 +7568,27 @@ async function logCAEvent(db,req,event,by,extra){
   }catch(e){console.warn("CA log failed:",event,e);}
 }
 
+// Older builds mirrored every expense into cash_log as an "out" entry.
+// Expenses are now read from `expenses` itself, so those copies must be
+// skipped everywhere — left in, the same peso leaves the drawer twice.
+function isExpenseCopy(c){
+  return !!(c&&(c.subType==="expense"||c.expenseId
+    ||/^expense\s*:/i.test(c.desc||"")));
+}
+
 function payAmtOf(o,method){
-  if(o&&Array.isArray(o.payments)&&o.payments.length)
-    return o.payments.filter(p=>p&&p.method===method)
+  if(o&&Array.isArray(o.payments)&&o.payments.length){
+    const legs=o.payments.filter(p=>p&&p.method===method)
       .reduce((s,p)=>s+(Number(p.amount)||0),0);
+    // A partial void lowers the order total but leaves payments[] as it was
+    // tendered. Without scaling, the drawer is still expected to hold the
+    // full pre-void cash — the exact amount handed back to the customer.
+    const all=o.payments.reduce((s,p)=>s+(Number(p.amount)||0),0);
+    const tot=Number(o.total)||0;
+    if(all>0&&Math.abs(all-tot)>0.01)
+      return Math.round(legs*(tot/all)*100)/100;
+    return legs;
+  }
   return ((o&&o.payMethod)||"cash")===method?(Number(o&&o.total)||0):0;
 }
 
@@ -12772,7 +12813,8 @@ function App(){
     const cancelled=bo.filter(o=>o.status==="cancelled").length;
     const opening=bc.filter(c=>c.type==="in"&&(c.desc||"").includes("Opening")).reduce((s,c)=>s+(c.amount||0),0);
     const cashIn=bc.filter(c=>c.type==="in"&&!(c.desc||"").includes("Opening")).reduce((s,c)=>s+(c.amount||0),0);
-    const cashOut=bc.filter(c=>c.type==="out").reduce((s,c)=>s+(c.amount||0),0);
+    const cashOut=bc.filter(c=>c.type==="out"&&!isExpenseCopy(c))
+      .reduce((s,c)=>s+(c.amount||0),0);
     // This is the LIVE reading — a second builder alongside buildDailyRollup,
     // which is used only once a day is closed. Fields added to one and not the
     // other are why the manager's Today view showed blank expenses while the
@@ -15457,7 +15499,11 @@ function App(){
                   [["Opening Fund","₱"+peso(zd.opening),C.success],
                    ["Gross Sales","₱"+peso(zd.gross),C.primary],
                    ["Discounts","-₱"+peso(zd.discounts),C.danger],
-                   ["Voids ("+(zd.voidCount||0)+")","-₱"+peso(zd.voidAmt||0),C.danger],
+                   // Sat between Gross and Net with a minus sign, reading as
+                   // a subtraction. Voids are already out of Gross — this is a
+                   // record of what was cancelled, not a deduction.
+                   ["Voids ("+(zd.voidCount||0)+") — bawas na sa Gross",
+                    "₱"+peso(zd.voidAmt||0),C.muted],
                    ["Net Sales","₱"+peso(zd.net),C.success],
                    ["Cash In","₱"+peso(zd.cashIn),C.info],
                    ["Cash Out","-₱"+peso(zd.cashOut),C.warning],
