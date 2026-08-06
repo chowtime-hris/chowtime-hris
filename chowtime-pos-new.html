@@ -2602,7 +2602,7 @@ const DENOMS = [
   {label:"25¢",  value:0.25,type:"coin",color:"#78909C"},
 ];
 
-function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
+function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT}){
   const today = localDate();
   const [counts,setCounts]   = useState(DENOMS.reduce((a,d)=>({...a,[d.value]:0}),{}));
   const [remit,setRemit]     = useState("");
@@ -2683,7 +2683,15 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
   // Opening is its own line, so it must not also count as Cash In
   const cashIn  = todayCash.filter(c=>c.type==="in"&&!isOpeningEntry(c))
     .reduce((s,c)=>s+(Number(c.amount)||0),0);
-  const cashOut = todayCash.filter(c=>c.type==="out")
+  // Expenses are read from `expenses` itself, not from a copy in the cash
+  // log. A mirrored entry only exists if the second write succeeded, and it
+  // silently drifts the moment the expense is edited elsewhere — so the
+  // variance could disagree with the expense list and neither would be wrong.
+  // One source, always present.
+  const todayExpenses=(expenses||[])
+    .filter(e=>e.branch===branchId&&String(e.date||"")===today)
+    .reduce((s2,e)=>s2+(Number(e.amount)||0),0);
+  const cashOut = todayCash.filter(c=>c.type==="out"&&c.subType!=="expense")
     .reduce((s,c)=>s+(Number(c.amount)||0),0);
 
   // Opening fund, in order of authority:
@@ -2753,6 +2761,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
         cashIn,
         cashOut,
         expectedCash,
+        expenses:todayExpenses,
         variance,
         remittance: remittanceAmt,
         remittanceField: remitField,
@@ -2794,6 +2803,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
   // Snapshot ng count na nasa screen — fallback kapag walang ipinasang record.
   const liveCount = {date:today, counts, totalCash, billsTotal, coinsTotal,
     openingFund, todaySales, cashIn, cashOut, expectedCash, variance,
+    expenses:todayExpenses,
     remittance:remittanceAmt, remittanceField:remitField,
     remittanceLogged:remitLogged, closingBalance, note:countNote,
     countedBy:user.name, branchName:curBranch.full};
@@ -3186,14 +3196,43 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
             h("span",{style:{fontSize:13,color:C.muted}},"Cash Sales Today"),
             h("span",{style:{fontSize:13,fontWeight:700}},"₱"+peso(todaySales))
           ),
-          h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:3}},
-            h("span",{style:{fontSize:13,color:C.muted}},"Cash In"),
-            h("span",{style:{fontSize:13,fontWeight:700,color:C.success}},"+₱"+peso(cashIn))
-          ),
-          h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:3}},
-            h("span",{style:{fontSize:13,color:C.muted}},"Cash Out"),
-            h("span",{style:{fontSize:13,fontWeight:700,color:C.danger}},"-₱"+peso(cashOut))
-          ),
+          // Every movement is named with the word that was actually typed.
+          // A lumped "Cash In" / "Cash Out" made the crew guess what was in
+          // it — and "Cash Out" was reading as if it were something other than
+          // the expenses that made it up.
+          (function(){
+            const grp=(arr,sign)=>{
+              const m={};
+              arr.forEach(c=>{
+                const k=(c.desc||"").trim()||"Walang paglalarawan";
+                m[k]=(m[k]||0)+(Number(c.amount)||0);
+              });
+              return Object.keys(m).sort().map(k=>
+                h("div",{key:sign+k,style:{display:"flex",
+                  justifyContent:"space-between",marginBottom:3}},
+                  h("span",{style:{fontSize:13,color:C.muted}},k),
+                  h("span",{style:{fontSize:13,fontWeight:700,
+                    color:sign>0?C.success:C.danger}},
+                    (sign>0?"+₱":"-₱")+peso(m[k]))));
+            };
+            const expByCat={};
+            (expenses||[]).filter(e=>e.branch===branchId
+              &&String(e.date||"")===today)
+              .forEach(e=>{
+                const k=(e.cat||"Expense")+" — "+((e.desc||"").split("\n")[0]||"");
+                expByCat[k]=(expByCat[k]||0)+(Number(e.amount)||0);
+              });
+            return h("div",null,
+              grp(todayCash.filter(c=>c.type==="in"&&!isOpeningEntry(c)),1),
+              Object.keys(expByCat).sort().map(k=>
+                h("div",{key:"e"+k,style:{display:"flex",
+                  justifyContent:"space-between",marginBottom:3}},
+                  h("span",{style:{fontSize:13,color:C.muted}},k),
+                  h("span",{style:{fontSize:13,fontWeight:700,color:C.danger}},
+                    "-₱"+peso(expByCat[k])))),
+              grp(todayCash.filter(c=>c.type==="out"),-1)
+            );
+          })(),
           h("div",{style:{display:"flex",justifyContent:"space-between",padding:"6px 0",borderTop:"1px dashed #ddd",marginTop:3}},
             h("span",{style:{fontSize:13,color:C.muted}},"Expected Total"),
             h("span",{style:{fontSize:13,fontWeight:700}},"₱"+peso(expectedCash))
@@ -3215,11 +3254,11 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
             color:C.muted}},
             h("div",{style:{fontWeight:800,color:C.text,marginBottom:3}},
               "Paano binibilang"),
-            h("div",null,"Opening + Cash Sales + Cash In \u2212 Cash Out = Expected"),
+            h("div",null,"Opening + Cash Sales + pumasok \u2212 lumabas = Expected"),
             h("div",{style:{marginTop:2}},
               "Cash Sales = ang cash na bahagi lang. Ang GCash at bank ay hindi pumapasok sa drawer."),
             h("div",{style:{marginTop:2}},
-              "Cash Out = remittance, petty cash, at gastos na kinuha sa drawer."),
+              "Ang bawat linya sa itaas ay ang mismong salitang itinala \u2014 kung Remittance ang isinulat, Remittance ang lalabas."),
             h("div",{style:{marginTop:6,fontWeight:800,color:C.text,
               marginBottom:3}},"Ibig sabihin ng kulay"),
             h("div",{style:{color:C.success,fontWeight:700}},
@@ -7189,7 +7228,7 @@ function addDays(iso,n){
 // Business day = calendar day, midnight to midnight.
 
 // Pure: same figures as buildZ, but from an explicit day's data.
-function buildDailyRollup(dayOrders,dayCash,branch,date,vatMode){
+function buildDailyRollup(dayOrders,dayCash,branch,date,vatMode,dayExpenses){
   const bo=dayOrders||[], bc=dayCash||[];
   const voided=bo.filter(o=>o.status==="void"||o.status==="partial-void");
   const live=bo.filter(o=>o.status!=="void"&&o.status!=="cancelled");
@@ -7224,9 +7263,9 @@ function buildDailyRollup(dayOrders,dayCash,branch,date,vatMode){
 
   // Cash out is one bucket in the log but three different questions on a
   // reading: what was spent, what was handed over, and what else moved.
-  const expensesOut=bc.filter(c=>c.type==="out"
-    &&(c.subType==="expense"||/^expense/i.test(c.desc||"")))
-    .reduce((s2,c)=>s2+num(c.amount),0);
+  // Read from `expenses`, the same place the cash count reads. A copy in the
+  // cash log would be one more thing that can go missing or go stale.
+  const expensesOut=(dayExpenses||[]).reduce((s2,e)=>s2+num(e.amount),0);
   const remitOut=bc.filter(c=>c.type==="out"&&/remit/i.test(c.desc||""))
     .reduce((s2,c)=>s2+num(c.amount),0);
   const cashSalesOnly=payTotal("cash");
@@ -7237,7 +7276,7 @@ function buildDailyRollup(dayOrders,dayCash,branch,date,vatMode){
     gross:gross,discounts:discounts,net:net,
     skuCount:skuCount,
     expenses:expensesOut,remittance:remitOut,
-    otherCashOut:Math.max(0,cashOut-expensesOut-remitOut),
+    otherCashOut:Math.max(0,cashOut-remitOut),
     voidAmt:voidAmt,voidCount:voided.length,
     txns:live.length,cancelled:bo.filter(o=>o.status==="cancelled").length,
     qtySold:live.reduce((s2,o)=>s2+(o. items||[]).reduce((a,i)=>a+num(i.qty),0),0),
@@ -7263,8 +7302,8 @@ function buildDailyRollup(dayOrders,dayCash,branch,date,vatMode){
     opening:opening,cashIn:cashIn,cashOut:cashOut,
     // Was opening + NET + cashIn - cashOut, which counted GCash and delivery
     // sales as money in the drawer. Only the cash leg ever reaches it.
-    cashOnHand:opening+cashSalesOnly+cashIn-cashOut,
-    remainingFunds:opening+cashSalesOnly+cashIn-cashOut-remitOut,
+    cashOnHand:opening+cashSalesOnly+cashIn-cashOut-expensesOut,
+    remainingFunds:opening+cashSalesOnly+cashIn-cashOut-expensesOut-remitOut,
     siFrom:ids.length?ids[0]:"",siTo:ids.length?ids[ids.length-1]:"",
     topItems:topItems
   };
@@ -7338,7 +7377,13 @@ async function rollupDay(db,branch,date,vatMode,byName){
     // is indistinguishable from a real zero-sales day and just buries the
     // days that matter.
     if(!dayOrders.length&&!dayCash.length)return null;
-    const roll=buildDailyRollup(dayOrders,dayCash,branch,date,vatMode);
+    let dayExp=[];
+    try{
+      const eSnap=await getDocs(query(collection(db,"expenses"),
+        where("date","==",date)));
+      dayExp=eSnap.docs.map(d=>d.data()).filter(e=>e.branch===branch);
+    }catch(e){}
+    const roll=buildDailyRollup(dayOrders,dayCash,branch,date,vatMode,dayExp);
     await stampZCounter(db,branch,date,roll);
     roll.closedBy=byName||"auto";
     roll.closedAt=serverTimestamp();
@@ -7367,6 +7412,11 @@ async function rollupDateAllBranches(db,date,branchIds,vatMode,byName){
       const cSnap=await getDocs(query(collection(db,"cash_log"),where("date","==",date)));
       allCash=cSnap.docs.map(d=>d.data());
     }catch(e){}
+    let allExp=[];
+    try{
+      const eSnap=await getDocs(query(collection(db,"expenses"),where("date","==",date)));
+      allExp=eSnap.docs.map(d=>d.data());
+    }catch(e){}
 
     for(const b of branchIds){
       const bo=allOrders.filter(o=>o.branch===b);
@@ -7374,7 +7424,8 @@ async function rollupDateAllBranches(db,date,branchIds,vatMode,byName){
       // a branch with no activity that day gets no row — an empty document
       // would be indistinguishable from a real zero-sales day
       if(!bo.length&&!bc.length){res.skipped++;continue;}
-      const roll=buildDailyRollup(bo,bc,b,date,vatMode);
+      const roll=buildDailyRollup(bo,bc,b,date,vatMode,
+        allExp.filter(e=>e.branch===b));
       await stampZCounter(db,b,date,roll);
       roll.closedBy=byName||"backfill";
       roll.closedAt=serverTimestamp();
@@ -12726,9 +12777,9 @@ function App(){
     // which is used only once a day is closed. Fields added to one and not the
     // other are why the manager's Today view showed blank expenses while the
     // saved reading had them.
-    const expensesOut=bc.filter(c=>c.type==="out"
-      &&(c.subType==="expense"||/^expense/i.test(c.desc||"")))
-      .reduce((s,c)=>s+(c.amount||0),0);
+    const expensesOut=(expenses||[])
+      .filter(e=>e.branch===bid&&String(e.date||"")===d)
+      .reduce((s,e)=>s+(Number(e.amount)||0),0);
     const remitOut=bc.filter(c=>c.type==="out"&&/remit/i.test(c.desc||""))
       .reduce((s,c)=>s+(c.amount||0),0);
     const cashSalesOnly=payTotal("cash");
@@ -12738,12 +12789,12 @@ function App(){
     }));
     return{gross,discounts,net,voidAmt,voidCount,opening,cashIn,cashOut,
       expenses:expensesOut,remittance:remitOut,
-      otherCashOut:Math.max(0,cashOut-expensesOut-remitOut),
+      otherCashOut:Math.max(0,cashOut-remitOut),
       skuCount:Object.keys(skuTally).length,
       // opening + CASH sales + cashIn - cashOut. Using net counted GCash and
       // delivery money as if it were sitting in the drawer.
-      cashOnHand:opening+cashSalesOnly+cashIn-cashOut,
-      remainingFunds:opening+cashSalesOnly+cashIn-cashOut-remitOut,
+      cashOnHand:opening+cashSalesOnly+cashIn-cashOut-expensesOut,
+      remainingFunds:opening+cashSalesOnly+cashIn-cashOut-expensesOut-remitOut,
       cashSales:payTotal("cash"),gcash:payTotal("gcash"),
       maya:payTotal("maya"),bank:payTotal("bank"),
       foodpanda:payTotal("foodpanda"),grabfood:payTotal("grabfood"),
@@ -12752,7 +12803,7 @@ function App(){
       discSC,discPWD,discEmp,discOther,scTxns,pwdTxns,
       vatableSales,vatAmount,vatExempt,zeroSales,isVATreg,zeroRated,
       siFrom,siTo,qtySold,cancelled,
-      totalCash:opening+cashSalesOnly+cashIn-cashOut,
+      totalCash:opening+cashSalesOnly+cashIn-cashOut-expensesOut,
       dineIn:bo.filter(o=>o.orderType==="dine-in").length,
       takeout:bo.filter(o=>o.orderType==="takeout").length,
       scPwd:bo.filter(o=>o.discType?.id==="sc"||o.discType?.id==="pwd").length,
@@ -15795,17 +15846,6 @@ function App(){
                       await updateDoc(doc(db,"expenses",editExp._docId),{
                         cat:editExp.cat,desc:editExp.desc,amount:amt,
                         editedBy:user.name,editedAt:serverTimestamp()});
-                      // Keep the linked drawer entry in step. Editing the
-                      // expense alone would leave the cash count reconciling
-                      // against the old figure.
-                      const q2=query(collection(db,"cash_log"),
-                        where("expenseId","==",editExp._docId),limit(5));
-                      const sn=await getDocs(q2);
-                      for(const d2 of sn.docs){
-                        await updateDoc(doc(db,"cash_log",d2.id),{
-                          amount:amt,
-                          desc:"Expense: "+editExp.cat+" — "+editExp.desc});
-                      }
                       await logCAEvent(db,{_docId:editExp._docId,kind:"Expense",
                         type:"Expense",staffName:editExp.cat+" — "+editExp.desc,
                         branch:editExp.branch,amount:amt},"expense_edited",
@@ -15821,14 +15861,8 @@ function App(){
                     borderRadius:8,color:"#fff",fontWeight:800,fontSize:13,
                     cursor:"pointer"}},"\uD83D\uDCBE I-save"),
                 h("button",{onClick:async()=>{
-                    if(!confirm("Burahin ang expense na ito? Aalisin din ang katumbas nitong Cash Out."))return;
+                    if(!confirm("Burahin ang expense na ito? Babalik sa drawer ang halaga sa cash count."))return;
                     try{
-                      const q2=query(collection(db,"cash_log"),
-                        where("expenseId","==",editExp._docId),limit(5));
-                      const sn=await getDocs(q2);
-                      for(const d2 of sn.docs){
-                        await deleteDoc(doc(db,"cash_log",d2.id));
-                      }
                       await deleteDoc(doc(db,"expenses",editExp._docId));
                       // Logged BEFORE the row disappears — a deletion with no
                       // trail is indistinguishable from an entry never made.
@@ -15872,7 +15906,7 @@ function App(){
                   borderRadius:8,padding:"8px 11px",fontSize:12,color:"#BF360C",
                   lineHeight:1.45}},
                   h("b",null,"Ibabawas ito sa cash drawer."),
-                  " Bawat expense ay perang lumabas, kaya awtomatiko itong nagiging Cash Out at tumutugma ang bilang sa gabi."),
+                  " Bawat expense ay perang lumabas, kaya kusang binabawas ito sa Expected Total ng cash count at sa Z-Reading."),
                 h("button",{onClick:async()=>{
                   if(!newExp.desc||!newExp.amount){showT("Fill all fields","warn");return;}
                   const _amt=parseFloat(newExp.amount)||0;
@@ -15884,26 +15918,9 @@ function App(){
                     enteredOn:localDate(),   // keep when it was keyed in, for audit
                     by:user.name,status:user.role==="owner"?"approved":"pending",
                     timestamp:serverTimestamp()});
-                  // An expense paid out of the drawer is cash that physically
-                  // left it. Recorded only in `expenses`, it never reached the
-                  // variance check or the Z-Reading, so every such payment read
-                  // as a shortage. expenseId links the two so the same peso is
-                  // never counted twice.
-                  if(_amt>0){
-                    try{
-                      const _now=new Date();
-                      await addDoc(collection(db,"cash_log"),{
-                        branch:branchId,type:"out",subType:"expense",
-                        desc:"Expense: "+newExp.cat+" — "+newExp.desc,
-                        amount:_amt,expenseId:_exp.id,
-                        time:_now.toLocaleTimeString("en-PH",{hour:"2-digit",minute:"2-digit"}),
-                        date:_date,by:user.name,
-                        timestamp:serverTimestamp(),at:serverTimestamp()});
-                    }catch(e2){
-                      console.warn("expense→cash_log failed:",e2);
-                      showT("Naitala ang expense pero HINDI sa cash — idagdag bilang Cash Out","warn");
-                    }
-                  }
+                  // No copy is written into cash_log. The cash count and the
+                  // Z-Reading read `expenses` directly, so there is nothing to
+                  // fall out of step when an expense is edited or deleted.
                   await logCAEvent(db,{_docId:_exp.id,kind:"Expense",
                     type:"Expense",staffName:newExp.cat+" — "+newExp.desc,
                     branch:branchId,amount:_amt},"expense_created",user.name,{});
@@ -17278,7 +17295,7 @@ function App(){
 
         // ══ CASH COUNT ══
         page==="cash_count"&&h(CashCountPage,{
-          branchId,curBranch,user,db,orders,cashLog,showT,
+          branchId,curBranch,user,db,orders,cashLog,expenses,showT,
           key:branchId
         }),
 
