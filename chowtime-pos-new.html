@@ -13473,7 +13473,9 @@ function App(){
           ),
           // Hide cash tendered for non-cash
           !chkSplit&&chkPay!=="cash"&&h("div",{style:{marginTop:6,padding:"7px 11px",background:"#F3E9F7",borderRadius:8,fontSize:13,color:C.primary,fontWeight:600}},
-            "📱 "+{gcash:"GCash",maya:"Maya/PayMaya",bank:"Bank Transfer",foodpanda:"FoodPanda",grabfood:"GrabFood"}[chkPay]+" — no change needed"
+            "📱 "+({gcash:"GCash",maya:"Maya/PayMaya",bank:"Bank Transfer",
+              foodpanda:"FoodPanda",grabfood:"GrabFood",credit:"Credit"}[chkPay]
+              ||chkPay)+" — walang sukli"
           ),
 
           chkSplit&&h("div",{style:{marginTop:8,background:"#F3E9F7",
@@ -13746,8 +13748,13 @@ function App(){
                 showT("₱"+peso(due-cash)+" kulang sa cash","err");return;
               }
             }else{
-              const isCredit=chkPay==="credit"||chkPay==="gcash"||chkPay==="maya"||chkPay==="bank";
-              if(!isCredit&&cash<chkTotal){
+              // Only cash needs cash counted out. FoodPanda and GrabFood were
+              // missing from the old list, so the POS demanded a tendered
+              // amount for a field it had already hidden — the sale could not
+              // be completed at all. Stated the other way round, any payment
+              // method added later is covered.
+              const needsCash=(chkPay==="cash");
+              if(needsCash&&cash<chkTotal){
                 showT("₱"+peso((chkTotal-cash))+" short — enter full payment","err");
                 return;
               }
