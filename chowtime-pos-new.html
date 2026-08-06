@@ -7185,6 +7185,7 @@ function voidSummary(r){
 function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=false}){
   const [voidRequests,setVoidReqs] = useState([]);
   const [selOrder,setSelOrder]     = useState(null);
+  const [voidDays,setVoidDays]     = useState(0);   // 0 = today, 7 = last week
   const [selItems,setSelItems]     = useState({}); // { itemIdx: true/false}
   const [reason,setReason]         = useState("");
   const [submitting,setSubmitting] = useState(false);
@@ -7331,13 +7332,27 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
     showT("Void request rejected");
   };
 
-  // Today's non-voided orders for this branch
+  // Orders a cashier may raise a void request against.
+  //
+  // Two things were wrong here. The date came from toISOString(), which is
+  // UTC — in PH that files every order taken before 8AM under yesterday, so
+  // it disappeared from this list on the morning it was most likely to be
+  // corrected. And the window was today only, which left an order noticed
+  // the next morning with no route to a void at all.
   const today = localDate();
-  const todayOrders = orders.filter(o=>
-    o.branch===branchId &&
-    o.status!=="void" && o.status!=="cancelled" &&
-    (o.timestamp?.toDate?.()?.toISOString()||"").slice(0,10)===today
-  );
+  const dayKey=(o)=>o.date||localDate(o.timestamp?.toDate?.());
+  const daysAgo=(k)=>{
+    if(!k)return 9999;
+    const a=new Date(k+"T00:00:00"), b=new Date(today+"T00:00:00");
+    return Math.round((b-a)/86400000);
+  };
+  const todayOrders = orders.filter(o=>{
+    if(o.branch!==branchId)return false;
+    if(o.status==="void"||o.status==="cancelled")return false;
+    const d=daysAgo(dayKey(o));
+    return d>=0 && d<=voidDays;
+  }).sort((a,b)=>String(dayKey(b)+" "+(b.id||""))
+      .localeCompare(String(dayKey(a)+" "+(a.id||""))));
   const pending = voidRequests.filter(r=>r.status==="pending");
 
   return h("div",null,
@@ -7371,11 +7386,24 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
       h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}},
         // Left: select order
         h("div",null,
-          h("div",{style:{fontWeight:700,fontSize:14,marginBottom:8,color:C.danger}},"Select Order to Void"),
+          h("div",{style:{display:"flex",alignItems:"center",gap:8,
+            marginBottom:8,flexWrap:"wrap"}},
+            h("div",{style:{fontWeight:700,fontSize:14,color:C.danger}},
+              "Select Order to Void"),
+            h("div",{style:{marginLeft:"auto",display:"flex",gap:4}},
+              [[0,"Ngayon"],[7,"Huling 7 araw"]].map(([d,l])=>
+                h("button",{key:d,onClick:()=>setVoidDays(d),
+                  style:{padding:"4px 11px",fontSize:12,borderRadius:7,
+                    cursor:"pointer",fontWeight:voidDays===d?800:600,
+                    border:"1px solid "+(voidDays===d?C.danger:C.border),
+                    background:voidDays===d?"#FFEBEE":"#fff",
+                    color:voidDays===d?C.danger:C.muted}},l)))),
           todayOrders.length===0
             ?h("div",{style:{padding:"20px",textAlign:"center",color:C.muted,
                 background:"#fff",borderRadius:10,border:"1px solid "+C.border,fontSize:13}},
-              "No orders today yet")
+              voidDays===0
+                ?"Walang order ngayong araw — subukan ang Huling 7 araw."
+                :"Walang mavo-void na order sa huling 7 araw.")
             :h("div",{style:{display:"grid",gap:5,maxHeight:380,overflowY:"auto"}},
               todayOrders.map(o=>h("div",{key:o.id,
                 style:{padding:"10px 13px",borderRadius:9,
@@ -7398,7 +7426,8 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
                   },
                   style:{display:"flex",justifyContent:"space-between",
                     alignItems:"center",marginBottom:selOrder?.id===o.id?8:0,cursor:"pointer"}},
-                  h("span",{style:{fontSize:13,fontWeight:800,color:C.danger}},"#"+o.id),
+                  h("span",{style:{fontSize:13,fontWeight:800,color:C.danger}},
+                    "#"+o.id+(dayKey(o)!==today?"  \u00B7 "+dayKey(o):"")),
                   h("div",{style:{display:"flex",gap:8,alignItems:"center"}},
                     h("span",{style:{fontSize:14,fontWeight:900,color:C.primary}},
                       "₱"+peso(o.total)),
