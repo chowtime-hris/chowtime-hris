@@ -3535,6 +3535,7 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
   const [rejectModal, setRejectModal] = useState(null);
   const [rejectReason, setRejectReason] = useState("");
   const [caTab,setCaTab] = useState("reqs");
+  const [logKind,setLogKind] = useState("all");
   const [caLog,setCaLog] = useState([]);
 
   useEffect(()=>{
@@ -3744,14 +3745,24 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
       h("div",{style:{background:"#E3F2FD",border:"1px solid #90CAF9",
         borderRadius:10,padding:"9px 13px",marginBottom:12,fontSize:13,
         color:"#1565C0"}},
-        "Bawat hakbang ng bawat request. Kapag may nawawalang bawas sa payslip, dito makikita kung saan ito tumigil."),
+        "Bawat hakbang ng CA, loan, at expense. Kapag may nawawalang bawas sa payslip o hindi tugmang cash count, dito makikita kung saan ito tumigil."),
+      h("div",{style:{display:"flex",gap:6,marginBottom:11,flexWrap:"wrap"}},
+        [["all","Lahat"],["CA","Cash Advance"],["Loan","Cash Loan"],
+         ["Expense","Expenses"]].map(([k,l])=>
+          h("button",{key:k,onClick:()=>setLogKind(k),
+            style:{padding:"5px 13px",borderRadius:20,fontSize:13,
+              cursor:"pointer",fontWeight:logKind===k?800:500,
+              border:"1px solid "+(logKind===k?C.primary:C.border),
+              background:logKind===k?"#F3E9F7":"#fff",
+              color:logKind===k?C.primary:C.muted}},l))),
       caLog.length===0
         ? h("div",{style:{textAlign:"center",padding:"34px",color:C.muted,
             background:"#fff",borderRadius:12,border:"1px solid "+C.border}},
             "Wala pang naitatalang hakbang. Nagsisimula ang trail sa mga bagong request.")
         : h("div",{style:{background:"#fff",borderRadius:12,
             border:"1px solid "+C.border,overflow:"hidden"}},
-            caLog.filter(l=>canDecide||l.branch===user.branch).map(l=>{
+            caLog.filter(l=>canDecide||l.branch===user.branch)
+              .filter(l=>logKind==="all"||(l.kind||"CA")===logKind).map(l=>{
               const meta={
                 submitted:{c:C.info,i:"\uD83D\uDCE4",t:"Isinumite"},
                 posted_to_payroll:{c:C.success,i:"\u2705",t:"Naipasok sa payroll"},
@@ -3760,7 +3771,10 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
                   t:"Approved pero WALANG naipasok sa payroll"},
                 payroll_sync_failed:{c:C.danger,i:"\u274C",t:"Pumalya ang sync"},
                 rejected:{c:C.danger,i:"\u2716",t:"Tinanggihan"},
-                cancelled_by_requester:{c:C.muted,i:"\u21A9",t:"Binawi ng humiling"}
+                cancelled_by_requester:{c:C.muted,i:"\u21A9",t:"Binawi ng humiling"},
+                expense_created:{c:C.info,i:"\uD83D\uDCB8",t:"Expense naitala \u00B7 Cash Out"},
+                expense_edited:{c:C.warning,i:"\u270F\uFE0F",t:"Expense binago"},
+                expense_deleted:{c:C.danger,i:"\uD83D\uDDD1\uFE0F",t:"Expense binura"}
               }[l.event]||{c:C.muted,i:"\u2022",t:l.event};
               return h("div",{key:l._docId,style:{display:"flex",gap:10,
                 padding:"10px 14px",borderBottom:"1px solid #f5f5f5",
@@ -7467,6 +7481,9 @@ async function syncPackFromMain(db,col,itemId){
 async function logCAEvent(db,req,event,by,extra){
   try{
     await addDoc(collection(db,"hris_request_log"),Object.assign({
+      // "CA" / "Loan" / "Expense" — one trail, filtered on the screen.
+      kind:req.kind||(String(req.type||"").indexOf("Loan")>=0?"Loan"
+        :(req.type==="Expense"?"Expense":"CA")),
       reqId:req._docId||"",type:req.type||"",staffName:req.staffName||"",
       branch:req.branch||"",amount:Number(req.amount)||0,
       event:event,by:by||"",date:localDate(),
@@ -11531,6 +11548,7 @@ function App(){
   const [expMonth,setExpMonth]=useState("");             // "" = all months
   const [expCat,setExpCat]=useState("");
   const [expBranch,setExpBranch]=useState("");           // owner only, "" = all
+  const [editExp,setEditExp]=useState(null);             // manager/owner edit
   const [ordDate,setOrdDate]=useState("");               // "" = today, "all" = no filter
   const [ordPage,setOrdPage]=useState(1);                // orders list pagination
   const [placing,setPlacing]=useState(false);            // order submit in flight
@@ -15707,6 +15725,14 @@ function App(){
               ),
               h("div",{style:{fontSize:14,fontWeight:800,color:C.danger,marginRight:7}},"₱"+(e.amount||0).toLocaleString()),
               h(Badge,{label:e.status,color:e.status==="approved"?C.success:C.warning}),
+              // Whoever keyed it in cannot change it afterwards — a wrong
+              // amount is a wrong drawer, and the person who made the entry
+              // should not be the one who quietly rewrites it.
+              (user.role==="manager"||user.role==="owner")&&h("button",{
+                onClick:()=>setEditExp(Object.assign({},e)),
+                style:{padding:"3px 9px",background:"#E3F2FD",border:"none",
+                  borderRadius:6,color:C.info,fontSize:12,fontWeight:700,
+                  cursor:"pointer",marginRight:5}},"Edit"),
               e.status==="pending"&&user.role==="owner"&&h("button",{
                 onClick:async()=>{
                   if(e._docId)await updateDoc(doc(db,"expenses",e._docId),{status:"approved",approvedBy:user.name,approvedAt:serverTimestamp()});
@@ -15716,6 +15742,115 @@ function App(){
             )),
             expenses.length===0&&h("div",{style:{textAlign:"center",padding:"30px",color:C.muted,fontSize:14}},"No expenses yet")
           ),
+          // EDIT / DELETE — manager and owner only
+          editExp&&h("div",{style:{position:"fixed",inset:0,
+            background:"rgba(0,0,0,.5)",display:"flex",alignItems:"center",
+            justifyContent:"center",zIndex:905,padding:14}},
+            h("div",{style:{background:"#fff",width:380,maxWidth:"100%",
+              borderRadius:14,padding:"18px",
+              boxShadow:"0 20px 60px rgba(0,0,0,.3)"}},
+              h("div",{style:{display:"flex",justifyContent:"space-between",
+                marginBottom:12}},
+                h("b",null,"\u270F\uFE0F I-edit ang Expense"),
+                h("button",{onClick:()=>setEditExp(null),
+                  style:{background:"none",border:"none",fontSize:17,
+                    cursor:"pointer"}},"\u00D7")),
+              h("div",{style:{fontSize:12,color:C.muted,marginBottom:11}},
+                "Isinumite ni "+(editExp.by||"\u2014")+" \u00B7 "+(editExp.date||"")),
+              h("div",{style:{display:"grid",gap:9}},
+                h("div",null,
+                  h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,
+                    letterSpacing:1,marginBottom:4}},"CATEGORY"),
+                  h("select",{value:editExp.cat||"Utilities",
+                    onChange:ev=>setEditExp(p2=>({...p2,cat:ev.target.value})),
+                    style:{width:"100%",padding:"8px",border:"1px solid "+C.border,
+                      borderRadius:7,fontSize:13,outline:"none"}},
+                    EXPENSE_CATS.map(c=>h("option",{key:c},c)))),
+                h("div",null,
+                  h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,
+                    letterSpacing:1,marginBottom:4}},"DESCRIPTION"),
+                  h("textarea",{value:editExp.desc||"",rows:3,
+                    onChange:ev=>setEditExp(p2=>({...p2,desc:ev.target.value})),
+                    style:{width:"100%",padding:"8px",border:"1px solid "+C.border,
+                      borderRadius:7,fontSize:13,outline:"none",
+                      boxSizing:"border-box",resize:"vertical",
+                      fontFamily:"inherit",lineHeight:1.45}})),
+                h("div",null,
+                  h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,
+                    letterSpacing:1,marginBottom:4}},"AMOUNT (\u20B1)"),
+                  h("input",{type:"number",onFocus:ev=>ev.target.select(),
+                    value:editExp.amount||"",
+                    onChange:ev=>setEditExp(p2=>({...p2,amount:ev.target.value})),
+                    style:{width:"100%",padding:"8px",border:"1px solid "+C.border,
+                      borderRadius:7,fontSize:14,fontWeight:700,outline:"none",
+                      boxSizing:"border-box"}})),
+                h("div",{style:{fontSize:12,color:"#BF360C",background:"#FFF8E1",
+                  border:"1px solid #FFE082",borderRadius:8,padding:"8px 10px",
+                  lineHeight:1.45}},
+                  "Ang katumbas nitong Cash Out ay susunod sa bagong halaga, kaya mananatiling tugma ang cash count."),
+                h("button",{onClick:async()=>{
+                    const amt=parseFloat(editExp.amount)||0;
+                    if(!editExp.desc||amt<=0){showT("Kulang ang detalye","warn");return;}
+                    try{
+                      await updateDoc(doc(db,"expenses",editExp._docId),{
+                        cat:editExp.cat,desc:editExp.desc,amount:amt,
+                        editedBy:user.name,editedAt:serverTimestamp()});
+                      // Keep the linked drawer entry in step. Editing the
+                      // expense alone would leave the cash count reconciling
+                      // against the old figure.
+                      const q2=query(collection(db,"cash_log"),
+                        where("expenseId","==",editExp._docId),limit(5));
+                      const sn=await getDocs(q2);
+                      for(const d2 of sn.docs){
+                        await updateDoc(doc(db,"cash_log",d2.id),{
+                          amount:amt,
+                          desc:"Expense: "+editExp.cat+" — "+editExp.desc});
+                      }
+                      await logCAEvent(db,{_docId:editExp._docId,kind:"Expense",
+                        type:"Expense",staffName:editExp.cat+" — "+editExp.desc,
+                        branch:editExp.branch,amount:amt},"expense_edited",
+                        user.name,{note:"dating \u20B1"+peso(Number(editExp.amount)||0)
+                          +" \u2192 \u20B1"+peso(amt)});
+                      showT("Na-update ang expense \u2713");
+                      setEditExp(null);
+                    }catch(er){
+                      showT("Failed: "+String(er&&er.message||er).slice(0,60),"err");
+                    }
+                  },
+                  style:{padding:"10px",background:C.primary,border:"none",
+                    borderRadius:8,color:"#fff",fontWeight:800,fontSize:13,
+                    cursor:"pointer"}},"\uD83D\uDCBE I-save"),
+                h("button",{onClick:async()=>{
+                    if(!confirm("Burahin ang expense na ito? Aalisin din ang katumbas nitong Cash Out."))return;
+                    try{
+                      const q2=query(collection(db,"cash_log"),
+                        where("expenseId","==",editExp._docId),limit(5));
+                      const sn=await getDocs(q2);
+                      for(const d2 of sn.docs){
+                        await deleteDoc(doc(db,"cash_log",d2.id));
+                      }
+                      await deleteDoc(doc(db,"expenses",editExp._docId));
+                      // Logged BEFORE the row disappears — a deletion with no
+                      // trail is indistinguishable from an entry never made.
+                      await logCAEvent(db,{_docId:editExp._docId,kind:"Expense",
+                        type:"Expense",staffName:editExp.cat+" — "+editExp.desc,
+                        branch:editExp.branch,
+                        amount:Number(editExp.amount)||0},"expense_deleted",
+                        user.name,{note:"isinumite ni "+(editExp.by||"—")});
+                      showT("Nabura ang expense","warn");
+                      setEditExp(null);
+                    }catch(er){
+                      showT("Failed: "+String(er&&er.message||er).slice(0,60),"err");
+                    }
+                  },
+                  style:{padding:"9px",background:"#fff",
+                    border:"1px solid "+C.border,borderRadius:8,
+                    color:C.danger,fontWeight:700,fontSize:13,
+                    cursor:"pointer"}},"\uD83D\uDDD1\uFE0F Burahin")
+              )
+            )
+          ),
+
           modal==="add_exp"&&h("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:900}},
             h("div",{style:{background:"#fff",width:360,borderRadius:14,padding:"18px",boxShadow:"0 20px 60px rgba(0,0,0,.3)"}},
               h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:14}},h("b",null,"Add Expense"),h("button",{onClick:()=>setModal(null),style:{background:"none",border:"none",fontSize:17,cursor:"pointer"}},"×")),
@@ -15769,6 +15904,9 @@ function App(){
                       showT("Naitala ang expense pero HINDI sa cash — idagdag bilang Cash Out","warn");
                     }
                   }
+                  await logCAEvent(db,{_docId:_exp.id,kind:"Expense",
+                    type:"Expense",staffName:newExp.cat+" — "+newExp.desc,
+                    branch:branchId,amount:_amt},"expense_created",user.name,{});
                   setNewExp({cat:"Utilities",desc:"",amount:"",date:""});setModal(null);
                   showT("Expense recorded \u00B7 \u20B1"+peso(_amt)+" Cash Out");
                 },style:{padding:"10px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:8,color:"#fff",fontWeight:700,cursor:"pointer"}},"Save Expense")
