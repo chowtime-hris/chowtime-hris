@@ -7771,8 +7771,30 @@ function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inve
         h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,padding:"16px"}},
           h("div",{style:{fontSize:13,color:C.muted,marginBottom:4}},"PRODUCT INVENTORY VALUE"),
           h("div",{style:{fontSize:22,fontWeight:900,color:C.text}},
-            "₱"+invValue.toLocaleString("en-PH",{minimumFractionDigits:2})),
-          h("div",{style:{fontSize:13,color:C.muted,marginTop:4}},"Selling value: ₱"+invValueSell.toLocaleString())
+            "₱"+peso(invValue)),
+          h("div",{style:{fontSize:13,color:C.muted,marginTop:4}},
+            "Selling value: ₱"+peso(invValueSell)),
+          // A total is only as good as the lines under it. Two failures hide
+          // inside a single figure: a cost that is wrong by orders of
+          // magnitude, and a costed-at-zero item. Both read as a plausible
+          // number until someone opens the list.
+          (function(){
+            const stocked=inventory.filter(i=>(Number(i.stock)||0)>0);
+            const noCost=stocked.filter(i=>!(Number(i.cost)>0));
+            const huge=stocked.filter(i=>
+              (Number(i.cost)||0)*(Number(i.stock)||0)>100000);
+            if(!noCost.length&&!huge.length)return null;
+            const nm=(a)=>a.slice(0,3).map(i=>i.name).join(", ")
+              +(a.length>3?" +"+(a.length-3):"");
+            return h("div",{style:{marginTop:8,paddingTop:8,
+              borderTop:"1px solid "+C.border,fontSize:12,lineHeight:1.5}},
+              huge.length>0&&h("div",{style:{color:C.danger,fontWeight:700}},
+                "\u26A0\uFE0F "+huge.length+" item na lampas \u20B1100k ang halaga: "
+                +nm(huge)),
+              noCost.length>0&&h("div",{style:{color:C.warning,fontWeight:700}},
+                "\u26A0\uFE0F "+noCost.length+" item na may stock pero walang cost: "
+                +nm(noCost)));
+          })()
         ),
         h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,padding:"16px"}},
           h("div",{style:{fontSize:13,color:C.muted,marginBottom:4}},"GROSS SALES"),
@@ -13050,6 +13072,18 @@ function App(){
               "🚪 Sign Out")
           )
         ),
+
+        // The mini header is hidden on POS and Kitchen to keep those screens
+        // clear — which also removed the only way into the guide from the two
+        // screens where someone is most likely to be stuck mid-task. This puts
+        // it back without taking any layout space.
+        (page==="pos"||page==="kitchen")&&h("button",{
+          onClick:()=>{setShowGuide(true);setOpenGuide("");},
+          title:"How to use the POS",
+          style:{position:"fixed",right:14,bottom:14,width:42,height:42,
+            borderRadius:"50%",border:"1px solid "+C.border,background:"#fff",
+            fontSize:18,lineHeight:1,cursor:"pointer",zIndex:900,
+            boxShadow:"0 4px 14px rgba(0,0,0,.18)"}},"\uD83D\uDCD6"),
 
         showGuide&&h("div",{style:{position:"fixed",inset:0,
         background:"rgba(0,0,0,.55)",display:"flex",alignItems:"center",
