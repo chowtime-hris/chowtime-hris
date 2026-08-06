@@ -166,6 +166,63 @@ function posLocalDate(d){
     String(x.getDate()).padStart(2,"0");
 }
 
+// Pack size is not a second setting to keep in step — it is read from the
+// MAIN inventory item this code is linked to. Change it there and Production
+// follows. Only items counted in pieces get the pack/loose split; a sauce
+// measured in ml has no pack and keeps its single field.
+// Cached in localStorage and read back before the first paint, so the row
+// knows immediately whether it needs one field or two. Pack sizes change once
+// in a blue moon; a stale value for a few seconds costs nothing, a redraw
+// under the cashier's fingers costs a mistyped batch.
+const PACK_CACHE_KEY = "ct_pos_pack_v1";
+function readPackCache(){
+  try{
+    const c = localStorage.getItem(PACK_CACHE_KEY);
+    return c ? JSON.parse(c) : null;
+  }catch(e){ return null; }
+}
+
+async function loadPosPackInfo(){
+  const fs = posDB();
+  if(!fs) return {};
+  const info = {};
+  try{
+    const dm = await fs.collection("settings").doc("production_map").get();
+    const map = (dm.exists && dm.data() && dm.data().map) || {};
+    state.posMap = map;
+    for(const code of Object.keys(map)){
+      const cfg = map[code];
+      const id = typeof cfg==="string" ? cfg : (cfg && cfg.id);
+      if(!id) continue;
+      try{
+        const snap = await fs.collection("inventory").doc(id).get();
+        if(!snap.exists) continue;
+        const d = snap.data() || {};
+        info[code] = {
+          unit: d.unit || "",
+          packUnit: d.packUnit || "",
+          packSize: Number(d.packSize) || 0,
+          name: d.name || id
+        };
+      }catch(e){ console.warn("pack info", code, e); }
+    }
+  }catch(e){ console.warn("pack info map:", e); }
+  const changed = JSON.stringify(state.posPack||{}) !== JSON.stringify(info);
+  state.posPack = info;
+  try{ localStorage.setItem(PACK_CACHE_KEY, JSON.stringify(info)); }catch(e){}
+  return {info, changed};
+}
+
+// True when this code should be entered as packs + loose pieces.
+function usesPackEntry(code){
+  const pi = (state.posPack || {})[code];
+  return !!(pi && pi.packSize > 1 && /^pcs?$/i.test(pi.unit || ""));
+}
+function packSizeOfCode(code){
+  const pi = (state.posPack || {})[code];
+  return (pi && Number(pi.packSize)) || 0;
+}
+
 // Post one day's finished quantities into MAIN's inventory.
 // Guarded by a marker per date so re-saving the same day tops up by the
 // difference rather than adding the whole batch a second time.
@@ -194,7 +251,14 @@ async function postProductionToPOS(dateStr, products){
     const already = Number(posted[code]) || 0;
     // Convert to POS units before comparing: 5 bottles at 1000 ml is 5000 ml,
     // and posting 5 would credit a thousandth of what was made.
-    const wantPos = Math.round(qty * per * 1000) / 1000;
+    //
+    // posBase means the entry was already keyed in POS base units — packs were
+    // turned into pieces at entry time. Multiplying by `per` again would credit
+    // a pack's worth for every single piece.
+    const alreadyBase = !!(products[code] && products[code].posBase);
+    const wantPos = alreadyBase
+      ? Math.round(qty * 1000) / 1000
+      : Math.round(qty * per * 1000) / 1000;
     const delta   = Math.round((wantPos - already) * 1000) / 1000;
     if(delta === 0) continue;
     try{
@@ -216,8 +280,14 @@ async function postProductionToPOS(dateStr, products){
         prevStock: prev,
         newStock: next,
         desc: "Production " + dateStr + " · " + code +
-              (per !== 1 ? " · " + qty + " " + (pUnit || "unit") +
-                (qty === 1 ? "" : "s") + " x " + per : "") +
+              (alreadyBase
+                ? ((products[code]||{}).packs
+                    ? (" · " + (products[code]||{}).packs + " pack"
+                       + (((products[code]||{}).loose)
+                          ? (" + " + (products[code]||{}).loose + " pc") : ""))
+                    : "")
+                : (per !== 1 ? " · " + qty + " " + (pUnit || "unit") +
+                    (qty === 1 ? "" : "s") + " x " + per : "")) +
               (already ? " (adjusted from " + already + ")" : ""),
         source: "PRODUCTION",
         ref: dateStr,
@@ -259,6 +329,9 @@ let state = {
   ledger: {},        // staffId -> [ {id,type:'loan'|'fine'|'ca'|'payment'|'cashfund_add'|'cashfund_deduct',amount,date,note} ]
   deductions: {}     // cutoffKey -> { staffId: {sss,philhealth,pagibig} }
 };
+// Seeded before anything renders, so the batch rows know from the first paint
+// which items are counted in packs.
+state.posPack = readPackCache();
 
 const LS_STATE_KEY = 'chowtimeProduction_state_v1';
 const LS_CFG_KEY = 'chowtimeProduction_fbConfig_v1';
@@ -645,15 +718,33 @@ function renderEntry(main){
   <div class="card">
     <h2>Batches produced today</h2>
     <div class="table-wrap"><table>
-      <thead><tr><th>Item</th><th>Total qty made</th><th>Credited to</th></tr></thead>
+      <thead><tr><th>Item</th><th>Qty made</th><th>Credited to</th></tr></thead>
       <tbody>
         ${state.products.map(p=>{
           const pd = (day.products && day.products[p.code]) || {};
           const qty = pd.qty!=null ? pd.qty : '';
+          const usePack = usesPackEntry(p.code);
+          const per = packSizeOfCode(p.code);
+          // An older row holds pieces with no split recorded; show them as
+          // loose so nothing is silently reinterpreted as packs.
+          const packs = pd.packs!=null ? pd.packs : '';
+          const loose = pd.loose!=null ? pd.loose
+                        : (pd.packs!=null ? '' : qty);
           const creditedSet = pd.staff ? new Set(pd.staff) : new Set(staffList.filter(s=>attendance[s.id]).map(s=>s.id));
           return `<tr>
             <td><strong>${p.label}</strong><br><span style="font-size:10px;color:#5A5A5A">${p.code}</span></td>
-            <td><input type="number" min="0" step="any" style="width:100px" class="batchQty" data-code="${p.code}" value="${qty}" placeholder="0"></td>
+            <td>${usePack ? `
+              <div style="display:flex;gap:6px;align-items:center">
+                <div><div style="font-size:10px;color:#5A5A5A">PACKS</div>
+                  <input type="number" min="0" step="any" style="width:74px" class="batchPacks" data-code="${p.code}" value="${packs}" placeholder="0"></div>
+                <div style="padding-top:12px;color:#5A5A5A">+</div>
+                <div><div style="font-size:10px;color:#5A5A5A">LOOSE PC</div>
+                  <input type="number" min="0" step="any" style="width:74px" class="batchLoose" data-code="${p.code}" value="${loose}" placeholder="0"></div>
+              </div>
+              <div style="font-size:11px;color:#6b5a3a;margin-top:3px" class="packHint" data-code="${p.code}">1 pack = ${per} pc</div>
+            ` : `
+              <input type="number" min="0" step="any" style="width:100px" class="batchQty" data-code="${p.code}" value="${qty}" placeholder="0">
+            `}</td>
             <td>
               <div style="display:flex;flex-wrap:wrap;gap:8px">
               ${staffList.map(s=>`
@@ -711,6 +802,19 @@ function renderEntry(main){
       refreshPreview();
     });
   });
+  document.querySelectorAll('.batchPacks,.batchLoose').forEach(el=>{
+    el.addEventListener('input', ()=>{
+      const code = el.dataset.code;
+      const per  = packSizeOfCode(code) || 1;
+      const packs = Number((document.querySelector(`.batchPacks[data-code="${code}"]`)||{}).value)||0;
+      const loose = Number((document.querySelector(`.batchLoose[data-code="${code}"]`)||{}).value)||0;
+      const hint = document.querySelector(`.packHint[data-code="${code}"]`);
+      if(hint) hint.textContent = (packs||loose)
+        ? (packs+' pack × '+per+(loose?(' + '+loose):'')+' = '+(packs*per+loose)+' pc')
+        : ('1 pack = '+per+' pc');
+      refreshPreview();
+    });
+  });
   document.querySelectorAll('.batchQty,.creditCheck').forEach(el=>{
     el.addEventListener('input', refreshPreview);
     el.addEventListener('change', refreshPreview);
@@ -721,10 +825,21 @@ function renderEntry(main){
     document.querySelectorAll('.attCheck').forEach(cb=>{ data.attendance[cb.dataset.staff]=cb.checked; });
     document.querySelectorAll('.caInput').forEach(i=>{ const v=Number(i.value)||0; if(v>0) data.ca[i.dataset.staff]=v; });
     state.products.forEach(p=>{
-      const qtyEl = document.querySelector(`.batchQty[data-code="${p.code}"]`);
-      const qty = Number(qtyEl.value)||0;
       const staffIds = Array.from(document.querySelectorAll(`.creditCheck[data-code="${p.code}"]:checked`)).map(c=>c.dataset.staff);
-      data.products[p.code] = {qty, staff: staffIds};
+      if(usesPackEntry(p.code)){
+        const per   = packSizeOfCode(p.code) || 1;
+        const packs = Number((document.querySelector(`.batchPacks[data-code="${p.code}"]`)||{}).value)||0;
+        const loose = Number((document.querySelector(`.batchLoose[data-code="${p.code}"]`)||{}).value)||0;
+        // qty stays PIECES — payroll reads it exactly as before, at the same
+        // per-piece rate. packs/loose are kept only as a record of how the
+        // figure was reached, and posBase marks it as already converted.
+        const qty = Math.round((packs*per + loose)*1000)/1000;
+        data.products[p.code] = {qty, packs, loose, per, posBase:true, staff: staffIds};
+      }else{
+        const qtyEl = document.querySelector(`.batchQty[data-code="${p.code}"]`);
+        const qty = Number(qtyEl ? qtyEl.value : 0)||0;
+        data.products[p.code] = {qty, staff: staffIds};
+      }
     });
     return data;
   }
@@ -749,9 +864,18 @@ function renderEntry(main){
   }
   refreshPreview();
 
+  // Refreshed quietly in the background. The screen is already drawn from the
+  // cached sizes, so it is only redrawn when MAIN actually changed something —
+  // no flicker on a normal day.
+  loadPosPackInfo().then(r=>{ if(r && r.changed) render(); });
+
   document.getElementById('saveEntryBtn').onclick = ()=>{
     const emptyBatches = state.products.filter(p=>{
-      const qty = Number(document.querySelector(`.batchQty[data-code="${p.code}"]`).value)||0;
+      const qty = usesPackEntry(p.code)
+        ? ((Number((document.querySelector(`.batchPacks[data-code="${p.code}"]`)||{}).value)||0)
+           *(packSizeOfCode(p.code)||1)
+           +(Number((document.querySelector(`.batchLoose[data-code="${p.code}"]`)||{}).value)||0))
+        : (Number((document.querySelector(`.batchQty[data-code="${p.code}"]`)||{}).value)||0);
       const staffCount = document.querySelectorAll(`.creditCheck[data-code="${p.code}"]:checked`).length;
       return qty>0 && staffCount===0;
     });
