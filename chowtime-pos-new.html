@@ -234,7 +234,7 @@ const BRANCHES = [
 
 const ROLES = {
   owner:     {label:"Owner / Admin",    emoji:"\u{1F451}", color:"#6A1B9A",
-    nav:["dashboard","branches","subs","pos","orders","void_requests","all_orders","analytics","z_reading","reports","cash_count","expenses","cash_monitor","cash_advance","inventory","inv_log","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","settings","printer","ext_payroll","ext_kiosk","hris_dash","ext_production","ext_stock","branch_pl"]},
+    nav:["dashboard","branches","subs","pos","orders","void_requests","all_orders","analytics","z_reading","reports","cash_count","expenses","cash_monitor","cash_advance","discount_mgmt","inventory","inv_log","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","settings","printer","ext_payroll","ext_kiosk","hris_dash","ext_production","ext_stock","branch_pl"]},
   manager:   {label:"Branch Manager",   emoji:"\u{1F3EA}", color:"#007AFF",
     nav:["branch_dash","pos","orders","analytics","z_reading","reports","cash_count","expenses","inventory","inv_log","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","hris_dash","bom_mgmt","branch_settings","printer","ext_kiosk","ext_stock","branch_pl"]},
   cashier:   {label:"Cashier",          emoji:"\u{1F4B3}", color:"#34C759",
@@ -286,6 +286,7 @@ const NAV_META = {
   expenses:    {icon:"💸",label:"Expenses"},
   cash_monitor:{icon:"💵",label:"Cash Monitor"},
   cash_advance:{icon:"💵",label:"Cash Advance"},
+  discount_mgmt:{icon:"🏷️",label:"Discounts"},
   cash_in_out: {icon:"🔄",label:"Cash In/Out"},
   inventory:   {icon:"📦",label:"Inventory"},
   menu_mgmt:   {icon:"🍽️",label:"Menu"},
@@ -7074,6 +7075,260 @@ function daysBetween(fromISO,toISO){
   if(isNaN(a)||isNaN(b))return 0;
   return Math.round((b-a)/86400000);
 }
+// ─── DISCOUNT MANAGEMENT (Main) ──────────────────────────
+// Defined once at Main and switched on per branch. Leaving Branches empty
+// means every branch — franchise included — so the common case is one click.
+function DiscountPage({db,user,branches,discounts,menuItems,showT}){
+  const blank={name:"",valueType:"percent",value:"",status:"active",
+    fromDate:localDate(),toDate:"",branches:[],items:[],note:""};
+  const [form,setForm]=useState(blank);
+  const [editId,setEditId]=useState(null);
+  const [saving,setSaving]=useState(false);
+
+  const bName=(id)=>{
+    const b=(branches||[]).find(x=>x.id===id);
+    return (b&&(b.name||b.full))||id;
+  };
+  // Scope keys are "itemId" for a whole item, or "itemId|Variant" for one
+  // variant of it — so a BOGO can be tied to "w/ Drinks" without touching the
+  // plain version of the same meal.
+  const toggleItem=(key)=>setForm(p=>{
+    const cur=p.items||[];
+    return {...p,items:cur.indexOf(key)>=0
+      ? cur.filter(x=>x!==key) : cur.concat([key])};
+  });
+  const toggleBranch=(id)=>setForm(p=>{
+    const cur=p.branches||[];
+    return {...p,branches:cur.indexOf(id)>=0
+      ? cur.filter(x=>x!==id) : cur.concat([id])};
+  });
+
+  const save=async()=>{
+    const v=parseFloat(form.value)||0;
+    if(!form.name.trim()){showT("Kailangan ng pangalan","warn");return;}
+    if(v<=0){showT("Kailangan ng halaga","warn");return;}
+    if(form.valueType==="percent"&&v>100){showT("Hindi pwedeng lampas 100%","warn");return;}
+    if(form.toDate&&form.fromDate&&form.toDate<form.fromDate){
+      showT("Mali ang petsa — nauuna ang To Date","warn");return;
+    }
+    setSaving(true);
+    try{
+      const payload={name:form.name.trim(),valueType:form.valueType,value:v,
+        status:form.status,fromDate:form.fromDate||"",toDate:form.toDate||"",
+        branches:form.branches||[],items:form.items||[],
+        note:(form.note||"").trim(),
+        updatedBy:user.name,updatedAt:serverTimestamp()};
+      if(editId){ await updateDoc(doc(db,"discounts",editId),payload); }
+      else{ await addDoc(collection(db,"discounts"),
+        Object.assign({},payload,{createdBy:user.name,at:serverTimestamp()})); }
+      showT(editId?"Na-update ✓":"Naidagdag ang discount ✓");
+      setForm(blank); setEditId(null);
+    }catch(e){ showT("Failed: "+String(e&&e.message||e).slice(0,60),"err"); }
+    setSaving(false);
+  };
+
+  const lbl=(t)=>h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,
+    letterSpacing:1,marginBottom:4}},t);
+  const inp={width:"100%",padding:"9px",border:"1px solid "+C.border,
+    borderRadius:8,fontSize:13,outline:"none",boxSizing:"border-box"};
+
+  return h("div",null,
+    h(SectionHeader,{title:"🏷️ Discounts"}),
+
+    h("div",{style:{display:"grid",gridTemplateColumns:"minmax(300px,380px) 1fr",
+      gap:14,alignItems:"start"}},
+
+      h("div",{style:{background:"#fff",borderRadius:12,padding:16,
+        border:"1px solid "+C.border}},
+        h("b",{style:{fontSize:14}},editId?"I-edit ang discount":"Bagong discount"),
+        h("div",{style:{display:"grid",gap:10,marginTop:11}},
+          h("div",null,lbl("PANGALAN"),
+            h("input",{value:form.name,placeholder:"hal. Opening Promo",
+              onChange:e=>setForm(p=>({...p,name:e.target.value})),style:inp})),
+
+          h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}},
+            h("div",null,lbl("VALUE TYPE"),
+              h("select",{value:form.valueType,
+                onChange:e=>setForm(p=>({...p,valueType:e.target.value})),
+                style:inp},
+                h("option",{value:"percent"},"Percentage (%)"),
+                h("option",{value:"amount"},"Amount (₱)"))),
+            h("div",null,lbl(form.valueType==="percent"?"HALAGA (%)":"HALAGA (₱)"),
+              h("input",{type:"number",onFocus:e=>e.target.select(),
+                value:form.value,placeholder:"0.00",
+                onChange:e=>setForm(p=>({...p,value:e.target.value})),
+                style:Object.assign({},inp,{fontWeight:800})}))),
+
+          h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}},
+            h("div",null,lbl("MULA"),
+              h("input",{type:"date",value:form.fromDate,
+                onChange:e=>setForm(p=>({...p,fromDate:e.target.value})),
+                style:inp})),
+            h("div",null,lbl("HANGGANG"),
+              h("input",{type:"date",value:form.toDate,
+                onChange:e=>setForm(p=>({...p,toDate:e.target.value})),
+                style:inp}))),
+          h("div",{style:{fontSize:12,color:C.muted,marginTop:-4}},
+            "Iwanang blanko ang Hanggang kung walang katapusan."),
+
+          h("div",null,lbl("STATUS"),
+            h("div",{style:{display:"flex",gap:6}},
+              [["active","Active"],["inactive","Inactive"]].map(([v,l])=>
+                h("button",{key:v,onClick:()=>setForm(p=>({...p,status:v})),
+                  style:{flex:1,padding:"8px",borderRadius:8,fontSize:13,
+                    fontWeight:form.status===v?800:500,cursor:"pointer",
+                    border:"2px solid "+(form.status===v
+                      ?(v==="active"?C.success:C.muted):C.border),
+                    background:form.status===v
+                      ?(v==="active"?"#E8F5E9":"#F5F5F5"):"#fff",
+                    color:form.status===v
+                      ?(v==="active"?C.success:C.muted):C.muted}},l)))),
+
+          h("div",null,lbl("ITEMS"),
+            h("div",{style:{fontSize:12,color:C.muted,marginBottom:6}},
+              (form.items||[]).length===0
+                ? "Walang napili — mag-a-apply sa BUONG order."
+                : ((form.items||[]).length+" item/variant ang saklaw. Sa mga linyang ito lang babawas.")),
+            h("div",{style:{maxHeight:170,overflowY:"auto",display:"flex",
+              gap:5,flexWrap:"wrap",padding:"2px"}},
+              (menuItems||[]).map(mi=>{
+                const vs=(mi.variants&&mi.variants.length)?mi.variants:null;
+                const keys=vs
+                  ? vs.map(v=>({k:mi.id+"|"+(v.label||""),
+                      t:(mi.name||"")+" · "+(v.label||"")}))
+                  : [{k:mi.id,t:mi.name||mi.id}];
+                return keys.map(o=>{
+                  const on=(form.items||[]).indexOf(o.k)>=0;
+                  return h("button",{key:o.k,onClick:()=>toggleItem(o.k),
+                    style:{padding:"5px 10px",borderRadius:20,fontSize:12,
+                      cursor:"pointer",fontWeight:on?800:500,
+                      border:"1px solid "+(on?C.primary:C.border),
+                      background:on?"#F3E9F7":"#fff",
+                      color:on?C.primary:C.muted}},o.t);
+                });
+              }))),
+
+          h("div",null,lbl("BRANCHES"),
+            h("div",{style:{fontSize:12,color:C.muted,marginBottom:6}},
+              (form.branches||[]).length===0
+                ? "Walang napili — mag-a-apply sa LAHAT ng branch."
+                : ((form.branches||[]).length+" branch ang napili.")),
+            h("div",{style:{display:"flex",gap:5,flexWrap:"wrap"}},
+              (branches||[]).map(b=>{
+                const on=(form.branches||[]).indexOf(b.id)>=0;
+                return h("button",{key:b.id,onClick:()=>toggleBranch(b.id),
+                  style:{padding:"5px 11px",borderRadius:20,fontSize:12,
+                    cursor:"pointer",fontWeight:on?800:500,
+                    border:"1px solid "+(on?C.primary:C.border),
+                    background:on?"#F3E9F7":"#fff",
+                    color:on?C.primary:C.muted}},b.name||b.full||b.id);
+              }))),
+
+          h("div",null,lbl("PAALALA (opsyonal)"),
+            h("textarea",{value:form.note,rows:2,
+              onChange:e=>setForm(p=>({...p,note:e.target.value})),
+              style:Object.assign({},inp,{resize:"vertical",
+                fontFamily:"inherit",lineHeight:1.4})})),
+
+          h("button",{onClick:save,disabled:saving,
+            style:{padding:"11px",borderRadius:9,border:"none",
+              background:saving?"#8A8A8A":C.primary,color:"#fff",
+              fontWeight:800,fontSize:14,
+              cursor:saving?"not-allowed":"pointer"}},
+            saving?"Sinesave...":(editId?"💾 I-update":"➕ Idagdag")),
+          editId&&h("button",{onClick:()=>{setForm(blank);setEditId(null);},
+            style:{padding:"9px",borderRadius:9,border:"1px solid "+C.border,
+              background:"#fff",color:C.muted,fontWeight:700,fontSize:13,
+              cursor:"pointer"}},"Kanselahin ang edit")
+        )
+      ),
+
+      h("div",{style:{background:"#fff",borderRadius:12,
+        border:"1px solid "+C.border,overflow:"hidden"}},
+        h("div",{style:{padding:"11px 15px",borderBottom:"1px solid "+C.border,
+          fontSize:14,fontWeight:800}},
+          "Mga discount ("+(discounts||[]).length+")"),
+        (discounts||[]).length===0
+          ? h("div",{style:{padding:"34px",textAlign:"center",color:C.muted,
+              fontSize:13}},"Wala pang discount. Gumawa sa kaliwa.")
+          : (discounts||[]).slice().sort((a,b)=>
+              String(a.name||"").localeCompare(String(b.name||"")))
+            .map(d=>{
+              const t=localDate();
+              const expired=d.toDate&&t>d.toDate;
+              const notYet=d.fromDate&&t<d.fromDate;
+              const live=d.status==="active"&&!expired&&!notYet;
+              return h("div",{key:d._docId,style:{padding:"11px 15px",
+                borderBottom:"1px solid #f5f5f5",display:"flex",gap:10,
+                alignItems:"flex-start",flexWrap:"wrap"}},
+                h("div",{style:{flex:1,minWidth:190}},
+                  h("div",{style:{fontSize:14,fontWeight:800}},
+                    (d.name||"—")+"  "+(d.valueType==="amount"
+                      ? ("₱"+peso(d.value||0)) : ((Number(d.value)||0)+"%"))),
+                  h("div",{style:{fontSize:12,color:C.muted,marginTop:2}},
+                    ((d.branches||[]).length===0
+                      ? "Lahat ng branch"
+                      : (d.branches||[]).map(bName).join(", "))),
+                  h("div",{style:{fontSize:12,color:C.muted,marginTop:1}},
+                    (d.fromDate||"—")+" → "+(d.toDate||"walang katapusan")),
+                  h("div",{style:{fontSize:12,color:C.muted,marginTop:1}},
+                    (d.items||[]).length===0
+                      ? "Buong order"
+                      : ("Items: "+(d.items||[]).map(k=>{
+                          const parts=String(k).split("|");
+                          const mi=(menuItems||[]).find(x=>x.id===parts[0]);
+                          return ((mi&&mi.name)||parts[0])
+                            +(parts[1]?(" · "+parts[1]):"");
+                        }).join(", "))),
+                  d.note&&h("div",{style:{fontSize:12,color:C.muted,
+                    marginTop:2,whiteSpace:"pre-line"}},"📝 "+d.note)),
+                h("div",{style:{display:"flex",gap:6,alignItems:"center",
+                  flexWrap:"wrap"}},
+                  h("span",{style:{padding:"3px 10px",borderRadius:20,
+                    fontSize:11,fontWeight:800,
+                    background:live?"#E8F5E9":"#F5F5F5",
+                    color:live?C.success:C.muted}},
+                    live?"LIVE":(expired?"EXPIRED"
+                      :(notYet?"SCHEDULED":"INACTIVE"))),
+                  h("button",{onClick:()=>{
+                      setEditId(d._docId);
+                      setForm({name:d.name||"",valueType:d.valueType||"percent",
+                        value:String(d.value||""),status:d.status||"active",
+                        fromDate:d.fromDate||"",toDate:d.toDate||"",
+                        branches:d.branches||[],items:d.items||[],
+                        note:d.note||""});
+                    },
+                    style:{padding:"4px 11px",borderRadius:7,fontSize:12,
+                      fontWeight:700,cursor:"pointer",background:"#E3F2FD",
+                      border:"none",color:C.info}},"Edit"),
+                  h("button",{onClick:async()=>{
+                      try{
+                        await updateDoc(doc(db,"discounts",d._docId),{
+                          status:d.status==="active"?"inactive":"active",
+                          updatedBy:user.name,updatedAt:serverTimestamp()});
+                        showT(d.status==="active"?"Na-off":"Na-on");
+                      }catch(e){showT("Failed","err");}
+                    },
+                    style:{padding:"4px 11px",borderRadius:7,fontSize:12,
+                      fontWeight:700,cursor:"pointer",background:"#fff",
+                      border:"1px solid "+C.border,color:C.muted}},
+                    d.status==="active"?"Off":"On"),
+                  h("button",{onClick:async()=>{
+                      if(!confirm("Burahin ang \""+(d.name||"")+"\"? Hindi ito makakaapekto sa mga naunang benta."))return;
+                      try{ await deleteDoc(doc(db,"discounts",d._docId));
+                        showT("Nabura","warn");
+                      }catch(e){showT("Failed","err");}
+                    },
+                    style:{padding:"4px 10px",borderRadius:7,fontSize:12,
+                      fontWeight:700,cursor:"pointer",background:"#fff",
+                      border:"1px solid "+C.border,color:C.danger}},"🗑️"))
+              );
+            })
+      )
+    )
+  );
+}
+
 // ─── PAYMENT PROOF MODAL ─────────────────────────────────
 // A branch cannot confirm its own subscription — that stays with the owner.
 // What it can do is file the proof, so the reference number stops living in
@@ -11634,6 +11889,7 @@ function App(){
   const [newBuild,setNewBuild]=useState(null);           // a newer build is live
   const [subs,setSubs]=useState([]);                     // subscriptions, all branches
   const [proofs,setProofs]=useState([]);                 // submitted payment proofs
+  const [discounts,setDiscounts]=useState([]);           // Main-managed discounts
   const [proofOpen,setProofOpen]=useState(false);        // proof modal
   const [openDisc,setOpenDisc]=useState({});             // expanded discrepancy reports
   const [editBr,setEditBr]=useState(null);               // branch being added/edited
@@ -11796,6 +12052,14 @@ function App(){
 
     // Subscriptions. Everyone loads the full set: it is eight small documents,
     // and the owner needs all of them to run the collections page.
+    // Discounts are defined at Main and switched on per branch. Everyone
+    // loads them: the POS needs the ones that apply to its own branch.
+    try{
+      unsubs.push(onSnapshot(collection(db,"discounts"),
+        snap=>setDiscounts(snap.docs.map(d=>({...d.data(),_docId:d.id}))),
+        ()=>{}));
+    }catch(e){}
+
     try{
       unsubs.push(onSnapshot(collection(db,"subscriptions"),
         snap=>setSubs(snap.docs.map(d=>({...d.data(),_docId:d.id}))),
@@ -12200,14 +12464,45 @@ function App(){
   const cartCount=cart.reduce((s,i)=>s+i.qty,0);
   const chkSub=cartTotal;
   // Discount = % rate, applied to the whole order OR to selected lines only
+  // Discounts defined at Main, switched on for this branch and in date.
+  // Empty branches[] means every branch.
+  const liveDiscs=(discounts||[]).filter(d=>{
+    if(d.status!=="active")return false;
+    const t=localDate();
+    if(d.fromDate&&t<d.fromDate)return false;
+    if(d.toDate&&t>d.toDate)return false;
+    const bl=d.branches||[];
+    return bl.length===0||bl.indexOf(branchId)>=0;
+  }).map(d=>({
+    id:"d_"+d._docId, label:d.name||"Discount",
+    rate:d.valueType==="percent"?(Number(d.value)||0)/100:0,
+    amountOff:d.valueType==="amount"?(Number(d.value)||0):0,
+    scope:d.items||[], fromMain:true
+  }));
+  const DISC_OPTIONS=DISCS.concat(liveDiscs);
+
   const discRate=chkDisc.custom
     ? Math.min(100,Math.max(0,parseFloat(chkDiscPct)||0))/100
     : (chkDisc.rate||0);
+  // A Main discount can be scoped to items or to one variant of an item.
+  // Where it is, the base is those cart lines only — a BOGO on "w/ Drinks"
+  // must not take anything off the plain version sitting in the same order.
+  const scopeKeys=(chkDisc&&chkDisc.scope)||[];
+  const inScope=(i)=>scopeKeys.length===0
+    ? true
+    : (scopeKeys.indexOf(i.id)>=0
+       ||scopeKeys.indexOf(i.id+"|"+(i.variant||""))>=0);
   const discTargets=(chkDiscTargets||[]).filter(cid=>cart.some(i=>i.cartId===cid));
+  const scopedCart=cart.filter(inScope);
   const discAll=discTargets.length===0;
-  const chkDiscBase=discAll?chkSub
-    :cart.filter(i=>discTargets.includes(i.cartId)).reduce((s,i)=>s+lineAmt(i),0);
-  const chkDiscAmt=Math.round(chkDiscBase*discRate*100)/100;
+  const chkDiscBase=discAll
+    ? scopedCart.reduce((s,i)=>s+lineAmt(i),0)
+    : cart.filter(i=>discTargets.includes(i.cartId)&&inScope(i))
+        .reduce((s,i)=>s+lineAmt(i),0);
+  // A peso-value discount can never take more than the lines it applies to.
+  const chkDiscAmt=(chkDisc.amountOff>0)
+    ? Math.min(chkDiscBase,Number(chkDisc.amountOff)||0)
+    : Math.round(chkDiscBase*discRate*100)/100;
   const chkTotal=chkSub-chkDiscAmt;
   // Take-out can apply to the whole order (follows ORDER TYPE) or to chosen lines.
   const toTargets=(chkToTargets||[]).filter(cid=>cart.some(i=>i.cartId===cid));
@@ -12517,7 +12812,8 @@ function App(){
           +(i.freebies||[]).reduce((a,f)=>a+((f.priceAdd||0)*(f.qty||0)),0),
         isBogo:i.isBogo||false,promo:i.promo||"",note:i.note||""})),
       subtotal:chkSub,discAmt:chkDiscAmt,
-      discType:{id:chkDisc.id,label:chkDisc.label,rate:discRate},
+      discType:{id:chkDisc.id,label:chkDisc.label,rate:discRate,
+        amountOff:Number(chkDisc.amountOff)||0,fromMain:!!chkDisc.fromMain},
       discRate:discRate,discBase:chkDiscBase,discScope:discAll?"order":" items",
       discItems:discAll?[]:cart.filter(i=>discTargets.includes(i.cartId)).map(i=>i.name),
       discId:chkDiscId,custName:chkCust,tableNo:chkTable,
@@ -13270,12 +13566,13 @@ function App(){
         chkStep===2&&h("div",{style:{marginBottom:10}},
           h("div",{style:{fontSize:14,fontWeight:800,color:C.muted,letterSpacing:1,marginBottom:6}},"DISCOUNT"),
           h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5}},
-            DISCS.map(d=>h("button",{key:d.id,onClick:()=>{setChkDisc(d);if(d.id==="none")setChkDiscTargets([]);},
+            DISC_OPTIONS.map(d=>h("button",{key:d.id,onClick:()=>{setChkDisc(d);if(d.id==="none")setChkDiscTargets([]);},
               style:{padding:"7px 9px",borderRadius:8,border:`2px solid ${chkDisc.id===d.id?C.primary:C.border}`,
                 background:chkDisc.id===d.id?"#F3E9F7":"#fff",color:chkDisc.id===d.id?C.primary:C.text,
                 fontWeight:600,fontSize:13,cursor:"pointer",textAlign:"left",display:"flex",justifyContent:"space-between"}},
               h("span",null,d.label),
-              d.rate>0&&h("span",{style:{color:C.muted,fontSize:14}},Math.round(d.rate*100)+"%")
+              d.rate>0&&h("span",{style:{color:C.muted,fontSize:14}},Math.round(d.rate*100)+"%"),
+              d.amountOff>0&&h("span",{style:{color:C.muted,fontSize:14}},"₱"+peso(d.amountOff))
             ))
           ),
           // Custom % input
@@ -13285,6 +13582,13 @@ function App(){
               style:{flex:1,padding:"8px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,outline:"none",boxSizing:"border-box"}}),
             h("span",{style:{fontSize:13,fontWeight:900,color:C.primary}},"%")
           ),
+          scopeKeys.length>0&&h("div",{style:{marginTop:6,padding:"7px 10px",
+            borderRadius:8,fontSize:12,lineHeight:1.45,
+            background:chkDiscBase>0?"#E8F5E9":"#FFEBEE",
+            color:chkDiscBase>0?C.success:C.danger,fontWeight:700}},
+            chkDiscBase>0
+              ? ("Saklaw nito ang ₱"+peso(chkDiscBase)+" sa order na ito.")
+              : "Walang item sa cart na saklaw ng discount na ito — ₱0.00 ang bawas."),
           discRate>0&&h("input",{value:chkDiscId,onChange:e=>setChkDiscId(e.target.value),
             placeholder:chkDisc.label+" ID",
             style:{width:"100%",padding:"8px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,outline:"none",boxSizing:"border-box",marginTop:5}}),
@@ -15062,6 +15366,10 @@ function App(){
         })(),
 
         // ══ SUBSCRIPTIONS ══
+        page==="discount_mgmt"&&user.role==="owner"&&h(DiscountPage,{
+          db,user,branches,discounts,menuItems,showT,key:"disc"
+        }),
+
         page==="subs"&&(user.role==="owner"||user.role==="commissary")&&(()=>{
           const rows=branches.map(b=>{
             const sub=subs.find(x=>x.branch===b.id)||null;
