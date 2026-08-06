@@ -122,7 +122,7 @@ import {
   createUserWithEmailAndPassword
 } from "firebase/auth";
 import {
-  getDatabase, ref, push, set, onValue, get
+  getDatabase, ref, push, set, onValue, get, runTransaction
 } from "firebase/database";
 
 // ─── ALL IMPORTS DONE — initialize apps ──────────────────
@@ -234,7 +234,7 @@ const BRANCHES = [
 
 const ROLES = {
   owner:     {label:"Owner / Admin",    emoji:"\u{1F451}", color:"#6A1B9A",
-    nav:["dashboard","branches","subs","pos","orders","void_requests","all_orders","analytics","z_reading","reports","cash_count","expenses","cash_monitor","inventory","inv_log","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","settings","printer","ext_payroll","ext_kiosk","hris_dash","ext_production","ext_stock","branch_pl"]},
+    nav:["dashboard","branches","subs","pos","orders","void_requests","all_orders","analytics","z_reading","reports","cash_count","expenses","cash_monitor","cash_advance","inventory","inv_log","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","settings","printer","ext_payroll","ext_kiosk","hris_dash","ext_production","ext_stock","branch_pl"]},
   manager:   {label:"Branch Manager",   emoji:"\u{1F3EA}", color:"#007AFF",
     nav:["branch_dash","pos","orders","analytics","z_reading","reports","cash_count","expenses","inventory","inv_log","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","bom_mgmt","branch_settings","printer","ext_kiosk","ext_stock","branch_pl"]},
   cashier:   {label:"Cashier",          emoji:"\u{1F4B3}", color:"#34C759",
@@ -3277,6 +3277,14 @@ function CALoanPage({user,branchId,curBranch,db,hrisDB,showT,mode,hrisEmps=[]}){
       timestamp: serverTimestamp(),
     });
 
+    // The request only ever landed in Firestore. Nothing told the approver,
+    // so it sat there until someone happened to open the page.
+    try{
+      await notify(db,{to:"ct-main",type:"info",
+        title:(isCA?"Cash Advance":"Cash Loan")+" request — "+curBranch.full,
+        message:hrisEmp.name+" \u00B7 \u20B1"+peso(amt)+" \u00B7 "+reason,
+        page:"cash_advance",ref:hrisEmp.name,by:user.name});
+    }catch(e){console.warn("CA notify failed:",e);}
     showT((isCA?"Cash Advance":"Cash Loan")+" request submitted! Waiting for approval ✓");
     setAmount(""); setReason(""); setInst("2");
   };
@@ -3425,6 +3433,12 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
   },[]);
 
   const approve = async(req)=>{
+    // Approving twice would post the deduction twice. The request itself is
+    // the guard: only a pending one can be approved.
+    if(req.status&&req.status!=="pending"){
+      showT("Naaksyunan na ito: "+req.status,"warn");
+      return;
+    }
     // 1. Update POS Firestore status
     await updateDoc(doc(db,"hris_requests",req._docId),{
       status:"approved",
@@ -3448,10 +3462,6 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
     }
     if(targetDB && req.hrisEmpId){
       try{
-        // Load current loans
-        const snap = await get(ref(targetDB,"loans"));
-        const existing = snap.val();
-        const loans = existing ? (Array.isArray(existing)?existing:Object.values(existing)) : [];
         const newLoan = {
           emp:      req.hrisEmpId,
           empName:  req.staffName,
@@ -3465,13 +3475,37 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
           branch:   req.branch,
           reason:   req.reason,
         };
-        loans.push(newLoan);
-        await set(ref(targetDB,"loans"), loans);
-        showT("Approved & synced to "
-          +(isFranchiseReq?(reqBranch.name||reqBranch.full)+"'s payroll":"HRIS payroll")+" ✓");
+        // Read-modify-write on the whole list loses a loan whenever two
+        // approvals overlap — the second write replaces the first one's
+        // record entirely. A transaction re-runs on conflict instead, so
+        // nothing already in payroll can be erased by an approval.
+        //
+        // posReqId also makes this idempotent: a retry after a dropped
+        // connection finds its own row and adds nothing.
+        let already=false;
+        const res=await runTransaction(ref(targetDB,"loans"),(cur)=>{
+          const list = cur
+            ? (Array.isArray(cur)?cur.slice():Object.values(cur))
+            : [];
+          if(list.some(l=>l&&l.posReqId===req._docId)){ already=true; return cur; }
+          list.push(newLoan);
+          return list;   // stays an array, as the payroll app expects
+        });
+        if(!res.committed) throw new Error("payroll busy — try again");
+        showT(already
+          ? "Naka-post na ang deduction na ito sa payroll"
+          : ("Approved & synced to "
+             +(isFranchiseReq?(reqBranch.name||reqBranch.full)+"'s payroll":"HRIS payroll")+" ✓"));
       }catch(e){
         console.warn("HRIS sync failed:",e);
-        showT("Approved in POS — HRIS sync failed, add manually","warn");
+        // The POS says approved but payroll never got it. Put the request
+        // back so it stays in the queue instead of looking done.
+        try{
+          await updateDoc(doc(db,"hris_requests",req._docId),{
+            status:"pending",syncError:String(e&&e.message||e).slice(0,120),
+            syncFailedAt:serverTimestamp()});
+        }catch(e2){}
+        showT("HINDI naipasok sa payroll — nanatiling pending ang request","err");
       }
     } else {
       showT("Approved! No HRIS link — add deduction manually in HRIS","warn");
