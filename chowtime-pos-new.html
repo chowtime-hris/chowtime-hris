@@ -1050,14 +1050,37 @@ function printZ(zd,branchName,cashier){
   <div class="row"><span>Voids (${zd.voidCount||0}):</span><span>-P${peso((zd.voidAmt||0))}</span></div>
   <div class="row"><span>Net Sales:</span><span>P${peso((zd.net||0))}</span></div>
   <div class="row"><span>Cash In:</span><span>P${peso((zd.cashIn||0))}</span></div>
-  <div class="row"><span>Cash Out:</span><span>-P${peso((zd.cashOut||0))}</span></div>
+  <div class="row"><span>Expenses:</span><span>-P${peso((zd.expenses||0))}</span></div>
+  <div class="row"><span>Remittance:</span><span>-P${peso((zd.remittance||0))}</span></div>
+  <div class="row"><span>Other Cash Out:</span><span>-P${peso((zd.otherCashOut||0))}</span></div>
   <div class="hr"></div>
-  <div class="row b"><span>CASH ON HAND:</span><span>P${peso((zd.totalCash||0))}</span></div>
+  <div class="row b"><span>CASH ON HAND:</span><span>P${peso((zd.cashOnHand!=null?zd.cashOnHand:(zd.totalCash||0)))}</span></div>
+  ${zd.countedCash!=null?`<div class="row"><span>Counted Cash:</span><span>P${peso(zd.countedCash)}</span></div>
+  <div class="row b"><span>SHORT / OVER:</span><span>${zd.shortOver>=0?"+":""}P${peso(zd.shortOver||0)}</span></div>`:""}
+  <div class="hr"></div>
+  <div class="b">PAYMENT BREAKDOWN</div>
+  <div class="row"><span>Cash:</span><span>P${peso((zd.cashSales||0))}</span></div>
+  <div class="row"><span>GCash:</span><span>P${peso((zd.gcash||0))}</span></div>
+  <div class="row"><span>Maya:</span><span>P${peso((zd.maya||0))}</span></div>
+  <div class="row"><span>Bank Transfer:</span><span>P${peso((zd.bank||0))}</span></div>
+  <div class="row"><span>FoodPanda:</span><span>P${peso((zd.foodpanda||0))}</span></div>
+  <div class="row"><span>GrabFood:</span><span>P${peso((zd.grabfood||0))}</span></div>
+  <div class="row b"><span>Total Tender:</span><span>P${peso((zd.tenderTotal!=null?zd.tenderTotal:((zd.cashSales||0)+(zd.gcash||0)+(zd.maya||0)+(zd.bank||0)+(zd.foodpanda||0)+(zd.grabfood||0))))}</span></div>
+  <div class="hr"></div>
+  <div class="b">ACCUMULATED SALES</div>
+  <div class="row"><span>Z Counter No.:</span><span>${zd.zCounter!=null?zd.zCounter:"-"}</span></div>
+  <div class="row"><span>Reset Counter No.:</span><span>${zd.resetCounter||0}</span></div>
+  <div class="row"><span>Previous Accum.:</span><span>P${peso((zd.prevAccum||0))}</span></div>
+  <div class="row"><span>Present Accum.:</span><span>P${peso((zd.presentAccum||0))}</span></div>
+  <div class="row"><span>Sales for the Day:</span><span>P${peso((zd.net||0))}</span></div>
   <div class="hr"></div>
   <div class="row"><span>Transactions:</span><span>${zd.txns||0}</span></div>
+  <div class="row"><span>Cancelled:</span><span>${zd.cancelled||0}</span></div>
   <div class="row"><span>Dine-in:</span><span>${zd.dineIn||0}</span></div>
   <div class="row"><span>Takeout:</span><span>${zd.takeout||0}</span></div>
   <div class="row"><span>SC/PWD:</span><span>${zd.scPwd||0}</span></div>
+  <div class="row"><span>No. of SKUs:</span><span>${zd.skuCount!=null?zd.skuCount:"-"}</span></div>
+  <div class="row"><span>Total Quantity:</span><span>${zd.qtySold||0}</span></div>
   <div class="hr"></div>
   <div class="c">Generated: ${new Date().toLocaleString("en-PH")}<br>FINAL Z-READING FOR THE DAY</div>
   </body></html>`);
@@ -1110,11 +1133,44 @@ function buildEscPosZ(zd,branchName,cashier,cs,paperSize,isZ){
   a(row("Net Sales","P"+n(zd.net)));
   a([ESC,0x45,0x00]);
   a(row("Cash In","P"+n(zd.cashIn)));
-  a(row("Cash Out","- P"+n(zd.cashOut)));
+  // The paper listed one lumped Cash Out and no expenses at all, so it could
+  // not be reconciled against the drawer it was printed for.
+  a(row("Expenses","- P"+n(zd.expenses||0)));
+  a(row("Remittance","- P"+n(zd.remittance||0)));
+  a(row("Other Cash Out","- P"+n(zd.otherCashOut||0)));
   a(dash());
   a([ESC,0x21,0x10]);
-  a(row("CASH ON HAND","P"+n(zd.totalCash)));
+  a(row("CASH ON HAND","P"+n(zd.cashOnHand!=null?zd.cashOnHand:zd.totalCash)));
   a([ESC,0x21,0x00]);
+  if(zd.countedCash!=null){
+    a(row("Counted Cash","P"+n(zd.countedCash)));
+    a([ESC,0x45,0x01]);
+    a(row("SHORT / OVER",(zd.shortOver>=0?"+":"")+"P"+n(zd.shortOver)));
+    a([ESC,0x45,0x00]);
+  }
+  a(dash());
+
+  a(ln("PAYMENT BREAKDOWN"));
+  a(row("Cash",       "P"+n(zd.cashSales)));
+  a(row("GCash",      "P"+n(zd.gcash)));
+  a(row("Maya",       "P"+n(zd.maya||0)));
+  a(row("Bank Transfer","P"+n(zd.bank||0)));
+  a(row("FoodPanda",  "P"+n(zd.foodpanda)));
+  a(row("GrabFood",   "P"+n(zd.grabfood)));
+  a([ESC,0x45,0x01]);
+  a(row("Total Tender","P"+n(zd.tenderTotal!=null?zd.tenderTotal
+    :((zd.cashSales||0)+(zd.gcash||0)+(zd.maya||0)+(zd.bank||0)
+      +(zd.foodpanda||0)+(zd.grabfood||0)))));
+  a([ESC,0x45,0x00]);
+  a(dash());
+
+  a(ln("ACCUMULATED SALES"));
+  a(row("Z Counter No.",String(zd.zCounter!=null?zd.zCounter:"-")));
+  a(row("Reset Counter No.",String(zd.resetCounter||0)));
+  a(row("Previous Accum.","P"+n(zd.prevAccum||0)));
+  a(row("Present Accum.","P"+n(zd.presentAccum||0)));
+  a(row("Sales for the Day","P"+n(zd.net)));
+  a(row("No. of SKUs",String(zd.skuCount!=null?zd.skuCount:"-")));
   a(dash());
 
   a(row("Transactions",String(zd.txns||0)));
@@ -2557,6 +2613,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
   const [saved,setSaved]     = useState(false);
   const [selDate,setSelDate] = useState(today);
   const [showHistory,setShowHistory] = useState(false);
+  // stays "in" — the Cash Out door was closed, see RECORD CASH MOVEMENT
   const [cashEntry,setCashEntry] = useState({type:"in",desc:"",amount:""});
   const [addingCash,setAddingCash] = useState(false);
 
@@ -3063,20 +3120,16 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
         h("div",{style:{background:"#fff",border:"1px solid "+C.border,borderRadius:12,
           padding:"12px 14px",marginBottom:10}},
           h("div",{style:{fontSize:12,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:8}},
-            "RECORD CASH MOVEMENT"),
-          h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:8}},
-            [["in","\uD83D\uDCB0 Cash In"],["out","\uD83D\uDCB8 Cash Out"]].map(([t,l])=>
-              h("button",{key:t,onClick:()=>setCashEntry(p=>({...p,type:t,desc:""})),
-                style:{padding:"8px",borderRadius:8,fontSize:13,fontWeight:700,cursor:"pointer",
-                  border:"2px solid "+(cashEntry.type===t?(t==="in"?C.success:C.danger):C.border),
-                  background:cashEntry.type===t?(t==="in"?"#E8F5E9":"#FFEBEE"):"#fff",
-                  color:cashEntry.type===t?(t==="in"?C.success:C.danger):C.muted}},l))
-          ),
+            "\uD83D\uDCB0 CASH IN"),
+          // Cash OUT was removed here on purpose. Every way money leaves the
+          // drawer now has exactly one door: remittance has its own field
+          // below, and anything bought goes through Expenses. Two doors onto
+          // the same movement means the same peso gets recorded twice.
+          h("div",{style:{fontSize:12,color:C.muted,marginBottom:8,lineHeight:1.5}},
+            "Ang paglabas ng pera ay wala na dito \u2014 ang remittance ay nasa ibaba, ang gastos ay sa Expenses."),
           h("div",{style:{display:"flex",gap:5,flexWrap:"wrap",marginBottom:8}},
-            (cashEntry.type==="in"
-              ? ["Opening Fund","Change Fund","Collection"]
-              : ["Remittance","Supplies","Petty cash"]
-            ).map(lbl=>h("button",{key:lbl,
+            ["Opening Fund","Change Fund","Collection"]
+            .map(lbl=>h("button",{key:lbl,
               onClick:()=>setCashEntry(p=>({...p,desc:lbl})),
               style:{padding:"5px 9px",borderRadius:20,fontSize:13,cursor:"pointer",
                 fontWeight:cashEntry.desc===lbl?800:500,
@@ -11477,6 +11530,7 @@ function App(){
   const [editBr,setEditBr]=useState(null);               // branch being added/edited
   const [expMonth,setExpMonth]=useState("");             // "" = all months
   const [expCat,setExpCat]=useState("");
+  const [expBranch,setExpBranch]=useState("");           // owner only, "" = all
   const [ordDate,setOrdDate]=useState("");               // "" = today, "all" = no filter
   const [ordPage,setOrdPage]=useState(1);                // orders list pagination
   const [placing,setPlacing]=useState(false);            // order submit in flight
@@ -15534,6 +15588,7 @@ function App(){
           const rows=mine
             .filter(e=>!expMonth||String(e.date||"").slice(0,7)===expMonth)
             .filter(e=>!expCat||e.cat===expCat)
+            .filter(e=>!expBranch||e.branch===expBranch)
             .sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")));
           const total=rows.reduce((s2,e)=>s2+(Number(e.amount)||0),0);
           const byCat={};
@@ -15566,6 +15621,19 @@ function App(){
 
           h("div",{style:{display:"flex",gap:8,marginBottom:12,alignItems:"center",
             flexWrap:"wrap"}},
+            // The owner reads every branch here, which is the point — but with
+            // no way to narrow it, one branch's spending could not be seen on
+            // its own.
+            user.role==="owner"&&h("select",{value:expBranch,
+              onChange:e=>setExpBranch(e.target.value),
+              style:{padding:"7px 11px",borderRadius:8,fontSize:13,
+                cursor:"pointer",border:"1px solid "+(expBranch?C.primary:C.border),
+                background:expBranch?"#F3E9F7":"#fff",fontWeight:expBranch?800:500,
+                outline:"none"}},
+              [h("option",{key:"_",value:""},"Lahat ng branch")]
+                .concat([...new Set(mine.map(e=>e.branch).filter(Boolean))]
+                  .sort().map(b=>h("option",{key:b,value:b},
+                    ((branches||[]).find(x=>x.id===b)||{}).name||b)))),
             h("select",{value:expMonth,onChange:e=>setExpMonth(e.target.value),
               style:{padding:"8px 11px",borderRadius:8,fontSize:13,outline:"none",
                 cursor:"pointer",border:"1px solid "+(expMonth?C.primary:C.border),
@@ -15645,22 +15713,10 @@ function App(){
                 h("div",null,h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"DESCRIPTION"),h("textarea",{value:newExp.desc,onChange:e=>setNewExp(p=>({...p,desc:e.target.value})),rows:3,placeholder:"Isa bawat linya:\nIce \u2014 2 bag\nLPG refill",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:13,outline:"none",boxSizing:"border-box",resize:"vertical",fontFamily:"inherit",lineHeight:1.45}})),
                 h("div",null,h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"AMOUNT (₱)"),h("input",{type:"number",onFocus:e=>e.target.select(),value:newExp.amount,onChange:e=>setNewExp(p=>({...p,amount:e.target.value})),placeholder:"0.00",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:14,fontWeight:700,outline:"none",boxSizing:"border-box"}})),
                 h("div",{style:{background:"#FFF8E1",border:"1px solid #FFE082",
-                  borderRadius:8,padding:"9px 11px"}},
-                  h("label",{style:{display:"flex",gap:9,alignItems:"flex-start",
-                    cursor:"pointer"}},
-                    h("input",{type:"checkbox",
-                      checked:newExp.fromDrawer!==false,
-                      onChange:e=>setNewExp(p=>({...p,fromDrawer:e.target.checked})),
-                      style:{marginTop:2,width:17,height:17,cursor:"pointer"}}),
-                    h("div",null,
-                      h("div",{style:{fontSize:13,fontWeight:800,color:"#BF360C"}},
-                        "Kinuha sa cash drawer"),
-                      h("div",{style:{fontSize:12,color:C.muted,marginTop:2,
-                        lineHeight:1.45}},
-                        newExp.fromDrawer!==false
-                          ? "Magiging Cash Out ito, kaya tutugma ang bilang ng pera sa gabi."
-                          : "Hindi bababa sa cash count. Piliin ito kung GCash, bank, o si Main ang nagbayad."))
-                  )),
+                  borderRadius:8,padding:"8px 11px",fontSize:12,color:"#BF360C",
+                  lineHeight:1.45}},
+                  h("b",null,"Ibabawas ito sa cash drawer."),
+                  " Bawat expense ay perang lumabas, kaya awtomatiko itong nagiging Cash Out at tumutugma ang bilang sa gabi."),
                 h("button",{onClick:async()=>{
                   if(!newExp.desc||!newExp.amount){showT("Fill all fields","warn");return;}
                   const _amt=parseFloat(newExp.amount)||0;
@@ -15668,7 +15724,7 @@ function App(){
                   const _exp=await addDoc(collection(db,"expenses"),{branch:branchId,cat:newExp.cat,
                     desc:newExp.desc,amount:_amt,
                     date:_date,
-                    fromDrawer:newExp.fromDrawer!==false,
+                    fromDrawer:true,
                     enteredOn:localDate(),   // keep when it was keyed in, for audit
                     by:user.name,status:user.role==="owner"?"approved":"pending",
                     timestamp:serverTimestamp()});
@@ -15677,7 +15733,7 @@ function App(){
                   // variance check or the Z-Reading, so every such payment read
                   // as a shortage. expenseId links the two so the same peso is
                   // never counted twice.
-                  if(newExp.fromDrawer!==false&&_amt>0){
+                  if(_amt>0){
                     try{
                       const _now=new Date();
                       await addDoc(collection(db,"cash_log"),{
@@ -15692,7 +15748,8 @@ function App(){
                       showT("Naitala ang expense pero HINDI sa cash — idagdag bilang Cash Out","warn");
                     }
                   }
-                  setNewExp({cat:"Utilities",desc:"",amount:"",date:"",fromDrawer:true});setModal(null);showT("Expense recorded!");
+                  setNewExp({cat:"Utilities",desc:"",amount:"",date:""});setModal(null);
+                  showT("Expense recorded \u00B7 \u20B1"+peso(_amt)+" Cash Out");
                 },style:{padding:"10px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:8,color:"#fff",fontWeight:700,cursor:"pointer"}},"Save Expense")
               )
             )
