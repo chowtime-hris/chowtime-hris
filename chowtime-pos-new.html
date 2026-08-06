@@ -236,7 +236,7 @@ const ROLES = {
   owner:     {label:"Owner / Admin",    emoji:"\u{1F451}", color:"#6A1B9A",
     nav:["dashboard","branches","subs","pos","orders","void_requests","all_orders","analytics","z_reading","reports","cash_count","expenses","cash_monitor","cash_advance","inventory","inv_log","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","settings","printer","ext_payroll","ext_kiosk","hris_dash","ext_production","ext_stock","branch_pl"]},
   manager:   {label:"Branch Manager",   emoji:"\u{1F3EA}", color:"#007AFF",
-    nav:["branch_dash","pos","orders","analytics","z_reading","reports","cash_count","expenses","inventory","inv_log","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","bom_mgmt","branch_settings","printer","ext_kiosk","ext_stock","branch_pl"]},
+    nav:["branch_dash","pos","orders","analytics","z_reading","reports","cash_count","expenses","inventory","inv_log","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","hris_dash","bom_mgmt","branch_settings","printer","ext_kiosk","ext_stock","branch_pl"]},
   cashier:   {label:"Cashier",          emoji:"\u{1F4B3}", color:"#34C759",
     nav:["pos","orders","x_reading","printer","z_reading","cash_count","expenses","inventory","ca_request","loan_request","void_request","ext_kiosk","ext_stock"]},
   crew:      {label:"Crew / Kitchen",   emoji:"\u{1F9D1}\u{200D}\u{1F373}", color:"#FF9500",
@@ -3154,6 +3154,29 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,showT}){
             Math.abs(variance)<0.01?"✅ Count is accurate":
             variance>0?"📈 Cash is OVER expected":
             "⚠️ Cash is SHORT — check transactions"
+          ),
+          // Nobody explained what the figures mean or what the colours are
+          // saying, so a shortage read as an accusation instead of a checklist.
+          h("div",{style:{marginTop:9,paddingTop:8,
+            borderTop:"1px dashed "+C.border,fontSize:12,lineHeight:1.55,
+            color:C.muted}},
+            h("div",{style:{fontWeight:800,color:C.text,marginBottom:3}},
+              "Paano binibilang"),
+            h("div",null,"Opening + Cash Sales + Cash In \u2212 Cash Out = Expected"),
+            h("div",{style:{marginTop:2}},
+              "Cash Sales = ang cash na bahagi lang. Ang GCash at bank ay hindi pumapasok sa drawer."),
+            h("div",{style:{marginTop:2}},
+              "Cash Out = remittance, petty cash, at gastos na kinuha sa drawer."),
+            h("div",{style:{marginTop:6,fontWeight:800,color:C.text,
+              marginBottom:3}},"Ibig sabihin ng kulay"),
+            h("div",{style:{color:C.success,fontWeight:700}},
+              "\uD83D\uDFE2 Berde \u2014 tugma ang bilang sa inaasahan."),
+            h("div",{style:{color:C.info,fontWeight:700}},
+              "\uD83D\uDD35 Asul \u2014 SOBRA. Kadalasan: hindi naitalang cash in, o maling sukli."),
+            h("div",{style:{color:C.danger,fontWeight:700}},
+              "\uD83D\uDD34 Pula \u2014 KULANG. Tingnan: may gastos bang hindi naitala, remittance na hindi naipasok, o benta na naka-cash pero GCash pala."),
+            h("div",{style:{marginTop:5}},
+              "Ang pagkakaiba ay itala, huwag itago \u2014 ang tala ang naghahanap ng dahilan, hindi ang taong nagbilang.")
           )
         ),
 
@@ -3279,11 +3302,23 @@ function CALoanPage({user,branchId,curBranch,db,hrisDB,showT,mode,hrisEmps=[]}){
 
     // The request only ever landed in Firestore. Nothing told the approver,
     // so it sat there until someone happened to open the page.
+    await logCAEvent(db,{_docId:reqRef.id,type:isCA?"Cash Advance":"Cash Loan",
+      staffName:hrisEmp.name,branch:branchId,amount:amt},
+      "submitted",user.name,{reason:reason});
     try{
+      // Two audiences: Main approves it, but the branch manager is
+      // accountable for the crew and only ever learned by being told in
+      // person. Both get told; only Main can act.
       await notify(db,{to:"ct-main",type:"info",
         title:(isCA?"Cash Advance":"Cash Loan")+" request — "+curBranch.full,
         message:hrisEmp.name+" \u00B7 \u20B1"+peso(amt)+" \u00B7 "+reason,
         page:"cash_advance",ref:hrisEmp.name,by:user.name});
+      if(branchId!=="ct-main"){
+        await notify(db,{to:branchId,type:"info",
+          title:(isCA?"Cash Advance":"Cash Loan")+" request \u2014 "+hrisEmp.name,
+          message:"\u20B1"+peso(amt)+" \u00B7 "+reason+" \u00B7 nasa Main ang approval",
+          page:"cash_advance",ref:hrisEmp.name,by:user.name});
+      }
     }catch(e){console.warn("CA notify failed:",e);}
     showT((isCA?"Cash Advance":"Cash Loan")+" request submitted! Waiting for approval ✓");
     setAmount(""); setReason(""); setInst("2");
@@ -3408,7 +3443,30 @@ function CALoanPage({user,branchId,curBranch,db,hrisDB,showT,mode,hrisEmps=[]}){
               h("div",{style:{fontSize:12,color:C.muted,marginTop:3}},r.date+" · "+r.type),
               r.status==="approved"&&r.balance>0&&h("div",{style:{fontSize:13,fontWeight:700,color:C.warning,marginTop:3}},"Balance: ₱"+peso((r.balance||r.amount))),
               r.status==="rejected"&&r.rejectReason&&h("div",{style:{fontSize:13,color:C.danger,marginTop:3}},"Reason: "+r.rejectReason),
-              r.status==="approved"&&h("div",{style:{fontSize:12,color:C.success,marginTop:3}},"✅ Auto-deducted on the next payroll cutoff")
+              r.status==="approved"&&h("div",{style:{fontSize:12,color:C.success,marginTop:3}},"✅ Auto-deducted on the next payroll cutoff"),
+              r.approvedBy&&h("div",{style:{fontSize:12,color:C.muted,marginTop:2}},
+                "Inaprubahan ni "+r.approvedBy),
+              r.rejectedBy&&h("div",{style:{fontSize:12,color:C.muted,marginTop:2}},
+                "Tinanggihan ni "+r.rejectedBy),
+              r.syncError&&h("div",{style:{fontSize:12,color:C.danger,marginTop:3,
+                fontWeight:700}},
+                "\u26A0\uFE0F Hindi pa naipapasok sa payroll \u2014 nanatiling pending"),
+              // The only thing the requester can do to their own request, and
+              // it withdraws rather than deletes — the row and its trail stay.
+              r.status==="pending"&&h("button",{
+                onClick:async()=>{
+                  if(!confirm("Bawiin ang \u20B1"+peso(r.amount)+" na request?"))return;
+                  try{
+                    await updateDoc(doc(db,"hris_requests",r._docId),{
+                      status:"cancelled",cancelledBy:user.name,
+                      cancelledAt:serverTimestamp()});
+                    await logCAEvent(db,r,"cancelled_by_requester",user.name,{});
+                    showT("Nabawi ang request","warn");
+                  }catch(e){showT("Hindi nabawi","err");}
+                },
+                style:{marginTop:7,padding:"5px 11px",fontSize:12,fontWeight:700,
+                  borderRadius:7,cursor:"pointer",border:"1px solid "+C.border,
+                  background:"#fff",color:C.danger}},"Bawiin ang request")
             ))
         )
       )
@@ -3423,6 +3481,21 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
   const [filterBranch, setFilterBranch] = useState("all");
   const [rejectModal, setRejectModal] = useState(null);
   const [rejectReason, setRejectReason] = useState("");
+  const [caTab,setCaTab] = useState("reqs");
+  const [caLog,setCaLog] = useState([]);
+
+  useEffect(()=>{
+    // no orderBy — that needs a composite index this project does not have;
+    // sorted in memory instead
+    try{
+      const unsub=onSnapshot(query(collection(db,"hris_request_log"),limit(400)),
+        snap=>setCaLog(snap.docs.map(d=>({...d.data(),_docId:d.id}))
+          .sort((a,b)=>String((b.date||"")+" "+(b.time||""))
+            .localeCompare(String((a.date||"")+" "+(a.time||""))))),
+        ()=>{});
+      return()=>unsub();
+    }catch(e){}
+  },[]);
 
   useEffect(()=>{
     const q = query(collection(db,"hris_requests"), orderBy("timestamp","desc"), limit(200));
@@ -3492,6 +3565,15 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
           return list;   // stays an array, as the payroll app expects
         });
         if(!res.committed) throw new Error("payroll busy — try again");
+        await logCAEvent(db,req,already?"already_in_payroll":"posted_to_payroll",
+          user.name,{payrollDB:isFranchiseReq?(reqBranch.name||reqBranch.full):"main",
+            monthly:req.cutoffDeduct||0});
+        try{
+          await notify(db,{to:req.branch,type:"success",
+            title:req.type+" approved — "+req.staffName,
+            message:"\u20B1"+peso(req.amount)+" \u00B7 ibabawas sa susunod na cutoff",
+            page:"ca_request",ref:req.staffName||"",by:user.name});
+        }catch(e3){}
         showT(already
           ? "Naka-post na ang deduction na ito sa payroll"
           : ("Approved & synced to "
@@ -3505,9 +3587,15 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
             status:"pending",syncError:String(e&&e.message||e).slice(0,120),
             syncFailedAt:serverTimestamp()});
         }catch(e2){}
+        await logCAEvent(db,req,"payroll_sync_failed",user.name,
+          {error:String(e&&e.message||e).slice(0,120)});
         showT("HINDI naipasok sa payroll — nanatiling pending ang request","err");
       }
     } else {
+      // Approved in the POS with nothing written to payroll. Recorded loudly:
+      // this is the case that quietly never reaches a payslip.
+      await logCAEvent(db,req,"approved_no_payroll_link",user.name,
+        {note:"walang hrisEmpId o walang payroll DB — manual entry needed"});
       showT("Approved! No HRIS link — add deduction manually in HRIS","warn");
     }
   };
@@ -3519,6 +3607,13 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
       rejectedAt: serverTimestamp(),
       rejectReason,
     });
+    await logCAEvent(db,req,"rejected",user.name,{reason:rejectReason});
+    try{
+      await notify(db,{to:req.branch,type:"warning",
+        title:req.type+" rejected — "+req.staffName,
+        message:rejectReason||"Walang ibinigay na dahilan",
+        page:"ca_request",ref:req.staffName||"",by:user.name});
+    }catch(e3){}
     setRejectModal(null);
     setRejectReason("");
     showT("Request rejected");
@@ -3560,7 +3655,11 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
   const ownBranch=(BRANCHES||[]).find(b=>b&&b.id===user.branch);
   const isFranchisee=(user.role==="manager"
     &&ownBranch&&ownBranch.ownership==="franchise");
+  // A branch manager gets a window, not a lever: their crew's requests only,
+  // and no approve. Posting a deduction into payroll stays with the owner.
+  const canDecide = (user.role==="owner"||user.role==="commissary");
   const filtered = requests
+    .filter(r=>canDecide?true:(r.branch===user.branch))
     .filter(r=>isFranchisee
       ? r.branch===user.branch
       : franchiseIds.indexOf(r.branch)<0)
@@ -3568,6 +3667,7 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
     .filter(r=>filterBranch==="all"||r.branch===filterBranch);
 
   const pending  = requests.filter(r=>r.status==="pending"
+    &&(canDecide||r.branch===user.branch)
     &&(isFranchisee ? r.branch===user.branch
                     : franchiseIds.indexOf(r.branch)<0));
   const approved = requests.filter(r=>r.status==="approved");
@@ -3576,6 +3676,58 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
 
   return h("div",null,
     h(SectionHeader,{title:"HRIS — CA & Loan Approvals"}),
+
+    h("div",{style:{display:"flex",gap:0,borderBottom:"2px solid "+C.border,
+      marginBottom:14}},
+      [["reqs","\uD83D\uDCCB Requests"],["log","\uD83D\uDCDC Audit trail"]]
+        .map(([t,l])=>h("button",{key:t,onClick:()=>setCaTab(t),
+          style:{padding:"9px 18px",border:"none",background:"transparent",
+            color:caTab===t?C.primary:C.muted,fontWeight:caTab===t?800:400,
+            fontSize:14,cursor:"pointer",
+            borderBottom:"3px solid "+(caTab===t?C.primary:"transparent"),
+            marginBottom:-2}},l))),
+
+    caTab==="log"&&h("div",null,
+      h("div",{style:{background:"#E3F2FD",border:"1px solid #90CAF9",
+        borderRadius:10,padding:"9px 13px",marginBottom:12,fontSize:13,
+        color:"#1565C0"}},
+        "Bawat hakbang ng bawat request. Kapag may nawawalang bawas sa payslip, dito makikita kung saan ito tumigil."),
+      caLog.length===0
+        ? h("div",{style:{textAlign:"center",padding:"34px",color:C.muted,
+            background:"#fff",borderRadius:12,border:"1px solid "+C.border}},
+            "Wala pang naitatalang hakbang. Nagsisimula ang trail sa mga bagong request.")
+        : h("div",{style:{background:"#fff",borderRadius:12,
+            border:"1px solid "+C.border,overflow:"hidden"}},
+            caLog.filter(l=>canDecide||l.branch===user.branch).map(l=>{
+              const meta={
+                submitted:{c:C.info,i:"\uD83D\uDCE4",t:"Isinumite"},
+                posted_to_payroll:{c:C.success,i:"\u2705",t:"Naipasok sa payroll"},
+                already_in_payroll:{c:C.muted,i:"\u21BB",t:"Nakapasok na dati"},
+                approved_no_payroll_link:{c:C.warning,i:"\u26A0\uFE0F",
+                  t:"Approved pero WALANG naipasok sa payroll"},
+                payroll_sync_failed:{c:C.danger,i:"\u274C",t:"Pumalya ang sync"},
+                rejected:{c:C.danger,i:"\u2716",t:"Tinanggihan"},
+                cancelled_by_requester:{c:C.muted,i:"\u21A9",t:"Binawi ng humiling"}
+              }[l.event]||{c:C.muted,i:"\u2022",t:l.event};
+              return h("div",{key:l._docId,style:{display:"flex",gap:10,
+                padding:"10px 14px",borderBottom:"1px solid #f5f5f5",
+                alignItems:"flex-start"}},
+                h("span",{style:{fontSize:15,flexShrink:0}},meta.i),
+                h("div",{style:{flex:1,minWidth:0}},
+                  h("div",{style:{fontSize:13,fontWeight:800,color:meta.c}},
+                    meta.t),
+                  h("div",{style:{fontSize:13,color:C.text,marginTop:1}},
+                    (l.staffName||"\u2014")+" \u00B7 \u20B1"+peso(l.amount||0)
+                    +" \u00B7 "+(l.type||"")),
+                  (l.reason||l.error||l.note)&&h("div",{style:{fontSize:12,
+                    color:C.muted,marginTop:1}},l.error||l.note||l.reason),
+                  h("div",{style:{fontSize:11,color:C.muted,marginTop:2}},
+                    (l.date||"")+" "+(l.time||"")+" \u00B7 "+(l.by||"\u2014")
+                    +" \u00B7 "+(l.branch||""))));
+            }))
+    ),
+
+    caTab==="reqs"&&h("div",null,
 
     // KPI cards
     h("div",{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}},
@@ -3644,15 +3796,16 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
           h("div",null,h(Badge,{label:req.status.toUpperCase(),
             color:{pending:C.warning,approved:C.success,rejected:C.danger,released:C.info}[req.status]||C.muted})),
           h("div",{style:{display:"flex",gap:5}},
-            req.status==="pending"&&h("button",{onClick:()=>approve(req),
+            canDecide&&req.status==="pending"&&h("button",{onClick:()=>approve(req),
               style:{padding:"4px 10px",background:"#E8F5E9",border:"none",borderRadius:6,
                 color:C.success,fontSize:13,fontWeight:700,cursor:"pointer"}},"✓ Approve"),
-            req.status==="pending"&&h("button",{onClick:()=>setRejectModal(req),
+            canDecide&&req.status==="pending"&&h("button",{onClick:()=>setRejectModal(req),
               style:{padding:"4px 9px",background:"#FFEBEE",border:"none",borderRadius:6,
                 color:C.danger,fontSize:13,fontWeight:700,cursor:"pointer"}},"✗"),
             req.status==="approved"&&h("div",{style:{fontSize:12,color:C.success,fontWeight:600}},"✅ In payroll")
           )
         ))
+    )
     ),
 
     // Reject modal
@@ -7002,9 +7155,22 @@ function buildDailyRollup(dayOrders,dayCash,branch,date,vatMode){
     .reduce((s2,c)=>s2+num(c.amount),0);
   const cashOut=bc.filter(c=>c.type==="out").reduce((s2,c)=>s2+num(c.amount),0);
 
+  // Cash out is one bucket in the log but three different questions on a
+  // reading: what was spent, what was handed over, and what else moved.
+  const expensesOut=bc.filter(c=>c.type==="out"
+    &&(c.subType==="expense"||/^expense/i.test(c.desc||"")))
+    .reduce((s2,c)=>s2+num(c.amount),0);
+  const remitOut=bc.filter(c=>c.type==="out"&&/remit/i.test(c.desc||""))
+    .reduce((s2,c)=>s2+num(c.amount),0);
+  const cashSalesOnly=payTotal("cash");
+  const skuCount=Object.keys(tally).length;
+
   return {
     branch:branch,date:date,
     gross:gross,discounts:discounts,net:net,
+    skuCount:skuCount,
+    expenses:expensesOut,remittance:remitOut,
+    otherCashOut:Math.max(0,cashOut-expensesOut-remitOut),
     voidAmt:voidAmt,voidCount:voided.length,
     txns:live.length,cancelled:bo.filter(o=>o.status==="cancelled").length,
     qtySold:live.reduce((s2,o)=>s2+(o. items||[]).reduce((a,i)=>a+num(i.qty),0),0),
@@ -7028,7 +7194,10 @@ function buildDailyRollup(dayOrders,dayCash,branch,date,vatMode){
     tenderTotal:["cash","gcash","maya","bank","foodpanda","grabfood"]
       .reduce((s2,m)=>s2+payTotal(m),0),
     opening:opening,cashIn:cashIn,cashOut:cashOut,
-    cashOnHand:opening+net+cashIn-cashOut,
+    // Was opening + NET + cashIn - cashOut, which counted GCash and delivery
+    // sales as money in the drawer. Only the cash leg ever reaches it.
+    cashOnHand:opening+cashSalesOnly+cashIn-cashOut,
+    remainingFunds:opening+cashSalesOnly+cashIn-cashOut-remitOut,
     siFrom:ids.length?ids[0]:"",siTo:ids.length?ids[ids.length-1]:"",
     topItems:topItems
   };
@@ -7036,6 +7205,54 @@ function buildDailyRollup(dayOrders,dayCash,branch,date,vatMode){
 
 // Fetch one day and write its rollup. Deterministic doc id + setDoc means
 // several tablets closing at once converge on one row instead of duplicating.
+// A Z-Reading is a numbered, running record: each close gets the next Z
+// number, and the day's net is added to a total that only ever grows. Both
+// are what make one reading checkable against the next.
+//
+// Re-closing or backfilling the same day must NOT advance either — so a date
+// that already carries a Z number keeps it, and the accumulation is left
+// alone.
+async function stampZCounter(db,branch,date,roll){
+  try{
+    const rollRef=doc(db,"daily_sales",branch+"_"+date);
+    const prev=await getDoc(rollRef);
+    if(prev.exists()&&prev.data().zCounter){
+      const p=prev.data();
+      roll.zCounter=p.zCounter;
+      roll.resetCounter=p.resetCounter||0;
+      roll.prevAccum=p.prevAccum||0;
+      roll.presentAccum=(p.prevAccum||0)+(Number(roll.net)||0);
+      return;
+    }
+    const cRef=doc(db,"settings","zcounter_"+branch);
+    const cSnap=await getDoc(cRef);
+    const cur=cSnap.exists()?cSnap.data():{};
+    const zNo=(Number(cur.zCount)||0)+1;
+    const before=Number(cur.grandTotal)||0;
+    const after=before+(Number(roll.net)||0);
+    roll.zCounter=zNo;
+    roll.resetCounter=Number(cur.resetCount)||0;
+    roll.prevAccum=before;
+    roll.presentAccum=after;
+    await setDoc(cRef,{branch:branch,zCount:zNo,grandTotal:after,
+      resetCount:Number(cur.resetCount)||0,lastDate:date,
+      updatedAt:serverTimestamp()},{merge:true});
+  }catch(e){ console.warn("z counter failed",branch,date,e); }
+}
+
+// The counted drawer lives in cash_counts, not in the order stream, so the
+// reading could never state short/over on its own.
+async function attachCountedCash(db,branch,date,roll){
+  try{
+    const cs=await getDoc(doc(db,"cash_counts",branch+"_"+date));
+    if(!cs.exists())return;
+    const d=cs.data();
+    roll.countedCash=Number(d.totalCash)||0;
+    roll.shortOver=(Number(d.totalCash)||0)-(Number(roll.cashOnHand)||0);
+    roll.countedBy=d.countedBy||"";
+  }catch(e){}
+}
+
 async function rollupDay(db,branch,date,vatMode,byName){
   try{
     // Query by date only — a single equality filter needs no composite index.
@@ -7055,10 +7272,12 @@ async function rollupDay(db,branch,date,vatMode,byName){
     // days that matter.
     if(!dayOrders.length&&!dayCash.length)return null;
     const roll=buildDailyRollup(dayOrders,dayCash,branch,date,vatMode);
+    await stampZCounter(db,branch,date,roll);
     roll.closedBy=byName||"auto";
     roll.closedAt=serverTimestamp();
     roll.year=date.slice(0,4);
     roll.month=date.slice(0,7);
+    await attachCountedCash(db,branch,date,roll);
     await setDoc(doc(db,"daily_sales",branch+"_"+date),roll,{merge:true});
     return roll;
   }catch(e){
@@ -7089,11 +7308,13 @@ async function rollupDateAllBranches(db,date,branchIds,vatMode,byName){
       // would be indistinguishable from a real zero-sales day
       if(!bo.length&&!bc.length){res.skipped++;continue;}
       const roll=buildDailyRollup(bo,bc,b,date,vatMode);
+      await stampZCounter(db,b,date,roll);
       roll.closedBy=byName||"backfill";
       roll.closedAt=serverTimestamp();
       roll.year=date.slice(0,4);
       roll.month=date.slice(0,7);
       roll.backfilled=true;
+      await attachCountedCash(db,b,date,roll);
       await setDoc(doc(db,"daily_sales",b+"_"+date),roll,{merge:true});
       res.written++;
       if(roll.txns>0)res.traded++;
@@ -7186,6 +7407,22 @@ async function syncPackFromMain(db,col,itemId){
 // payMethod and the whole total sits in it. Every drawer figure, Z-reading
 // and payment mix has to read through here — filtering on payMethod alone
 // counts a split sale as entirely cash or entirely GCash.
+// Every state change a CA / loan request goes through, in its own append-only
+// collection. The request document only ever shows where it ended up; when a
+// deduction is missing from a payslip the question is where it stopped, and
+// that answer has to survive whatever the document says now.
+async function logCAEvent(db,req,event,by,extra){
+  try{
+    await addDoc(collection(db,"hris_request_log"),Object.assign({
+      reqId:req._docId||"",type:req.type||"",staffName:req.staffName||"",
+      branch:req.branch||"",amount:Number(req.amount)||0,
+      event:event,by:by||"",date:localDate(),
+      time:new Date().toLocaleTimeString("en-PH",{hour:"2-digit",minute:"2-digit"}),
+      at:serverTimestamp()
+    },extra||{}));
+  }catch(e){console.warn("CA log failed:",event,e);}
+}
+
 function payAmtOf(o,method){
   if(o&&Array.isArray(o.payments)&&o.payments.length)
     return o.payments.filter(p=>p&&p.method===method)
@@ -15108,6 +15345,54 @@ function App(){
                     h("span",{style:{fontSize:13,color:C.muted}},l),
                     h("span",{style:{fontSize:14,fontWeight:800,color:C.text}},v)
                   ))
+                ),
+
+                // A reading has to be checkable against the one before it:
+                // a Z number that never repeats, and a total that only grows.
+                h("div",{style:{marginTop:12,paddingTop:10,
+                  borderTop:"2px solid "+C.border}},
+                  h("b",{style:{fontSize:13}},"Accumulated Sales"),
+                  [["Z Counter No.",zd.zCounter!=null?String(zd.zCounter):"—"],
+                   ["Reset Counter No.",String(zd.resetCounter||0)],
+                   ["Previous Accumulated","₱"+peso(zd.prevAccum||0)],
+                   ["Present Accumulated","₱"+peso(zd.presentAccum||0)],
+                   ["Sales for the Day","₱"+peso(zd.net||0)],
+                   ["No. of SKUs",String(zd.skuCount!=null?zd.skuCount:"—")],
+                   ["Total Quantity",String(zd.qtySold||0)],
+                   ["Cancelled Trans.",String(zd.cancelled||0)]
+                  ].map(([l,v])=>h("div",{key:l,style:{display:"flex",
+                    justifyContent:"space-between",padding:"5px 0",
+                    borderBottom:"1px solid #f5f5f5"}},
+                    h("span",{style:{fontSize:13,color:C.muted}},l),
+                    h("span",{style:{fontSize:14,fontWeight:800,color:C.text}},v)))
+                ),
+
+                // The drawer's own story, separate from sales: what came in,
+                // what was spent, what was handed over, what should be left.
+                h("div",{style:{marginTop:12,paddingTop:10,
+                  borderTop:"2px solid "+C.border}},
+                  h("b",{style:{fontSize:13}},"Cash Drawer"),
+                  [["Opening Fund","₱"+peso(zd.opening||0)],
+                   ["Cash Sales","₱"+peso(zd.cashSales||0)],
+                   ["Cash In","₱"+peso(zd.cashIn||0)],
+                   ["Expenses","₱"+peso(zd.expenses||0)],
+                   ["Remittance","₱"+peso(zd.remittance||0)],
+                   ["Ibang Cash Out","₱"+peso(zd.otherCashOut||0)],
+                   ["Dapat nasa drawer","₱"+peso(zd.cashOnHand||0)],
+                   ["Aktuwal na binilang",zd.countedCash!=null
+                     ?("₱"+peso(zd.countedCash)):"— walang cash count —"]
+                  ].map(([l,v])=>h("div",{key:l,style:{display:"flex",
+                    justifyContent:"space-between",padding:"5px 0",
+                    borderBottom:"1px solid #f5f5f5"}},
+                    h("span",{style:{fontSize:13,color:C.muted}},l),
+                    h("span",{style:{fontSize:14,fontWeight:800,color:C.text}},v))),
+                  zd.shortOver!=null&&h("div",{style:{display:"flex",
+                    justifyContent:"space-between",padding:"8px 0 0"}},
+                    h("span",{style:{fontSize:13,fontWeight:800}},"SHORT / OVER"),
+                    h("span",{style:{fontSize:15,fontWeight:900,
+                      color:Math.abs(zd.shortOver)<0.01?C.success
+                        :(zd.shortOver>0?C.info:C.danger)}},
+                      (zd.shortOver>=0?"+":"")+"₱"+peso(zd.shortOver)))
                 )
               )
             ),
@@ -15359,15 +15644,55 @@ function App(){
                 h("div",null,h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"CATEGORY"),h("select",{value:newExp.cat,onChange:e=>setNewExp(p=>({...p,cat:e.target.value})),style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:13,outline:"none"}},EXPENSE_CATS.map(c=>h("option",{key:c},c)))),
                 h("div",null,h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"DESCRIPTION"),h("textarea",{value:newExp.desc,onChange:e=>setNewExp(p=>({...p,desc:e.target.value})),rows:3,placeholder:"Isa bawat linya:\nIce \u2014 2 bag\nLPG refill",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:13,outline:"none",boxSizing:"border-box",resize:"vertical",fontFamily:"inherit",lineHeight:1.45}})),
                 h("div",null,h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"AMOUNT (₱)"),h("input",{type:"number",onFocus:e=>e.target.select(),value:newExp.amount,onChange:e=>setNewExp(p=>({...p,amount:e.target.value})),placeholder:"0.00",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:14,fontWeight:700,outline:"none",boxSizing:"border-box"}})),
+                h("div",{style:{background:"#FFF8E1",border:"1px solid #FFE082",
+                  borderRadius:8,padding:"9px 11px"}},
+                  h("label",{style:{display:"flex",gap:9,alignItems:"flex-start",
+                    cursor:"pointer"}},
+                    h("input",{type:"checkbox",
+                      checked:newExp.fromDrawer!==false,
+                      onChange:e=>setNewExp(p=>({...p,fromDrawer:e.target.checked})),
+                      style:{marginTop:2,width:17,height:17,cursor:"pointer"}}),
+                    h("div",null,
+                      h("div",{style:{fontSize:13,fontWeight:800,color:"#BF360C"}},
+                        "Kinuha sa cash drawer"),
+                      h("div",{style:{fontSize:12,color:C.muted,marginTop:2,
+                        lineHeight:1.45}},
+                        newExp.fromDrawer!==false
+                          ? "Magiging Cash Out ito, kaya tutugma ang bilang ng pera sa gabi."
+                          : "Hindi bababa sa cash count. Piliin ito kung GCash, bank, o si Main ang nagbayad."))
+                  )),
                 h("button",{onClick:async()=>{
                   if(!newExp.desc||!newExp.amount){showT("Fill all fields","warn");return;}
-                  await addDoc(collection(db,"expenses"),{branch:branchId,cat:newExp.cat,
-                    desc:newExp.desc,amount:parseFloat(newExp.amount),
-                    date:newExp.date||localDate(),
+                  const _amt=parseFloat(newExp.amount)||0;
+                  const _date=newExp.date||localDate();
+                  const _exp=await addDoc(collection(db,"expenses"),{branch:branchId,cat:newExp.cat,
+                    desc:newExp.desc,amount:_amt,
+                    date:_date,
+                    fromDrawer:newExp.fromDrawer!==false,
                     enteredOn:localDate(),   // keep when it was keyed in, for audit
                     by:user.name,status:user.role==="owner"?"approved":"pending",
                     timestamp:serverTimestamp()});
-                  setNewExp({cat:"Utilities",desc:"",amount:"",date:""});setModal(null);showT("Expense recorded!");
+                  // An expense paid out of the drawer is cash that physically
+                  // left it. Recorded only in `expenses`, it never reached the
+                  // variance check or the Z-Reading, so every such payment read
+                  // as a shortage. expenseId links the two so the same peso is
+                  // never counted twice.
+                  if(newExp.fromDrawer!==false&&_amt>0){
+                    try{
+                      const _now=new Date();
+                      await addDoc(collection(db,"cash_log"),{
+                        branch:branchId,type:"out",subType:"expense",
+                        desc:"Expense: "+newExp.cat+" — "+newExp.desc,
+                        amount:_amt,expenseId:_exp.id,
+                        time:_now.toLocaleTimeString("en-PH",{hour:"2-digit",minute:"2-digit"}),
+                        date:_date,by:user.name,
+                        timestamp:serverTimestamp(),at:serverTimestamp()});
+                    }catch(e2){
+                      console.warn("expense→cash_log failed:",e2);
+                      showT("Naitala ang expense pero HINDI sa cash — idagdag bilang Cash Out","warn");
+                    }
+                  }
+                  setNewExp({cat:"Utilities",desc:"",amount:"",date:"",fromDrawer:true});setModal(null);showT("Expense recorded!");
                 },style:{padding:"10px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:8,color:"#fff",fontWeight:700,cursor:"pointer"}},"Save Expense")
               )
             )
