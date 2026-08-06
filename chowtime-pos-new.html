@@ -7182,7 +7182,7 @@ function voidSummary(r){
 }
 
 // ─── VOID REQUEST (Cashier submits, Manager approves) ─────
-function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=false}){
+function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=false,branches=[]}){
   const [voidRequests,setVoidReqs] = useState([]);
   const [selOrder,setSelOrder]     = useState(null);
   const [voidDays,setVoidDays]     = useState(0);   // 0 = today, 7 = last week
@@ -7190,17 +7190,21 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
   const [reason,setReason]         = useState("");
   const [submitting,setSubmitting] = useState(false);
   const [tab,setTab]               = useState(isManager?"pending":"new");
+  // The owner account is pinned to ct-main, so a request raised at any other
+  // branch could only ever be approved by signing in as that branch. The
+  // owner reads every branch here instead.
+  const seesAllBranches = isManager && user.role==="owner";
+  const [vrBranch,setVrBranch]     = useState("all");
 
   useEffect(()=>{
     // where + orderBy on different fields needs a Firestore composite index.
     // Without it the query fails outright, and the old empty error handler
     // swallowed that — the bell fired but this list stayed blank forever.
     // A single equality filter needs no index; sort in memory instead.
-    const q = query(
-      collection(db,"void_requests"),
-      where("branch","==",branchId),
-      limit(100)
-    );
+    const q = seesAllBranches
+      ? query(collection(db,"void_requests"),limit(300))
+      : query(collection(db,"void_requests"),
+          where("branch","==",branchId),limit(100));
     const unsub = onSnapshot(q,snap=>{
       const rows=snap.docs.map(d=>({...d.data(),_docId:d.id}));
       rows.sort((a,b)=>{
@@ -7215,7 +7219,7 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
       showT("Could not load void requests: "+String(err&&err.message||err).slice(0,60),"err");
     });
     return()=>unsub();
-  },[branchId]);
+  },[branchId,seesAllBranches]);
 
   const submitVoid = async()=>{
     if(!selOrder){showT("Select an order to void","warn");return;}
@@ -7280,7 +7284,12 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
   const voidAmt = voidedItems.reduce((s,i)=>
     s+(Number(i.lineTotal)||((Number(i.unitPrice)||0)*(i.qty||1))),0);
 
+  // A void is the one action a cashier must not be able to grant themselves.
+  // The prop only says which VIEW was asked for; the role says who is asking.
+  const canApprove = (user.role==="manager"||user.role==="owner");
+
   const approveVoid = async(req)=>{
+    if(!canApprove){showT("Manager approval required","warn");return;}
     try{
       // Re-check the order itself: a second request for the same order, or a
       // double tap, would otherwise restock and reverse the cash twice.
@@ -7294,6 +7303,29 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
         showT(req.orderId+" was already voided — request closed","warn");
         return;
       }
+      // The request stores the human OR number; the order document has a
+      // Firestore id. Resolve it BEFORE anything is marked approved.
+      //
+      // Approving across branches means the order may not be in the locally
+      // loaded set at all. Without the Firestore id, performVoid skips step 1
+      // and leaves the worst possible outcome: stock returned and cash
+      // reversed while the order still counts as a live sale.
+      let ord=orders.find(o=>o.id===req.orderId
+        &&(!req.branch||!o.branch||o.branch===req.branch));
+      if(!ord||!ord._docId){
+        try{
+          const snap=await getDocs(query(collection(db,"orders"),
+            where("id","==",String(req.orderId)),limit(5)));
+          const hit=snap.docs.map(d=>({...d.data(),_docId:d.id}))
+            .find(o=>!req.branch||!o.branch||o.branch===req.branch);
+          if(hit)ord=hit;
+        }catch(e){console.warn("void: order lookup failed",e);}
+      }
+      if(!ord||!ord._docId){
+        showT("Hindi mahanap ang order "+req.orderId
+          +" — hindi itinuloy ang void","err");
+        return;
+      }
       await notify(db,{to:req.branch||branchId,type:"void",
         title:"Void approved — "+req.orderId,
         message:"₱"+peso(req.voidAmount)+" reversed by "+user.name,
@@ -7301,9 +7333,6 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
       await updateDoc(doc(db,"void_requests",req._docId),{
         status:"approved",approvedBy:user.name,approvedAt:serverTimestamp()
       });
-      // The request stores the human OR number; the order document has a
-      // Firestore id. Resolve it or the order update silently targets nothing.
-      const ord=orders.find(o=>o.id===req.orderId)||{id:req.orderId,branch:req.branch};
       const r=await performVoid(db,{
         order:ord,
         docId:ord._docId,
@@ -7320,6 +7349,7 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
   };
 
   const rejectVoid = async(req)=>{
+    if(!canApprove){showT("Manager approval required","warn");return;}
     await notify(db,{to:req.branch||branchId,type:"void",
       title:"Void rejected — "+req.orderId,
       message:"Rejected by "+user.name,
@@ -7353,7 +7383,16 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
     return d>=0 && d<=voidDays;
   }).sort((a,b)=>String(dayKey(b)+" "+(b.id||""))
       .localeCompare(String(dayKey(a)+" "+(a.id||""))));
-  const pending = voidRequests.filter(r=>r.status==="pending");
+  const scoped = (seesAllBranches&&vrBranch!=="all")
+    ? voidRequests.filter(r=>r.branch===vrBranch)
+    : voidRequests;
+  const pending = scoped.filter(r=>r.status==="pending");
+  const brName = (id)=>{
+    const b=(branches||[]).find(x=>x.id===id);
+    return (b&&(b.name||b.full))||id||"—";
+  };
+  const pendingByBranch = voidRequests.filter(r=>r.status==="pending")
+    .reduce((m,r)=>{m[r.branch]=(m[r.branch]||0)+1;return m;},{});
 
   return h("div",null,
     h(SectionHeader,{title:"🚫 "+(isManager?"Void Requests — "+curBranch.name:"Request Void Transaction")}),
@@ -7363,6 +7402,26 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
       borderRadius:10,padding:"10px 14px",marginBottom:12,fontSize:13,
       color:C.danger,fontWeight:700}},
       "⚠️ "+pending.length+" void request"+(pending.length>1?"s":"")+" pending your approval!"
+    ),
+
+    seesAllBranches&&h("div",{style:{display:"flex",gap:8,alignItems:"center",
+      flexWrap:"wrap",marginBottom:12,background:"#fff",padding:"9px 13px",
+      borderRadius:10,border:"1px solid "+C.border}},
+      h("span",{style:{fontSize:12,fontWeight:700,color:C.muted,
+        letterSpacing:1}},"BRANCH"),
+      h("select",{value:vrBranch,onChange:e=>setVrBranch(e.target.value),
+        style:{padding:"6px 9px",fontSize:13,borderRadius:7,
+          border:"1px solid "+C.border,cursor:"pointer",fontWeight:700}},
+        [h("option",{key:"all",value:"all"},
+          "Lahat ng branch ("+Object.values(pendingByBranch)
+            .reduce((a,b)=>a+b,0)+" pending)")]
+          .concat((branches||[]).map(b=>h("option",{key:b.id,value:b.id},
+            (b.name||b.full||b.id)
+            +(pendingByBranch[b.id]?"  \u00B7 "+pendingByBranch[b.id]+" pending":""))))),
+      Object.keys(pendingByBranch).length>0&&h("span",{style:{fontSize:12,
+        color:C.muted}},
+        Object.keys(pendingByBranch).map(b=>brName(b)+" ("+pendingByBranch[b]+")")
+          .join("  \u00B7  "))
     ),
 
     // Tabs
@@ -7540,7 +7599,8 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
               h("div",null,
                 h("div",{style:{fontSize:13,fontWeight:800,color:C.danger}},"Void Request — #"+req.orderId),
                 h("div",{style:{fontSize:13,color:C.muted,marginTop:2}},
-                  "By: "+req.requestedBy+" · "+req.date)
+                  (seesAllBranches?brName(req.branch)+" · ":"")
+                  +"By: "+req.requestedBy+" · "+req.date)
               ),
               h("div",{style:{fontSize:16,fontWeight:900,color:C.primary}},"₱"+peso(req.orderTotal))
             ),
@@ -13069,7 +13129,9 @@ function App(){
                         const t=nf.at&&nf.at.toDate?nf.at.toDate():null;
                         return h("button",{key:nf._docId,
                           onClick:async()=>{
-                            if(nf.page)setPage(nf.page);
+                            // A notification is a pointer, not a permission.
+                            const allowed=(ROLES[user.role]&&ROLES[user.role].nav)||[];
+                            if(nf.page&&allowed.indexOf(nf.page)>=0)setPage(nf.page);
                             setShowNotifs(false);
                             if(!nf.read){
                               try{await updateDoc(doc(db,"notifications",nf._docId),{read:true});}catch(e){}
@@ -16453,8 +16515,12 @@ function App(){
         }),
 
         // ══ VOID REQUESTS (Manager) ══
-        page==="void_requests"&&h(VoidRequestPage,{
-          user,branchId,curBranch,db,orders,showT,
+        // Role-gated at the render, not just hidden from the nav: a
+        // notification carries page:"void_requests", and a cashier tapping
+        // their own request landed on the approval screen.
+        page==="void_requests"&&(user.role==="manager"||user.role==="owner")
+          &&h(VoidRequestPage,{
+          user,branchId,curBranch,db,orders,showT,branches,
           isManager:true,key:"voidmgr"
         }),
 
