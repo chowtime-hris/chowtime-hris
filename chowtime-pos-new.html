@@ -176,6 +176,20 @@ try {
   hrisDB = getDatabase(hrisApp);
 } catch(e) { console.warn("HRIS DB:", e.message); }
 
+// Production runs a separate payroll — its own staff, rates and payslip — in
+// its own database. A production crew's advance has to land in that ledger,
+// because the HRIS one is never read by the payslip they are paid from.
+const prodConfig = {
+  apiKey:      "AIzaSyB8PlWl-qfmAn2GDdrJ1Y5pZQs4RAjhTo4",
+  projectId:   "chowtime-production",
+  databaseURL: "https://chowtime-production-default-rtdb.asia-southeast1.firebasedatabase.app",
+};
+let prodDB = null;
+try {
+  const prodApp = initializeApp(prodConfig, "chowtime-production");
+  prodDB = getDatabase(prodApp);
+} catch(e) { console.warn("Production DB:", e.message); }
+
 // A franchise runs its own HRIS project, so an approval for their crew has to
 // be written there — not into Main's. One app instance per franchise, made
 // once and kept.
@@ -1061,8 +1075,8 @@ function printZ(zd,branchName,cashier){
   <div class="row"><span>Remittance:</span><span>-P${peso((zd.remittance||0))}</span></div>
   <div class="row"><span>Other Cash Out:</span><span>-P${peso((zd.otherCashOut||0))}</span></div>
   <div class="hr"></div>
-  <div class="row b"><span>CASH ON HAND:</span><span>P${peso((zd.cashOnHand!=null?zd.cashOnHand:(zd.totalCash||0)))}</span></div>
-  ${zd.countedCash!=null?`<div class="row"><span>Counted Cash:</span><span>P${peso(zd.countedCash)}</span></div>
+  <div class="row b"><span>EXPECTED CASH:</span><span>P${peso((zd.cashOnHand!=null?zd.cashOnHand:(zd.totalCash||0)))}</span></div>
+  ${zd.countedCash!=null?`<div class="row"><span>COUNTED CASH:</span><span>P${peso(zd.countedCash)}</span></div>
   <div class="row b"><span>SHORT / OVER:</span><span>${zd.shortOver>=0?"+":""}P${peso(zd.shortOver||0)}</span></div>`:""}
   <div class="hr"></div>
   <div class="b">PAYMENT BREAKDOWN</div>
@@ -1153,10 +1167,10 @@ function buildEscPosZ(zd,branchName,cashier,cs,paperSize,isZ){
   a(row("Other Cash Out","- P"+n(zd.otherCashOut||0)));
   a(dash());
   a([ESC,0x21,0x10]);
-  a(row("CASH ON HAND","P"+n(zd.cashOnHand!=null?zd.cashOnHand:zd.totalCash)));
+  a(row("EXPECTED CASH","P"+n(zd.cashOnHand!=null?zd.cashOnHand:zd.totalCash)));
   a([ESC,0x21,0x00]);
   if(zd.countedCash!=null){
-    a(row("Counted Cash","P"+n(zd.countedCash)));
+    a(row("COUNTED CASH","P"+n(zd.countedCash)));
     a([ESC,0x45,0x01]);
     a(row("SHORT / OVER",(zd.shortOver>=0?"+":"")+"P"+n(zd.shortOver)));
     a([ESC,0x45,0x00]);
@@ -2842,6 +2856,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
     openingFund, todaySales, cashIn, cashOut, expectedCash, variance,
     expenses:todayExpenses,
     remittance:remittanceAmt, remittanceField:remitField,
+    remittedBeforeCount:remitBefore,
     remittanceLogged:remitLogged, closingBalance, note:countNote,
     countedBy:user.name, branchName:curBranch.full};
 
@@ -2864,6 +2879,12 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
     const cashIn        = num("cashIn");
     const cashOut       = num("cashOut");
     const expectedCash  = num("expectedCash");
+    // Expected already has these taken off it. Printed without them, the
+    // column could not be added up by the person holding the paper.
+    const expenses      = num("expenses");
+    const remitBeforeAmt= R.remittedBeforeCount
+      ? (Number(R.remittanceField!==undefined?R.remittanceField:R.remittance)||0)
+      : 0;
     const variance      = num("variance");
     const remittanceAmt = num("remittance");
     const closingBalance= num("closingBalance");
@@ -2884,8 +2905,8 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
     const remitTotal  = remitField+remitLogged;
     const showRemit   = isClosing||remitTotal>0;
     const remitRows=[
-      remitField>0 ?`<div class="r"><span>Mula sa bilang</span><span>${P(remitField)}</span></div>`:"",
-      remitLogged>0?`<div class="r"><span>Naunang cash out</span><span>${P(remitLogged)}</span></div>`:""
+      remitField>0 ?`<div class="r"><span>From the count</span><span>${P(remitField)}</span></div>`:"",
+      remitLogged>0?`<div class="r"><span>Earlier cash out</span><span>${P(remitLogged)}</span></div>`:""
     ].join("");
     const vTag=variance===0?"BALANCED":(variance>0?"OVER":"SHORT");
     const printedAt=new Date().toLocaleString("en-PH",
@@ -2914,25 +2935,27 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
     Business date: ${today}<br>Counted by: ${esc(countedBy)}</div>
     <div class="hr"></div>
     <div class="sec">DENOMINATIONS</div>
-    ${dRows||`<div class="r"><span>(walang naitalang piraso)</span><span>P0.00</span></div>`}
+    ${dRows||`<div class="r"><span>(no denominations recorded)</span><span>P0.00</span></div>`}
     <div class="hr"></div>
     <div class="r"><span>Bills</span><span>${P(billsTotal)}</span></div>
     <div class="r"><span>Coins</span><span>${P(coinsTotal)}</span></div>
-    <div class="r big"><span>TOTAL CASH</span><span>${P(totalCash)}</span></div>
+    <div class="r big"><span>COUNTED CASH</span><span>${P(totalCash)}</span></div>
     <div class="hr"></div>
     <div class="sec">RECONCILIATION</div>
     <div class="r"><span>Opening fund</span><span>${P(openingFund)}</span></div>
     <div class="r"><span>Cash sales</span><span>${P(todaySales)}</span></div>
     <div class="r"><span>Cash in</span><span>+${P(cashIn)}</span></div>
+    <div class="r"><span>Expenses</span><span>-${P(expenses)}</span></div>
     <div class="r"><span>Cash out</span><span>-${P(cashOut)}</span></div>
-    <div class="r"><span>Expected</span><span>${P(expectedCash)}</span></div>
-    <div class="r b"><span>Variance &middot; ${vTag}</span><span>${variance>=0?"+":"-"}${P(Math.abs(variance))}</span></div>
+    ${remitBeforeAmt>0?`<div class="r"><span>Remittance (before count)</span><span>-${P(remitBeforeAmt)}</span></div>`:""}
+    <div class="r"><span>Expected Cash</span><span>${P(expectedCash)}</span></div>
+    <div class="r b"><span>SHORT / OVER &middot; ${vTag}</span><span>${variance>=0?"+":"-"}${P(Math.abs(variance))}</span></div>
     ${showRemit?`<div class="hr"></div>
     <div class="sec">REMITTANCE</div>
     ${remitRows}
     <div class="r b"><span>TOTAL REMITTED</span><span>${P(remitTotal)}</span></div>
     <div class="r big"><span>CLOSING BALANCE</span><span>${P(closingBalance)}</span></div>
-    <div class="s">Nananatili sa cash box bilang opening fund bukas.</div>`:""}
+    <div class="s">Stays in the cash box as tomorrow's opening fund.</div>`:""}
     ${countNote?`<div class="hr"></div><div class="sec">NOTES</div>
     <div class="note">${esc(countNote)}</div>`:""}
     <div class="hr"></div>
@@ -3150,7 +3173,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
         // Step bar. Finished steps stay tappable — going back to fix a count
         // is normal; being unable to is what makes people invent a number.
         h("div",{style:{display:"flex",gap:4,marginBottom:10}},
-          [[1,"Gastos"],[2,"Bilang"],[3,"Remit"],[4,"Isara"]].map(([n,l])=>{
+          [[1,"Expenses"],[2,"Count"],[3,"Remittance"],[4,"Close"]].map(([n,l])=>{
             const done=ccStep>n, now=ccStep===n;
             return h("button",{key:n,onClick:()=>setCcStep(n),
               style:{flex:1,padding:"7px 4px",borderRadius:8,cursor:"pointer",
@@ -3186,7 +3209,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
           // below, and anything bought goes through Expenses. Two doors onto
           // the same movement means the same peso gets recorded twice.
           h("div",{style:{fontSize:12,color:C.muted,marginBottom:8,lineHeight:1.5}},
-            "Ang paglabas ng pera ay wala na dito \u2014 ang remittance ay nasa ibaba, ang gastos ay sa Expenses."),
+            "Money leaving the drawer is not entered here — remittance is below, purchases go through Expenses."),
           h("div",{style:{display:"flex",gap:5,flexWrap:"wrap",marginBottom:8}},
             ["Opening Fund","Change Fund","Collection"]
             .map(lbl=>h("button",{key:lbl,
@@ -3254,7 +3277,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
             const grp=(arr,sign)=>{
               const m={};
               arr.forEach(c=>{
-                const k=(c.desc||"").trim()||"Walang paglalarawan";
+                const k=(c.desc||"").trim()||"No description";
                 m[k]=(m[k]||0)+(Number(c.amount)||0);
               });
               return Object.keys(m).sort().map(k=>
@@ -3299,7 +3322,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
               remitOutBefore>0&&h("div",{style:{display:"flex",
                 justifyContent:"space-between",marginBottom:3}},
                 h("span",{style:{fontSize:13,color:C.muted}},
-                  "Remittance (naibigay na bago binilang)"),
+                  "Remittance (before count)"),
                 h("span",{style:{fontSize:13,fontWeight:700,color:C.danger}},
                   "-₱"+peso(remitOutBefore))),
               // Shown but never added: zeroing the order already took this out
@@ -3307,17 +3330,17 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
               voidRef>0&&h("div",{style:{display:"flex",
                 justifyContent:"space-between",marginBottom:3}},
                 h("span",{style:{fontSize:12,color:C.muted,fontStyle:"italic"}},
-                  "Void refund (hindi binibilang \u2014 bawas na sa benta)"),
+                  "Void refund (not counted — already out of sales)"),
                 h("span",{style:{fontSize:12,color:C.muted}},
                   "\u20B1"+peso(voidRef)))
             );
           })(),
           h("div",{style:{display:"flex",justifyContent:"space-between",padding:"6px 0",borderTop:"1px dashed #ddd",marginTop:3}},
-            h("span",{style:{fontSize:13,color:C.muted}},"Expected Total"),
+            h("span",{style:{fontSize:13,color:C.muted}},"Expected Cash"),
             h("span",{style:{fontSize:13,fontWeight:700}},"₱"+peso(expectedCash))
           ),
           h("div",{style:{display:"flex",justifyContent:"space-between",marginTop:4}},
-            h("span",{style:{fontSize:14,fontWeight:800}},"VARIANCE"),
+            h("span",{style:{fontSize:14,fontWeight:800}},"SHORT / OVER"),
             h("span",{style:{fontSize:14,fontWeight:900,color:Math.abs(variance)<0.01?C.success:variance>0?C.info:C.danger}},
               (variance>=0?"+":"")+"₱"+peso(variance))
           ),
@@ -3332,22 +3355,22 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
             borderTop:"1px dashed "+C.border,fontSize:12,lineHeight:1.55,
             color:C.muted}},
             h("div",{style:{fontWeight:800,color:C.text,marginBottom:3}},
-              "Paano binibilang"),
-            h("div",null,"Opening + Cash Sales + pumasok \u2212 lumabas = Expected"),
+              "How this is calculated"),
+            h("div",null,"Opening + Cash Sales + Cash In − Expenses − Cash Out = Expected Cash"),
             h("div",{style:{marginTop:2}},
-              "Cash Sales = ang cash na bahagi lang. Ang GCash at bank ay hindi pumapasok sa drawer."),
+              "Cash Sales counts the cash leg only. GCash and bank never reach the drawer."),
             h("div",{style:{marginTop:2}},
-              "Ang bawat linya sa itaas ay ang mismong salitang itinala \u2014 kung Remittance ang isinulat, Remittance ang lalabas."),
+              "Each line above uses the exact wording that was entered."),
             h("div",{style:{marginTop:6,fontWeight:800,color:C.text,
-              marginBottom:3}},"Ibig sabihin ng kulay"),
+              marginBottom:3}},"What the colours mean"),
             h("div",{style:{color:C.success,fontWeight:700}},
-              "\uD83D\uDFE2 Berde \u2014 tugma ang bilang sa inaasahan."),
+              "🟢 Green — the count matches Expected Cash."),
             h("div",{style:{color:C.info,fontWeight:700}},
-              "\uD83D\uDD35 Asul \u2014 SOBRA. Kadalasan: hindi naitalang cash in, o maling sukli."),
+              "🔵 Blue — OVER. Usually an unrecorded cash in, or wrong change given."),
             h("div",{style:{color:C.danger,fontWeight:700}},
-              "\uD83D\uDD34 Pula \u2014 KULANG. Tingnan: may gastos bang hindi naitala, remittance na hindi naipasok, o benta na naka-cash pero GCash pala."),
+              "🔴 Red — SHORT. Check for an unrecorded expense, a remittance not entered, or a sale marked cash that was actually GCash."),
             h("div",{style:{marginTop:5}},
-              "Ang pagkakaiba ay itala, huwag itago \u2014 ang tala ang naghahanap ng dahilan, hindi ang taong nagbilang.")
+              "Record the difference, do not hide it — the record is what finds the reason.")
           )
         ),
 
@@ -3373,12 +3396,12 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
               h("div",null,
                 h("div",{style:{fontSize:13,fontWeight:800,
                   color:remitBefore?"#BF360C":C.text}},
-                  "Naibigay na bago binilang"),
+                  "Handed over before the count"),
                 h("div",{style:{fontSize:12,color:C.muted,marginTop:2,
                   lineHeight:1.45}},
                   remitBefore
-                    ? "Wala na ito sa drawer, kaya ibinabawas na sa Expected Total. Ang binilang mo ang siyang matitira."
-                    : "Nasa drawer pa habang binibilang. Ibabawas ito sa Closing Balance pagkatapos.")))
+                    ? "No longer in the drawer, so it is taken off Expected Cash. What you counted is what stays."
+                    : "Still in the drawer while counting. It comes off the Closing Balance afterwards.")))
           ),
           remitLogged>0&&h("div",{style:{background:"#FFF8E1",
             border:"1px solid #FFE082",borderRadius:8,padding:"8px 11px",
@@ -3407,9 +3430,9 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
         // ── STEP 1: EXPENSES ──
         ccStep===1&&h("div",{style:{background:"#fff",borderRadius:12,
           border:"1px solid "+C.border,padding:"14px 16px",marginBottom:10}},
-          h("b",{style:{fontSize:15}},"1. Gastos ng araw"),
+          h("b",{style:{fontSize:15}},"1. Expenses for the day"),
           h("div",{style:{fontSize:13,color:C.muted,marginTop:3,lineHeight:1.5}},
-            "Ipasok muna ang lahat ng gastos bago magbilang. Ang gastos na naipasok pagkatapos ng bilang ay lalabas na parang kulang ang pera."),
+            "Record every expense before counting. An expense keyed in after the count shows up as missing cash."),
           h("div",{style:{background:todayExpenses>0?"#FFF8E1":"#F5F5F5",
             border:"1px solid "+(todayExpenses>0?"#FFE082":C.border),
             borderRadius:9,padding:"11px 13px",marginTop:10}},
@@ -3418,17 +3441,17 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
               "₱"+peso(todayExpenses)),
             h("div",{style:{fontSize:12,color:C.muted,marginTop:2}},
               todayExpenses>0
-                ? "ang naitalang gastos ngayong araw"
-                : "wala pang naitalang gastos ngayong araw")),
+                ? "recorded in expenses today"
+                : "no expenses recorded today")),
           h("label",{style:{display:"flex",gap:9,alignItems:"flex-start",
             marginTop:11,cursor:"pointer"}},
             h("input",{type:"checkbox",checked:ackExpenses,
               onChange:e=>setAckExpenses(e.target.checked),
               style:{marginTop:2,width:17,height:17,cursor:"pointer"}}),
             h("div",{style:{fontSize:13,fontWeight:700}},
-              "Kumpirmado \u2014 wala nang ipapasok na gastos")),
+              "Confirmed — no more expenses to record")),
           h("div",{style:{fontSize:12,color:C.muted,marginTop:7}},
-            "Kung may naiwan pa, buksan muna ang Expenses sa sidebar at bumalik dito.")),
+            "If any are missing, open Expenses in the sidebar and come back here.")),
 
         // Step navigation — pinned, so the way forward is always in reach
         h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,
@@ -3441,7 +3464,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
               border:"1px solid "+C.border,borderRadius:9,fontWeight:700,
               fontSize:13,color:ccStep===1?C.muted:C.text,
               cursor:ccStep===1?"not-allowed":"pointer"}},
-            ccStep===1?"—":"← Bumalik"),
+            ccStep===1?"—":"← Back"),
           (function(){
             if(ccStep===1)
               return h("button",{onClick:()=>setCcStep(2),disabled:!ackExpenses,
@@ -3449,19 +3472,19 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
                   fontWeight:800,fontSize:14,
                   background:ackExpenses?C.primary:"#C8C8C8",
                   cursor:ackExpenses?"pointer":"not-allowed"}},
-                "Susunod → Bilangin");
+                "Next → Count cash");
             if(ccStep===2)
               return h("button",{onClick:()=>setCcStep(3),disabled:!(totalCash>0),
                 style:{padding:"11px",borderRadius:9,border:"none",color:"#fff",
                   fontWeight:800,fontSize:14,
                   background:totalCash>0?C.primary:"#C8C8C8",
                   cursor:totalCash>0?"pointer":"not-allowed"}},
-                "Susunod → Remittance");
+                "Next → Remittance");
             if(ccStep===3)
               return h("button",{onClick:()=>setCcStep(4),
                 style:{padding:"11px",borderRadius:9,border:"none",color:"#fff",
                   fontWeight:800,fontSize:14,background:C.primary,
-                  cursor:"pointer"}},"Susunod → Suriin");
+                  cursor:"pointer"}},"Next → Review");
             const offBy=Math.abs(variance)>=0.01;
             const ready=!offBy||(countNote||"").trim().length>0;
             return h("button",{disabled:!ready,
@@ -3470,18 +3493,18 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
                 fontWeight:800,fontSize:14,
                 background:ready?`linear-gradient(135deg,${C.primary},${C.dark})`:"#C8C8C8",
                 cursor:ready?"pointer":"not-allowed"}},
-              "🏁 Isara at i-print");
+              "🏁 Close & Print");
           })()
         ),
         ccStep===4&&Math.abs(variance)>=0.01&&!(countNote||"").trim()&&
           h("div",{style:{fontSize:12,color:C.danger,fontWeight:700,
             textAlign:"center",marginTop:6}},
-            "₱"+peso(Math.abs(variance))+" ang "+(variance>0?"sobra":"kulang")
-            +" — magsulat sa NOTES bago isara."),
+            "₱"+peso(Math.abs(variance))+" ang "+(variance>0?"over":"short")
+            +" — write a note in NOTES before closing."),
         ccStep<4&&h("button",{onClick:()=>{saveCashCount(false);},
           style:{width:"100%",marginTop:7,padding:"9px",background:"#fff",
             border:"1px solid "+C.border,borderRadius:9,fontWeight:700,
-            fontSize:13,cursor:"pointer"}},"💾 I-save muna (hindi pa sarado)"),
+            fontSize:13,cursor:"pointer"}},"💾 Save progress (not closed)"),
         saved&&h("div",{style:{textAlign:"center",marginTop:8}},
           h("div",{style:{fontSize:13,color:C.success,fontWeight:700}},
             "✅ Count saved to Firebase"),
@@ -3560,6 +3583,8 @@ function CALoanPage({user,branchId,curBranch,db,hrisDB,showT,mode,hrisEmps=[]}){
       cutoffDeduct,
       status: "pending",
       hrisEmpId: hrisEmp?.id||null,
+      // Which payroll this person is actually paid from.
+      payrollSrc: hrisEmp?._src||"hris",
       date: today,
       timestamp: serverTimestamp(),
     });
@@ -3633,10 +3658,19 @@ function CALoanPage({user,branchId,curBranch,db,hrisDB,showT,mode,hrisEmps=[]}){
                 fontWeight:empId?700:400}},
               h("option",{value:""},
                 hrisEmps.length?"— select your name —":"No payroll records loaded"),
-              hrisEmps.slice()
-                .sort((a,b)=>String(a.name||"").localeCompare(String(b.name||"")))
-                .map(e=>h("option",{key:e.id,value:e.id},
-                  e.name+(e.pos?" · "+e.pos:"")))),
+              // Grouped by payroll. Two people can share a first name across the
+              // two systems, and picking the wrong one posts the deduction to
+              // a payslip that person is never paid from.
+              [["hris","Branch / HRIS payroll"],["prod","Production payroll"]]
+                .map(([src,label])=>{
+                  const list=hrisEmps.filter(e=>(e._src||"hris")===src);
+                  if(!list.length)return null;
+                  return h("optgroup",{key:src,label:label},
+                    list.slice()
+                      .sort((a,b)=>String(a.name||"").localeCompare(String(b.name||"")))
+                      .map(e=>h("option",{key:src+"_"+e.id,value:e.id},
+                        e.name+(e.pos?" · "+e.pos:(e.position?" · "+e.position:"")))));
+                })),
             !empId&&h("div",{style:{fontSize:11,color:C.warning,marginTop:4,
               lineHeight:1.5}},
               hrisEmps.length
@@ -3725,7 +3759,7 @@ function CALoanPage({user,branchId,curBranch,db,hrisDB,showT,mode,hrisEmps=[]}){
                       status:"cancelled",cancelledBy:user.name,
                       cancelledAt:serverTimestamp()});
                     await logCAEvent(db,r,"cancelled_by_requester",user.name,{});
-                    showT("Nabawi ang request","warn");
+                    showT("Request withdrawn","warn");
                   }catch(e){showT("Hindi nabawi","err");}
                 },
                 style:{marginTop:7,padding:"5px 11px",fontSize:12,fontWeight:700,
@@ -3785,7 +3819,62 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
       balance: req.amount,
     });
 
-    // 2. Push the deduction into whichever payroll actually pays this person
+    // 2. Push the deduction into whichever payroll actually pays this person.
+    //
+    // Production crew are not in HRIS at all — they have their own staff list,
+    // rates and payslip in the Production database, and its payslip reads a
+    // per-staff ledger, not a flat loans array. Writing their advance into
+    // HRIS would deduct nothing from the payslip they are actually paid from.
+    if(req.payrollSrc==="prod"){
+      if(!prodDB||!req.hrisEmpId){
+        await logCAEvent(db,req,"approved_no_payroll_link",user.name,
+          {note:"walang Production DB o walang staff id"});
+        showT("Approved — but Production payroll is unreachable. "
+          +"Record it manually in the Production app.","warn");
+        return;
+      }
+      try{
+        const entry={
+          id:"pos_"+req._docId,
+          type:req.type==="Cash Advance"?"ca":"loan",
+          amount:Number(req.amount)||0,
+          date:req.date||localDate(),
+          note:(req.reason||"")+" · POS request approved by "+user.name
+        };
+        let already=false;
+        const res=await runTransaction(
+          ref(prodDB,"chowtimeProduction/ledger/"+req.hrisEmpId),(cur)=>{
+            const list=cur?(Array.isArray(cur)?cur.slice():Object.values(cur)):[];
+            if(list.some(e=>e&&e.id===entry.id)){ already=true; return cur; }
+            list.push(entry);
+            return list;
+          });
+        if(!res.committed) throw new Error("production payroll busy — try again");
+        await logCAEvent(db,req,already?"already_in_payroll":"posted_to_payroll",
+          user.name,{payrollDB:"production",monthly:req.cutoffDeduct||0});
+        try{
+          await notify(db,{to:req.branch,type:"success",
+            title:req.type+" approved — "+req.staffName,
+            message:"₱"+peso(req.amount)+" · deducted on the Production payslip",
+            page:"ca_request",ref:req.staffName||"",by:user.name});
+        }catch(e3){}
+        showT(already
+          ? "Already posted to Production payroll"
+          : "Approved & synced to Production payroll ✓");
+      }catch(e){
+        console.warn("production sync failed:",e);
+        try{
+          await updateDoc(doc(db,"hris_requests",req._docId),{
+            status:"pending",syncError:String(e&&e.message||e).slice(0,120),
+            syncFailedAt:serverTimestamp()});
+        }catch(e2){}
+        await logCAEvent(db,req,"payroll_sync_failed",user.name,
+          {error:String(e&&e.message||e).slice(0,120)});
+        showT("NOT posted to Production payroll — request stays pending","err");
+      }
+      return;
+    }
+
     const reqBranch=(BRANCHES||[]).find(b=>b&&b.id===req.branch);
     const isFranchiseReq=!!(reqBranch&&reqBranch.ownership==="franchise");
     const targetDB=isFranchiseReq
@@ -3854,13 +3943,13 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
         }catch(e2){}
         await logCAEvent(db,req,"payroll_sync_failed",user.name,
           {error:String(e&&e.message||e).slice(0,120)});
-        showT("HINDI naipasok sa payroll — nanatiling pending ang request","err");
+        showT("NOT posted to payroll — request stays pending","err");
       }
     } else {
       // Approved in the POS with nothing written to payroll. Recorded loudly:
       // this is the case that quietly never reaches a payslip.
       await logCAEvent(db,req,"approved_no_payroll_link",user.name,
-        {note:"walang hrisEmpId o walang payroll DB — manual entry needed"});
+        {note:"no hrisEmpId or no payroll DB — manual entry needed"});
       showT("Approved! No HRIS link — add deduction manually in HRIS","warn");
     }
   };
@@ -3876,7 +3965,7 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
     try{
       await notify(db,{to:req.branch,type:"warning",
         title:req.type+" rejected — "+req.staffName,
-        message:rejectReason||"Walang ibinigay na dahilan",
+        message:rejectReason||"No reason given",
         page:"ca_request",ref:req.staffName||"",by:user.name});
     }catch(e3){}
     setRejectModal(null);
@@ -3980,7 +4069,7 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
                 already_in_payroll:{c:C.muted,i:"\u21BB",t:"Nakapasok na dati"},
                 approved_no_payroll_link:{c:C.warning,i:"\u26A0\uFE0F",
                   t:"Approved pero WALANG naipasok sa payroll"},
-                payroll_sync_failed:{c:C.danger,i:"\u274C",t:"Pumalya ang sync"},
+                payroll_sync_failed:{c:C.danger,i:"\u274C",t:"Sync failed"},
                 rejected:{c:C.danger,i:"\u2716",t:"Tinanggihan"},
                 cancelled_by_requester:{c:C.muted,i:"\u21A9",t:"Binawi ng humiling"},
                 expense_created:{c:C.info,i:"\uD83D\uDCB8",t:"Expense naitala \u00B7 Cash Out"},
@@ -5905,7 +5994,7 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
   const applyQuick=(rows,setRows)=>{
     const lines=String(quickAdd||"").split(/[\n;]+/)
       .map(x=>x.trim()).filter(Boolean);
-    if(!lines.length){setQuickMsg("Walang mababasang linya.");return;}
+    if(!lines.length){setQuickMsg("No readable lines.");return;}
     const keep=rows.filter(r=>r.ingId||r.ingName);
     const missed=[]; let added=0;
     lines.forEach(ln=>{
@@ -7257,7 +7346,7 @@ function DiscountPage({db,user,branches,discounts,menuItems,showT}){
     if(v<=0){showT("Kailangan ng halaga","warn");return;}
     if(form.valueType==="percent"&&v>100){showT("Hindi pwedeng lampas 100%","warn");return;}
     if(form.toDate&&form.fromDate&&form.toDate<form.fromDate){
-      showT("Mali ang petsa — nauuna ang To Date","warn");return;
+      showT("Invalid dates — To Date is before From Date","warn");return;
     }
     setSaving(true);
     try{
@@ -7269,7 +7358,7 @@ function DiscountPage({db,user,branches,discounts,menuItems,showT}){
       if(editId){ await updateDoc(doc(db,"discounts",editId),payload); }
       else{ await addDoc(collection(db,"discounts"),
         Object.assign({},payload,{createdBy:user.name,at:serverTimestamp()})); }
-      showT(editId?"Na-update ✓":"Naidagdag ang discount ✓");
+      showT(editId?"Na-update ✓":"Discount added ✓");
       setForm(blank); setEditId(null);
     }catch(e){ showT("Failed: "+String(e&&e.message||e).slice(0,60),"err"); }
     setSaving(false);
@@ -7335,8 +7424,8 @@ function DiscountPage({db,user,branches,discounts,menuItems,showT}){
           h("div",null,lbl("ITEMS"),
             h("div",{style:{fontSize:12,color:C.muted,marginBottom:6}},
               (form.items||[]).length===0
-                ? "Walang napili — mag-a-apply sa BUONG order."
-                : ((form.items||[]).length+" item/variant ang saklaw. Sa mga linyang ito lang babawas.")),
+                ? "None selected — applies to the WHOLE order."
+                : ((form.items||[]).length+" item/variant in scope. Only those lines are discounted.")),
             h("div",{style:{maxHeight:170,overflowY:"auto",display:"flex",
               gap:5,flexWrap:"wrap",padding:"2px"}},
               (menuItems||[]).map(mi=>{
@@ -7359,8 +7448,8 @@ function DiscountPage({db,user,branches,discounts,menuItems,showT}){
           h("div",null,lbl("BRANCHES"),
             h("div",{style:{fontSize:12,color:C.muted,marginBottom:6}},
               (form.branches||[]).length===0
-                ? "Walang napili — mag-a-apply sa LAHAT ng branch."
-                : ((form.branches||[]).length+" branch ang napili.")),
+                ? "None selected — applies to ALL branches."
+                : ((form.branches||[]).length+" branch(es) selected.")),
             h("div",{style:{display:"flex",gap:5,flexWrap:"wrap"}},
               (branches||[]).map(b=>{
                 const on=(form.branches||[]).indexOf(b.id)>=0;
@@ -7387,7 +7476,7 @@ function DiscountPage({db,user,branches,discounts,menuItems,showT}){
           editId&&h("button",{onClick:()=>{setForm(blank);setEditId(null);},
             style:{padding:"9px",borderRadius:9,border:"1px solid "+C.border,
               background:"#fff",color:C.muted,fontWeight:700,fontSize:13,
-              cursor:"pointer"}},"Kanselahin ang edit")
+              cursor:"pointer"}},"Cancel edit")
         )
       ),
 
@@ -7462,7 +7551,7 @@ function DiscountPage({db,user,branches,discounts,menuItems,showT}){
                       border:"1px solid "+C.border,color:C.muted}},
                     d.status==="active"?"Off":"On"),
                   h("button",{onClick:async()=>{
-                      if(!confirm("Burahin ang \""+(d.name||"")+"\"? Hindi ito makakaapekto sa mga naunang benta."))return;
+                      if(!confirm("Burahin ang \""+(d.name||"")+"\"? Past sales are not affected."))return;
                       try{ await deleteDoc(doc(db,"discounts",d._docId));
                         showT("Nabura","warn");
                       }catch(e){showT("Failed","err");}
@@ -7511,7 +7600,7 @@ function PaymentProofModal({db,branchId,curBranch,user,mySub,myProofs,onClose,sh
         if(out.length>700000){showT("Masyadong malaki ang larawan","warn");return;}
         setShot(out);setShotName(file.name||"screenshot.jpg");
       };
-      img.onerror=()=>showT("Hindi mabasa ang larawan","err");
+      img.onerror=()=>showT("Could not read the image","err");
       img.src=r.result;
     };
     r.onerror=()=>showT("Hindi mabasa ang file","err");
@@ -7520,8 +7609,8 @@ function PaymentProofModal({db,branchId,curBranch,user,mySub,myProofs,onClose,sh
 
   const submit=async()=>{
     const amt=parseFloat(amount)||0;
-    if(!payRef.trim()){showT("Kailangan ang reference number","warn");return;}
-    if(amt<=0){showT("Ilagay ang halagang binayad","warn");return;}
+    if(!payRef.trim()){showT("Reference number is required","warn");return;}
+    if(amt<=0){showT("Enter the amount paid","warn");return;}
     setBusy(true);
     try{
       const bFull=(curBranch&&curBranch.full)||branchId;
@@ -7594,7 +7683,7 @@ function PaymentProofModal({db,branchId,curBranch,user,mySub,myProofs,onClose,sh
             h("button",{onClick:()=>{setShot("");setShotName("");},
               style:{marginTop:5,padding:"4px 10px",fontSize:12,
                 border:"1px solid "+C.border,borderRadius:6,background:"#fff",
-                cursor:"pointer"}},"Alisin ang larawan"))),
+                cursor:"pointer"}},"Remove image"))),
         h("div",null,lbl("PAALALA (opsyonal)"),
           h("textarea",{value:note,onChange:e=>setNote(e.target.value),rows:2,
             placeholder:"hal. partial payment, kalahati muna",
@@ -8287,8 +8376,8 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
         }catch(e){console.warn("void: order lookup failed",e);}
       }
       if(!ord||!ord._docId){
-        showT("Hindi mahanap ang order "+req.orderId
-          +" — hindi itinuloy ang void","err");
+        showT("Cannot find order "+req.orderId
+          +" — void not completed","err");
         return;
       }
       await notify(db,{to:req.branch||branchId,type:"void",
@@ -9554,27 +9643,27 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
             padding:"9px 11px",marginBottom:10}},
             h("div",{style:{fontSize:12,fontWeight:800,color:"#1565C0",
               letterSpacing:1,marginBottom:6}},
-              "O ILAGAY KADA "+packLbl.toUpperCase()+" ("+packN+" "+base+")"),
+              "OR ENTER PER "+packLbl.toUpperCase()+" ("+packN+" "+base+")"),
             h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}},
               h("div",null,
                 h("div",{style:{fontSize:12,color:"#1565C0",marginBottom:3}},
-                  "Sell kada "+packLbl),
+                  "Sell per "+packLbl),
                 h("input",{type:"number",onFocus:e=>e.target.select(),
                   value:show(details._pricePack,details.price),
                   onChange:setPack("_pricePack","price"),placeholder:"0.00",
                   style:Object.assign({},box,{color:"#1565C0"})})),
               h("div",null,
                 h("div",{style:{fontSize:12,color:"#C62828",marginBottom:3}},
-                  "Cost kada "+packLbl),
+                  "Cost per "+packLbl),
                 h("input",{type:"number",onFocus:e=>e.target.select(),
                   value:show(details._costPack,details.cost),
                   onChange:setPack("_costPack","cost"),placeholder:"0.00",
                   style:Object.assign({},box,{color:"#C62828"})}))),
             h("div",{style:{fontSize:12,color:"#1565C0",marginTop:6}},
-              "Naka-save kada "+base+": sell \u20B1"
+              "Saved per "+base+": sell \u20B1"
               +peso(parseFloat(details.price)||0)+"  \u00B7  cost \u20B1"
               +peso(parseFloat(details.cost)||0)
-              +" \u2014 iyon ang ginagamit ng BOM.")
+              +" — this is what the BOM uses.")
           );
         })(),
 
@@ -12013,6 +12102,7 @@ function App(){
   },[]);
   const [staff,setStaff]=useState([]);
   const [hrisEmps,setHrisEmps]=useState([]); // employees from HRIS RTDB
+  const [prodEmps,setProdEmps]=useState([]); // crew from the Production app
   const [menuItems,setMenuItems]=useState(MENU_CATALOG);
   // POS
   const [cart,setCart]=useState([]);
@@ -12607,8 +12697,27 @@ function App(){
     if(!hrisDB)return;
     onValue(ref(hrisDB,"employees"),snap=>{
       const data=snap.val();
-      if(data)setHrisEmps((Array.isArray(data)?data:Object.values(data)).filter(e=>e&&e.name));
+      if(data)setHrisEmps((Array.isArray(data)?data:Object.values(data))
+        .filter(e=>e&&e.name).map(e=>Object.assign({},e,{_src:"hris"})));
     },()=>{});
+  },[]);
+
+  // ── LOAD CREW FROM THE PRODUCTION APP ────────────────────
+  // Production keeps its own payroll — its own staff, rates, deductions and
+  // payslip — and none of those people exist in HRIS. Reading only HRIS meant
+  // a production account was offered branch crew it has no business paying.
+  useEffect(()=>{
+    try{
+      if(!prodDB)return;
+      onValue(ref(prodDB,"chowtimeProduction/staff"),snap=>{
+        const data=snap.val()||{};
+        setProdEmps(Object.keys(data).map(k=>({
+          id:k, name:(data[k]||{}).name||"",
+          position:(data[k]||{}).position||"Production crew",
+          _src:"prod"
+        })).filter(e=>e.name));
+      },()=>{});
+    }catch(e){ console.warn("production roster:",e); }
   },[]);
 
   // ── COMPUTED FROM USER ────────────────────────────────────
@@ -13678,7 +13787,7 @@ function App(){
           chkSplit&&h("div",{style:{marginTop:8,background:"#F3E9F7",
             borderRadius:9,padding:"10px 11px"}},
             h("div",{style:{fontSize:12,fontWeight:800,color:C.primary,
-              letterSpacing:1,marginBottom:6}},"HINDI CASH NA BAHAGI"),
+              letterSpacing:1,marginBottom:6}},"NON-CASH PORTION"),
             chkSplitRows.map((r,ri)=>h("div",{key:ri,style:{display:"flex",
               gap:6,marginBottom:6,alignItems:"center"}},
               h("select",{value:r.method,
@@ -13706,7 +13815,7 @@ function App(){
               onClick:()=>setChkSplitRows(p=>p.concat([{method:"maya",amount:""}])),
               style:{padding:"5px 11px",borderRadius:7,fontSize:12,
                 fontWeight:700,cursor:"pointer",border:"1px dashed "+C.primary,
-                background:"#fff",color:C.primary}},"+ Isa pa"),
+                background:"#fff",color:C.primary}},"+ Add another"),
             (function(){
               const oth=splitOtherTotal();
               const due=Math.max(0,(Number(chkTotal)||0)-oth);
@@ -13717,13 +13826,13 @@ function App(){
                   h("span",{style:{color:C.muted}},"Total"),
                   h("b",null,"\u20B1"+peso(chkTotal))),
                 h("div",{style:{display:"flex",justifyContent:"space-between"}},
-                  h("span",{style:{color:C.muted}},"Hindi cash"),
+                  h("span",{style:{color:C.muted}},"Non-cash"),
                   h("b",null,"\u20B1"+peso(oth))),
                 h("div",{style:{display:"flex",justifyContent:"space-between",
                   marginTop:2}},
                   h("span",{style:{fontWeight:800,
                     color:over?C.danger:C.success}},
-                    over?"Sobra sa total":"Bayaran sa cash"),
+                    over?"Over the total":"Balance in cash"),
                   h("b",{style:{color:over?C.danger:C.success}},
                     over?("\u20B1"+peso(oth-(Number(chkTotal)||0)))
                         :("\u20B1"+peso(due)))));
@@ -13786,8 +13895,8 @@ function App(){
             background:chkDiscBase>0?"#E8F5E9":"#FFEBEE",
             color:chkDiscBase>0?C.success:C.danger,fontWeight:700}},
             chkDiscBase>0
-              ? ("Saklaw nito ang ₱"+peso(chkDiscBase)+" sa order na ito.")
-              : "Walang item sa cart na saklaw ng discount na ito — ₱0.00 ang bawas."),
+              ? ("Covers ₱"+peso(chkDiscBase)+" sa order na ito.")
+              : "No item in the cart is covered by this discount — ₱0.00 off."),
           discRate>0&&h("input",{value:chkDiscId,onChange:e=>setChkDiscId(e.target.value),
             placeholder:chkDisc.label+" ID",
             style:{width:"100%",padding:"8px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,outline:"none",boxSizing:"border-box",marginTop:5}}),
@@ -13936,13 +14045,13 @@ function App(){
             const cash=parseFloat(chkCash)||0;
             if(chkSplit){
               const oth=splitOtherTotal();
-              if(oth<=0){showT("Ilagay ang hindi-cash na bahagi","warn");return;}
+              if(oth<=0){showT("Enter the non-cash portion","warn");return;}
               if(oth>chkTotal+0.001){
-                showT("₱"+peso(oth-chkTotal)+" sobra sa total","err");return;
+                showT("₱"+peso(oth-chkTotal)+" over the total","err");return;
               }
               const due=chkTotal-oth;
               if(due>0.001&&cash<due-0.001){
-                showT("₱"+peso(due-cash)+" kulang sa cash","err");return;
+                showT("₱"+peso(due-cash)+" short in cash","err");return;
               }
             }else{
               // Only cash needs cash counted out. FoodPanda and GrabFood were
@@ -15700,7 +15809,7 @@ function App(){
                 reviewedBy:user.name,reviewedAt:serverTimestamp()});
               await notify(db,{to:x.branch,type:"warning",
                 title:"Payment proof rejected",
-                message:why.trim()||"Tingnan ang reference number",
+                message:why.trim()||"Check the reference number",
                 page:"dashboard",ref:x.ref||"",by:user.name});
               showT("Tinanggihan ang patunay","warn");
             }catch(e){
@@ -15916,7 +16025,7 @@ function App(){
                     gridTemplateColumns:"96px 1fr 90px 60px 90px 130px",gap:8,
                     padding:"9px 14px",background:"#fafafa",
                     borderBottom:"1px solid "+C.border}},
-                    ["DATE","BRANCH","NET","TXNS","CASH ON HAND",""].map(hh=>
+                    ["DATE","BRANCH","NET","TXNS","EXPECTED CASH",""].map(hh=>
                       h("div",{key:hh,style:{fontSize:11,fontWeight:700,
                         color:C.muted,letterSpacing:1}},hh))),
                   rows.slice(0,200).map(r=>h("div",{key:r.branch+"_"+r.date,
@@ -16027,7 +16136,7 @@ function App(){
                 h("div",{style:{color:"rgba(255,255,255,.75)",fontSize:11,marginTop:2}},dbReady?"✓ From Firebase ("+orders.length+" orders)":"Loading Firebase data...")
               ),
               h("div",{style:{textAlign:"right"}},
-                h("div",{style:{color:C.accent,fontSize:11}},"CASH ON HAND"),
+                h("div",{style:{color:C.accent,fontSize:11}},"EXPECTED CASH"),
                 h("div",{style:{color:"#111111",fontSize:24,fontWeight:900}},"₱"+peso(zd.totalCash))
               )
             ),
@@ -16044,7 +16153,7 @@ function App(){
                    // Sat between Gross and Net with a minus sign, reading as
                    // a subtraction. Voids are already out of Gross — this is a
                    // record of what was cancelled, not a deduction.
-                   ["Voids ("+(zd.voidCount||0)+") — bawas na sa Gross",
+                   ["Voids ("+(zd.voidCount||0)+") — already out of Gross",
                     "₱"+peso(zd.voidAmt||0),C.muted],
                    ["Net Sales","₱"+peso(zd.net),C.success],
                    ["Cash In","₱"+peso(zd.cashIn),C.info],
@@ -16068,10 +16177,10 @@ function App(){
                  ["Cash In","₱"+peso(zd.cashIn||0)],
                  ["Expenses","₱"+peso(zd.expenses||0)],
                  ["Remittance","₱"+peso(zd.remittance||0)],
-                 ["Ibang Cash Out","₱"+peso(zd.otherCashOut||0)],
-                 ["Dapat nasa drawer","₱"+peso(zd.cashOnHand||0)],
-                 ["Aktuwal na binilang",zd.countedCash!=null
-                   ?("₱"+peso(zd.countedCash)):"— walang cash count —"]
+                 ["Other Cash Out","₱"+peso(zd.otherCashOut||0)],
+                 ["Expected Cash","₱"+peso(zd.cashOnHand||0)],
+                 ["Counted Cash",zd.countedCash!=null
+                   ?("₱"+peso(zd.countedCash)):"— no cash count —"]
                 ].map(([l,v])=>h("div",{key:l,style:{display:"flex",
                   justifyContent:"space-between",padding:"5px 0",
                   borderBottom:"1px solid #f5f5f5"}},
@@ -16197,7 +16306,7 @@ function App(){
                 h("button",{
                   onClick:async()=>{
                     const days=dateRange(bfFrom,bfTo);
-                    if(!days.length){showT("Pick tamang range","warn");return;}
+                    if(!days.length){showT("Pick a valid range","warn");return;}
                     if(days.length>120){showT("Too long — 120 days maximum","warn");return;}
                     if(!confirm(days.length+" days × "+branches.length+" branch.\n"
                       +"Tatagal ng ilang sandali. Ituloy?"))return;
@@ -16431,7 +16540,7 @@ function App(){
                   "Ang katumbas nitong Cash Out ay susunod sa bagong halaga, kaya mananatiling tugma ang cash count."),
                 h("button",{onClick:async()=>{
                     const amt=parseFloat(editExp.amount)||0;
-                    if(!editExp.desc||amt<=0){showT("Kulang ang detalye","warn");return;}
+                    if(!editExp.desc||amt<=0){showT("Missing details","warn");return;}
                     try{
                       await updateDoc(doc(db,"expenses",editExp._docId),{
                         cat:editExp.cat,desc:editExp.desc,amount:amt,
@@ -16495,8 +16604,8 @@ function App(){
                 h("div",{style:{background:"#FFF8E1",border:"1px solid #FFE082",
                   borderRadius:8,padding:"8px 11px",fontSize:12,color:"#BF360C",
                   lineHeight:1.45}},
-                  h("b",null,"Ibabawas ito sa cash drawer."),
-                  " Bawat expense ay perang lumabas, kaya kusang binabawas ito sa Expected Total ng cash count at sa Z-Reading."),
+                  h("b",null,"This comes out of the cash drawer."),
+                  " Every expense is money that left, so it is taken off Expected Cash in the cash count and in the Z-Reading."),
                 h("button",{onClick:async()=>{
                   if(!newExp.desc||!newExp.amount){showT("Fill all fields","warn");return;}
                   const _amt=parseFloat(newExp.amount)||0;
@@ -16753,7 +16862,7 @@ function App(){
               !invView&&user.role==="owner"&&h("button",{
                 onClick:async()=>{
                   try{
-                    showT("Sinusuri ang lahat ng branch...","info");
+                    showT("Checking every branch...","info");
                     const mainSnap=await getDocs(collection(db,"inventory"));
                     const mainMap={};
                     mainSnap.docs.forEach(d=>{mainMap[d.id]=d.data();});
@@ -16858,7 +16967,7 @@ function App(){
                 noPrice>0&&h("div",{style:{fontSize:11,color:"#BF360C",
                   marginTop:4,fontWeight:700}},
                   noPrice+" item/s may stock pero walang "
-                    +(retail?"presyo":"cost")+" — hindi kasama")
+                    +(retail?"presyo":"cost")+" — not counted")
               );
             })()
           ),
@@ -18859,13 +18968,13 @@ function App(){
         // ══ CA REQUEST ══
         page==="ca_request"&&h(CALoanPage,{
           user,branchId,curBranch,db,hrisDB,showT,mode:"ca",
-          hrisEmps,key:"ca_"+user.id
+          hrisEmps:hrisEmps.concat(prodEmps),key:"ca_"+user.id
         }),
 
         // ══ LOAN REQUEST ══
         page==="loan_request"&&h(CALoanPage,{
           user,branchId,curBranch,db,hrisDB,showT,mode:"loan",
-          hrisEmps,key:"loan_"+user.id
+          hrisEmps:hrisEmps.concat(prodEmps),key:"loan_"+user.id
         }),
 
         // ══ HRIS DASHBOARD (Owner) ══
