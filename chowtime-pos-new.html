@@ -2622,6 +2622,10 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
   const [remit,setRemit]     = useState("");
   // true = the money was handed over BEFORE the drawer was counted
   const [remitBefore,setRemitBefore] = useState(false);
+  // Closing runs in an order for a reason: expenses first, then the count.
+  // Counting before the day's spending is keyed in produces a shortage that
+  // is nobody's fault and takes an hour to explain.
+  const [ackExpenses,setAckExpenses] = useState(false);
   const [countNote,setNote]  = useState("");
   const [history,setHistory] = useState([]);
   const [countLog,setCountLog] = useState([]);
@@ -3383,6 +3387,53 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
             style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:13,outline:"none",resize:"none",height:52,boxSizing:"border-box",fontFamily:"inherit"}})
         ),
 
+        // ── CLOSING CHECKLIST ──
+        (function(){
+          const hasCount=totalCash>0;
+          const offBy=Math.abs(variance)>=0.01;
+          const noteOk=!offBy||(countNote||"").trim().length>0;
+          const ready=ackExpenses&&hasCount&&noteOk;
+          const row=(ok,title,body,extra)=>h("div",{style:{display:"flex",
+            gap:10,alignItems:"flex-start",padding:"8px 0",
+            borderBottom:"1px solid #f5f5f5"}},
+            h("span",{style:{fontSize:15,flexShrink:0,width:20}},ok?"✅":"⬜"),
+            h("div",{style:{flex:1,minWidth:0}},
+              h("div",{style:{fontSize:13,fontWeight:800,
+                color:ok?C.success:C.text}},title),
+              h("div",{style:{fontSize:12,color:C.muted,marginTop:1,
+                lineHeight:1.45}},body),
+              extra||null));
+          return h("div",{style:{background:"#fff",borderRadius:12,
+            border:"2px solid "+(ready?C.success:C.warning),
+            padding:"13px 15px",marginBottom:10}},
+            h("b",{style:{fontSize:14}},"🌙 Pagsasara ng araw"),
+            h("div",{style:{marginTop:7}},
+              row(ackExpenses,"1. Nailagay na lahat ng gastos",
+                todayExpenses>0
+                  ? ("₱"+peso(todayExpenses)+" ang naitala ngayong araw.")
+                  : "Wala pang naitalang gastos ngayong araw.",
+                h("label",{style:{display:"flex",gap:8,alignItems:"center",
+                  marginTop:6,cursor:"pointer"}},
+                  h("input",{type:"checkbox",checked:ackExpenses,
+                    onChange:e=>setAckExpenses(e.target.checked),
+                    style:{width:16,height:16,cursor:"pointer"}}),
+                  h("span",{style:{fontSize:12,fontWeight:700}},
+                    "Kumpirmado — wala nang ipapasok na gastos"))),
+              row(hasCount,"2. Binilang ang pera",
+                hasCount ? ("₱"+peso(totalCash)+" ang nabilang.")
+                  : "Ilagay ang bilang ng bawat denominasyon sa kaliwa."),
+              row(noteOk,"3. Ipaliwanag ang pagkakaiba",
+                !offBy ? "Tugma ang bilang — walang kailangang ipaliwanag."
+                  : ((countNote||"").trim()
+                      ? "May paliwanag na."
+                      : ("₱"+peso(Math.abs(variance))+" ang "
+                         +(variance>0?"sobra":"kulang")
+                         +". Magsulat sa NOTES sa ibaba bago isara.")))),
+            !ready&&h("div",{style:{marginTop:8,fontSize:12,color:C.warning,
+              fontWeight:700}},
+              "Kumpletuhin ang tatlo bago isara ang araw."));
+        })(),
+
         // Action buttons — pinned, because a full count runs past the fold
         h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,
           position:"sticky",bottom:0,background:"#fff",padding:"9px 0",
@@ -3390,11 +3441,30 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
           h("button",{onClick:()=>{saveCashCount(false);},
             style:{padding:"11px",background:"#fff",border:"1px solid "+C.border,borderRadius:9,fontWeight:700,fontSize:13,cursor:"pointer"}},
             "💾 Save Count"),
-          h("button",{onClick:()=>{saveCashCount(true);printCount(true);},
-            style:{padding:"11px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:9,color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer"}},
-            "🏁 Close Store & Print")
+          (function(){
+            const offBy=Math.abs(variance)>=0.01;
+            const ready=ackExpenses&&totalCash>0
+              &&(!offBy||(countNote||"").trim().length>0);
+            return h("button",{disabled:!ready,
+              onClick:()=>{
+                if(!ready)return;
+                saveCashCount(true);
+                printCount(true);
+              },
+              style:{padding:"11px",
+                background:ready?`linear-gradient(135deg,${C.primary},${C.dark})`:"#C8C8C8",
+                border:"none",borderRadius:9,color:"#fff",fontWeight:700,
+                fontSize:14,cursor:ready?"pointer":"not-allowed"}},
+              "🏁 Close Store & Print");
+          })()
         ),
-        saved&&h("div",{style:{textAlign:"center",marginTop:8,fontSize:13,color:C.success,fontWeight:700}},"✅ Count saved to Firebase")
+        saved&&h("div",{style:{textAlign:"center",marginTop:8}},
+          h("div",{style:{fontSize:13,color:C.success,fontWeight:700}},
+            "✅ Count saved to Firebase"),
+          // The day is not finished until the reading is out too, and nothing
+          // used to say so.
+          h("div",{style:{fontSize:12,color:C.muted,marginTop:3}},
+            "Susunod: buksan ang Z-Reading at i-print ang End of Day."))
       )
     )
   );
@@ -15981,34 +16051,6 @@ function App(){
                     borderBottom:"1px solid #f5f5f5"}},
                     h("span",{style:{fontSize:13,color:C.muted}},l),
                     h("span",{style:{fontSize:14,fontWeight:800,color:C.text}},v)))
-                ),
-
-                // The drawer's own story, separate from sales: what came in,
-                // what was spent, what was handed over, what should be left.
-                h("div",{style:{marginTop:12,paddingTop:10,
-                  borderTop:"2px solid "+C.border}},
-                  h("b",{style:{fontSize:13}},"Cash Drawer"),
-                  [["Opening Fund","₱"+peso(zd.opening||0)],
-                   ["Cash Sales","₱"+peso(zd.cashSales||0)],
-                   ["Cash In","₱"+peso(zd.cashIn||0)],
-                   ["Expenses","₱"+peso(zd.expenses||0)],
-                   ["Remittance","₱"+peso(zd.remittance||0)],
-                   ["Ibang Cash Out","₱"+peso(zd.otherCashOut||0)],
-                   ["Dapat nasa drawer","₱"+peso(zd.cashOnHand||0)],
-                   ["Aktuwal na binilang",zd.countedCash!=null
-                     ?("₱"+peso(zd.countedCash)):"— walang cash count —"]
-                  ].map(([l,v])=>h("div",{key:l,style:{display:"flex",
-                    justifyContent:"space-between",padding:"5px 0",
-                    borderBottom:"1px solid #f5f5f5"}},
-                    h("span",{style:{fontSize:13,color:C.muted}},l),
-                    h("span",{style:{fontSize:14,fontWeight:800,color:C.text}},v))),
-                  zd.shortOver!=null&&h("div",{style:{display:"flex",
-                    justifyContent:"space-between",padding:"8px 0 0"}},
-                    h("span",{style:{fontSize:13,fontWeight:800}},"SHORT / OVER"),
-                    h("span",{style:{fontSize:15,fontWeight:900,
-                      color:Math.abs(zd.shortOver)<0.01?C.success
-                        :(zd.shortOver>0?C.info:C.danger)}},
-                      (zd.shortOver>=0?"+":"")+"₱"+peso(zd.shortOver)))
                 )
               )
             ),
