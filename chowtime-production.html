@@ -1596,9 +1596,6 @@ function renderPayslip(main){
       if(day && day.ca) caTotal += Number(day.ca[sid]||0);
     });
 
-    const totalDeduction = sss+phil+pagibig+deductionPayment+autoTotal+caTotal+cashfund;
-    const net = gross - totalDeduction;
-
     // Automatic schedule. Each debt with a perCutoff contributes its step for
     // this cutoff; a hand-logged payment in the same cutoff counts toward it
     // rather than on top of it.
@@ -1612,6 +1609,9 @@ function renderPayslip(main){
       if(autoByType[d.type]!=null) autoByType[d.type]+=extra;
     });
     const autoTotal = autoByType.loan+autoByType.fine+autoByType.ca;
+
+    const totalDeduction = sss+phil+pagibig+deductionPayment+autoTotal+caTotal+cashfund;
+    const net = gross - totalDeduction;
 
     const deductionRows = [
       {label:'Loan payment', pay:payByType.loan+autoByType.loan, bal:balByType.loan},
