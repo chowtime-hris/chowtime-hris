@@ -1037,7 +1037,13 @@ function printKOT(ord, branchName, companySettings, paperSize){
 function printZ(zd,branchName,cashier){
   const w=window.open("","_blank","width=400,height=600");
   if(!w)return;
-  const d=new Date().toLocaleDateString("en-PH",{year:"numeric",month:"long",day:"numeric"});
+  // Was the print date. A reprint of an older day therefore carried today's
+  // date above yesterday's figures — the one line on the page nobody would
+  // think to doubt.
+  const bizDate=(zd&&zd.date)||localDate();
+  const d=new Date(bizDate+"T00:00:00").toLocaleDateString("en-PH",
+    {year:"numeric",month:"long",day:"numeric"});
+  const printedAt=new Date().toLocaleString("en-PH");
   w.document.write(`<!DOCTYPE html><html><head><title>Z-Reading</title>
   <style>*{margin:0;padding:0;}body{font-family:'Courier New',monospace;font-size:11px;width:80mm;margin:0 auto;padding:8px;}
   .c{text-align:center;}.b{font-weight:bold;}.hr{border-top:1px dashed #000;margin:6px 0;}
@@ -1083,7 +1089,7 @@ function printZ(zd,branchName,cashier){
   <div class="row"><span>No. of SKUs:</span><span>${zd.skuCount!=null?zd.skuCount:"-"}</span></div>
   <div class="row"><span>Total Quantity:</span><span>${zd.qtySold||0}</span></div>
   <div class="hr"></div>
-  <div class="c">Generated: ${new Date().toLocaleString("en-PH")}<br>FINAL Z-READING FOR THE DAY</div>
+  <div class="c">Business date: ${bizDate}<br>Printed: ${printedAt}<br>FINAL Z-READING FOR THE DAY</div>
   </body></html>`);
   w.document.close();
   setTimeout(()=>w.print(),500);
@@ -1121,7 +1127,9 @@ function buildEscPosZ(zd,branchName,cashier,cs,paperSize,isZ){
   a([ESC,0x45,0x00]);
   if(cs.address)a(ln(cs.address));
   if(cs.tin)a(ln("TIN: "+cs.tin));
-  a(ln(new Date().toLocaleDateString("en-PH",{year:"numeric",month:"long",day:"numeric"})));
+  // The reported day, not the day the paper came out.
+  a(ln(new Date(((zd&&zd.date)||localDate())+"T00:00:00")
+    .toLocaleDateString("en-PH",{year:"numeric",month:"long",day:"numeric"})));
   a(ln("Cashier: "+cashier));
   a([ESC,0x61,0x00]);
   a(dash());
@@ -1138,6 +1146,10 @@ function buildEscPosZ(zd,branchName,cashier,cs,paperSize,isZ){
   // not be reconciled against the drawer it was printed for.
   a(row("Expenses","- P"+n(zd.expenses||0)));
   a(row("Remittance","- P"+n(zd.remittance||0)));
+  if(zd.remittanceCounted>0&&zd.remittanceLogged>0){
+    a(row("  from count","P"+n(zd.remittanceCounted)));
+    a(row("  logged out","P"+n(zd.remittanceLogged)));
+  }
   a(row("Other Cash Out","- P"+n(zd.otherCashOut||0)));
   a(dash());
   a([ESC,0x21,0x10]);
@@ -1202,7 +1214,8 @@ function buildEscPosZ(zd,branchName,cashier,cs,paperSize,isZ){
   a(dash());
 
   a([ESC,0x61,0x01]);
-  a(ln("Generated: "+new Date().toLocaleString("en-PH")));
+  a(ln("Business date: "+((zd&&zd.date)||localDate())));
+  a(ln("Printed: "+new Date().toLocaleString("en-PH")));
   a([ESC,0x45,0x01]);
   a(ln(isZ?"FINAL Z-READING FOR THE DAY":"X-READING (NOT FINAL)"));
   a([ESC,0x45,0x00]);
@@ -11931,6 +11944,7 @@ function App(){
   const [subs,setSubs]=useState([]);                     // subscriptions, all branches
   const [proofs,setProofs]=useState([]);                 // submitted payment proofs
   const [discounts,setDiscounts]=useState([]);           // Main-managed discounts
+  const [cashCounts,setCashCounts]=useState([]);         // saved drawer counts
   const [proofOpen,setProofOpen]=useState(false);        // proof modal
   const [openDisc,setOpenDisc]=useState({});             // expanded discrepancy reports
   const [editBr,setEditBr]=useState(null);               // branch being added/edited
@@ -12093,6 +12107,15 @@ function App(){
 
     // Subscriptions. Everyone loads the full set: it is eight small documents,
     // and the owner needs all of them to run the collections page.
+    // Saved cash counts. The Z-Reading has to compare against the drawer that
+    // was actually counted, and that only ever lived in cash_counts.
+    try{
+      unsubs.push(onSnapshot(query(collection(db,"cash_counts"),
+        where("branch","==",branchId),limit(120)),
+        snap=>setCashCounts(snap.docs.map(d=>({...d.data(),_docId:d.id}))),
+        ()=>{}));
+    }catch(e){}
+
     // Discounts are defined at Main and switched on per branch. Everyone
     // loads them: the POS needs the ones that apply to its own branch.
     try{
@@ -13162,18 +13185,37 @@ function App(){
     const remitOut=bc.filter(c=>c.type==="out"&&/remit/i.test(c.desc||""))
       .reduce((s,c)=>s+(c.amount||0),0);
     const cashSalesOnly=payTotal("cash");
+    // The drawer that was actually counted. Reading it here is what lets the
+    // live reading state SHORT / OVER instead of waiting for the day to close
+    // — and it carries the remittance field, which never touched the cash log.
+    const cn=(cashCounts||[]).find(x=>x.branch===bid&&x.date===d)||null;
+    const cnRemitField=cn
+      ?Number(cn.remittanceField!==undefined?cn.remittanceField:cn.remittance)||0
+      :0;
+    const cnRemitBefore=(cn&&cn.remittedBeforeCount)?cnRemitField:0;
     const skuTally={};
     live.forEach(o=>(o. items||[]).forEach(i=>{
       const k=i.name||i.id||"?"; skuTally[k]=(skuTally[k]||0)+(Number(i.qty)||0);
     }));
     return{gross,discounts,net,voidAmt,voidCount,opening,cashIn,cashOut,
-      expenses:expensesOut,remittance:remitOut,
+      expenses:expensesOut,
+      // Remittance lives in two places: logged as cash out during the day, or
+      // typed into the count at closing. The reading has to state both.
+      remittance:remitOut+cnRemitField,
+      remittanceLogged:remitOut,remittanceCounted:cnRemitField,
+      remittedBeforeCount:!!(cn&&cn.remittedBeforeCount),
       otherCashOut:Math.max(0,cashOut-remitOut),
       skuCount:Object.keys(skuTally).length,
       // opening + CASH sales + cashIn - cashOut. Using net counted GCash and
       // delivery money as if it were sitting in the drawer.
-      cashOnHand:opening+cashSalesOnly+cashIn-cashOut-expensesOut,
-      remainingFunds:opening+cashSalesOnly+cashIn-cashOut-expensesOut-remitOut,
+      cashOnHand:opening+cashSalesOnly+cashIn-cashOut-expensesOut-cnRemitBefore,
+      remainingFunds:opening+cashSalesOnly+cashIn-cashOut-expensesOut-remitOut-cnRemitBefore,
+      countedCash:cn?(Number(cn.totalCash)||0):null,
+      countedBy:cn?(cn.countedBy||""):"",
+      shortOver:cn
+        ?Math.round(((Number(cn.totalCash)||0)
+          -(opening+cashSalesOnly+cashIn-cashOut-expensesOut-cnRemitBefore))*100)/100
+        :null,
       cashSales:payTotal("cash"),gcash:payTotal("gcash"),
       maya:payTotal("maya"),bank:payTotal("bank"),
       foodpanda:payTotal("foodpanda"),grabfood:payTotal("grabfood"),
@@ -15875,7 +15917,8 @@ function App(){
                 h("div",{style:{color:"#111111",fontSize:24,fontWeight:900}},"₱"+peso(zd.totalCash))
               )
             ),
-            h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}},
+            h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,
+              marginBottom:10,alignItems:"start"}},
               h("div",{style:{background:"#fff",borderRadius:12,padding:"13px 15px",border:"1px solid "+C.border}},
                 h("b",{style:{fontSize:14}},"Sales Summary"),
                 h("div",{style:{marginTop:9}},
