@@ -3848,6 +3848,11 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
           id:"pos_"+req._docId,
           type:req.type==="Cash Advance"?"ca":"loan",
           amount:Number(req.amount)||0,
+          // Without this the debt lands in the ledger with no schedule, and
+          // Production deducts nothing: it shows on the payslip as a balance
+          // owed while the pay goes out untouched. cutoffDeduct is the whole
+          // amount for an advance, or the instalment for a loan.
+          perCutoff:Number(req.cutoffDeduct)||Number(req.amount)||0,
           date:req.date||localDate(),
           note:(req.reason||"")+" · POS request approved by "+user.name
         };
