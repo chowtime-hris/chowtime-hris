@@ -1304,13 +1304,57 @@ function renderMaterials(main){
 }
 
 /* ---------- LOANS & CASH FUND ---------- */
+// ── AUTOMATIC PER-CUTOFF DEDUCTION ───────────────────────
+// Each debt carries its own perCutoff amount, so a fine can be paid down at
+// ₱1,500 a cutoff while a cash advance runs at a different rate.
+//
+// Nothing is written to the ledger for it. The amount due by a given cutoff is
+// derived: cutoffs elapsed since the debt × perCutoff, capped at the debt.
+// A manually logged payment does not stack on top — whichever is further along
+// wins — so a cutoff that was already settled by hand is never charged twice.
+function cutoffsElapsed(fromISO, toKey){
+  if(!fromISO || !toKey) return 0;
+  const fk = cutoffKeyFor(fromISO);
+  const [fy,fm,fh] = fk.split('-');
+  const [ty,tm,th] = toKey.split('-');
+  const fi = Number(fy)*24 + Number(fm)*2 + (fh==='C1'?0:1);
+  const ti = Number(ty)*24 + Number(tm)*2 + (th==='C1'?0:1);
+  return Math.max(0, ti - fi + 1);   // the debt's own cutoff counts as the first
+}
+function debtDeemedPaidBy(debt, manualPaid, cutoffKey){
+  const amount = Number(debt.amount)||0;
+  const per = Number(debt.perCutoff)||0;
+  if(per<=0) return Math.min(amount, manualPaid);
+  const scheduled = per * cutoffsElapsed(debt.date, cutoffKey);
+  return Math.min(amount, Math.max(manualPaid, scheduled));
+}
+function prevCutoffKey(key){
+  const [y,m,half] = key.split('-');
+  if(half==='C2') return `${y}-${m}-C1`;
+  const pm = Number(m)-1;
+  return pm>=1 ? `${y}-${String(pm).padStart(2,'0')}-C2`
+               : `${Number(y)-1}-12-C2`;
+}
+// What this cutoff actually takes off the pay: the step between what was due
+// by the end of the previous cutoff and what is due by the end of this one.
+function debtDueThisCutoff(debt, manualPaid, cutoffKey){
+  const now  = debtDeemedPaidBy(debt, manualPaid, cutoffKey);
+  const before = debtDeemedPaidBy(debt, manualPaid, prevCutoffKey(cutoffKey));
+  return Math.max(0, Math.round((now-before)*100)/100);
+}
+
 function staffDebts(staffId){
   const entries = state.ledger[staffId] || [];
   const debts = entries.filter(e=>e.type==='loan'||e.type==='fine'||e.type==='ca');
   const typeLabels = {loan:'Loan', fine:'Fine / penalty', ca:'Cash advance'};
   return debts.map(d=>{
     const paid = entries.filter(e=>e.type==='payment' && e.debtId===d.id).reduce((a,e)=>a+Number(e.amount),0);
-    return {...d, typeLabel:typeLabels[d.type]||d.type, paid, balance: Number(d.amount)-paid};
+    // "paid" stays the hand-logged figure; deemedPaid also counts the
+    // automatic schedule up to today, which is what the balance owes against.
+    const deemed = debtDeemedPaidBy(d, paid, cutoffKeyFor(todayISO()));
+    return {...d, typeLabel:typeLabels[d.type]||d.type, paid,
+      deemedPaid: deemed,
+      balance: Math.max(0, Math.round((Number(d.amount)-deemed)*100)/100)};
   }).sort((a,b)=> a.date<b.date?1:-1);
 }
 function staffDebtBalancesByType(staffId){
@@ -1341,6 +1385,7 @@ function renderLoans(main){
       </select></div>
       <div><label>Amount (₱)</label><input id="lAmt" type="number" step="any" min="0"></div>
       <div><label>Date</label><input id="lDate" type="date" value="${todayISO()}"></div>
+      <div><label>Deduct per cutoff (₱)</label><input id="lPerCutoff" type="number" step="any" min="0" placeholder="0 = manual only"></div>
     </div>
     <div id="debtPickerWrap" style="margin-top:8px;display:${lType==='payment'?'block':'none'}">
       <label>Which debt is this payment for?</label>
@@ -1376,13 +1421,19 @@ function renderLoans(main){
     <div class="card">
       <h2>${s.name} — debts</h2>
       <div class="table-wrap"><table>
-        <thead><tr><th>Type</th><th>Date given</th><th>Original amount</th><th>Paid so far</th><th>Balance</th><th>Note</th><th></th></tr></thead>
+        <thead><tr><th>Type</th><th>Date given</th><th>Original amount</th><th>Per cutoff</th><th>Paid so far</th><th>Balance</th><th>Note</th><th></th></tr></thead>
         <tbody>
           ${debts.map(d=>`<tr>
             <td>${d.typeLabel}</td>
             <td>${d.date}</td>
             <td>₱${fmt(d.amount)}</td>
-            <td>₱${fmt(d.paid)}</td>
+            <td>${Number(d.perCutoff)>0
+              ? `<span class="pill good">₱${fmt(d.perCutoff)}</span>`
+              : '<span style="color:#8A8A8A">manual</span>'}</td>
+            <td>₱${fmt(d.deemedPaid!=null?d.deemedPaid:d.paid)}${
+              (d.deemedPaid!=null && d.deemedPaid>d.paid+0.004)
+                ? `<div style="font-size:10px;color:#8A8A8A">₱${fmt(d.paid)} logged + ₱${fmt(d.deemedPaid-d.paid)} auto</div>`
+                : ''}</td>
             <td>${d.balance>0.004?`<span class="pill bad">₱${fmt(d.balance)}</span>`:'<span class="pill good">paid off</span>'}</td>
             <td>${d.note||''}</td>
             <td><span class="tag-rm delLedger" data-key="${s.id}||${d.id}">✕</span></td>
@@ -1422,6 +1473,11 @@ function renderLoans(main){
     const amount = Number(document.getElementById('lAmt').value)||0;
     if(!staffId || amount<=0){ alert('Choose staff and enter a valid amount'); return; }
     const entry = {id:uid(), type, amount, date:document.getElementById('lDate').value, note:document.getElementById('lNote').value.trim()};
+    // 0 keeps the old behaviour for this debt: nothing comes off until a
+    // payment is logged by hand.
+    if(type!=='payment'){
+      entry.perCutoff = Number(document.getElementById('lPerCutoff').value)||0;
+    }
     if(type==='payment'){
       const debtId = document.getElementById('lDebtId').value;
       if(!debtId){ alert('Pick which debt this payment is for. If there are no open debts listed, this staff has nothing outstanding.'); return; }
@@ -1540,13 +1596,27 @@ function renderPayslip(main){
       if(day && day.ca) caTotal += Number(day.ca[sid]||0);
     });
 
-    const totalDeduction = sss+phil+pagibig+deductionPayment+caTotal+cashfund;
+    const totalDeduction = sss+phil+pagibig+deductionPayment+autoTotal+caTotal+cashfund;
     const net = gross - totalDeduction;
 
+    // Automatic schedule. Each debt with a perCutoff contributes its step for
+    // this cutoff; a hand-logged payment in the same cutoff counts toward it
+    // rather than on top of it.
+    const autoByType = {loan:0, fine:0, ca:0};
+    allDebts.forEach(d=>{
+      if(!(Number(d.perCutoff)>0)) return;
+      const manualHere = paymentsThisCutoff
+        .filter(p=>p.debtId===d.id).reduce((a,p)=>a+Number(p.amount),0);
+      const due = debtDueThisCutoff(d, Number(d.paid)||0, ck);
+      const extra = Math.max(0, due - manualHere);
+      if(autoByType[d.type]!=null) autoByType[d.type]+=extra;
+    });
+    const autoTotal = autoByType.loan+autoByType.fine+autoByType.ca;
+
     const deductionRows = [
-      {label:'Loan payment', pay:payByType.loan, bal:balByType.loan},
-      {label:'Fine / penalty payment', pay:payByType.fine, bal:balByType.fine},
-      {label:'Cash advance payment', pay:payByType.ca, bal:balByType.ca}
+      {label:'Loan payment', pay:payByType.loan+autoByType.loan, bal:balByType.loan},
+      {label:'Fine / penalty payment', pay:payByType.fine+autoByType.fine, bal:balByType.fine},
+      {label:'Cash advance payment', pay:payByType.ca+autoByType.ca, bal:balByType.ca}
     ].filter(r=>r.pay>0.004 || r.bal>0.004);
 
     document.getElementById('payslipOut').innerHTML = `
