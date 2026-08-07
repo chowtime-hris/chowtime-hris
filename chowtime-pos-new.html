@@ -2626,6 +2626,10 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
   // Counting before the day's spending is keyed in produces a shortage that
   // is nobody's fault and takes an hour to explain.
   const [ackExpenses,setAckExpenses] = useState(false);
+  // The page is a sequence now, not a wall. Closing has an order — expenses,
+  // then the count, then what leaves, then the check — and doing it out of
+  // order is what produced shortages nobody could explain.
+  const [ccStep,setCcStep] = useState(1);
   const [countNote,setNote]  = useState("");
   const [history,setHistory] = useState([]);
   const [countLog,setCountLog] = useState([]);
@@ -3087,7 +3091,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
         ),
 
         // Bills
-        h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden",marginBottom:10}},
+        ccStep===2&&h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden",marginBottom:10}},
           h("div",{style:{padding:"10px 14px",background:"#E3F2FD",borderBottom:"1px solid #BBDEFB",display:"flex",justifyContent:"space-between"}},
             h("b",{style:{fontSize:14,color:C.info}},"💵 Bills"),
             h("span",{style:{fontSize:14,fontWeight:800,color:C.info}},"₱"+peso(billsTotal))
@@ -3114,7 +3118,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
         ),
 
         // Coins
-        h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
+        ccStep===2&&h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
           h("div",{style:{padding:"10px 14px",background:"#F3E5F5",borderBottom:"1px solid #CE93D8",display:"flex",justifyContent:"space-between"}},
             h("b",{style:{fontSize:14,color:"#6A1B9A"}},"🪙 Coins"),
             h("span",{style:{fontSize:14,fontWeight:800,color:"#6A1B9A"}},"₱"+peso(coinsTotal))
@@ -3143,6 +3147,19 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
 
       // RIGHT: Summary + Remittance
       h("div",null,
+        // Step bar. Finished steps stay tappable — going back to fix a count
+        // is normal; being unable to is what makes people invent a number.
+        h("div",{style:{display:"flex",gap:4,marginBottom:10}},
+          [[1,"Gastos"],[2,"Bilang"],[3,"Remit"],[4,"Isara"]].map(([n,l])=>{
+            const done=ccStep>n, now=ccStep===n;
+            return h("button",{key:n,onClick:()=>setCcStep(n),
+              style:{flex:1,padding:"7px 4px",borderRadius:8,cursor:"pointer",
+                fontSize:12,fontWeight:now?800:600,
+                border:"2px solid "+(now?C.primary:(done?C.success:C.border)),
+                background:now?"#F3E9F7":(done?"#E8F5E9":"#fff"),
+                color:now?C.primary:(done?C.success:C.muted)}},
+              (done?"✓ ":n+". ")+l);
+          })),
         // Total summary card
         h("div",{style:{background:`linear-gradient(135deg,${C.primary},${C.dark})`,borderRadius:13,padding:"16px 18px",marginBottom:10}},
           h("div",{style:{color:C.accent,fontSize:12,fontWeight:700,letterSpacing:2}},"CASH COUNT TOTAL"),
@@ -3160,7 +3177,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
         ),
 
         // Record cash in / out
-        h("div",{style:{background:"#fff",border:"1px solid "+C.border,borderRadius:12,
+        ccStep===2&&h("div",{style:{background:"#fff",border:"1px solid "+C.border,borderRadius:12,
           padding:"12px 14px",marginBottom:10}},
           h("div",{style:{fontSize:12,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:8}},
             "\uD83D\uDCB0 CASH IN"),
@@ -3219,7 +3236,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
         ),
 
         // Variance vs expected
-        h("div",{style:{background:Math.abs(variance)<0.01?"#E8F5E9":variance>0?"#E3F2FD":"#FFEBEE",borderRadius:12,padding:"12px 14px",marginBottom:10,border:"1px solid "+(Math.abs(variance)<0.01?"#A5D6A7":variance>0?"#90CAF9":"#FFCDD2")}},
+        ccStep===4&&h("div",{style:{background:Math.abs(variance)<0.01?"#E8F5E9":variance>0?"#E3F2FD":"#FFEBEE",borderRadius:12,padding:"12px 14px",marginBottom:10,border:"1px solid "+(Math.abs(variance)<0.01?"#A5D6A7":variance>0?"#90CAF9":"#FFCDD2")}},
           h("div",{style:{fontSize:12,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:6}},"VARIANCE CHECK"),
           h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:3}},
             h("span",{style:{fontSize:13,color:C.muted}},"Opening Fund"),
@@ -3335,7 +3352,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
         ),
 
         // Remittance section
-        h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,padding:"13px 15px",marginBottom:10}},
+        ccStep===3&&h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,padding:"13px 15px",marginBottom:10}},
           h("b",{style:{fontSize:14}},"🏦 Closing — Remittance"),
           h("div",{style:{fontSize:13,color:C.muted,marginTop:2,marginBottom:10}},"Enter amount to be remitted/deposited. The rest stays in the cash box as tomorrow's opening fund."),
           h("div",{style:{marginBottom:8}},
@@ -3380,84 +3397,91 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
         ),
 
         // Notes
-        h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,padding:"13px 15px",marginBottom:10}},
+        ccStep===4&&h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,padding:"13px 15px",marginBottom:10}},
           h("div",{style:{fontSize:12,fontWeight:700,color:C.muted,marginBottom:5,letterSpacing:1}},"NOTES (optional)"),
           h("textarea",{value:countNote,onChange:e=>setNote(e.target.value),
             placeholder:"e.g. Short ₱50 — customer returned wrong change",
             style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:13,outline:"none",resize:"none",height:52,boxSizing:"border-box",fontFamily:"inherit"}})
         ),
 
-        // ── CLOSING CHECKLIST ──
-        (function(){
-          const hasCount=totalCash>0;
-          const offBy=Math.abs(variance)>=0.01;
-          const noteOk=!offBy||(countNote||"").trim().length>0;
-          const ready=ackExpenses&&hasCount&&noteOk;
-          const row=(ok,title,body,extra)=>h("div",{style:{display:"flex",
-            gap:10,alignItems:"flex-start",padding:"8px 0",
-            borderBottom:"1px solid #f5f5f5"}},
-            h("span",{style:{fontSize:15,flexShrink:0,width:20}},ok?"✅":"⬜"),
-            h("div",{style:{flex:1,minWidth:0}},
-              h("div",{style:{fontSize:13,fontWeight:800,
-                color:ok?C.success:C.text}},title),
-              h("div",{style:{fontSize:12,color:C.muted,marginTop:1,
-                lineHeight:1.45}},body),
-              extra||null));
-          return h("div",{style:{background:"#fff",borderRadius:12,
-            border:"2px solid "+(ready?C.success:C.warning),
-            padding:"13px 15px",marginBottom:10}},
-            h("b",{style:{fontSize:14}},"🌙 Pagsasara ng araw"),
-            h("div",{style:{marginTop:7}},
-              row(ackExpenses,"1. Nailagay na lahat ng gastos",
-                todayExpenses>0
-                  ? ("₱"+peso(todayExpenses)+" ang naitala ngayong araw.")
-                  : "Wala pang naitalang gastos ngayong araw.",
-                h("label",{style:{display:"flex",gap:8,alignItems:"center",
-                  marginTop:6,cursor:"pointer"}},
-                  h("input",{type:"checkbox",checked:ackExpenses,
-                    onChange:e=>setAckExpenses(e.target.checked),
-                    style:{width:16,height:16,cursor:"pointer"}}),
-                  h("span",{style:{fontSize:12,fontWeight:700}},
-                    "Kumpirmado — wala nang ipapasok na gastos"))),
-              row(hasCount,"2. Binilang ang pera",
-                hasCount ? ("₱"+peso(totalCash)+" ang nabilang.")
-                  : "Ilagay ang bilang ng bawat denominasyon sa kaliwa."),
-              row(noteOk,"3. Ipaliwanag ang pagkakaiba",
-                !offBy ? "Tugma ang bilang — walang kailangang ipaliwanag."
-                  : ((countNote||"").trim()
-                      ? "May paliwanag na."
-                      : ("₱"+peso(Math.abs(variance))+" ang "
-                         +(variance>0?"sobra":"kulang")
-                         +". Magsulat sa NOTES sa ibaba bago isara.")))),
-            !ready&&h("div",{style:{marginTop:8,fontSize:12,color:C.warning,
-              fontWeight:700}},
-              "Kumpletuhin ang tatlo bago isara ang araw."));
-        })(),
+        // ── STEP 1: EXPENSES ──
+        ccStep===1&&h("div",{style:{background:"#fff",borderRadius:12,
+          border:"1px solid "+C.border,padding:"14px 16px",marginBottom:10}},
+          h("b",{style:{fontSize:15}},"1. Gastos ng araw"),
+          h("div",{style:{fontSize:13,color:C.muted,marginTop:3,lineHeight:1.5}},
+            "Ipasok muna ang lahat ng gastos bago magbilang. Ang gastos na naipasok pagkatapos ng bilang ay lalabas na parang kulang ang pera."),
+          h("div",{style:{background:todayExpenses>0?"#FFF8E1":"#F5F5F5",
+            border:"1px solid "+(todayExpenses>0?"#FFE082":C.border),
+            borderRadius:9,padding:"11px 13px",marginTop:10}},
+            h("div",{style:{fontSize:22,fontWeight:900,
+              color:todayExpenses>0?"#BF360C":C.muted}},
+              "₱"+peso(todayExpenses)),
+            h("div",{style:{fontSize:12,color:C.muted,marginTop:2}},
+              todayExpenses>0
+                ? "ang naitalang gastos ngayong araw"
+                : "wala pang naitalang gastos ngayong araw")),
+          h("label",{style:{display:"flex",gap:9,alignItems:"flex-start",
+            marginTop:11,cursor:"pointer"}},
+            h("input",{type:"checkbox",checked:ackExpenses,
+              onChange:e=>setAckExpenses(e.target.checked),
+              style:{marginTop:2,width:17,height:17,cursor:"pointer"}}),
+            h("div",{style:{fontSize:13,fontWeight:700}},
+              "Kumpirmado \u2014 wala nang ipapasok na gastos")),
+          h("div",{style:{fontSize:12,color:C.muted,marginTop:7}},
+            "Kung may naiwan pa, buksan muna ang Expenses sa sidebar at bumalik dito.")),
 
-        // Action buttons — pinned, because a full count runs past the fold
+        // Step navigation — pinned, so the way forward is always in reach
         h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,
           position:"sticky",bottom:0,background:"#fff",padding:"9px 0",
           borderTop:"1px solid "+C.border,zIndex:4}},
-          h("button",{onClick:()=>{saveCashCount(false);},
-            style:{padding:"11px",background:"#fff",border:"1px solid "+C.border,borderRadius:9,fontWeight:700,fontSize:13,cursor:"pointer"}},
-            "💾 Save Count"),
+          h("button",{onClick:()=>{
+              if(ccStep>1)setCcStep(ccStep-1);
+            },disabled:ccStep===1,
+            style:{padding:"11px",background:"#fff",
+              border:"1px solid "+C.border,borderRadius:9,fontWeight:700,
+              fontSize:13,color:ccStep===1?C.muted:C.text,
+              cursor:ccStep===1?"not-allowed":"pointer"}},
+            ccStep===1?"—":"← Bumalik"),
           (function(){
+            if(ccStep===1)
+              return h("button",{onClick:()=>setCcStep(2),disabled:!ackExpenses,
+                style:{padding:"11px",borderRadius:9,border:"none",color:"#fff",
+                  fontWeight:800,fontSize:14,
+                  background:ackExpenses?C.primary:"#C8C8C8",
+                  cursor:ackExpenses?"pointer":"not-allowed"}},
+                "Susunod → Bilangin");
+            if(ccStep===2)
+              return h("button",{onClick:()=>setCcStep(3),disabled:!(totalCash>0),
+                style:{padding:"11px",borderRadius:9,border:"none",color:"#fff",
+                  fontWeight:800,fontSize:14,
+                  background:totalCash>0?C.primary:"#C8C8C8",
+                  cursor:totalCash>0?"pointer":"not-allowed"}},
+                "Susunod → Remittance");
+            if(ccStep===3)
+              return h("button",{onClick:()=>setCcStep(4),
+                style:{padding:"11px",borderRadius:9,border:"none",color:"#fff",
+                  fontWeight:800,fontSize:14,background:C.primary,
+                  cursor:"pointer"}},"Susunod → Suriin");
             const offBy=Math.abs(variance)>=0.01;
-            const ready=ackExpenses&&totalCash>0
-              &&(!offBy||(countNote||"").trim().length>0);
+            const ready=!offBy||(countNote||"").trim().length>0;
             return h("button",{disabled:!ready,
-              onClick:()=>{
-                if(!ready)return;
-                saveCashCount(true);
-                printCount(true);
-              },
-              style:{padding:"11px",
+              onClick:()=>{ if(!ready)return; saveCashCount(true); printCount(true); },
+              style:{padding:"11px",borderRadius:9,border:"none",color:"#fff",
+                fontWeight:800,fontSize:14,
                 background:ready?`linear-gradient(135deg,${C.primary},${C.dark})`:"#C8C8C8",
-                border:"none",borderRadius:9,color:"#fff",fontWeight:700,
-                fontSize:14,cursor:ready?"pointer":"not-allowed"}},
-              "🏁 Close Store & Print");
+                cursor:ready?"pointer":"not-allowed"}},
+              "🏁 Isara at i-print");
           })()
         ),
+        ccStep===4&&Math.abs(variance)>=0.01&&!(countNote||"").trim()&&
+          h("div",{style:{fontSize:12,color:C.danger,fontWeight:700,
+            textAlign:"center",marginTop:6}},
+            "₱"+peso(Math.abs(variance))+" ang "+(variance>0?"sobra":"kulang")
+            +" — magsulat sa NOTES bago isara."),
+        ccStep<4&&h("button",{onClick:()=>{saveCashCount(false);},
+          style:{width:"100%",marginTop:7,padding:"9px",background:"#fff",
+            border:"1px solid "+C.border,borderRadius:9,fontWeight:700,
+            fontSize:13,cursor:"pointer"}},"💾 I-save muna (hindi pa sarado)"),
         saved&&h("div",{style:{textAlign:"center",marginTop:8}},
           h("div",{style:{fontSize:13,color:C.success,fontWeight:700}},
             "✅ Count saved to Firebase"),
@@ -15989,6 +16013,8 @@ function App(){
             ),
             h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,
               marginBottom:10,alignItems:"start"}},
+              // Left column is a stack: Sales Summary with the drawer beneath.
+              h("div",{style:{display:"grid",gap:10}},
               h("div",{style:{background:"#fff",borderRadius:12,padding:"13px 15px",border:"1px solid "+C.border}},
                 h("b",{style:{fontSize:14}},"Sales Summary"),
                 h("div",{style:{marginTop:9}},
@@ -16009,6 +16035,36 @@ function App(){
                     h("span",{style:{fontSize:13,fontWeight:800,color:col}},v)
                   ))
                 )
+              ),
+              // Sits under Sales Summary rather than at the foot of the
+              // right column: that column runs long, and the drawer figures
+              // were ending up below the fold on the very screen the cashier
+              // needs at closing.
+              h("div",{style:{background:"#fff",borderRadius:12,
+                padding:"13px 15px",border:"1px solid "+C.border}},
+                h("b",{style:{fontSize:13}},"Cash Drawer"),
+                [["Opening Fund","₱"+peso(zd.opening||0)],
+                 ["Cash Sales","₱"+peso(zd.cashSales||0)],
+                 ["Cash In","₱"+peso(zd.cashIn||0)],
+                 ["Expenses","₱"+peso(zd.expenses||0)],
+                 ["Remittance","₱"+peso(zd.remittance||0)],
+                 ["Ibang Cash Out","₱"+peso(zd.otherCashOut||0)],
+                 ["Dapat nasa drawer","₱"+peso(zd.cashOnHand||0)],
+                 ["Aktuwal na binilang",zd.countedCash!=null
+                   ?("₱"+peso(zd.countedCash)):"— walang cash count —"]
+                ].map(([l,v])=>h("div",{key:l,style:{display:"flex",
+                  justifyContent:"space-between",padding:"5px 0",
+                  borderBottom:"1px solid #f5f5f5"}},
+                  h("span",{style:{fontSize:13,color:C.muted}},l),
+                  h("span",{style:{fontSize:14,fontWeight:800,color:C.text}},v))),
+                zd.shortOver!=null&&h("div",{style:{display:"flex",
+                  justifyContent:"space-between",padding:"8px 0 0"}},
+                  h("span",{style:{fontSize:13,fontWeight:800}},"SHORT / OVER"),
+                  h("span",{style:{fontSize:15,fontWeight:900,
+                    color:Math.abs(zd.shortOver)<0.01?C.success
+                      :(zd.shortOver>0?C.info:C.danger)}},
+                    (zd.shortOver>=0?"+":"")+"₱"+peso(zd.shortOver)))
+              )
               ),
               h("div",{style:{background:"#fff",borderRadius:12,padding:"13px 15px",border:"1px solid "+C.border}},
                 h("b",{style:{fontSize:14}},"Transaction Summary"),
