@@ -3525,7 +3525,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
 }
 
 // ─── HRIS: CA / LOAN REQUEST PAGE ────────────────────────
-function CALoanPage({user,branchId,curBranch,db,hrisDB,showT,mode,hrisEmps=[]}){
+function CALoanPage({user,branchId,curBranch,db,hrisDB,showT,mode,hrisEmps=[],prodStatus=""}){
   const isCA = mode === "ca";
   const [amount, setAmount]     = useState("");
   const [reason, setReason]     = useState("");
@@ -3678,6 +3678,9 @@ function CALoanPage({user,branchId,curBranch,db,hrisDB,showT,mode,hrisEmps=[]}){
                       .map(e=>h("option",{key:src+"_"+e.id,value:e.id},
                         e.name+(e.pos?" · "+e.pos:(e.position?" · "+e.position:"")))));
                 })),
+            h("div",{style:{fontSize:11,marginTop:4,
+              color:/connected · [1-9]/.test(prodStatus)?C.success:C.danger}},
+              "Production payroll: "+(prodStatus||"—")),
             !empId&&h("div",{style:{fontSize:11,color:C.warning,marginTop:4,
               lineHeight:1.5}},
               hrisEmps.length
@@ -12110,6 +12113,9 @@ function App(){
   const [staff,setStaff]=useState([]);
   const [hrisEmps,setHrisEmps]=useState([]); // employees from HRIS RTDB
   const [prodEmps,setProdEmps]=useState([]); // crew from the Production app
+  // Surfaced on the request page: whether Production answered, and with how
+  // many. An empty dropdown says nothing about why it is empty.
+  const [prodStatus,setProdStatus]=useState("connecting...");
   const [menuItems,setMenuItems]=useState(MENU_CATALOG);
   // POS
   const [cart,setCart]=useState([]);
@@ -12715,17 +12721,23 @@ function App(){
   // a production account was offered branch crew it has no business paying.
   useEffect(()=>{
     try{
-      if(!prodDB){ console.warn("production roster: no DB"); return; }
+      if(!prodDB){ setProdStatus("no connection to Production"); return; }
       onValue(ref(prodDB,"chowtimeProduction/staff"),snap=>{
-        console.log("production roster:",Object.keys(snap.val()||{}).length,"crew");
         const data=snap.val()||{};
+        setProdStatus("connected · "+Object.keys(data).length+" crew");
         setProdEmps(Object.keys(data).map(k=>({
           id:k, name:(data[k]||{}).name||"",
           position:(data[k]||{}).position||"Production crew",
           _src:"prod"
         })).filter(e=>e.name));
-      },()=>{});
-    }catch(e){ console.warn("production roster:",e); }
+      },(err)=>{
+        setProdStatus("read blocked \u2014 "
+          +String((err&&err.message)||err).slice(0,70));
+      });
+    }catch(e){
+      setProdStatus("connect failed \u2014 "
+        +String((e&&e.message)||e).slice(0,70));
+    }
   },[]);
 
   // ── COMPUTED FROM USER ────────────────────────────────────
@@ -18976,13 +18988,13 @@ function App(){
         // ══ CA REQUEST ══
         page==="ca_request"&&h(CALoanPage,{
           user,branchId,curBranch,db,hrisDB,showT,mode:"ca",
-          hrisEmps:hrisEmps.concat(prodEmps),key:"ca_"+user.id
+          hrisEmps:hrisEmps.concat(prodEmps),prodStatus,key:"ca_"+user.id
         }),
 
         // ══ LOAN REQUEST ══
         page==="loan_request"&&h(CALoanPage,{
           user,branchId,curBranch,db,hrisDB,showT,mode:"loan",
-          hrisEmps:hrisEmps.concat(prodEmps),key:"loan_"+user.id
+          hrisEmps:hrisEmps.concat(prodEmps),prodStatus,key:"loan_"+user.id
         }),
 
         // ══ HRIS DASHBOARD (Owner) ══
