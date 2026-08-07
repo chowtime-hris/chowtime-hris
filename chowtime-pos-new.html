@@ -7780,10 +7780,30 @@ async function attachCountedCash(db,branch,date,roll){
     const cs=await getDoc(doc(db,"cash_counts",branch+"_"+date));
     if(!cs.exists())return;
     const d=cs.data();
+
+    // Remittance lives in two places. Logged as a cash out during the day it
+    // is already in remitOut; typed into the closing count it is only ever in
+    // this document. The saved reading read the first and never the second,
+    // so a day closed with a ₱7,000 hand-over reported ₱0 remitted — and
+    // carried that same ₱7,000 as a shortage.
+    const rField=Number(d.remittanceField!==undefined
+      ?d.remittanceField:d.remittance)||0;
+    const rBefore=d.remittedBeforeCount?rField:0;
+
+    roll.remittanceCounted=rField;
+    roll.remittanceLogged=Number(roll.remittance)||0;
+    roll.remittance=(Number(roll.remittance)||0)+rField;
+    roll.remittedBeforeCount=!!d.remittedBeforeCount;
+
+    // Money handed over before counting was never in the drawer to begin with.
+    roll.cashOnHand=Math.round(((Number(roll.cashOnHand)||0)-rBefore)*100)/100;
+    roll.remainingFunds=Math.round(((Number(roll.remainingFunds)||0)-rBefore)*100)/100;
+
     roll.countedCash=Number(d.totalCash)||0;
-    roll.shortOver=(Number(d.totalCash)||0)-(Number(roll.cashOnHand)||0);
+    roll.shortOver=Math.round(((Number(d.totalCash)||0)
+      -(Number(roll.cashOnHand)||0))*100)/100;
     roll.countedBy=d.countedBy||"";
-  }catch(e){}
+  }catch(e){ console.warn("attachCountedCash",branch,date,e); }
 }
 
 async function rollupDay(db,branch,date,vatMode,byName){
