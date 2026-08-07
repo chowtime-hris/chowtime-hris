@@ -179,10 +179,17 @@ try {
 // Production runs a separate payroll — its own staff, rates and payslip — in
 // its own database. A production crew's advance has to land in that ledger,
 // because the HRIS one is never read by the payslip they are paid from.
+// Copied from the Production app's own BUILTIN_FIREBASE_CONFIG. An apiKey
+// borrowed from a different project is the kind of thing that fails quietly:
+// the app initialises, the listener attaches, and no data ever arrives.
 const prodConfig = {
-  apiKey:      "AIzaSyB8PlWl-qfmAn2GDdrJ1Y5pZQs4RAjhTo4",
-  projectId:   "chowtime-production",
-  databaseURL: "https://chowtime-production-default-rtdb.asia-southeast1.firebasedatabase.app",
+  apiKey:            "AIzaSyAsWieHXURlP3k8AfZ4Wsb8Sp_1fathXvk",
+  authDomain:        "chowtime-production.firebaseapp.com",
+  databaseURL:       "https://chowtime-production-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId:         "chowtime-production",
+  storageBucket:     "chowtime-production.firebasestorage.app",
+  messagingSenderId: "418692832705",
+  appId:             "1:418692832705:web:d38d297de3282191ebe340"
 };
 let prodDB = null;
 try {
@@ -12708,8 +12715,9 @@ function App(){
   // a production account was offered branch crew it has no business paying.
   useEffect(()=>{
     try{
-      if(!prodDB)return;
+      if(!prodDB){ console.warn("production roster: no DB"); return; }
       onValue(ref(prodDB,"chowtimeProduction/staff"),snap=>{
+        console.log("production roster:",Object.keys(snap.val()||{}).length,"crew");
         const data=snap.val()||{};
         setProdEmps(Object.keys(data).map(k=>({
           id:k, name:(data[k]||{}).name||"",
