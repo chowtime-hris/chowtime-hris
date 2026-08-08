@@ -104,7 +104,7 @@ window.addEventListener("unhandledrejection", function(e) {
 <script type="module">
 // React loaded as UMD global
 const React = window.React;
-const { createElement: h, useState, useEffect, useRef, useCallback } = window.React;
+const { createElement: h, useState, useEffect, useRef, useCallback, useMemo } = window.React;
 const { createRoot } = window.ReactDOM;
 import { initializeApp } from "firebase/app";
 import {
@@ -8746,6 +8746,17 @@ function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inve
     return true;
   };
 
+  // Same as the other period screens: make sure the older days are loaded
+  // before anything is totalled, or the chart shows a partial month.
+  useEffect(()=>{
+    if(!window.__ctEnsureOrders)return;
+    const from = period==="today" ? today
+      : period==="week"  ? getWeekStart()
+      : period==="month" ? getMonthStart()
+      : (dateFrom||today);
+    window.__ctEnsureOrders(from, period==="custom"?(dateTo||today):today);
+  },[period,dateFrom,dateTo]);
+
   const filtOrders = orders.filter(o=>{
     if(o.status==="voided"||o.status==="void"||o.status==="cancelled")return false;
     if(o.branch!==branchId)return false;
@@ -12084,7 +12095,22 @@ function App(){
   // Nav
   const [page,setPage]=useState(null);
   // Firebase data (real-time)
-  const [orders,setOrders]=useState([]);
+  // Orders were fetched as "any 300" (owner) or "any 100" (branch) with no
+  // orderBy — an arbitrary slice, not the newest. Two screens reading two
+  // different arbitrary slices reported two different sales figures for the
+  // same day, in opposite directions. Now the window is a date range, so the
+  // set is complete for the period being asked about.
+  const [ordersLive,setOrdersLive]=useState([]);   // rolling recent window
+  const [ordersExtra,setOrdersExtra]=useState([]); // older days, fetched on demand
+  const orders=useMemo(()=>{
+    if(!ordersExtra.length)return ordersLive;
+    const seen={},out=[];
+    ordersLive.concat(ordersExtra).forEach(o=>{
+      const k=o._docId||o.id; if(!k||seen[k])return; seen[k]=1; out.push(o);
+    });
+    return out;
+  },[ordersLive,ordersExtra]);
+  const [ordersWindowFrom,setOrdersWindowFrom]=useState("");
   const [expenses,setExpenses]=useState([]);
   const [cashLog,setCashLog]=useState([]);
   const [advances,setAdvances]=useState([]);
@@ -12259,7 +12285,7 @@ function App(){
 
   const handleSignOut=async()=>{
     await signOut(auth);
-    setCart([]);setPage(null);setOrders([]);
+    setCart([]);setPage(null);setOrdersLive([]);setOrdersExtra([]);
     setExpenses([]);setCashLog([]);setAdvances([]);
     setLoginEmail("");setLoginPw("");setLoginErr("");
   };
@@ -12283,19 +12309,62 @@ function App(){
 
     // Orders
     try{
-      // Owner gets ALL orders (no where filter = no index needed)
-      // Branch staff gets filtered by branch
+      // A rolling window by DATE, not a blind slice. 14 days covers Today,
+      // Yesterday, This week and Last 7 days completely; anything longer is
+      // fetched on demand below.
+      //
+      // Owner: one range filter on a single field — no composite index.
+      // Branch: branch equality PLUS the date range, which Firestore needs a
+      // composite index for. If it is missing the query errors, so we fall
+      // back to the old shape rather than leaving the screen blank.
+      const _wf=new Date(); _wf.setDate(_wf.getDate()-14);
+      const winFrom=localDate(_wf);
+      setOrdersWindowFrom(winFrom);
       const oq=isOwner
-        ?query(collection(db,"orders"),limit(300))
-        :query(collection(db,"orders"),where("branch","==",bId),limit(100));
+        ?query(collection(db,"orders"),where("date",">=",winFrom))
+        :query(collection(db,"orders"),where("branch","==",bId),
+           where("date",">=",winFrom));
       unsubs.push(onSnapshot(oq,snap=>{
         const all=snap.docs.map(d=>({...d.data(),_docId:d.id}));
         // Sort client-side to avoid needing composite index
         all.sort((a,b)=>(b.timestamp?.seconds||0)-(a.timestamp?.seconds||0));
-        setOrders(all);
+        setOrdersLive(all);
         setDbReady(true);
-      },err=>{console.warn("Orders:",err.message);setDbReady(true);}));
+      },err=>{
+        console.warn("Orders:",err.message);
+        setDbReady(true);
+        // Almost always the missing composite index (branch + date). The
+        // console error carries a one-click link to create it. Until then,
+        // fall back so the POS still works — with the old, incomplete window.
+        if(/index/i.test(err.message||"")){
+          showT("Orders index missing — figures may be incomplete. "
+            +"Open the console link to create it.","warn");
+          try{
+            unsubs.push(onSnapshot(
+              query(collection(db,"orders"),where("branch","==",bId),limit(500)),
+              s2=>setOrdersLive(s2.docs.map(d=>({...d.data(),_docId:d.id}))),
+              ()=>{}));
+          }catch(e2){}
+        }
+      }));
     }catch(e){console.warn("Orders query:",e);}
+
+    // Anything older than the live window is fetched once, on demand, when a
+    // screen asks for a longer period. Kept separate so the live set stays
+    // small and the merged view stays complete.
+    window.__ctEnsureOrders=async(from,to)=>{
+      try{
+        if(!from||!ordersWindowFrom||from>=ordersWindowFrom)return;
+        const snap=await getDocs(query(collection(db,"orders"),
+          where("date",">=",from),where("date","<=",to||ordersWindowFrom)));
+        const rows=snap.docs.map(d=>({...d.data(),_docId:d.id}))
+          .filter(o=>isOwner||o.branch===bId);
+        setOrdersExtra(prev=>{
+          const seen={};prev.forEach(o=>{seen[o._docId]=1;});
+          return prev.concat(rows.filter(o=>!seen[o._docId]));
+        });
+      }catch(e){ console.warn("older orders:",e); }
+    };
 
     // Stock movements carrying a FIFO cost — the cost-of-goods side of the
     // branch P&L. Only deducts matter, and only recent ones: the page works a
@@ -14782,6 +14851,8 @@ function App(){
         // ══ DASHBOARD (Owner) ══
         page==="dashboard"&&(function(){
           const R=rangeFor(dashRange,dashFrom,dashTo);
+          // Pull in any days older than the live window before reading totals.
+          if(window.__ctEnsureOrders)window.__ctEnsureOrders(R.from,R.to);
           const scoped=orders.filter(o=>inRange(o,R))
             .filter(o=>!dashBranch||o.branch===dashBranch);
           const sales=scoped.reduce((a,o)=>a+(o.total||0),0);
@@ -14912,8 +14983,10 @@ function App(){
               h("div",{style:{padding:"12px 16px",borderBottom:"1px solid "+C.border,
                 display:"flex",justifyContent:"space-between",alignItems:"center"}},
                 h("div",{style:{fontSize:13,fontWeight:800}},"🏪 Branch Performance"),
+                // Was today's date whatever period was selected — a label that
+                // contradicted the figures under it.
                 h("div",{style:{fontSize:12,color:C.muted}},
-                  new Date().toLocaleDateString("en-PH",{month:"short",day:"numeric",year:"numeric"}))
+                  R.from===R.to ? R.from : (R.from+" → "+R.to))
               ),
               // Ranked by sales for the chosen period, so the list answers
               // "who is carrying the week" rather than listing stores in the
@@ -17873,6 +17946,8 @@ function App(){
         // information, it is just a number to argue about.
         page==="branch_pl"&&(function(){
           const R=rangeFor(plRange,plFrom,plTo);
+          // Pull in any days older than the live window before reading totals.
+          if(window.__ctEnsureOrders)window.__ctEnsureOrders(R.from,R.to);
           const mine=orders.filter(o=>o.branch===branchId&&inRange(o,R));
           const sales=mine.reduce((a,o)=>a+(o.total||0),0);
           const disc =mine.reduce((a,o)=>a+(o.discAmt||0),0);
