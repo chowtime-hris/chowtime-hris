@@ -257,7 +257,7 @@ const ROLES = {
   owner:     {label:"Owner / Admin",    emoji:"\u{1F451}", color:"#6A1B9A",
     nav:["dashboard","branches","subs","pos","orders","void_requests","all_orders","analytics","z_reading","reports","cash_count","cash_in","expenses","cash_monitor","cash_advance","discount_mgmt","inventory","inv_log","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","settings","printer","ext_payroll","ext_kiosk","hris_dash","ext_production","ext_stock","branch_pl"]},
   manager:   {label:"Branch Manager",   emoji:"\u{1F3EA}", color:"#007AFF",
-    nav:["branch_dash","pos","orders","analytics","z_reading","reports","cash_count","cash_in","expenses","inventory","inv_log","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","hris_dash","bom_mgmt","branch_settings","printer","ext_kiosk","ext_stock","branch_pl"]},
+    nav:["branch_dash","pos","orders","analytics","z_reading","reports","cash_count","cash_in","expenses","ext_payroll","inventory","inv_log","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","hris_dash","bom_mgmt","branch_settings","printer","ext_kiosk","ext_stock","branch_pl"]},
   cashier:   {label:"Cashier",          emoji:"\u{1F4B3}", color:"#34C759",
     nav:["pos","orders","x_reading","printer","z_reading","cash_count","cash_in","expenses","inventory","ca_request","loan_request","void_request","ext_kiosk","ext_stock"]},
   crew:      {label:"Crew / Kitchen",   emoji:"\u{1F9D1}\u{200D}\u{1F373}", color:"#FF9500",
@@ -3941,6 +3941,15 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
   // A branch manager gets a window, not a lever: their crew's requests only,
   // and no approve. Posting a deduction into payroll stays with the owner.
   const canDecide = (user.role==="owner"||user.role==="commissary");
+  // Which payroll this account's approvals actually reach. Naming one project
+  // for everyone told a franchise manager their crew's advances were syncing
+  // to Main's HRIS — the one place they will never appear.
+  const _myBr=(BRANCHES||[]).find(b=>b&&b.id===user.branch);
+  const hrisLabel=(_myBr&&_myBr.ownership==="franchise")
+    ? ((_myBr.hrisProjectId||"")
+        ? ("their own HRIS ("+_myBr.hrisProjectId+")")
+        : (_myBr.hrisUrl ? "their own HRIS" : ""))
+    : "HRIS (chowtime-hris)";
   const filtered = requests
     .filter(r=>canDecide?true:(r.branch===user.branch))
     .filter(r=>isFranchisee
@@ -4035,9 +4044,12 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
 
     // HRIS link status
     h("div",{style:{background:hrisDB?"#E8F5E9":"#FFF8E1",border:"1px solid "+(hrisDB?"#A5D6A7":"#FFE082"),borderRadius:10,padding:"10px 14px",marginBottom:14,fontSize:13,color:hrisDB?"#1B5E20":"#795548"}},
-      hrisDB
-        ?"✅ Connected to HRIS (chowtime-hris) — approved CAs will auto-sync to payroll deductions"
-        :"⚠️ HRIS connection unavailable — approvals will save to POS only"
+      (hrisDB&&hrisLabel)
+        ?("✅ Connected to "+hrisLabel
+          +" — approved CAs will auto-sync to payroll deductions")
+        :(_myBr&&_myBr.ownership==="franchise"&&!_myBr.hrisUrl
+            ? "⚠️ No payroll database set for this branch — approvals will save to POS only. Ask Main to add the HRIS URL in Branch settings."
+            : "⚠️ HRIS connection unavailable — approvals will save to POS only")
     ),
 
     // Filters
@@ -14442,6 +14454,10 @@ function App(){
             });
             // and they answer their own crew, so they need the queue
             if(isMgr&&allowed.indexOf("hris_dash")<0) allowed.push("hris_dash");
+          } else {
+            // A company-owned branch is paid from Main's payroll, which the
+            // branch manager has no business opening.
+            allowed=allowed.filter(p=>p!=="ext_payroll");
           }
 
           const badgeFor=(p)=>{
