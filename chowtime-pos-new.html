@@ -7504,8 +7504,15 @@ function DiscountPage({db,user,branches,discounts,menuItems,showT}){
 function CashInPage({branchId,curBranch,user,db,cashLog,showT}){
   const today=localDate();
   const [cashEntry,setCashEntry]=useState({type:"in",desc:"",amount:""});
-  const todayCash=(cashLog||[]).filter(c=>c.branch===branchId
-    &&(c.date===today||isToday(c)));
+  // Same rule the cash count uses: prefer the stored local date, fall back to
+  // the timestamp. An older entry written before `date` existed still lands
+  // on the right day.
+  const isTodayEntry=(c)=>{
+    if(c.date) return c.date===today;
+    const t=c.timestamp&&c.timestamp.toDate?c.timestamp.toDate():null;
+    return t?localDate(t)===today:false;
+  };
+  const todayCash=(cashLog||[]).filter(c=>c.branch===branchId&&isTodayEntry(c));
   const cashIn=todayCash.filter(c=>c.type==="in")
     .reduce((s,c)=>s+(Number(c.amount)||0),0);
 
