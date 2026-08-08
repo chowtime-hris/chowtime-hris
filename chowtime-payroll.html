@@ -3837,7 +3837,9 @@ function renderClockMonitor() {
           : '<span style="font-size:22px;">👤</span>'}</td>
         <td><strong>${e.empName}</strong><br><span style="font-size:11px;color:var(--muted);">${e.empPos||''}</span></td>
         <td>${ACTION_LABELS_MON[e.action] || e.action}</td>
-        <td>${e.time}</td>
+        <td>${e.time || (e.ts
+          ? new Date(e.ts).toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit'})
+          : '—')}</td>
         <td>${e.date}</td>
         <td style="font-size:11px;">${e.lat ? `${(+e.lat).toFixed(4)}, ${(+e.lng).toFixed(4)}` : '—'}</td>
         <td>${e.dist !== null && e.dist !== undefined ? e.dist + 'm' : '—'}</td>
