@@ -789,9 +789,12 @@ tbody td{padding:9px 11px;}
 
   <div class="panel">
     <div class="panel-title"><span>🗺️</span> Branch Geofence Settings</div>
-    <div class="alert alert-warn">Set your branch GPS coordinates and radius. Employees must be within this radius to clock in (when enforcement is on).</div>
+    <div class="alert alert-warn">Each branch has its own coordinates and radius. Pick the branch, set its location, then save. Employees must be within that radius to clock in (when enforcement is on).</div>
     <div class="form-grid">
-      <div class="form-group"><label>Branch Name</label><input id="geo-branch-name" placeholder="Main Branch"></div>
+      <div class="form-group"><label>Branch</label>
+        <select id="geo-branch-pick"></select>
+      </div>
+      <div class="form-group"><label>Branch Name</label><input id="geo-branch-name" placeholder="Chowtime WMBL"></div>
       <div class="form-group"><label>Latitude</label><input type="number" id="geo-lat" step="0.0001" placeholder="14.5995"></div>
       <div class="form-group"><label>Longitude</label><input type="number" id="geo-lng" step="0.0001" placeholder="120.9842"></div>
       <div class="form-group"><label>Geofence Radius (meters)</label><input type="number" id="geo-radius" placeholder="200"></div>
@@ -3800,6 +3803,24 @@ document.querySelectorAll('.modal-overlay').forEach(m=>{
 function lsSet(k,v){ localStorage.setItem('ct_'+k, JSON.stringify(v)); }
 let kioskLog   = load('kioskLog')  || [];
 let branchCfg  = load('branchCfg') || { name:'Main Branch', lat:14.5995, lng:120.9842, radius:200, enforceGeo:false };
+// One geofence for the whole chain could only ever be right for one branch —
+// every other branch reads as tens of kilometres away, so enforcement can
+// never be switched on. Keyed by branch name, same shape as branchSchedules.
+let branchGeo  = load('branchGeo') || {};
+const geoKey   = (n)=>String(n||'').replace(/[^a-zA-Z0-9]/g,'_');
+function branchList(){
+  const set={};
+  Object.keys(branchSchedules||{}).forEach(n=>{ if(n)set[n]=1; });
+  Object.keys(branchGeo||{}).forEach(n=>{ if(n)set[n]=1; });
+  (employees||[]).forEach(e=>{ if(e&&e.branch)set[e.branch]=1; });
+  (kioskLog||[]).forEach(e=>{ if(e&&e.branch)set[e.branch]=1; });
+  if(branchCfg&&branchCfg.name)set[branchCfg.name]=1;
+  return Object.keys(set).sort();
+}
+function geoFor(name){
+  return branchGeo[name] || (name===branchCfg.name ? branchCfg : null)
+    || { name:name, lat:'', lng:'', radius:200, enforceGeo:false };
+}
 
 const ACTION_LABELS_MON = { in:'🟢 Clock In', out:'🔴 Clock Out', bstart:'☕ Break Start', bend:'▶️ Break End' };
 
@@ -3850,21 +3871,57 @@ function renderClockMonitor() {
     : '<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--muted);">No entries found. Open the Kiosk for employees to clock in.</td></tr>';
 
   // Load geofence settings into form
-  document.getElementById('geo-branch-name').value = branchCfg.name   || '';
-  document.getElementById('geo-lat').value         = branchCfg.lat    || '';
-  document.getElementById('geo-lng').value         = branchCfg.lng    || '';
-  document.getElementById('geo-radius').value      = branchCfg.radius || 200;
-  document.getElementById('geo-enforce').value     = String(branchCfg.enforceGeo || false);
+  const pick = document.getElementById('geo-branch-pick');
+  if(pick){
+    const names = branchList();
+    const cur = pick.value || branchCfg.name || names[0] || '';
+    pick.innerHTML = names.map(n=>
+      `<option value="${n}"${n===cur?' selected':''}>${n}</option>`).join('')
+      + '<option value="__new">➕ New branch…</option>';
+    pick.onchange = ()=>{
+      if(pick.value==='__new'){
+        const n = prompt('Branch name:');
+        if(!n){ pick.value = cur; return; }
+        branchGeo[n] = { name:n, lat:'', lng:'', radius:200, enforceGeo:false };
+        lsSet('branchGeo', branchGeo);
+      }
+      loadGeoForm();
+    };
+    loadGeoForm();
+  }
+}
+
+// Fills the form from whichever branch is picked.
+function loadGeoForm(){
+  const pick = document.getElementById('geo-branch-pick');
+  const name = pick && pick.value!=='__new' ? pick.value : branchCfg.name;
+  const g = geoFor(name);
+  document.getElementById('geo-branch-name').value = g.name || name || '';
+  document.getElementById('geo-lat').value         = g.lat    || '';
+  document.getElementById('geo-lng').value         = g.lng    || '';
+  document.getElementById('geo-radius').value      = g.radius || 200;
+  document.getElementById('geo-enforce').value     = String(g.enforceGeo || false);
 }
 
 function saveGeofence() {
-  branchCfg = {
+  const cfg = {
     name:       document.getElementById('geo-branch-name').value || 'Main Branch',
     lat:        +document.getElementById('geo-lat').value,
     lng:        +document.getElementById('geo-lng').value,
     radius:     +document.getElementById('geo-radius').value || 200,
     enforceGeo: document.getElementById('geo-enforce').value === 'true',
   };
+  branchGeo[cfg.name] = cfg;
+  lsSet('branchGeo', branchGeo);
+  // The kiosk at that branch reads this key, so saving here is what actually
+  // changes what the tablet measures against.
+  try{
+    if(window._fbDB && window._fbFns){
+      window._fbFns.set(
+        window._fbFns.ref(window._fbDB,'branchGeo/'+geoKey(cfg.name)), cfg);
+    }
+  }catch(e){ console.warn('branchGeo sync:', e); }
+  branchCfg = cfg;
   lsSet('branchCfg', branchCfg);
   const el = document.getElementById('geo-saved');
   el.style.display = 'block'; setTimeout(()=>el.style.display='none', 2500);

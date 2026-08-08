@@ -1143,6 +1143,31 @@ if(!fbCfg?.apiKey||!fbCfg?.databaseURL){
 
     // Pull today log
     const today=(() => { const _d=new Date(); return `${_d.getFullYear()}-${String(_d.getMonth()+1).padStart(2,'0')}-${String(_d.getDate()).padStart(2,'0')}`; })().replace(/-/g,'');
+    // This tablet's own branch geofence, set from the payroll app. Without it
+    // every kiosk measured against one shared coordinate — Manila by default —
+    // so every branch read as tens of kilometres outside.
+    try{
+      const gk = BRANCH.replace(/[^a-zA-Z0-9]/g,'_');
+      onValue(ref(db,`branchGeo/${gk}`),gs=>{
+        const g = gs.val();
+        if(!g || g.lat===''||g.lat==null) return;
+        branchCfg = {...branchCfg, ...g};
+        lsSet('branchCfg', branchCfg);
+        const b = document.getElementById('badge-geo');
+        if(b && currentPos){
+          currentDist = Math.round(haversine(currentPos.latitude,currentPos.longitude,
+            branchCfg.lat, branchCfg.lng));
+          const inside = currentDist <= branchCfg.radius;
+          b.textContent = `📍 ${currentDist}m`;
+          b.className = 'badge ' + (inside?'bg-green':'bg-red');
+          const t = document.getElementById('geo-dist-txt');
+          if(t) t.textContent = currentDist;
+          document.getElementById('geo-warn')
+            .classList.toggle('show', !inside && branchCfg.enforceGeo);
+        }
+      });
+    }catch(e){ console.warn('branchGeo:', e); }
+
     onValue(ref(db,`kioskLog/${today}`),snap=>{
       const data=snap.val();
       if(data){

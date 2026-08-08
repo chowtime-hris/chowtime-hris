@@ -255,11 +255,11 @@ const BRANCHES = [
 
 const ROLES = {
   owner:     {label:"Owner / Admin",    emoji:"\u{1F451}", color:"#6A1B9A",
-    nav:["dashboard","branches","subs","pos","orders","void_requests","all_orders","analytics","z_reading","reports","cash_count","expenses","cash_monitor","cash_advance","discount_mgmt","inventory","inv_log","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","settings","printer","ext_payroll","ext_kiosk","hris_dash","ext_production","ext_stock","branch_pl"]},
+    nav:["dashboard","branches","subs","pos","orders","void_requests","all_orders","analytics","z_reading","reports","cash_count","cash_in","expenses","cash_monitor","cash_advance","discount_mgmt","inventory","inv_log","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","settings","printer","ext_payroll","ext_kiosk","hris_dash","ext_production","ext_stock","branch_pl"]},
   manager:   {label:"Branch Manager",   emoji:"\u{1F3EA}", color:"#007AFF",
-    nav:["branch_dash","pos","orders","analytics","z_reading","reports","cash_count","expenses","inventory","inv_log","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","hris_dash","bom_mgmt","branch_settings","printer","ext_kiosk","ext_stock","branch_pl"]},
+    nav:["branch_dash","pos","orders","analytics","z_reading","reports","cash_count","cash_in","expenses","inventory","inv_log","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","hris_dash","bom_mgmt","branch_settings","printer","ext_kiosk","ext_stock","branch_pl"]},
   cashier:   {label:"Cashier",          emoji:"\u{1F4B3}", color:"#34C759",
-    nav:["pos","orders","x_reading","printer","z_reading","cash_count","expenses","inventory","ca_request","loan_request","void_request","ext_kiosk","ext_stock"]},
+    nav:["pos","orders","x_reading","printer","z_reading","cash_count","cash_in","expenses","inventory","ca_request","loan_request","void_request","ext_kiosk","ext_stock"]},
   crew:      {label:"Crew / Kitchen",   emoji:"\u{1F9D1}\u{200D}\u{1F373}", color:"#FF9500",
     nav:["kitchen","ca_request","loan_request","pos","orders","ext_kiosk","ext_stock"]},
   stockclerk:{label:"Stock Clerk",      emoji:"\u{1F4E6}", color:"#AF52DE",
@@ -329,6 +329,7 @@ const NAV_META = {
   po_monitor:  {icon:"📊",label:"PO Monitor"},
   branch_menu: {icon:"🍽️",label:"My Menu"},
   cash_count:   {icon:"💰",label:"Cash Count"},
+  cash_in:      {icon:"💵",label:"Cash In"},
   ca_request:   {icon:"💵",label:"Cash Advance"},
   loan_request: {icon:"💸",label:"Cash Loan"},
   hris_branch:  {icon:"👥",label:"My Team"},
@@ -2659,8 +2660,6 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
   const [selDate,setSelDate] = useState(today);
   const [showHistory,setShowHistory] = useState(false);
   // stays "in" — the Cash Out door was closed, see RECORD CASH MOVEMENT
-  const [cashEntry,setCashEntry] = useState({type:"in",desc:"",amount:""});
-  const [addingCash,setAddingCash] = useState(false);
 
   // Load today's existing count + history from Firebase
   useEffect(()=>{
@@ -2773,32 +2772,6 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
   const expectedCash = openingFund + todaySales + cashIn
     - cashOut - todayExpenses - remitOutBefore;
   const variance = totalCash - expectedCash;
-
-  // Cash movements are recorded HERE, not on the monitoring dashboard —
-  // this is the page the crew opens at shift start and shift end, and the
-  // opening fund is the first line of the count.
-  const addCashEntry = async()=>{
-    const amt=parseFloat(cashEntry.amount)||0;
-    if(!cashEntry.desc.trim()){showT("Enter a description","warn");return;}
-    if(amt<=0){showT("Enter an amount","warn");return;}
-    setAddingCash(true);
-    try{
-      const now=new Date();
-      await addDoc(collection(db,"cash_log"),{
-        branch:branchId,type:cashEntry.type,
-        desc:cashEntry.desc.trim(),amount:amt,
-        date:localDate(now),
-        time:now.toLocaleTimeString("en-PH",{hour:"2-digit",minute:"2-digit"}),
-        by:user.name,timestamp:serverTimestamp(),at:serverTimestamp()
-      });
-      setCashEntry({type:"in",desc:"",amount:""});
-      showT("Cash "+(cashEntry.type==="in"?"In":"Out")+" recorded \u2713");
-    }catch(e){
-      console.error("cash entry failed:",e);
-      showT("Failed: "+String(e&&e.message||e).slice(0,70),"err");
-    }
-    setAddingCash(false);
-  };
 
   const saveCashCount = async(isClosing=false)=>{
     if(totalCash===0&&!isClosing){showT("Enter denominations first","warn");return;}
@@ -3203,65 +3176,6 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
               h("div",{style:{color:"rgba(255,255,255,.75)",fontSize:11}},"COINS"),
               h("div",{style:{color:"#fff",fontSize:13,fontWeight:800}},"₱"+peso(coinsTotal))
             )
-          )
-        ),
-
-        // Record cash in / out
-        ccStep===2&&h("div",{style:{background:"#fff",border:"1px solid "+C.border,borderRadius:12,
-          padding:"12px 14px",marginBottom:10}},
-          h("div",{style:{fontSize:12,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:8}},
-            "\uD83D\uDCB0 CASH IN"),
-          // Cash OUT was removed here on purpose. Every way money leaves the
-          // drawer now has exactly one door: remittance has its own field
-          // below, and anything bought goes through Expenses. Two doors onto
-          // the same movement means the same peso gets recorded twice.
-          h("div",{style:{fontSize:12,color:C.muted,marginBottom:8,lineHeight:1.5}},
-            "Money leaving the drawer is not entered here — remittance is below, purchases go through Expenses."),
-          h("div",{style:{display:"flex",gap:5,flexWrap:"wrap",marginBottom:8}},
-            ["Opening Fund","Change Fund","Collection"]
-            .map(lbl=>h("button",{key:lbl,
-              onClick:()=>setCashEntry(p=>({...p,desc:lbl})),
-              style:{padding:"5px 9px",borderRadius:20,fontSize:13,cursor:"pointer",
-                fontWeight:cashEntry.desc===lbl?800:500,
-                border:"1px solid "+(cashEntry.desc===lbl?C.primary:C.border),
-                background:cashEntry.desc===lbl?"#F3E9F7":"#fff",
-                color:cashEntry.desc===lbl?C.primary:C.text}},lbl))
-          ),
-          h("div",{style:{display:"flex",gap:6}},
-            h("input",{value:cashEntry.desc,
-              onChange:e=>setCashEntry(p=>({...p,desc:e.target.value})),
-              placeholder:"Description",
-              style:{flex:1,minWidth:0,padding:"8px",border:"1px solid "+C.border,
-                borderRadius:7,fontSize:13,outline:"none"}}),
-            h("input",{type:"number",onFocus:e=>e.target.select(),value:cashEntry.amount,
-              onChange:e=>setCashEntry(p=>({...p,amount:e.target.value})),
-              onKeyDown:e=>{if(e.key==="Enter")addCashEntry();},
-              placeholder:"0.00",
-              style:{width:90,padding:"8px",border:"1px solid "+C.border,
-                borderRadius:7,fontSize:13,fontWeight:700,textAlign:"right",outline:"none"}}),
-            h("button",{onClick:addCashEntry,disabled:addingCash,
-              style:{padding:"8px 14px",borderRadius:7,border:"none",
-                background:addingCash?"#8A8A8A":C.primary,color:"#fff",
-                fontWeight:800,fontSize:13,cursor:"pointer",flexShrink:0}},
-              addingCash?"...":"Add")
-          ),
-          cashEntry.type==="in"&&/opening/i.test(cashEntry.desc||"")&&
-            h("div",{style:{fontSize:12,color:"#1B5E20",background:"#E8F5E9",borderRadius:6,
-              padding:"5px 8px",marginTop:6,fontWeight:700}},
-              "\u2713 Counted as Opening Fund in the Z-Reading"),
-          todayCash.length>0&&h("div",{style:{marginTop:9,paddingTop:8,
-            borderTop:"1px dashed "+C.border}},
-            h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:5}},
-              "TODAY ("+todayCash.length+")"),
-            // The header counts every entry but only six were drawn, so the
-            // rest were invisible with nothing saying so. Scroll instead.
-            h("div",{style:{maxHeight:150,overflowY:"auto"}},
-              todayCash.map((c,ci)=>h("div",{key:c._docId||ci,
-                style:{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:2}},
-                h("span",{style:{color:C.muted}},(c.time?c.time+" · ":"")+(c.desc||"")),
-                h("span",{style:{fontWeight:700,color:c.type==="in"?C.success:C.danger}},
-                  (c.type==="in"?"+":"-")+"\u20B1"+(Number(c.amount)||0).toFixed(2))
-              )))
           )
         ),
 
@@ -7577,6 +7491,90 @@ function DiscountPage({db,user,branches,discounts,menuItems,showT}){
               );
             })
       )
+    )
+  );
+}
+
+// ─── CASH IN (standalone) ────────────────────────────────
+// Opening fund, change fund and collections happen in the morning, before a
+// single sale. Living inside the closing flow meant opening the end-of-day
+// screen to start the day — so it has its own page now. The closing screen
+// still READS these entries in the variance check; it just no longer asks
+// for them.
+function CashInPage({branchId,curBranch,user,db,cashLog,showT}){
+  const today=localDate();
+  const [cashEntry,setCashEntry]=useState({type:"in",desc:"",amount:""});
+  const todayCash=(cashLog||[]).filter(c=>c.branch===branchId
+    &&(c.date===today||isToday(c)));
+  const cashIn=todayCash.filter(c=>c.type==="in")
+    .reduce((s,c)=>s+(Number(c.amount)||0),0);
+
+  const addCashEntry=async()=>{
+    const amt=parseFloat(cashEntry.amount)||0;
+    if(!cashEntry.desc.trim()||amt<=0){showT("Enter description and amount","warn");return;}
+    try{
+      const now=new Date();
+      await addDoc(collection(db,"cash_log"),{
+        branch:branchId,type:"in",desc:cashEntry.desc.trim(),amount:amt,
+        time:now.toLocaleTimeString("en-PH",{hour:"2-digit",minute:"2-digit"}),
+        date:today,by:user.name,
+        timestamp:serverTimestamp(),at:serverTimestamp()});
+      setCashEntry({type:"in",desc:"",amount:""});
+      showT("Cash in recorded ✓");
+    }catch(e){showT("Failed: "+String(e&&e.message||e).slice(0,60),"err");}
+  };
+
+  return h("div",null,
+    h(SectionHeader,{title:"💵 Cash In — "+curBranch.name}),
+    h("div",{style:{background:"#E8F5E9",border:"1px solid #A5D6A7",
+      borderRadius:10,padding:"10px 13px",marginBottom:12,fontSize:13,
+      color:C.success,lineHeight:1.5}},
+      h("b",null,"Money coming INTO the drawer."),
+      " Opening fund at the start of the shift, change fund, and any collection. Money going out is not here — remittance is in Cash Count, anything bought is in Expenses."),
+    h("div",{style:{background:"#fff",border:"1px solid "+C.border,
+      borderRadius:12,padding:"13px 15px",marginBottom:10}},
+      h("div",{style:{display:"flex",gap:5,flexWrap:"wrap",marginBottom:8}},
+        ["Opening Fund","Change Fund","Collection"].map(lbl=>
+          h("button",{key:lbl,onClick:()=>setCashEntry(p=>({...p,desc:lbl})),
+            style:{padding:"6px 13px",borderRadius:20,fontSize:13,
+              cursor:"pointer",fontWeight:cashEntry.desc===lbl?800:500,
+              border:"1px solid "+(cashEntry.desc===lbl?C.success:C.border),
+              background:cashEntry.desc===lbl?"#E8F5E9":"#fff",
+              color:cashEntry.desc===lbl?C.success:C.muted}},lbl))),
+      h("div",{style:{display:"flex",gap:7,flexWrap:"wrap"}},
+        h("input",{value:cashEntry.desc,placeholder:"Description",
+          onChange:e=>setCashEntry(p=>({...p,desc:e.target.value})),
+          style:{flex:1,minWidth:180,padding:"9px 11px",fontSize:13,
+            border:"1px solid "+C.border,borderRadius:8,outline:"none"}}),
+        h("input",{type:"number",onFocus:e=>e.target.select(),
+          value:cashEntry.amount,placeholder:"0.00",
+          onChange:e=>setCashEntry(p=>({...p,amount:e.target.value})),
+          style:{width:120,padding:"9px 11px",fontSize:14,fontWeight:700,
+            textAlign:"right",border:"1px solid "+C.border,borderRadius:8,
+            outline:"none"}}),
+        h("button",{onClick:addCashEntry,
+          style:{padding:"9px 20px",background:C.success,border:"none",
+            borderRadius:8,color:"#fff",fontWeight:800,fontSize:14,
+            cursor:"pointer"}},"Add"))),
+
+    h("div",{style:{background:"#fff",border:"1px solid "+C.border,
+      borderRadius:12,overflow:"hidden"}},
+      h("div",{style:{padding:"10px 14px",borderBottom:"1px solid "+C.border,
+        display:"flex",justifyContent:"space-between",alignItems:"center"}},
+        h("b",{style:{fontSize:14}},"Today ("+todayCash.filter(c=>c.type==="in").length+")"),
+        h("b",{style:{fontSize:15,color:C.success}},"+₱"+peso(cashIn))),
+      todayCash.filter(c=>c.type==="in").length===0
+        ? h("div",{style:{padding:"28px",textAlign:"center",color:C.muted,
+            fontSize:13}},"Nothing recorded yet today.")
+        : todayCash.filter(c=>c.type==="in").map((c,ci)=>
+            h("div",{key:c._docId||ci,style:{display:"flex",
+              justifyContent:"space-between",padding:"9px 14px",
+              borderBottom:"1px solid #f5f5f5",fontSize:13}},
+              h("span",{style:{color:C.muted}},
+                (c.time?c.time+" · ":"")+(c.desc||"")+
+                (c.by?"  ·  "+c.by:"")),
+              h("b",{style:{color:C.success}},
+                "+₱"+peso(Number(c.amount)||0))))
     )
   );
 }
@@ -15053,6 +15051,9 @@ function App(){
                   }).length+" active")
               ),
               (function(){
+              // With kitchen flow off nobody is meant to work the queue, so
+              // an untouched ticket is expected rather than a problem.
+              if(!kitchenFlow)return null;
               const stuck=orders.filter(function(o){
                 return (o.status==="pending"||o.status==="cooking")
                   &&o.date!==localDate();
@@ -15064,7 +15065,33 @@ function App(){
                   stuck.length+" ticket"+(stuck.length>1?"s":"")+" left open from earlier days"),
                 h("div",{style:{fontSize:11,color:C.muted,marginTop:2,lineHeight:1.5}},
                   "Never marked served or void, so they sit in the queue forever. "+
-                  "Close them from All Orders."));
+                  "Closing them marks them SERVED — the sale stays, only the queue clears."),
+                // Sending someone to All Orders to tick 95 rows one at a time is
+                // not a fix. This closes the backlog in one action, and records
+                // that it was a cleanup rather than a real service.
+                h("button",{onClick:async()=>{
+                    if(!confirm("Close "+stuck.length+" open ticket"
+                      +(stuck.length>1?"s":"")+" from earlier days?\n\n"
+                      +"They will be marked SERVED. Sales figures do not change."))return;
+                    let ok=0,bad=0;
+                    for(const o of stuck){
+                      if(!o._docId){bad++;continue;}
+                      try{
+                        await updateDoc(doc(db,"orders",o._docId),{
+                          status:"served",
+                          closedBy:user.name,
+                          closedAt:serverTimestamp(),
+                          bulkClosed:true});
+                        ok++;
+                      }catch(e){bad++;}
+                    }
+                    showT(ok+" ticket"+(ok===1?"":"s")+" closed"
+                      +(bad?"  ·  "+bad+" failed":""),bad?"warn":"ok");
+                  },
+                  style:{marginTop:8,padding:"7px 13px",borderRadius:8,
+                    border:"none",background:C.warning,color:"#fff",
+                    fontSize:12,fontWeight:800,cursor:"pointer"}},
+                  "Close all "+stuck.length));
             })(),
 
             h("div",{style:{maxHeight:350,overflowY:"auto"}},
@@ -18178,6 +18205,10 @@ function App(){
         ),
 
         // ══ CASH COUNT ══
+        page==="cash_in"&&h(CashInPage,{
+          branchId,curBranch,user,db,cashLog,showT,key:"cashin_"+branchId
+        }),
+
         page==="cash_count"&&h(CashCountPage,{
           branchId,curBranch,user,db,orders,cashLog,expenses,showT,
           key:branchId
