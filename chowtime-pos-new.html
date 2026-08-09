@@ -12897,7 +12897,12 @@ function App(){
   // Main's roster offered them Main's crew — and an approval filed against a
   // person who does not exist in the database it gets written to.
   useEffect(()=>{
-    const rec=(branches||[]).find(b=>b&&b.id===branchId);
+    // branchId is declared further down, and a dependency array is read during
+    // render — reaching for it here threw before the component could mount.
+    // Derived locally instead, from the same rule.
+    const _bid=(user?.branch==="all"||user?.branch==="comm")
+      ? "ct-main" : (user?.branch||"");
+    const rec=(branches||[]).find(b=>b&&b.id===_bid);
     if(!rec||rec.ownership!=="franchise"||!rec.hrisUrl){
       setFranchiseEmps([]); return;
     }
@@ -12911,7 +12916,7 @@ function App(){
             .filter(e=>e&&e.name).map(e=>Object.assign({},e,{_src:"hris"})));
       },()=>setFranchiseEmps([]));
     }catch(e){ console.warn("franchise roster:",e); setFranchiseEmps([]); }
-  },[branchId,branches.length]);
+  },[user&&user.branch,branches.length]);
 
   // ── LOAD CREW FROM THE PRODUCTION APP ────────────────────
   // Production keeps its own payroll — its own staff, rates, deductions and
