@@ -3728,7 +3728,16 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
     // no orderBy — that needs a composite index this project does not have;
     // sorted in memory instead
     try{
-      const unsub=onSnapshot(query(collection(db,"hris_request_log"),limit(400)),
+      // Filtering in the UI still downloaded every branch's trail. Scoped at
+      // the query instead, so it is never on the device to begin with.
+      // canDecide is declared further down the component; derived locally so
+      // this never depends on where the declaration happens to sit.
+      const wide=(user.role==="owner"||user.role==="commissary");
+      const lq=wide
+        ?query(collection(db,"hris_request_log"),limit(400))
+        :query(collection(db,"hris_request_log"),
+           where("branch","==",user.branch),limit(400));
+      const unsub=onSnapshot(lq,
         snap=>setCaLog(snap.docs.map(d=>({...d.data(),_docId:d.id}))
           .sort((a,b)=>String((b.date||"")+" "+(b.time||""))
             .localeCompare(String((a.date||"")+" "+(a.time||""))))),
@@ -3738,9 +3747,17 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
   },[]);
 
   useEffect(()=>{
-    const q = query(collection(db,"hris_requests"), orderBy("timestamp","desc"), limit(200));
+    // Every branch's CA and loan requests were downloaded and then filtered on
+    // screen — the names and amounts were still on the device. Scoped at the
+    // query for anyone who is not approving chain-wide.
+    const wide=(user.role==="owner"||user.role==="commissary");
+    const q = wide
+      ? query(collection(db,"hris_requests"), orderBy("timestamp","desc"), limit(200))
+      : query(collection(db,"hris_requests"), where("branch","==",user.branch), limit(200));
     const unsub = onSnapshot(q, snap=>{
-      setRequests(snap.docs.map(d=>({...d.data(),_docId:d.id})));
+      setRequests(snap.docs.map(d=>({...d.data(),_docId:d.id}))
+        .sort((a,b)=>((b.timestamp&&b.timestamp.seconds)||0)
+                    -((a.timestamp&&a.timestamp.seconds)||0)));
     }, ()=>{});
     return()=>unsub();
   },[]);
@@ -12508,8 +12525,14 @@ function App(){
         ()=>{}));
     }catch(e){}
 
+    // Only the owner runs the collections page; a branch needs its own record
+    // and nothing else. Fees, GCash numbers and expiry dates of other stores
+    // are not theirs to read.
     try{
-      unsubs.push(onSnapshot(collection(db,"subscriptions"),
+      const sq=isOwner
+        ?collection(db,"subscriptions")
+        :query(collection(db,"subscriptions"),where("branch","==",bId));
+      unsubs.push(onSnapshot(sq,
         snap=>setSubs(snap.docs.map(d=>({...d.data(),_docId:d.id}))),
         ()=>{}));
     }catch(e){}
@@ -12605,10 +12628,22 @@ function App(){
         ()=>{}));
     }catch(e){}
 
-    // Advances + POs
+    // Advances + POs.
+    //
+    // This pulled every branch's purchase orders — which carry Main's price on
+    // each item and what every other store, franchise included, is paying.
+    // A branch account has no business holding that. Sorted in memory so the
+    // branch query stays a single equality filter and needs no index.
     try{
-      unsubs.push(onSnapshot(query(collection(db,"advances"),orderBy("timestamp","desc"),limit(100)),
-        snap=>setAdvances(snap.docs.map(d=>({...d.data(),_docId:d.id}))),()=>{}));
+      const aq=isOwner
+        ?query(collection(db,"advances"),orderBy("timestamp","desc"),limit(100))
+        :query(collection(db,"advances"),where("branch","==",bId),limit(100));
+      unsubs.push(onSnapshot(aq,snap=>{
+        const rows=snap.docs.map(d=>({...d.data(),_docId:d.id}));
+        if(!isOwner)rows.sort((a,b)=>
+          ((b.timestamp&&b.timestamp.seconds)||0)-((a.timestamp&&a.timestamp.seconds)||0));
+        setAdvances(rows);
+      },()=>{}));
     }catch(e){}
 
     // Branch permissions + menu overrides handled above
@@ -12875,12 +12910,19 @@ function App(){
   },[user?.branch,user?.role]);
 
   // ── LOAD STAFF FROM FIRESTORE ────────────────────────────
+  // Was the whole chain: every account, name, email, role and branch. A
+  // manager only ever manages their own crew, so that is all they load.
   useEffect(()=>{
-    const unsub=onSnapshot(collection(db,"staff_accounts"),snap=>{
+    const _bid=(user?.branch==="all"||user?.branch==="comm")
+      ? "ct-main" : (user?.branch||"");
+    const wide=(user?.role==="owner"||user?.role==="commissary");
+    const q2=wide?collection(db,"staff_accounts")
+      :query(collection(db,"staff_accounts"),where("branch","==",_bid));
+    const unsub=onSnapshot(q2,snap=>{
       if(!snap.empty)setStaff(snap.docs.map(d=>({...d.data(),id:d.id})));
     },()=>{});
     return()=>unsub();
-  },[]);
+  },[user&&user.branch,user&&user.role]);
 
   // ── LOAD EMPLOYEES FROM HRIS RTDB ────────────────────────
   useEffect(()=>{
