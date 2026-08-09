@@ -3270,6 +3270,23 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
             variance>0?"📈 Cash is OVER expected":
             "⚠️ Cash is SHORT — check transactions"
           ),
+          // An over that matches the remittance almost to the peso is not
+          // money found — it is the timing box ticked the wrong way. Catching
+          // it here saves an hour of hunting for cash that never moved.
+          (remitField>0&&Math.abs(variance-remitOutBefore)<1&&remitOutBefore>0)
+            &&h("div",{style:{marginTop:7,padding:"8px 11px",borderRadius:8,
+              background:"#FFF8E1",border:"1px solid #FFE082",fontSize:12,
+              color:"#BF360C",fontWeight:700,lineHeight:1.5}},
+              "The over is almost exactly the ₱"+peso(remitField)
+              +" remittance. If the money was still in the drawer when you "
+              +"counted it, untick \u201Chanded over before counting\u201D."),
+          (remitField>0&&!remitBefore&&Math.abs(variance+remitField)<1)
+            &&h("div",{style:{marginTop:7,padding:"8px 11px",borderRadius:8,
+              background:"#FFF8E1",border:"1px solid #FFE082",fontSize:12,
+              color:"#BF360C",fontWeight:700,lineHeight:1.5}},
+              "The shortage is almost exactly the ₱"+peso(remitField)
+              +" remittance. If the money had already been handed over before "
+              +"you counted, tick \u201Chanded over before counting\u201D."),
           // Nobody explained what the figures mean or what the colours are
           // saying, so a shortage read as an accusation instead of a checklist.
           h("div",{style:{marginTop:9,paddingTop:8,
@@ -8380,6 +8397,27 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
       });
       // the bell existed; this path never wrote to it, so a pending request
       // sat in Firestore with nothing telling the manager
+      // The branch hears about it, and so does Main. Not every branch has a
+      // manager on duty, and a request nobody is told about simply waits.
+      if(branchId!=="ct-main"){
+        await notify(db,{to:"ct-main",type:"void",
+          title:"Void request — "+curBranch.name+" · "+selOrder.id,
+          message:(isPartial?"Partial":"Full")+" void · ₱"+peso(voidAmt)
+            +" · by "+user.name+" · "+reason,
+          page:"void_requests",ref:String(selOrder.id||""),by:user.name});
+      }
+      // Main is copied on every request. Not every branch has a manager, and a
+      // request nobody was told about simply waits — the branch assumes it was
+      // seen, and it never was.
+      if(branchId!=="ct-main"){
+        try{
+          await notify(db,{to:"ct-main",type:"void",
+            title:"Void request — "+curBranch.name+" · "+selOrder.id,
+            message:(isPartial?"Partial":"Full")+" void · ₱"+peso(voidAmt)
+              +" · by "+user.name+" · "+reason,
+            page:"void_requests",ref:String(selOrder.id||""),by:user.name});
+        }catch(e2){}
+      }
       await notify(db,{to:branchId,type:"void",
         title:"Void request — "+selOrder.id,
         message:(isPartial?"Partial":"Full")+" void · ₱"+peso(voidAmt)
@@ -12195,6 +12233,7 @@ function App(){
   const [staff,setStaff]=useState([]);
   const [hrisEmps,setHrisEmps]=useState([]); // employees from HRIS RTDB
   const [prodEmps,setProdEmps]=useState([]); // crew from the Production app
+  const [franchiseEmps,setFranchiseEmps]=useState([]); // this franchise's own crew
   // Surfaced on the request page: whether Production answered, and with how
   // many. An empty dropdown says nothing about why it is empty.
   const [prodStatus,setProdStatus]=useState("connecting...");
@@ -12528,11 +12567,21 @@ function App(){
       }catch(e){console.warn("auto-close skipped:",e);}
     })();
 
-    // Notifications addressed to this branch. Sorted client-side so the query
-    // stays a single equality filter and needs no composite index.
+    // Notifications addressed to this branch, for the last few days.
+    //
+    // This was `where(to) limit(60)` with no orderBy — an arbitrary 60 out of
+    // however many the branch has ever received, NOT the newest. Once a branch
+    // passed 60 notifications, a new one had to be lucky to appear at all, and
+    // a void request could sit unseen. Equality filters on `to` and `date`
+    // merge without a composite index.
+    const _nd=[];
+    for(let k=0;k<4;k++){
+      const d=new Date(); d.setDate(d.getDate()-k); _nd.push(localDate(d));
+    }
     try{
       unsubs.push(onSnapshot(
-        query(collection(db,"notifications"),where("to","==",bId),limit(60)),
+        query(collection(db,"notifications"),
+          where("to","==",bId),where("date","in",_nd),limit(200)),
         snap=>{
           const list=snap.docs.map(d=>({...d.data(),_docId:d.id}));
           list.sort((a,b)=>((b.at&&b.at.seconds)||0)-((a.at&&a.at.seconds)||0));
@@ -12843,6 +12892,27 @@ function App(){
     },()=>{});
   },[]);
 
+  // ── LOAD CREW FROM A FRANCHISE'S OWN HRIS ────────────────
+  // A franchise pays its own people from its own payroll database. Reading
+  // Main's roster offered them Main's crew — and an approval filed against a
+  // person who does not exist in the database it gets written to.
+  useEffect(()=>{
+    const rec=(branches||[]).find(b=>b&&b.id===branchId);
+    if(!rec||rec.ownership!=="franchise"||!rec.hrisUrl){
+      setFranchiseEmps([]); return;
+    }
+    const fdb=franchiseHrisDB(rec);
+    if(!fdb){ setFranchiseEmps([]); return; }
+    try{
+      onValue(ref(fdb,"employees"),snap=>{
+        const data=snap.val();
+        setFranchiseEmps(!data?[]
+          :(Array.isArray(data)?data:Object.values(data))
+            .filter(e=>e&&e.name).map(e=>Object.assign({},e,{_src:"hris"})));
+      },()=>setFranchiseEmps([]));
+    }catch(e){ console.warn("franchise roster:",e); setFranchiseEmps([]); }
+  },[branchId,branches.length]);
+
   // ── LOAD CREW FROM THE PRODUCTION APP ────────────────────
   // Production keeps its own payroll — its own staff, rates, deductions and
   // payslip — and none of those people exist in HRIS. Reading only HRIS meant
@@ -12880,6 +12950,9 @@ function App(){
   const isOwnerAll=(user?.branch==="all");
   const isCommAcct=(user?.branch==="comm");
   const branchId=(isOwnerAll||isCommAcct)?"ct-main":(user?.branch||"ct-wsfp");
+  const _myBranchRec=(branches||[]).find(b=>b&&b.id===branchId);
+  const isFranchiseAcct=!!(_myBranchRec&&_myBranchRec.ownership==="franchise");
+  const caRoster=isFranchiseAcct?franchiseEmps:hrisEmps.concat(prodEmps);
   const curBranch=branches.find(b=>b.id===branchId)||BRANCHES[0];
   // One rule for every stock collection, driven by the SAME branch the order
   // is filed under. Previously this keyed off role, so an owner's sale was
@@ -14479,8 +14552,12 @@ function App(){
           if(_br&&_br.ownership==="franchise"){
             const isMgr=(user?.role==="manager");
             allowed=allowed.filter(p=>{
-              // Payroll opens their own system, or nothing at all.
-              if(p==="ext_payroll") return !!_br.payrollUrl;
+              // These open a payroll or stock database. Their own, or the item
+              // is not offered at all — never Main's.
+              if(p==="ext_payroll")    return !!_br.payrollUrl;
+              if(p==="ext_kiosk")      return !!_br.kioskUrl;
+              if(p==="ext_stock")      return !!_br.stockUrl;
+              if(p==="ext_production") return false;
               // The franchisee is the business — they do not ask themselves
               // for an advance. Their crew still does.
               if(p==="ca_request"||p==="loan_request") return !isMgr;
@@ -14533,11 +14610,31 @@ function App(){
             return h("button",{key:p,
               onClick:()=>{
                 if(EXT_APPS[p]){
-                  // a franchise opens their own payroll, never yours
                   const br=branches.find(b=>b.id===branchId);
-                  const url=(p==="ext_payroll"&&br&&br.ownership==="franchise"
-                             &&br.payrollUrl) ? br.payrollUrl : EXT_APPS[p];
-                  window.open(url,"_blank","noopener");
+                  const isFr=!!(br&&br.ownership==="franchise");
+                  // These three write into a payroll database. Falling back to
+                  // Main's copy handed a franchise manager Main's shifts,
+                  // loans and ledger — every wage figure in the company. When
+                  // their own link is missing the answer is to stop, not to
+                  // open somebody else's books.
+                  const OWN={ext_payroll:"payrollUrl",ext_kiosk:"kioskUrl",
+                             ext_production:null,ext_stock:"stockUrl"};
+                  if(isFr&&Object.prototype.hasOwnProperty.call(OWN,p)){
+                    const field=OWN[p];
+                    if(!field){
+                      showT("Production is Main's own system — not available for this branch.","warn");
+                      return;
+                    }
+                    const own=br[field];
+                    if(!own){
+                      showT("No "+m.label.replace(" ↗","")+" link set for this branch yet. "
+                        +"Ask Main to add it in Branch settings.","warn");
+                      return;
+                    }
+                    window.open(own,"_blank","noopener");
+                    return;
+                  }
+                  window.open(EXT_APPS[p],"_blank","noopener");
                   return;
                 }
                 setPage(p);
@@ -15338,11 +15435,18 @@ function App(){
                   "list, so a cashier reading the sidebar never sees them. "+
                   "Re-enter them here if you change them."),
                 [["payrollUrl","THEIR PAYROLL LINK",
-                  "https://…/chowtime-payroll.html"],
+                  "https://…/chowtime-payroll-wcap.html"],
+                 // The kiosk and the stock app write into their databases too.
+                 // Left blank, the branch simply cannot open them — which is
+                 // the safe answer, not falling through to Main's copy.
+                 ["kioskUrl","THEIR TIME CLOCK LINK",
+                  "https://…/chowtime-kiosk-wcap.html"],
+                 ["stockUrl","THEIR FREEZER COUNT LINK",
+                  "https://…/chowtime-stock-wcap.html"],
                  ["hrisUrl","THEIR PAYROLL DATABASE URL",
                   "https://…-default-rtdb.asia-southeast1.firebasedatabase.app"],
                  ["hrisApiKey","THEIR FIREBASE API KEY","AIza…"],
-                 ["hrisProjectId","THEIR PROJECT ID","chowtime-wgapan"]
+                 ["hrisProjectId","THEIR PROJECT ID","cffc-wcap"]
                 ].map(([k,lbl,ph])=>h("div",{key:k,style:{marginBottom:8}},
                   h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,
                     letterSpacing:1,marginBottom:3}},lbl),
@@ -15469,7 +15573,9 @@ function App(){
                     full:b.full,loc:b.loc||"",status:b.status||"open",
                     // whether their pay runs through you or their own system
                     ownership:b.ownership||"company",
-                    payrollUrl:(b.ownership==="franchise")?(b.payrollUrl||""):""};
+                    payrollUrl:(b.ownership==="franchise")?(b.payrollUrl||""):"",
+                    kioskUrl:(b.ownership==="franchise")?(b.kioskUrl||""):"",
+                    stockUrl:(b.ownership==="franchise")?(b.stockUrl||""):""};
                   const next=b._isNew
                     ? branches.concat([clean])
                     // keep whatever else the record carries — the delivery
@@ -19239,20 +19345,23 @@ function App(){
 
 
         // ══ CA REQUEST ══
+        // A franchise account sees ONLY its own crew — never Main's, never
+        // production's. Everyone else sees Main's HRIS plus the production
+        // crew, who are paid from a different system but still work for Main.
         page==="ca_request"&&h(CALoanPage,{
           user,branchId,curBranch,db,hrisDB,showT,mode:"ca",
-          hrisEmps:hrisEmps.concat(prodEmps),prodStatus,key:"ca_"+user.id
+          hrisEmps:caRoster,prodStatus,key:"ca_"+user.id
         }),
 
         // ══ LOAN REQUEST ══
         page==="loan_request"&&h(CALoanPage,{
           user,branchId,curBranch,db,hrisDB,showT,mode:"loan",
-          hrisEmps:hrisEmps.concat(prodEmps),prodStatus,key:"loan_"+user.id
+          hrisEmps:caRoster,prodStatus,key:"loan_"+user.id
         }),
 
         // ══ HRIS DASHBOARD (Owner) ══
         page==="hris_dash"&&h(HRISDashPage,{
-          user,db,hrisDB,showT,branches,hrisEmps
+          user,db,hrisDB,showT,branches,hrisEmps:caRoster
         }),
 
         // ══ HRIS BRANCH VIEW (Manager) ══
