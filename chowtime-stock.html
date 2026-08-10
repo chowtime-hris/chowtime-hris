@@ -941,11 +941,14 @@ function checkAuditorPin(){
     document.getElementById('auditorPinGateInput').focus();
   }
 }
-function enterAuditor(){
+async function enterAuditor(){
   showMain('mainAuditor');
   document.getElementById('auditorDateLabel').textContent = new Date().toLocaleDateString('en-PH',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
   document.getElementById('auditorNameInput').value = '';
   document.getElementById('auditorResultCard').style.display = 'none';
+  // The POS column is filled from live stock, so it has to be in hand before
+  // the rows are drawn — otherwise every box renders empty and locked.
+  if(!POS_READY){ try{ await loadPosStock(); }catch(e){} }
   renderAuditorItemsList();
 }
 function renderAuditorItemsList(){
@@ -954,16 +957,36 @@ function renderAuditorItemsList(){
   if(!keys.length){ list.innerHTML='<p class="sub">No items in catalog yet.</p>'; return; }
   bref('varianceBaseline').once('value').then(snap=>{
     const baselines = snap.val() || {};
+    // The POS figure is already in the POS — retyping it invited a typo that
+    // then read as a variance nobody could account for. Filled in and locked;
+    // the freezer count is the number the auditor is here to establish.
+    const posOf = (id)=>{
+      const cfg = POS_MAP[id];
+      if(!cfg) return null;
+      const pid = typeof cfg === 'string' ? cfg : cfg.id;
+      const per = typeof cfg === 'object' ? (Number(cfg.per)||1) : 1;
+      if(!pid || POS_STOCK[pid] === undefined) return null;
+      return Math.round((Number(POS_STOCK[pid]) / (per||1)) * 1000) / 1000;
+    };
     keys.forEach(id=>{
       const it = items[id];
       const baseline = baselineValue(baselines[id]);
       const block = document.createElement('div'); block.className='item-block';
       block.innerHTML = `<div class="name">${escapeHtml(it.name)} <span class="unit">(${escapeHtml(it.unit)})</span>${Math.abs(baseline)>0.001?` <span class="hint" style="color:var(--muted);">(current known gap: ${fmt(baseline)})</span>`:''}</div>
         <div class="dual-input">
-          <div class="field"><label>POS Stock</label><input type="number" min="0" step="any" data-item="${id}" data-field="pos" placeholder="0"></div>
+          <div class="field"><label>POS Stock</label><input type="number" min="0" step="any" data-item="${id}" data-field="pos" placeholder="—" readonly style="background:#F1F1F1;color:#555;cursor:not-allowed"></div>
           <div class="field"><label>Freezer Count</label><input type="number" min="0" step="any" data-item="${id}" data-field="freezer" placeholder="0"></div>
         </div>`;
       list.appendChild(block);
+      const posVal = posOf(id);
+      const posInp = block.querySelector('input[data-field="pos"]');
+      if(posVal === null){
+        // Not linked to a POS item, or the stock has not loaded — the auditor
+        // can still count the freezer, and this simply has nothing to compare.
+        posInp.placeholder = 'not linked';
+      }else{
+        posInp.value = posVal;
+      }
     });
   });
 }
@@ -976,8 +999,11 @@ function submitAudit(){
   posInputs.forEach(inp=>{
     const id = inp.dataset.item;
     const freezerInp = document.querySelector(`#auditorItemsList input[data-item="${id}"][data-field="freezer"]`);
-    if(inp.value !== '' && freezerInp.value !== ''){
-      values[id] = {pos: parseFloat(inp.value), freezer: parseFloat(freezerInp.value)};
+    // A locked POS box can be legitimately empty when the item is not linked.
+    // The freezer count is what makes the row an audit.
+    if(freezerInp.value !== ''){
+      values[id] = {pos: (inp.value===''?0:parseFloat(inp.value)),
+                    freezer: parseFloat(freezerInp.value)};
       filled++;
     }
   });
