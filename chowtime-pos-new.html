@@ -14592,6 +14592,14 @@ function App(){
                 &&NAV_META[p]&&GRANTABLE.indexOf(p)>=0);
           let allowed=base.concat(granted);
 
+          // Per-ACCOUNT extras. rolePerms is one setting for a whole role
+          // across the company, and managers skip it entirely — so there was
+          // no way to give ONE manager a page without giving it to all of
+          // them. This only ever adds; it never takes a page away.
+          const _extra=Array.isArray(user&&user.navExtra)?user.navExtra:[];
+          allowed=allowed.concat(
+            _extra.filter(p=>NAV_META[p]&&allowed.indexOf(p)<0));
+
           // A franchise runs its own pay. Their cash advance and loan requests
           // would land in your approval queue and come off your payslips, and
           // the payroll link would open your system — so neither is offered.
@@ -19043,6 +19051,41 @@ function App(){
               h("button",{onClick:()=>{setModal(null);setEditingStaff(null);},
                 style:{background:"none",border:"none",fontSize:20,cursor:"pointer"}},"×")
             ),
+            // Extra pages for THIS account only.
+            (function(){
+              const roleNav=(ROLES[editingStaff.role]&&ROLES[editingStaff.role].nav)||[];
+              const opts=Object.keys(NAV_META).filter(p=>roleNav.indexOf(p)<0);
+              const cur=Array.isArray(editingStaff.navExtra)?editingStaff.navExtra:[];
+              return h("div",{style:{marginBottom:12,background:"#FAFAFA",
+                border:"1px solid "+C.border,borderRadius:9,padding:"10px 11px"}},
+                h("div",{style:{fontSize:11,fontWeight:800,color:C.muted,
+                  letterSpacing:1,marginBottom:3}},"EXTRA PAGES FOR THIS ACCOUNT"),
+                h("div",{style:{fontSize:12,color:C.muted,marginBottom:8,
+                  lineHeight:1.45}},
+                  "On top of what the "
+                  +((ROLES[editingStaff.role]&&ROLES[editingStaff.role].label)||editingStaff.role)
+                  +" role already has. Affects this one account only."),
+                h("div",{style:{display:"flex",gap:5,flexWrap:"wrap"}},
+                  opts.map(p=>{
+                    const on=cur.indexOf(p)>=0;
+                    return h("button",{key:p,
+                      onClick:()=>setEditingStaff(st=>{
+                        const list=Array.isArray(st.navExtra)?st.navExtra.slice():[];
+                        const k=list.indexOf(p);
+                        if(k>=0)list.splice(k,1); else list.push(p);
+                        return Object.assign({},st,{navExtra:list});
+                      }),
+                      style:{padding:"5px 10px",borderRadius:16,fontSize:12,
+                        cursor:"pointer",fontWeight:on?800:500,
+                        border:"1px solid "+(on?C.primary:C.border),
+                        background:on?"#F3E9F7":"#fff",
+                        color:on?C.primary:C.muted}},
+                      (NAV_META[p].icon||"")+" "+NAV_META[p].label);
+                  })),
+                cur.length?null:h("div",{style:{fontSize:12,color:C.muted,
+                  marginTop:7}},"None selected — role default."));
+            })(),
+
             // Name
             h("div",{style:{marginBottom:10}},
               h("div",{style:{fontSize:12,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"NAME"),
@@ -19091,6 +19134,7 @@ function App(){
                       name:editingStaff.name,
                       role:editingStaff.role,
                       branch:editingStaff.branch,
+                      navExtra:Array.isArray(editingStaff.navExtra)?editingStaff.navExtra:[],
                       updatedBy:user.name,
                       updatedAt:serverTimestamp()
                     });
