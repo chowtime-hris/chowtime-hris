@@ -14598,16 +14598,16 @@ function App(){
           const _br=branches.find(b=>b.id===branchId);
           if(_br&&_br.ownership==="franchise"){
             const isMgr=(user?.role==="manager");
+            // A franchise manager runs the same branch a company-owned manager
+            // runs — same pages, same tools. The only difference is WHERE the
+            // external links point: their own payroll, their own kiosk, their
+            // own stock app. Never Main's, and never a fallback to Main's.
             allowed=allowed.filter(p=>{
-              // These open a payroll or stock database. Their own, or the item
-              // is not offered at all — never Main's.
               if(p==="ext_payroll")    return !!_br.payrollUrl;
               if(p==="ext_kiosk")      return !!_br.kioskUrl;
               if(p==="ext_stock")      return !!_br.stockUrl;
+              // Production is Main's own commissary, not a branch tool.
               if(p==="ext_production") return false;
-              // The franchisee is the business — they do not ask themselves
-              // for an advance. Their crew still does.
-              if(p==="ca_request"||p==="loan_request") return !isMgr;
               return true;
             });
             // and they answer their own crew, so they need the queue
