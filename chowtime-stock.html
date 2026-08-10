@@ -953,7 +953,16 @@ async function enterAuditor(){
 }
 function renderAuditorItemsList(){
   const list = document.getElementById('auditorItemsList'); list.innerHTML='';
-  const keys = Object.keys(items).filter(id => !items[id].archived);
+  // Grouped by category, the way the freezer is actually stacked — an auditor
+  // walking one shelf should not have to hunt the list for its items.
+  const catOf = (id)=>String((items[id]||{}).category||'').trim();
+  const keys = Object.keys(items).filter(id => !items[id].archived)
+    .sort((a,b)=>{
+      const ca=catOf(a).toLowerCase(), cb=catOf(b).toLowerCase();
+      // Uncategorised sits at the end rather than jumping to the top.
+      if(ca!==cb) return (ca?ca:'\uffff').localeCompare(cb?cb:'\uffff');
+      return String(items[a].name||'').localeCompare(String(items[b].name||''));
+    });
   if(!keys.length){ list.innerHTML='<p class="sub">No items in catalog yet.</p>'; return; }
   bref('varianceBaseline').once('value').then(snap=>{
     const baselines = snap.val() || {};
@@ -968,8 +977,19 @@ function renderAuditorItemsList(){
       if(!pid || POS_STOCK[pid] === undefined) return null;
       return Math.round((Number(POS_STOCK[pid]) / (per||1)) * 1000) / 1000;
     };
+    let lastCat = null;
     keys.forEach(id=>{
       const it = items[id];
+      const thisCat = catOf(id).toLowerCase();
+      if(thisCat !== lastCat){
+        lastCat = thisCat;
+        const hd = document.createElement('div');
+        hd.style.cssText = 'font-size:11px;font-weight:800;letter-spacing:1px;'
+          + 'color:var(--muted);margin:14px 0 6px;padding-bottom:4px;'
+          + 'border-bottom:1px solid var(--border)';
+        hd.textContent = catOf(id).toUpperCase() || 'UNCATEGORISED';
+        list.appendChild(hd);
+      }
       // Stock is held in the POS in base units because a recipe eats pieces,
       // not packs. The freezer is stacked in packs, so the count is entered
       // the way it is seen and converted here — the stored figure stays in
