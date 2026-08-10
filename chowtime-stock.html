@@ -482,6 +482,17 @@
       <p class="hint">Every date with a count, waste entry or audit. Tap a date to open it below.</p>
       <div id="activityLog"><p class="hint">Loading…</p></div>
     </div>
+
+    <!-- The physical count is the truth in the freezer; until now it stopped
+         here and someone retyped it into the POS by hand. -->
+    <div class="card">
+      <div class="flex-between">
+        <h2>📤 Push audit to POS inventory</h2>
+        <button class="btn ghost" onclick="previewAuditPush()">Preview changes</button>
+      </div>
+      <p class="hint">Uses the audited FREEZER count for the date selected above. It replaces the POS stock and writes an adjustment to the Inv. Log, so the correction is traceable.</p>
+      <div id="auditPushBox"><p class="hint">Pick a date, then tap Preview changes.</p></div>
+    </div>
     <div class="card">
       <div class="flex-between">
         <div><label>Date</label><input type="date" id="datePicker" onchange="loadDay()"></div>
@@ -1723,8 +1734,11 @@ function loadActivityLog(){
       const row = touch(d);
       Object.keys(counts[d]||{}).forEach(cp=>{
         row.cp++;
-        const by = (counts[d][cp]||{}).crew;
-        if(by) row.crew[crewName(by)] = 1;
+        // submitCount() writes countedByName / countedBy — reading `crew`
+        // left this column blank on every row.
+        const rec = counts[d][cp] || {};
+        const who = rec.countedByName || (rec.countedBy ? crewName(rec.countedBy) : '');
+        if(who) row.crew[who] = 1;
       });
     });
     Object.keys(waste).forEach(d=>{ touch(d).waste += Object.keys(waste[d]||{}).length; });
@@ -1750,6 +1764,121 @@ function loadActivityLog(){
       + '</tbody></table></div>';
   })
   .catch(()=>{ box.innerHTML = '<p class="hint">Could not load the log.</p>'; });
+}
+
+// ── PUSH AUDIT → POS INVENTORY ────────────────────────────
+let AUDIT_PUSH_ROWS = [];
+
+async function previewAuditPush(){
+  const box = document.getElementById('auditPushBox');
+  const date = (document.getElementById('datePicker')||{}).value;
+  if(!date){ box.innerHTML = '<p class="hint">Pick a date first.</p>'; return; }
+  box.innerHTML = '<p class="hint">Reading the audit…</p>';
+
+  if(!POS_READY) await loadPosStock();
+  if(!POS_READY){
+    box.innerHTML = '<p class="hint">Not connected to the POS. Link this branch in Setup first.</p>';
+    return;
+  }
+
+  const snap = await bref('audits/'+date).once('value');
+  const audits = snap.val() || {};
+  const stamps = Object.keys(audits).sort();
+  if(!stamps.length){
+    box.innerHTML = '<p class="empty">No audit recorded on '+date+'.</p>';
+    return;
+  }
+  // The last audit of the day is the one that stands.
+  const audit = audits[stamps[stamps.length-1]];
+
+  AUDIT_PUSH_ROWS = [];
+  Object.entries(audit.items||{}).forEach(([id, a])=>{
+    const cfg = POS_MAP[id];
+    if(!cfg) return;                       // not linked — nothing to write to
+    const posId = typeof cfg === 'string' ? cfg : cfg.id;
+    const per   = typeof cfg === 'object' ? (Number(cfg.per)||1) : 1;
+    if(!posId) return;
+    const nowPos   = POS_STOCK[posId];
+    const counted  = Number(a.freezer)||0;
+    const newStock = Math.round(counted * per * 1000)/1000;
+    AUDIT_PUSH_ROWS.push({
+      id, posId, per,
+      name: (items[id]&&items[id].name) || id,
+      unit: (items[id]&&items[id].unit) || '',
+      counted, newStock,
+      prevStock: (nowPos===undefined ? null : Number(nowPos)),
+      diff: (nowPos===undefined ? null : Math.round((newStock-Number(nowPos))*1000)/1000)
+    });
+  });
+
+  const skipped = Object.keys(audit.items||{}).length - AUDIT_PUSH_ROWS.length;
+  if(!AUDIT_PUSH_ROWS.length){
+    box.innerHTML = '<p class="empty">None of the audited items are linked to a POS item.</p>';
+    return;
+  }
+
+  box.innerHTML =
+    '<div class="table-wrap"><table><thead><tr>'
+    + '<th>Item</th><th>POS now</th><th>Counted</th><th>Change</th>'
+    + '</tr></thead><tbody>'
+    + AUDIT_PUSH_ROWS.map(r=>{
+        const d = r.diff;
+        const col = d===null ? 'var(--muted)' : (Math.abs(d)<0.001 ? 'var(--muted)' : (d>0 ? 'var(--good)' : 'var(--danger)'));
+        return '<tr><td><strong>'+r.name+'</strong></td>'
+          + '<td>'+(r.prevStock===null?'—':r.prevStock)+'</td>'
+          + '<td>'+r.newStock+'</td>'
+          + '<td style="color:'+col+';font-weight:700">'
+          +   (d===null ? '—' : (d>0?'+':'')+d) + '</td></tr>';
+      }).join('')
+    + '</tbody></table></div>'
+    + (skipped ? '<p class="hint">'+skipped+' audited item'+(skipped>1?'s':'')+' not linked to the POS — skipped.</p>' : '')
+    + '<button class="btn" style="margin-top:10px" onclick="applyAuditPush(\''+date+'\',\''+(audit.auditedBy||'')+'\')">'
+    + '📤 Apply to POS inventory</button>';
+}
+
+async function applyAuditPush(date, auditedBy){
+  if(!AUDIT_PUSH_ROWS.length) return;
+  if(!confirm('Set the POS stock of '+AUDIT_PUSH_ROWS.length+' item'
+    +(AUDIT_PUSH_ROWS.length>1?'s':'')+' to the counted figures from '+date+'?'
+    +'\n\nThe previous stock is kept in the Inv. Log as an adjustment.')) return;
+
+  const box = document.getElementById('auditPushBox');
+  box.innerHTML = '<p class="hint">Writing to the POS…</p>';
+
+  const fs = posDB();
+  if(!fs){ box.innerHTML = '<p class="hint">Lost the POS connection. Nothing was written.</p>'; return; }
+  const invCol = posInvCollection(POS_BRANCH);
+  const logCol = (POS_BRANCH==='ct-main'||POS_BRANCH==='main')
+    ? 'inventory_log' : 'inventory_log_'+POS_BRANCH;
+
+  let ok=0, bad=0;
+  for(const r of AUDIT_PUSH_ROWS){
+    try{
+      await fs.collection(invCol).doc(r.posId).update({ stock: r.newStock });
+      // The adjustment, not just the new number: the Inv. Log has to answer
+      // where a figure came from months later.
+      await fs.collection(logCol).add({
+        itemId: r.posId, itemName: r.name, unit: r.unit,
+        type: 'adjust',
+        amount: (r.diff===null ? 0 : r.diff),
+        prevStock: r.prevStock, newStock: r.newStock,
+        desc: 'Freezer audit '+date+' — counted '+r.counted+' '+(r.unit||''),
+        source: 'freezer_audit',
+        reason: 'Physical count on '+date+(auditedBy?' by '+auditedBy:''),
+        ref: date,
+        date: date,
+        branch: POS_BRANCH,
+        by: (auditedBy||'Freezer audit'),
+        at: firebase.firestore.FieldValue.serverTimestamp(),
+        timestamp: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      ok++;
+    }catch(e){ console.error('audit push', r.posId, e); bad++; }
+  }
+  await loadPosStock();
+  box.innerHTML = '<p class="hint">'+ok+' item'+(ok===1?'':'s')+' updated'
+    + (bad ? ' · '+bad+' failed' : '') + '. Check the POS Inv. Log for the entries.</p>';
+  toast(ok+' POS item'+(ok===1?'':'s')+' updated from the audit');
 }
 
 function openDay(d){
