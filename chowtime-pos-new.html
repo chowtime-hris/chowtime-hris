@@ -14612,9 +14612,11 @@ function App(){
             });
             // and they answer their own crew, so they need the queue
             if(isMgr&&allowed.indexOf("hris_dash")<0) allowed.push("hris_dash");
-          } else {
+          } else if(user?.role==="manager"){
             // A company-owned branch is paid from Main's payroll, which the
-            // branch manager has no business opening.
+            // BRANCH MANAGER has no business opening. This used to strip it
+            // from everyone outside a franchise — including the owner, who
+            // lost their own payroll link.
             allowed=allowed.filter(p=>p!=="ext_payroll");
           }
 
