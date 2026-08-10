@@ -15403,16 +15403,23 @@ function App(){
         // then the manager account. Both on one screen meant scrolling past
         // half a form before reaching Save.
         editBr&&(function(){
-        const brStep=editBr._isNew?(editBr._step||1):1;
+        // Editing was one long screen: fields, franchise links, sign-ins and
+        // status all at once. Same steps as adding, and the franchise step
+        // only exists when the branch is one.
+        const _isFr=(editBr.ownership==="franchise");
+        const brSteps=["Branch"].concat(_isFr?["Franchise"]:[])
+          .concat([editBr._isNew?"Manager":"Users"]);
+        const brStep=Math.min(editBr._step||1,brSteps.length);
+        const stepName=brSteps[brStep-1];
         return h("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",
           display:"flex",alignItems:"center",justifyContent:"center",zIndex:900,padding:16},
           onClick:e=>e.target===e.currentTarget&&setEditBr(null)},
           h("div",{style:{background:"#fff",width:380,borderRadius:14,padding:"18px"}},
             h("div",{style:{fontSize:14,fontWeight:800,marginBottom:4}},
               editBr._isNew?"➕ New Branch":"✏️ Edit Branch"),
-            editBr._isNew&&h("div",{style:{display:"flex",gap:6,
+            h("div",{style:{display:"flex",gap:6,
               alignItems:"center",marginBottom:13}},
-              [[1,"Branch"],[2,"Manager"]].map(([n,l])=>
+              brSteps.map((l,i)=>[i+1,l]).map(([n,l])=>
                 h("div",{key:n,style:{flex:1,padding:"5px 0",textAlign:"center",
                   fontSize:12,fontWeight:brStep===n?800:500,
                   color:brStep===n?C.primary:C.muted,
@@ -15422,7 +15429,7 @@ function App(){
               [["id","BRANCH ID (e.g. ct-wsfp)",!!editBr._isNew],
                ["name","SHORT CODE (e.g. CT-WSFP)",true],
                ["full","FULL NAME",true],
-               ["loc","LOCATION",true]].map(([k,lbl,editable])=>brStep!==1?null:
+               ["loc","LOCATION",true]].map(([k,lbl,editable])=>stepName!=="Branch"?null:
                 h("div",{key:k},
                   h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,
                     letterSpacing:1,marginBottom:3}},lbl),
@@ -15449,7 +15456,7 @@ function App(){
                       color:editable?C.text:C.muted}}),
                   k==="id"&&!editBr._isNew&&h("div",{style:{fontSize:12,color:C.muted,marginTop:2}},
                     "Cannot be changed — orders and inventory are tagged to it"))),
-              brStep===1&&h("div",null,
+              stepName==="Branch"&&h("div",null,
                 h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,
                   letterSpacing:1,marginBottom:3}},"OWNERSHIP"),
                 h("div",{style:{display:"flex",gap:8}},
@@ -15474,7 +15481,7 @@ function App(){
                     : "You run their payroll. Cash advance and loan requests "
                       +"come to you for approval and land on your payslips.")),
 
-              brStep===1&&(editBr.ownership==="franchise")&&h("div",null,
+              stepName==="Franchise"&&h("div",null,
                 h("div",{style:{fontSize:11,color:C.muted,marginBottom:8,
                   background:C.bg,borderRadius:8,padding:"9px 11px",
                   lineHeight:1.6}},
@@ -15485,10 +15492,10 @@ function App(){
                 // the branch with nothing said. This states what is missing
                 // and what it costs them.
                 (function(){
-                  const rows=[["payrollUrl","Payroll System"],
-                              ["kioskUrl","Time Clock"],
-                              ["stockUrl","Freezer Count"],
-                              ["hrisUrl","Payroll database"]];
+                  const rows=[["payrollUrl","Payroll System","hidden from their nav until this is set"],
+                              ["kioskUrl","Time Clock","hidden from their nav until this is set"],
+                              ["stockUrl","Freezer Count","hidden from their nav until this is set"],
+                              ["hrisUrl","Payroll database","approved cash advances will not reach their payroll"]];
                   const missing=rows.filter(([k])=>!editBr[k]);
                   return h("div",{style:{background:missing.length?"#FFF8E1":"#E8F5E9",
                     border:"1px solid "+(missing.length?"#FFE082":"#A5D6A7"),
@@ -15498,10 +15505,10 @@ function App(){
                       missing.length
                         ? missing.length+" of 4 still to set"
                         : "Setup complete"),
-                    rows.map(([k,label])=>h("div",{key:k,
+                    rows.map(([k,label,why])=>h("div",{key:k,
                       style:{color:editBr[k]?C.success:C.muted}},
                       (editBr[k]?"✅ ":"⬜ ")+label
-                      +(editBr[k]?"":" — hidden from their nav until this is set"))));
+                      +(editBr[k]?"":" — "+why))));
                 })(),
                 [["payrollUrl","THEIR PAYROLL LINK",
                   "https://…/chowtime-payroll-wcap.html"],
@@ -15537,7 +15544,7 @@ function App(){
               // Editing an existing branch showed no sign of who signs into
               // it — the login was only ever visible at the moment of
               // creation, so a forgotten address meant guessing.
-              !editBr._isNew&&(function(){
+              stepName==="Users"&&(function(){
                 const mine=(staff||[]).filter(x=>x.branch===editBr.id);
                 const mgrs=mine.filter(x=>x.role==="manager");
                 const rest=mine.filter(x=>x.role!=="manager");
@@ -15572,7 +15579,7 @@ function App(){
                 );
               })(),
 
-              editBr._isNew&&brStep===2&&h("div",{style:{background:"#FFFDE7",
+              stepName==="Manager"&&h("div",{style:{background:"#FFFDE7",
                 border:"1px solid #FFE082",borderRadius:9,padding:"10px 11px"}},
                 h("div",{style:{fontSize:12,fontWeight:800,color:"#BF360C",
                   letterSpacing:1,marginBottom:3}},"BRANCH MANAGER ACCOUNT"),
@@ -15594,7 +15601,7 @@ function App(){
                         outline:"none",boxSizing:"border-box",
                         border:"1px solid "+C.border}})))
               ),
-              brStep===1&&h("div",null,
+              stepName==="Branch"&&h("div",null,
                 h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,
                   letterSpacing:1,marginBottom:3}},"STATUS"),
                 h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}},
@@ -15610,23 +15617,25 @@ function App(){
             ),
             h("div",{style:{display:"flex",gap:8,marginTop:16}},
               h("button",{onClick:()=>{
-                  if(brStep===2)setEditBr(p=>Object.assign({},p,{_step:1}));
+                  if(brStep>1)setEditBr(p=>Object.assign({},p,{_step:brStep-1}));
                   else setEditBr(null);
                 },
                 style:{flex:1,padding:"10px",borderRadius:9,border:"1px solid "+C.border,
                   background:"#fff",fontSize:14,cursor:"pointer"}},
-                brStep===2?"← Back":"Cancel"),
-              (editBr._isNew&&brStep===1)&&h("button",{
+                brStep>1?"← Back":"Cancel"),
+              // Save sits on the last step only, so a half-filled franchise
+              // block cannot be saved by reflex on the way past it.
+              (brStep<brSteps.length)&&h("button",{
                 onClick:()=>{
                   if(!editBr.id||!editBr.full){
                     showT("ID and full name are required","warn");return;
                   }
-                  setEditBr(p=>Object.assign({},p,{_step:2}));
+                  setEditBr(p=>Object.assign({},p,{_step:brStep+1}));
                 },
                 style:{flex:1,padding:"10px",borderRadius:9,border:"none",
                   background:C.primary,color:"#fff",fontSize:14,fontWeight:800,
-                  cursor:"pointer"}},"Next →"),
-              (!editBr._isNew||brStep===2)&&h("button",{
+                  cursor:"pointer"}},"Next → "+brSteps[brStep]),
+              (brStep===brSteps.length)&&h("button",{
                 onClick:async()=>{
                   const b=editBr;
                   if(!b.id||!b.full){showT("ID and full name are required","warn");return;}
