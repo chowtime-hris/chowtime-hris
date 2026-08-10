@@ -1014,12 +1014,32 @@ import{initializeApp}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-ap
 import{getDatabase,ref,push,set,onValue}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js';
 
 // ── Firebase config — hardcoded so it always connects ──
-const HARDCODED_FB_CFG = {
+// ─── TENANTS ─────────────────────────────────────────────
+// One file, many clock-ins. ?p=<code> picks WHICH DATABASE to open — never a
+// mix: a tenant's kiosk only ever writes to its own project.
+const TENANTS = {
+  wcap: {
+    name:        'CFFC-WCAP',
+    apiKey:      'AIzaSyCP8vgcMjy5c6etUUKWp9dE5M3JbzAqWFA',
+    authDomain:  'cffc-wcap.firebaseapp.com',
+    projectId:   'cffc-wcap',
+    databaseURL: 'https://cffc-wcap-default-rtdb.asia-southeast1.firebasedatabase.app',
+    appId:       '1:1012135463767:web:48c0677761f420779ecc12',
+  },
+  // Add one line per franchise. Nothing else in this file changes.
+};
+
+const MAIN_FB_CFG = {
+  name:        'Chowtime Main',
   apiKey:      'AIzaSyB8PlWl-qfmAn2GDdrJ1Y5pZQs4RAjhTo4',
   projectId:   'chowtime-hris',
   databaseURL: 'https://chowtime-hris-default-rtdb.asia-southeast1.firebasedatabase.app',
   appId:       '1:443134962503:web:7959dc5a6c9cbc967d7a62',
 };
+
+const TENANT_CODE = (new URLSearchParams(location.search).get('p')||'').trim().toLowerCase();
+const TENANT = TENANT_CODE ? TENANTS[TENANT_CODE] : MAIN_FB_CFG;
+const HARDCODED_FB_CFG = TENANT || MAIN_FB_CFG;
 const savedCfg = JSON.parse(localStorage.getItem('ct_firebase_cfg')||'null');
 const fbCfg = savedCfg?.apiKey ? savedCfg : HARDCODED_FB_CFG;
 // Save merged config back
@@ -1031,10 +1051,9 @@ if(!fbCfg?.apiKey||!fbCfg?.databaseURL){
 }else{
   try{
     window.setLoadingProgress && window.setLoadingProgress(40,'Connecting to Firebase…');
-    const app=initializeApp({
-      apiKey:fbCfg.apiKey,authDomain:`${fbCfg.projectId}.firebaseapp.com`,
-      databaseURL:fbCfg.databaseURL,projectId:fbCfg.projectId,appId:fbCfg.appId,
-    });
+    // Built from the tenant the ?p= code selected, not from whatever config
+    // happens to be cached on this device.
+    const app=initializeApp(HARDCODED_FB_CFG);
     const db=getDatabase(app);
     window._fbDB=db; window._fbFns={ref,push,set};
     window.setLoadingProgress && window.setLoadingProgress(65,'Loading employees…');

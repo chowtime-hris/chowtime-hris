@@ -15481,6 +15481,28 @@ function App(){
                   "Their database details are stored separately from the branch "+
                   "list, so a cashier reading the sidebar never sees them. "+
                   "Re-enter them here if you change them."),
+                // Six fields, and a blank one just makes a nav item vanish for
+                // the branch with nothing said. This states what is missing
+                // and what it costs them.
+                (function(){
+                  const rows=[["payrollUrl","Payroll System"],
+                              ["kioskUrl","Time Clock"],
+                              ["stockUrl","Freezer Count"],
+                              ["hrisUrl","Payroll database"]];
+                  const missing=rows.filter(([k])=>!editBr[k]);
+                  return h("div",{style:{background:missing.length?"#FFF8E1":"#E8F5E9",
+                    border:"1px solid "+(missing.length?"#FFE082":"#A5D6A7"),
+                    borderRadius:9,padding:"9px 11px",fontSize:12,
+                    lineHeight:1.6}},
+                    h("b",{style:{color:missing.length?"#BF360C":C.success}},
+                      missing.length
+                        ? missing.length+" of 4 still to set"
+                        : "Setup complete"),
+                    rows.map(([k,label])=>h("div",{key:k,
+                      style:{color:editBr[k]?C.success:C.muted}},
+                      (editBr[k]?"✅ ":"⬜ ")+label
+                      +(editBr[k]?"":" — hidden from their nav until this is set"))));
+                })(),
                 [["payrollUrl","THEIR PAYROLL LINK",
                   "https://…/chowtime-payroll-wcap.html"],
                  // The kiosk and the stock app write into their databases too.

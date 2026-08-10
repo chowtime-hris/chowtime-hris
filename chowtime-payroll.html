@@ -4056,12 +4056,113 @@ import{initializeApp}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-ap
 import{getDatabase,ref,set,onValue,remove}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js';
 
 // ── Firebase config — hardcoded so it never needs localStorage ──
-const HARDCODED_FB_CFG = {
+// ─── TENANTS ─────────────────────────────────────────────
+// One file, many payrolls. ?p=<code> picks WHICH DATABASE to open — it never
+// mixes them: a tenant's app only ever reads and writes its own project.
+//
+// Ten franchises used to mean ten copies of this file, so one fix meant ten
+// uploads and one forgotten upload meant a branch running old code.
+const TENANTS = {
+  wcap: {
+    name:        'CFFC-WCAP',
+    apiKey:      'AIzaSyCP8vgcMjy5c6etUUKWp9dE5M3JbzAqWFA',
+    authDomain:  'cffc-wcap.firebaseapp.com',
+    projectId:   'cffc-wcap',
+    databaseURL: 'https://cffc-wcap-default-rtdb.asia-southeast1.firebasedatabase.app',
+    appId:       '1:1012135463767:web:48c0677761f420779ecc12',
+  },
+  // Add one line per franchise. Nothing else in this file changes.
+};
+
+const MAIN_FB_CFG = {
+  name:        'Chowtime Main',
   apiKey:      'AIzaSyB8PlWl-qfmAn2GDdrJ1Y5pZQs4RAjhTo4',
   projectId:   'chowtime-hris',
   databaseURL: 'https://chowtime-hris-default-rtdb.asia-southeast1.firebasedatabase.app',
   appId:       '1:443134962503:web:7959dc5a6c9cbc967d7a62',
 };
+
+
+// ─── ACCESS GATE ─────────────────────────────────────────
+// A link is not a password. Anyone handed one payroll link could edit the
+// query string and open another franchise's. This asks for a passcode before
+// the app connects, and remembers it on the device.
+//
+// What it stores is a SHA-256 hash, so reading the database does not reveal
+// the code. It is a lock on the door — the safe is the Firebase rules, which
+// still have to be closed.
+async function ctSha(text){
+  const b = new TextEncoder().encode(text);
+  const h = await crypto.subtle.digest('SHA-256', b);
+  return Array.from(new Uint8Array(h)).map(x=>x.toString(16).padStart(2,'0')).join('');
+}
+
+async function ctUnlock(cfg){
+  const key = 'ct_unlocked_' + (cfg.projectId||'main');
+  const { initializeApp:initA } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js');
+  const { getDatabase:getDB, ref:r, get:g, set:st } =
+    await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js');
+
+  let probe;
+  try{ probe = initA(cfg, 'gate-'+(cfg.projectId||'main')); }
+  catch(e){ return true; }          // cannot check — do not lock anyone out
+  const gdb = getDB(probe);
+
+  let stored = null;
+  try{
+    const snap = await g(r(gdb, 'config/accessHash'));
+    stored = snap.exists() ? snap.val() : null;
+  }catch(e){ return true; }         // unreachable — same reasoning
+
+  // Nothing set yet: first person in chooses the code.
+  if(!stored){
+    const set1 = prompt('Set a passcode for ' + (cfg.name||'this payroll')
+      + '\n\nEveryone opening this link will need it. Minimum 6 characters.');
+    if(!set1 || set1.length < 6){ ctLocked(cfg, 'A passcode of at least 6 characters is required.'); return false; }
+    try{ await st(r(gdb,'config/accessHash'), await ctSha(set1)); }
+    catch(e){ ctLocked(cfg, 'Could not save the passcode.'); return false; }
+    try{ localStorage.setItem(key, await ctSha(set1)); }catch(e){}
+    return true;
+  }
+
+  // Already unlocked on this device.
+  try{ if(localStorage.getItem(key) === stored) return true; }catch(e){}
+
+  for(let tries = 3; tries > 0; tries--){
+    const entered = prompt('Passcode for ' + (cfg.name||'this payroll')
+      + (tries < 3 ? '\n\nWrong passcode — ' + tries + ' left.' : ''));
+    if(entered === null) break;
+    if(await ctSha(entered) === stored){
+      try{ localStorage.setItem(key, stored); }catch(e){}
+      return true;
+    }
+  }
+  ctLocked(cfg, 'Wrong passcode.');
+  return false;
+}
+
+function ctLocked(cfg, why){
+  document.body.innerHTML =
+    '<div style="font-family:system-ui;padding:48px 24px;text-align:center;color:#111">'
+    + '<div style="font-size:40px">\uD83D\uDD12</div>'
+    + '<h2 style="margin:12px 0 6px">' + (cfg.name||'Payroll') + '</h2>'
+    + '<p style="color:#666;margin:0 0 18px">' + why + '</p>'
+    + '<button onclick="location.reload()" style="padding:10px 22px;border:none;'
+    + 'border-radius:9px;background:#5B2C87;color:#fff;font-weight:700;'
+    + 'cursor:pointer">Try again</button></div>';
+}
+
+const TENANT_CODE = (new URLSearchParams(location.search).get('p')||'').trim().toLowerCase();
+const TENANT = TENANT_CODE ? TENANTS[TENANT_CODE] : MAIN_FB_CFG;
+if(TENANT_CODE && !TENANT){
+  document.addEventListener('DOMContentLoaded',()=>{
+    document.body.innerHTML =
+      '<div style="font-family:system-ui;padding:40px;text-align:center">'
+      + '<h2>Unknown payroll code</h2><p>“'+TENANT_CODE+'” is not set up. '
+      + 'Ask Main for the correct link.</p></div>';
+  });
+}
+const HARDCODED_FB_CFG = TENANT || MAIN_FB_CFG;
 const fbCfg = JSON.parse(localStorage.getItem('ct_firebase_cfg') || 'null') || HARDCODED_FB_CFG;
 localStorage.setItem('ct_firebase_cfg', JSON.stringify({...HARDCODED_FB_CFG, branch: fbCfg.branch || 'HR Admin'}));
 
@@ -4083,6 +4184,12 @@ function updateFirebaseBadge(connected) {
 
 try {
   // Handle case where Firebase app already initialized
+  // The passcode gate runs before anything is drawn or read. Top-level
+  // module scope, so a bare return is not available — throw to stop the
+  // rest of the boot instead.
+  const _ok = await ctUnlock(HARDCODED_FB_CFG);
+  if(!_ok) throw new Error("locked");
+
   let app;
   try { app = initializeApp(HARDCODED_FB_CFG); }
   catch(e) {
