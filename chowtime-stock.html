@@ -970,12 +970,29 @@ function renderAuditorItemsList(){
     };
     keys.forEach(id=>{
       const it = items[id];
+      // Stock is held in the POS in base units because a recipe eats pieces,
+      // not packs. The freezer is stacked in packs, so the count is entered
+      // the way it is seen and converted here — the stored figure stays in
+      // base units and nothing downstream has to know the difference.
+      const fps = Number(it.freezerPackSize) || 0;
       const baseline = baselineValue(baselines[id]);
       const block = document.createElement('div'); block.className='item-block';
       block.innerHTML = `<div class="name">${escapeHtml(it.name)} <span class="unit">(${escapeHtml(it.unit)})</span>${Math.abs(baseline)>0.001?` <span class="hint" style="color:var(--muted);">(current known gap: ${fmt(baseline)})</span>`:''}</div>
         <div class="dual-input">
-          <div class="field"><label>POS Stock</label><input type="number" min="0" step="any" data-item="${id}" data-field="pos" placeholder="—" readonly style="background:#F1F1F1;color:#555;cursor:not-allowed"></div>
-          <div class="field"><label>Freezer Count</label><input type="number" min="0" step="any" data-item="${id}" data-field="freezer" placeholder="0"></div>
+          <div class="field"><label>POS Stock${it.unit?' ('+escapeHtml(it.unit)+')':''}</label><input type="number" min="0" step="any" data-item="${id}" data-field="pos" placeholder="—" readonly style="background:#F1F1F1;color:#555;cursor:not-allowed"><div class="hint" data-item="${id}" data-field="posbreak" style="margin-top:3px"></div></div>
+          ${fps>1
+            ? `<div class="field"><label>Freezer Count</label>
+                 <div style="display:flex;gap:6px;align-items:flex-end">
+                   <div style="flex:1"><div class="hint" style="margin-bottom:2px">PACKS</div>
+                     <input type="number" min="0" step="any" data-item="${id}" data-field="packs" placeholder="0" style="width:100%"></div>
+                   <div style="padding-bottom:10px;color:var(--muted)">+</div>
+                   <div style="flex:1"><div class="hint" style="margin-bottom:2px">LOOSE ${escapeHtml(it.unit||'PC')}</div>
+                     <input type="number" min="0" step="any" data-item="${id}" data-field="loose" placeholder="0" style="width:100%"></div>
+                 </div>
+                 <div class="hint" data-item="${id}" data-field="total" style="margin-top:3px">1 pack = ${fmt(fps)} ${escapeHtml(it.unit||'pc')}</div>
+                 <input type="hidden" data-item="${id}" data-field="freezer" value="">
+               </div>`
+            : `<div class="field"><label>Freezer Count${it.unit?' ('+escapeHtml(it.unit)+')':''}</label><input type="number" min="0" step="any" data-item="${id}" data-field="freezer" placeholder="0"></div>`}
         </div>`;
       list.appendChild(block);
       const posVal = posOf(id);
@@ -986,6 +1003,37 @@ function renderAuditorItemsList(){
         posInp.placeholder = 'not linked';
       }else{
         posInp.value = posVal;
+        // Same figure the auditor is looking at in the freezer: how many full
+        // packs it should be, and what should be loose.
+        const brk = block.querySelector('[data-field="posbreak"]');
+        if(brk && fps > 1){
+          const pk = Math.floor(posVal / fps);
+          const lo = Math.round((posVal - pk*fps)*1000)/1000;
+          brk.textContent = pk + ' pack' + (lo ? ' + ' + fmt(lo) + ' ' + (it.unit||'pc') : '');
+        }
+      }
+
+      // Live total as the two boxes are typed, and the hidden field the rest
+      // of the audit reads.
+      if(fps > 1){
+        const pIn = block.querySelector('[data-field="packs"]');
+        const lIn = block.querySelector('[data-field="loose"]');
+        const tot = block.querySelector('[data-field="total"]');
+        const hid = block.querySelector('input[data-field="freezer"]');
+        const recalc = ()=>{
+          const pk = Number(pIn.value)||0, lo = Number(lIn.value)||0;
+          if(pIn.value==='' && lIn.value===''){
+            hid.value = '';
+            tot.textContent = '1 pack = ' + fmt(fps) + ' ' + (it.unit||'pc');
+            return;
+          }
+          const total = Math.round((pk*fps + lo)*1000)/1000;
+          hid.value = total;
+          tot.textContent = pk + ' \u00D7 ' + fmt(fps)
+            + (lo ? ' + ' + fmt(lo) : '') + ' = ' + fmt(total) + ' ' + (it.unit||'pc');
+        };
+        pIn.addEventListener('input', recalc);
+        lIn.addEventListener('input', recalc);
       }
     });
   });
@@ -1001,9 +1049,19 @@ function submitAudit(){
     const freezerInp = document.querySelector(`#auditorItemsList input[data-item="${id}"][data-field="freezer"]`);
     // A locked POS box can be legitimately empty when the item is not linked.
     // The freezer count is what makes the row an audit.
-    if(freezerInp.value !== ''){
+    if(freezerInp && freezerInp.value !== ''){
+      // packs/loose are recorded alongside so the audit shows how the figure
+      // was reached; `freezer` stays the converted base-unit total, which is
+      // what the variance and the POS push both read.
+      const pIn = document.querySelector(`#auditorItemsList input[data-item="${id}"][data-field="packs"]`);
+      const lIn = document.querySelector(`#auditorItemsList input[data-item="${id}"][data-field="loose"]`);
       values[id] = {pos: (inp.value===''?0:parseFloat(inp.value)),
                     freezer: parseFloat(freezerInp.value)};
+      if(pIn||lIn){
+        values[id].packs = Number(pIn&&pIn.value)||0;
+        values[id].loose = Number(lIn&&lIn.value)||0;
+        values[id].packSize = Number((items[id]||{}).freezerPackSize)||0;
+      }
       filled++;
     }
   });
@@ -1017,6 +1075,11 @@ function submitAudit(){
       const priorBaseline = baselineValue(baselines[id]);
       const variance = v.pos - v.freezer;
       auditItems[id] = {pos: v.pos, freezer: v.freezer, priorBaseline, variance};
+      if(v.packs !== undefined){
+        auditItems[id].packs = v.packs;
+        auditItems[id].loose = v.loose;
+        auditItems[id].packSize = v.packSize;
+      }
     });
     const payload = { items: auditItems, auditedBy: auditorName, timestamp: auditTimestamp };
     return Promise.all([
