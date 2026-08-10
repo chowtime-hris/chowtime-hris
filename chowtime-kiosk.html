@@ -1037,6 +1037,158 @@ const MAIN_FB_CFG = {
   appId:       '1:443134962503:web:7959dc5a6c9cbc967d7a62',
 };
 
+// ─── SIGN IN ─────────────────────────────────────────────
+// A link is not a password: anyone holding one payroll link could edit the
+// query string and open another franchise's. This asks for a username and
+// password before the app connects to anything.
+//
+// Accounts live in that tenant's own database under config/users, and only a
+// SHA-256 hash of the password is stored — reading the database does not
+// reveal it. This is a lock on the door; the Firebase rules are the safe.
+async function ctSha(text){
+  const b = new TextEncoder().encode(text);
+  const h = await crypto.subtle.digest('SHA-256', b);
+  return Array.from(new Uint8Array(h)).map(x=>x.toString(16).padStart(2,'0')).join('');
+}
+
+function ctScreen(title, sub, fields, actionLabel, onSubmit, secondary){
+  return new Promise(resolve=>{
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#F5F3F7;'
+      + 'display:flex;align-items:center;justify-content:center;padding:20px;'
+      + 'font-family:system-ui,-apple-system,"Segoe UI",sans-serif';
+    wrap.innerHTML =
+      '<div style="background:#fff;border-radius:16px;padding:28px 26px;width:360px;'
+      + 'max-width:100%;box-shadow:0 18px 50px rgba(0,0,0,.14)">'
+      + '<div style="text-align:center;margin-bottom:18px">'
+      +   '<div style="font-size:15px;font-weight:800;letter-spacing:1px;color:#5B2C87">CHOWTIME</div>'
+      +   '<div style="font-size:19px;font-weight:800;margin-top:6px">'+title+'</div>'
+      +   '<div style="font-size:13px;color:#6B6B6B;margin-top:5px;line-height:1.5">'+sub+'</div>'
+      + '</div>'
+      + fields.map(f=>
+          '<div style="margin-bottom:11px">'
+          + '<div style="font-size:11px;font-weight:700;color:#6B6B6B;letter-spacing:1px;'
+          +   'margin-bottom:5px">'+f.label+'</div>'
+          + '<input id="'+f.id+'" type="'+(f.type||'text')+'" autocomplete="off" '
+          +   'style="width:100%;padding:11px 12px;border:1px solid #DDD;border-radius:9px;'
+          +   'font-size:15px;outline:none;box-sizing:border-box">'
+          + '</div>').join('')
+      + '<div id="ctErr" style="display:none;font-size:12px;color:#C62828;font-weight:700;'
+      +   'margin:2px 0 10px"></div>'
+      + '<button id="ctGo" style="width:100%;padding:12px;border:none;border-radius:10px;'
+      +   'background:#5B2C87;color:#fff;font-size:15px;font-weight:800;cursor:pointer">'
+      +   actionLabel + '</button>'
+      + (secondary
+          ? '<button id="ctAlt" style="width:100%;margin-top:9px;padding:10px;'
+            + 'border:none;background:none;color:#5B2C87;font-size:13px;'
+            + 'font-weight:700;cursor:pointer">' + secondary.text + '</button>'
+          : '')
+      + '</div>';
+    document.body.appendChild(wrap);
+
+    const err = wrap.querySelector('#ctErr');
+    const fail = (msg)=>{ err.textContent = msg; err.style.display = 'block'; };
+    const go = async ()=>{
+      const vals = {};
+      fields.forEach(f=>{ vals[f.id] = wrap.querySelector('#'+f.id).value; });
+      const res = await onSubmit(vals, fail);
+      if(res){ wrap.remove(); resolve(true); }
+    };
+    wrap.querySelector('#ctGo').onclick = go;
+    if(secondary){
+      wrap.querySelector('#ctAlt').onclick = async ()=>{
+        wrap.remove();
+        resolve(await secondary.run());
+      };
+    }
+    wrap.addEventListener('keydown', e=>{ if(e.key === 'Enter') go(); });
+    const first = wrap.querySelector('input');
+    if(first) setTimeout(()=>first.focus(), 60);
+  });
+}
+
+async function ctUnlock(cfg){
+  const label = cfg.name || 'Payroll';
+  const key   = 'ct_signin_' + (cfg.projectId || 'main');
+
+  const { initializeApp:initA } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js');
+  const { getDatabase:getDB, ref:r, get:g, set:st } =
+    await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js');
+
+  let gdb;
+  try{ gdb = getDB(initA(cfg, 'gate-' + (cfg.projectId||'main'))); }
+  catch(e){ return true; }              // cannot check — never lock anyone out
+
+  let users = null;
+  try{
+    const snap = await g(r(gdb, 'config/users'));
+    users = snap.exists() ? (snap.val() || {}) : null;
+  }catch(e){ return true; }             // unreachable — same reasoning
+
+  // Nobody set up yet: the first person in creates the admin account.
+  if(!users || !Object.keys(users).length){
+    return ctScreen(label, 'No account exists yet. Create the first one — you will use it every time you open this link.',
+      [{id:'u', label:'USERNAME'},
+       {id:'p', label:'PASSWORD', type:'password'},
+       {id:'p2',label:'CONFIRM PASSWORD', type:'password'}],
+      'Create account',
+      async (v, fail)=>{
+        const u = (v.u||'').trim().toLowerCase();
+        if(u.length < 3){ fail('Username must be at least 3 characters.'); return false; }
+        if((v.p||'').length < 6){ fail('Password must be at least 6 characters.'); return false; }
+        if(v.p !== v.p2){ fail('The two passwords do not match.'); return false; }
+        const hash = await ctSha(v.p);
+        try{ await st(r(gdb, 'config/users/' + u), { hash: hash, createdAt: Date.now() }); }
+        catch(e){ fail('Could not save the account. Check your connection.'); return false; }
+        try{ localStorage.setItem(key, u + '|' + hash); }catch(e){}
+        return true;
+      });
+  }
+
+  // Already signed in on this device.
+  try{
+    const saved = (localStorage.getItem(key) || '').split('|');
+    if(saved.length === 2 && users[saved[0]] && users[saved[0]].hash === saved[1]) return true;
+  }catch(e){}
+
+  const signIn = ()=> ctScreen(label, 'Sign in to continue.',
+    [{id:'u', label:'USERNAME'},
+     {id:'p', label:'PASSWORD', type:'password'}],
+    'Sign in',
+    async (v, fail)=>{
+      const u = (v.u||'').trim().toLowerCase();
+      const rec = users[u];
+      if(!rec){ fail('No such username.'); return false; }
+      if(await ctSha(v.p||'') !== rec.hash){ fail('Wrong password.'); return false; }
+      try{ localStorage.setItem(key, u + '|' + rec.hash); }catch(e){}
+      return true;
+    },
+    // Changing it needs the old one. Nobody can reset another person's
+    // password from this screen, and nothing is emailed anywhere.
+    { text:'Change password', run: ()=> ctScreen(label, 'Change your password.',
+        [{id:'u',  label:'USERNAME'},
+         {id:'p',  label:'CURRENT PASSWORD', type:'password'},
+         {id:'n',  label:'NEW PASSWORD', type:'password'},
+         {id:'n2', label:'CONFIRM NEW PASSWORD', type:'password'}],
+        'Change password',
+        async (v, fail)=>{
+          const u = (v.u||'').trim().toLowerCase();
+          const rec = users[u];
+          if(!rec){ fail('No such username.'); return false; }
+          if(await ctSha(v.p||'') !== rec.hash){ fail('Current password is wrong.'); return false; }
+          if((v.n||'').length < 6){ fail('New password must be at least 6 characters.'); return false; }
+          if(v.n !== v.n2){ fail('The two new passwords do not match.'); return false; }
+          const hash = await ctSha(v.n);
+          try{ await st(r(gdb, 'config/users/' + u + '/hash'), hash); }
+          catch(e){ fail('Could not save. Check your connection.'); return false; }
+          users[u].hash = hash;
+          try{ localStorage.setItem(key, u + '|' + hash); }catch(e){}
+          return true;
+        }) });
+
+  return signIn();
+}
+
 const TENANT_CODE = (new URLSearchParams(location.search).get('p')||'').trim().toLowerCase();
 const TENANT = TENANT_CODE ? TENANTS[TENANT_CODE] : MAIN_FB_CFG;
 const HARDCODED_FB_CFG = TENANT || MAIN_FB_CFG;
@@ -1050,6 +1202,8 @@ if(!fbCfg?.apiKey||!fbCfg?.databaseURL){
   window.hideLoadingScreen && window.hideLoadingScreen();
 }else{
   try{
+    const _ok = await ctUnlock(HARDCODED_FB_CFG);
+    if(!_ok) throw new Error('locked');
     window.setLoadingProgress && window.setLoadingProgress(40,'Connecting to Firebase…');
     // Built from the tenant the ?p= code selected, not from whatever config
     // happens to be cached on this device.

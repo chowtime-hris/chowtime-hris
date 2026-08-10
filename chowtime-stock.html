@@ -472,6 +472,16 @@
   </div>
 
   <div id="ownerTab-daily" style="display:none;">
+    <!-- Which days have anything on them. Without this you had to guess a
+         date and check, one at a time, to find out whether a branch counted. -->
+    <div class="card">
+      <div class="flex-between">
+        <h2>📋 Activity Log</h2>
+        <button class="btn ghost" onclick="loadActivityLog()">🔄 Refresh</button>
+      </div>
+      <p class="hint">Every date with a count, waste entry or audit. Tap a date to open it below.</p>
+      <div id="activityLog"><p class="hint">Loading…</p></div>
+    </div>
     <div class="card">
       <div class="flex-between">
         <div><label>Date</label><input type="date" id="datePicker" onchange="loadDay()"></div>
@@ -1031,6 +1041,8 @@ function switchOwnerTab(name){
     document.getElementById('ownerTab-'+t).style.display = (t===name)?'block':'none';
   });
   if(name==='setup') renderPosLinkPanel();
+  // Load the day list when the tab is actually opened, not on every boot.
+  if(name==='daily') loadActivityLog();
 }
 
 function saveBranch(){
@@ -1693,6 +1705,57 @@ function deleteCrew(id){
 
 /* ---------- OWNER: DAILY AUDIT TAB ---------- */
 function crewName(id){ return (crewList[id]&&crewList[id].name) || id || '—'; }
+
+// Reads the three date-keyed nodes and lists the days that have something in
+// them, newest first. Cheap: one read each, and only the counts are summed.
+function loadActivityLog(){
+  const box = document.getElementById('activityLog');
+  if(!box || !currentBranchId) return;
+  box.innerHTML = '<p class="hint">Loading…</p>';
+  Promise.all([bref('counts').once('value'),
+               bref('waste').once('value'),
+               bref('audits').once('value')])
+  .then(([c,w,a])=>{
+    const counts = c.val()||{}, waste = w.val()||{}, audits = a.val()||{};
+    const days = {};
+    const touch = (d)=>{ if(!days[d]) days[d] = {cp:0, waste:0, audits:0, crew:{}}; return days[d]; };
+    Object.keys(counts).forEach(d=>{
+      const row = touch(d);
+      Object.keys(counts[d]||{}).forEach(cp=>{
+        row.cp++;
+        const by = (counts[d][cp]||{}).crew;
+        if(by) row.crew[crewName(by)] = 1;
+      });
+    });
+    Object.keys(waste).forEach(d=>{ touch(d).waste += Object.keys(waste[d]||{}).length; });
+    Object.keys(audits).forEach(d=>{ touch(d).audits += Object.keys(audits[d]||{}).length; });
+
+    const list = Object.keys(days).sort().reverse();
+    if(!list.length){ box.innerHTML = '<p class="empty">No activity recorded yet.</p>'; return; }
+
+    box.innerHTML =
+      '<div class="table-wrap"><table><thead><tr>'
+      + '<th>Date</th><th>Checkpoints</th><th>Waste</th><th>Audits</th><th>Counted by</th><th></th>'
+      + '</tr></thead><tbody>'
+      + list.map(d=>{
+          const r = days[d];
+          const who = Object.keys(r.crew).join(', ') || '—';
+          return '<tr><td><strong>'+d+'</strong></td>'
+            + '<td>'+(r.cp||'—')+'</td>'
+            + '<td>'+(r.waste||'—')+'</td>'
+            + '<td>'+(r.audits||'—')+'</td>'
+            + '<td style="font-size:12px">'+who+'</td>'
+            + '<td><button class="btn ghost" onclick="openDay(\''+d+'\')">Open</button></td></tr>';
+        }).join('')
+      + '</tbody></table></div>';
+  })
+  .catch(()=>{ box.innerHTML = '<p class="hint">Could not load the log.</p>'; });
+}
+
+function openDay(d){
+  const pick = document.getElementById('datePicker');
+  if(pick){ pick.value = d; loadDay(); pick.scrollIntoView({behavior:'smooth', block:'center'}); }
+}
 
 function loadDay(){
   const date = document.getElementById('datePicker').value;
