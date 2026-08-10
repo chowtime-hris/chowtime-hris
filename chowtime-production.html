@@ -741,7 +741,7 @@ function renderEntry(main){
                 <div><div style="font-size:10px;color:#5A5A5A">LOOSE PC</div>
                   <input type="number" min="0" step="any" style="width:74px" class="batchLoose" data-code="${p.code}" value="${loose}" placeholder="0"></div>
               </div>
-              <div style="font-size:11px;color:#6b5a3a;margin-top:3px" class="packHint" data-code="${p.code}">1 pack = ${per} pc</div>
+              <div style="font-size:11px;color:#6b5a3a;margin-top:3px" class="packHint" data-code="${p.code}">${per>0?('1 pack = '+per+' pc'):'pack size not loaded yet'}</div>
             ` : `
               <input type="number" min="0" step="any" style="width:100px" class="batchQty" data-code="${p.code}" value="${qty}" placeholder="0">
             `}</td>
