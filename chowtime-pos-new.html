@@ -18947,6 +18947,45 @@ function App(){
                       " It will use MAIN's own inventory, not a branch's. "+
                       "Correct only if this person works at the commissary."),
 
+                    // Extra pages for THIS account only. rolePerms is one
+                    // setting for a whole role across the company, and
+                    // managers skip it entirely — so there was no way to give
+                    // ONE manager a page without giving it to all of them.
+                    (function(){
+                      const roleNav=(ROLES[editingStaff.role]&&ROLES[editingStaff.role].nav)||[];
+                      const opts=Object.keys(NAV_META).filter(p=>roleNav.indexOf(p)<0);
+                      const cur=Array.isArray(editingStaff.navExtra)?editingStaff.navExtra:[];
+                      return h("div",{style:{background:"#FAFAFA",
+                        border:"1px solid "+C.border,borderRadius:8,
+                        padding:"10px 12px",marginBottom:12}},
+                        h("div",{style:{fontSize:11,fontWeight:800,color:C.muted,
+                          letterSpacing:1,marginBottom:3}},"EXTRA PAGES FOR THIS ACCOUNT"),
+                        h("div",{style:{fontSize:12,color:C.muted,marginBottom:8,
+                          lineHeight:1.45}},
+                          "On top of what the "
+                          +((ROLES[editingStaff.role]&&ROLES[editingStaff.role].label)||editingStaff.role)
+                          +" role already has. This one account only."),
+                        h("div",{style:{display:"flex",gap:5,flexWrap:"wrap"}},
+                          opts.map(p=>{
+                            const on=cur.indexOf(p)>=0;
+                            return h("button",{key:p,
+                              onClick:()=>setEditingStaff(st=>{
+                                const list=Array.isArray(st.navExtra)?st.navExtra.slice():[];
+                                const k=list.indexOf(p);
+                                if(k>=0)list.splice(k,1); else list.push(p);
+                                return Object.assign({},st,{navExtra:list});
+                              }),
+                              style:{padding:"5px 10px",borderRadius:16,fontSize:12,
+                                cursor:"pointer",fontWeight:on?800:500,
+                                border:"1px solid "+(on?C.primary:C.border),
+                                background:on?"#F3E9F7":"#fff",
+                                color:on?C.primary:C.muted}},
+                              (NAV_META[p].icon||"")+" "+NAV_META[p].label);
+                          })),
+                        cur.length?null:h("div",{style:{fontSize:12,color:C.muted,
+                          marginTop:7}},"None selected — role default."));
+                    })(),
+
                     // Access summary
                     h("div",{style:{background:"#f9f9f9",borderRadius:8,
                       padding:"10px 12px",marginBottom:12,fontSize:13,color:C.muted}},
@@ -19022,6 +19061,7 @@ function App(){
                               role:editingStaff.role,
                               branch:editingStaff.branch,
                               email:(editingStaff.email||"").trim().toLowerCase(),
+                              navExtra:Array.isArray(editingStaff.navExtra)?editingStaff.navExtra:[],
                               updatedAt:serverTimestamp(),
                               updatedBy:user.name
                             });
@@ -19044,116 +19084,6 @@ function App(){
 
         // ══ EDIT PIN MODAL ══
         // Edit Staff Modal
-        modal==="edit_staff"&&editingStaff&&h("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:900}},
-          h("div",{style:{background:"#fff",width:380,borderRadius:16,padding:"22px",boxShadow:"0 20px 60px rgba(0,0,0,.3)"}},
-            h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:16}},
-              h("b",{style:{fontSize:14}},"✏️ Edit Staff"),
-              h("button",{onClick:()=>{setModal(null);setEditingStaff(null);},
-                style:{background:"none",border:"none",fontSize:20,cursor:"pointer"}},"×")
-            ),
-            // Extra pages for THIS account only.
-            (function(){
-              const roleNav=(ROLES[editingStaff.role]&&ROLES[editingStaff.role].nav)||[];
-              const opts=Object.keys(NAV_META).filter(p=>roleNav.indexOf(p)<0);
-              const cur=Array.isArray(editingStaff.navExtra)?editingStaff.navExtra:[];
-              return h("div",{style:{marginBottom:12,background:"#FAFAFA",
-                border:"1px solid "+C.border,borderRadius:9,padding:"10px 11px"}},
-                h("div",{style:{fontSize:11,fontWeight:800,color:C.muted,
-                  letterSpacing:1,marginBottom:3}},"EXTRA PAGES FOR THIS ACCOUNT"),
-                h("div",{style:{fontSize:12,color:C.muted,marginBottom:8,
-                  lineHeight:1.45}},
-                  "On top of what the "
-                  +((ROLES[editingStaff.role]&&ROLES[editingStaff.role].label)||editingStaff.role)
-                  +" role already has. Affects this one account only."),
-                h("div",{style:{display:"flex",gap:5,flexWrap:"wrap"}},
-                  opts.map(p=>{
-                    const on=cur.indexOf(p)>=0;
-                    return h("button",{key:p,
-                      onClick:()=>setEditingStaff(st=>{
-                        const list=Array.isArray(st.navExtra)?st.navExtra.slice():[];
-                        const k=list.indexOf(p);
-                        if(k>=0)list.splice(k,1); else list.push(p);
-                        return Object.assign({},st,{navExtra:list});
-                      }),
-                      style:{padding:"5px 10px",borderRadius:16,fontSize:12,
-                        cursor:"pointer",fontWeight:on?800:500,
-                        border:"1px solid "+(on?C.primary:C.border),
-                        background:on?"#F3E9F7":"#fff",
-                        color:on?C.primary:C.muted}},
-                      (NAV_META[p].icon||"")+" "+NAV_META[p].label);
-                  })),
-                cur.length?null:h("div",{style:{fontSize:12,color:C.muted,
-                  marginTop:7}},"None selected — role default."));
-            })(),
-
-            // Name
-            h("div",{style:{marginBottom:10}},
-              h("div",{style:{fontSize:12,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"NAME"),
-              h("input",{
-                value:editingStaff.name,
-                onChange:e=>setEditingStaff(p=>({...p,name:e.target.value})),
-                style:{width:"100%",padding:"9px",border:"1px solid "+C.border,borderRadius:8,
-                  fontSize:13,fontWeight:700,outline:"none",boxSizing:"border-box"}
-              })
-            ),
-            // Role
-            h("div",{style:{marginBottom:10}},
-              h("div",{style:{fontSize:12,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"ROLE"),
-              h("select",{
-                value:editingStaff.role,
-                onChange:e=>setEditingStaff(p=>({...p,role:e.target.value})),
-                style:{width:"100%",padding:"9px",border:"1px solid "+C.border,borderRadius:8,
-                  fontSize:14,outline:"none"}
-              },
-                Object.entries(ROLES).map(([k,v])=>h("option",{key:k,value:k},v.emoji+" "+v.label))
-              )
-            ),
-            // Branch
-            h("div",{style:{marginBottom:16}},
-              h("div",{style:{fontSize:12,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"BRANCH"),
-              h("select",{
-                value:editingStaff.branch,
-                onChange:e=>setEditingStaff(p=>({...p,branch:e.target.value})),
-                style:{width:"100%",padding:"9px",border:"1px solid "+C.border,borderRadius:8,
-                  fontSize:14,outline:"none"}
-              },
-                h("option",{value:"all"},"👑 All Branches (Owner)"),
-                h("option",{value:"comm"},"🏭 Commissary"),
-                ...branches.map(b=>h("option",{key:b.id,value:b.id},b.name+" — "+b.full))
-              )
-            ),
-            // Save
-            h("div",{style:{display:"flex",gap:8}},
-              h("button",{
-                onClick:async()=>{
-                  if(!editingStaff.name.trim()){showT("Enter name","warn");return;}
-                        if(!editingStaff.branch){showT("Pick a branch first","warn");return;}
-                  try{
-                    // Update Firestore
-                    await updateDoc(doc(db,"staff_accounts",editingStaff.id||editingStaff.uid),{
-                      name:editingStaff.name,
-                      role:editingStaff.role,
-                      branch:editingStaff.branch,
-                      navExtra:Array.isArray(editingStaff.navExtra)?editingStaff.navExtra:[],
-                      updatedBy:user.name,
-                      updatedAt:serverTimestamp()
-                    });
-                    // Update local state
-                    setStaff(p=>p.map(s=>s.id===editingStaff.id?{...s,...editingStaff}:s));
-                    showT(editingStaff.name+" updated ✓");
-                    setModal(null);setEditingStaff(null);
-                  }catch(e){showT("Error: "+e.message,"err");}
-                },
-                style:{flex:1,padding:"11px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,
-                  border:"none",borderRadius:9,color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer"}
-              },"💾 Save Changes"),
-              h("button",{onClick:()=>{setModal(null);setEditingStaff(null);},
-                style:{padding:"11px 16px",background:"#fff",border:"1px solid "+C.border,
-                  borderRadius:9,fontWeight:600,fontSize:14,cursor:"pointer"}},"Cancel")
-            )
-          )
-        ),
-
         modal==="edit_pin"&&editingStaff&&h("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:900}},
           h("div",{style:{background:"#fff",width:300,borderRadius:16,padding:"22px",boxShadow:"0 20px 60px rgba(0,0,0,.3)",textAlign:"center"}},
             h("div",{style:{fontSize:34,marginBottom:8}},"🔑"),
