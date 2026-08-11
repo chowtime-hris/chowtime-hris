@@ -972,9 +972,7 @@ function renderEntry(main){
       // was not recorded.
       let posMsg = '';
       try{
-        // The entry is saved, so a redraw held back during typing can run now.
-      if(_redrawPending) setTimeout(render, 0);
-      const r = await postProductionToPOS(entryDate,
+        const r = await postProductionToPOS(entryDate,
           state.production[entryDate].products);
         if(!r.ok){
           posMsg = '\n\n⚠ POS inventory NOT updated: ' + r.reason;
@@ -994,6 +992,10 @@ function renderEntry(main){
         alert('⚠ Saved on THIS DEVICE ONLY (not connected to the cloud right now). This entry for '+entryDate+' will NOT appear anywhere else until this device reconnects.'+posMsg);
       }
       // 'failed' case already alerts inside saveState itself
+      // The form is finished with, so any redraw held back while it was being
+      // filled runs here — after the POS post and the result message, not in
+      // the middle of them.
+      _redrawPending = false;
       render();
     });
   };
