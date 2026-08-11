@@ -432,6 +432,12 @@ function initFirebase(cfgStr, fromSaved){
           state.ledger = v.ledger || {};
           state.deductions = v.deductions || {};
           persistLocalState();
+          // A cloud change fires on every write — including this device's own
+          // save — and a full redraw rebuilds every input and checkbox from
+          // saved state. Typing a quantity or ticking a crew member while one
+          // arrived wiped it. The data is already in state either way; the
+          // screen just waits until the form is not being filled.
+          if(isEnteringData()){ _redrawPending = true; return; }
           render();
         });
       });
@@ -554,7 +560,22 @@ document.getElementById('tabs').addEventListener('click', e=>{
   }
 });
 
+// True when someone is part-way through the production entry form: any box
+// with something in it, or focus sitting in one.
+let _redrawPending = false;
+function isEnteringData(){
+  const inForm = document.querySelector(
+    '.batchPacks,.batchLoose,.batchQty,.caInput');
+  if(!inForm) return false;
+  const a = document.activeElement;
+  if(a && a.matches && a.matches('.batchPacks,.batchLoose,.batchQty,.caInput,.creditCheck,.attCheck'))
+    return true;
+  return Array.from(document.querySelectorAll('.batchPacks,.batchLoose,.batchQty,.caInput'))
+    .some(el=>String(el.value||'').trim() !== '');
+}
+
 function render(){
+  _redrawPending = false;
   if(SUPERVISOR_MODE && !SUPERVISOR_ALLOWED_TABS.includes(activeTab)){
     activeTab = 'entry';
     renderNav();
@@ -892,7 +913,9 @@ function renderEntry(main){
       // was not recorded.
       let posMsg = '';
       try{
-        const r = await postProductionToPOS(entryDate,
+        // The entry is saved, so a redraw held back during typing can run now.
+      if(_redrawPending) setTimeout(render, 0);
+      const r = await postProductionToPOS(entryDate,
           state.production[entryDate].products);
         if(!r.ok){
           posMsg = '\n\n⚠ POS inventory NOT updated: ' + r.reason;
