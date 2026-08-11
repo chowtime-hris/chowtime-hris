@@ -574,8 +574,64 @@ function isEnteringData(){
     .some(el=>String(el.value||'').trim() !== '');
 }
 
+// Rather than chase every thing that can trigger a redraw — a cloud sync, a
+// pack-size refresh, another device saving — the form is snapshotted before
+// the screen is rebuilt and put back afterwards. Whatever caused it, what was
+// typed survives.
+let _entryDraft = null;
+
+function snapshotEntry(){
+  const q = (sel)=>Array.from(document.querySelectorAll(sel));
+  const boxes = q('.batchPacks,.batchLoose,.batchQty,.caInput');
+  if(!boxes.length) return null;
+  const draft = { date: entryDate, values: {}, checks: {} };
+  boxes.forEach(el=>{
+    const cls = el.className.split(' ').find(c=>c.indexOf('batch')===0||c==='caInput');
+    const k = cls + '|' + (el.dataset.code || el.dataset.staff || '');
+    draft.values[k] = el.value;
+  });
+  q('.creditCheck').forEach(el=>{
+    draft.checks['credit|' + el.dataset.code + '|' + el.dataset.staff] = el.checked;
+  });
+  q('.attCheck').forEach(el=>{
+    draft.checks['att|' + el.dataset.staff] = el.checked;
+  });
+  const a = document.activeElement;
+  if(a && a.dataset){
+    const cls = (a.className||'').split(' ').find(c=>c.indexOf('batch')===0||c==='caInput');
+    if(cls) draft.focus = cls + '|' + (a.dataset.code || a.dataset.staff || '');
+  }
+  return draft;
+}
+
+function restoreEntry(){
+  const d = _entryDraft;
+  _entryDraft = null;
+  if(!d || d.date !== entryDate) return;
+  Object.keys(d.values).forEach(k=>{
+    const [cls, id] = k.split('|');
+    const el = document.querySelector(
+      '.' + cls + '[data-code="' + id + '"], .' + cls + '[data-staff="' + id + '"]');
+    if(el) el.value = d.values[k];
+  });
+  Object.keys(d.checks).forEach(k=>{
+    const parts = k.split('|');
+    const el = parts[0] === 'credit'
+      ? document.querySelector('.creditCheck[data-code="'+parts[1]+'"][data-staff="'+parts[2]+'"]')
+      : document.querySelector('.attCheck[data-staff="'+parts[1]+'"]');
+    if(el) el.checked = d.checks[k];
+  });
+  if(d.focus){
+    const [cls, id] = d.focus.split('|');
+    const el = document.querySelector(
+      '.' + cls + '[data-code="' + id + '"], .' + cls + '[data-staff="' + id + '"]');
+    if(el){ el.focus(); try{ el.setSelectionRange(el.value.length, el.value.length); }catch(e){} }
+  }
+}
+
 function render(){
   _redrawPending = false;
+  _entryDraft = snapshotEntry();
   if(SUPERVISOR_MODE && !SUPERVISOR_ALLOWED_TABS.includes(activeTab)){
     activeTab = 'entry';
     renderNav();
@@ -888,6 +944,9 @@ function renderEntry(main){
   // Refreshed quietly in the background. The screen is already drawn from the
   // cached sizes, so it is only redrawn when MAIN actually changed something —
   // no flicker on a normal day.
+  // Put back anything that was being typed when the screen was rebuilt.
+  restoreEntry();
+
   loadPosPackInfo().then(r=>{ if(r && r.changed) render(); });
 
   document.getElementById('saveEntryBtn').onclick = ()=>{
