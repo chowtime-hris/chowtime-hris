@@ -213,6 +213,27 @@ async function loadPosPackInfo(){
   return {info, changed};
 }
 
+// What the crew is typing into a plain quantity box, and what it becomes in the
+// POS. The box used to be bare — nothing said whether a sauce was counted in
+// litres or millilitres, so the same field got both.
+function entryUnit(code){
+  const cfg = (state.posMap||{})[code];
+  if(!cfg || typeof cfg === 'string') return '';
+  return cfg.unit || '';
+}
+function entryHint(code, val){
+  const cfg = (state.posMap||{})[code];
+  if(!cfg || typeof cfg === 'string') return '';
+  const per = Number(cfg.per) || 1;
+  const pi  = (state.posPack||{})[code] || {};
+  const posUnit = pi.unit || 'POS units';
+  const u = cfg.unit || 'unit';
+  const n = Number(val);
+  if(per === 1) return '';
+  if(!n) return '1 ' + u + ' = ' + per + ' ' + posUnit;
+  return n + ' \u00D7 ' + per + ' = ' + Math.round(n*per*1000)/1000 + ' ' + posUnit + ' sa POS';
+}
+
 // True when this code should be entered as packs + loose pieces.
 function usesPackEntry(code){
   const pi = (state.posPack || {})[code];
@@ -820,7 +841,9 @@ function renderEntry(main){
               </div>
               <div style="font-size:11px;color:#6b5a3a;margin-top:3px" class="packHint" data-code="${p.code}">${per>0?('1 pack = '+per+' pc'):'pack size not loaded yet'}</div>
             ` : `
+              <div style="font-size:10px;color:#5A5A5A">${(entryUnit(p.code)||'QTY').toUpperCase()}</div>
               <input type="number" min="0" step="any" style="width:100px" class="batchQty" data-code="${p.code}" value="${qty}" placeholder="0">
+              <div style="font-size:11px;color:#6b5a3a;margin-top:3px" class="qtyHint" data-code="${p.code}">${entryHint(p.code, qty)}</div>
             `}</td>
             <td>
               <div style="display:flex;flex-wrap:wrap;gap:8px">
@@ -892,6 +915,13 @@ function renderEntry(main){
       refreshPreview();
     });
   });
+  document.querySelectorAll('.batchQty').forEach(el=>{
+    el.addEventListener('input', ()=>{
+      const hint = document.querySelector(`.qtyHint[data-code="${el.dataset.code}"]`);
+      if(hint) hint.textContent = entryHint(el.dataset.code, el.value);
+    });
+  });
+
   document.querySelectorAll('.batchQty,.creditCheck').forEach(el=>{
     el.addEventListener('input', refreshPreview);
     el.addEventListener('change', refreshPreview);
