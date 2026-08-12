@@ -1074,6 +1074,9 @@ function printZ(zd,branchName,cashier){
   <div class="c"><b>Z-READING REPORT</b><br>CHOWTIME - ${branchName}<br>${d}<br>Cashier: ${cashier}</div>
   <div class="hr"></div>
   <div class="row"><span>Opening Fund:</span><span>P${peso((zd.opening||0))}</span></div>
+  ${zd.openingSource==="carried"
+    ? `<div class="row" style="color:#666;font-size:11px"><span>&nbsp;&nbsp;carried from ${zd.openingFrom||"previous close"}</span><span></span></div>`
+    : ""}
   <div class="row"><span>Gross Sales:</span><span>P${peso((zd.gross||0))}</span></div>
   <div class="row"><span>Discounts:</span><span>-P${peso((zd.discounts||0))}</span></div>
   <div class="row"><span>Voids (${zd.voidCount||0}) excl.:</span><span>P${peso((zd.voidAmt||0))}</span></div>
@@ -7964,6 +7967,31 @@ async function stampZCounter(db,branch,date,roll){
 
 // The counted drawer lives in cash_counts, not in the order stream, so the
 // reading could never state short/over on its own.
+// Yesterday's closing balance — what stayed in the drawer once the remittance
+// was handed over — becomes today's opening fund when nobody keyed one in.
+async function attachCarriedOpening(db,branch,date,roll){
+  if((Number(roll.opening)||0)>0) return;      // a logged entry wins
+  try{
+    const d=new Date(date+"T00:00:00");
+    for(let back=1;back<=7;back++){
+      d.setDate(d.getDate()-1);
+      const key=localDate(d);
+      const snap=await getDoc(doc(db,"cash_counts",branch+"_"+key));
+      if(!snap.exists())continue;
+      const v=snap.data()||{};
+      if(v.closingBalance===undefined)continue;
+      roll.opening=Number(v.closingBalance)||0;
+      roll.openingSource="carried";
+      roll.openingFrom=key;
+      // Everything downstream was worked out with opening at zero.
+      const add=roll.opening;
+      roll.cashOnHand=Math.round(((Number(roll.cashOnHand)||0)+add)*100)/100;
+      roll.remainingFunds=Math.round(((Number(roll.remainingFunds)||0)+add)*100)/100;
+      return;
+    }
+  }catch(e){ console.warn("carried opening",branch,date,e); }
+}
+
 async function attachCountedCash(db,branch,date,roll){
   try{
     const cs=await getDoc(doc(db,"cash_counts",branch+"_"+date));
@@ -8025,6 +8053,7 @@ async function rollupDay(db,branch,date,vatMode,byName){
     roll.closedAt=serverTimestamp();
     roll.year=date.slice(0,4);
     roll.month=date.slice(0,7);
+    await attachCarriedOpening(db,branch,date,roll);
     await attachCountedCash(db,branch,date,roll);
     await setDoc(doc(db,"daily_sales",branch+"_"+date),roll,{merge:true});
     return roll;
@@ -8068,6 +8097,7 @@ async function rollupDateAllBranches(db,date,branchIds,vatMode,byName){
       roll.year=date.slice(0,4);
       roll.month=date.slice(0,7);
       roll.backfilled=true;
+      await attachCarriedOpening(db,b,date,roll);
       await attachCountedCash(db,b,date,roll);
       await setDoc(doc(db,"daily_sales",b+"_"+date),roll,{merge:true});
       res.written++;
@@ -13662,7 +13692,20 @@ function App(){
     const qtySold=live.reduce((s,o)=>
       s+(o. items||[]).reduce((a,i)=>a+(Number(i.qty)||0),0),0);
     const cancelled=bo.filter(o=>o.status==="cancelled").length;
-    const opening=bc.filter(c=>c.type==="in"&&(c.desc||"").includes("Opening")).reduce((s,c)=>s+(c.amount||0),0);
+    // Opening fund, same rule the cash count uses:
+    //   1. an Opening Fund entry recorded today, if there is one
+    //   2. otherwise what was left in the drawer at yesterday's close —
+    //      counted cash less the remittance handed over.
+    // The reading used to insist on (1) and report ₱0 without it, so a branch
+    // that simply carried its float over showed the whole float as an OVER.
+    const loggedOpen=bc.filter(c=>c.type==="in"&&(c.desc||"").includes("Opening"))
+      .reduce((s,c)=>s+(c.amount||0),0);
+    const prevCount=(cashCounts||[])
+      .filter(x=>x.branch===bid&&x.date<d&&x.closingBalance!==undefined)
+      .sort((a,b)=>String(b.date).localeCompare(String(a.date)))[0];
+    const carriedOpen=prevCount?(Number(prevCount.closingBalance)||0):0;
+    const opening=loggedOpen>0?loggedOpen:carriedOpen;
+    const openingSource=loggedOpen>0?"logged":(prevCount?"carried":"none");
     const cashIn=bc.filter(c=>c.type==="in"&&!(c.desc||"").includes("Opening")).reduce((s,c)=>s+(c.amount||0),0);
     const cashOut=bc.filter(c=>c.type==="out"&&!isExpenseCopy(c))
       .reduce((s,c)=>s+(c.amount||0),0);
@@ -13690,6 +13733,8 @@ function App(){
     }));
     return{gross,discounts,net,voidAmt,voidCount,opening,cashIn,cashOut,
       expenses:expensesOut,
+      openingSource,
+      openingFrom:prevCount?prevCount.date:"",
       // Remittance lives in two places: logged as cash out during the day, or
       // typed into the count at closing. The reading has to state both.
       remittance:remitOut+cnRemitField,
