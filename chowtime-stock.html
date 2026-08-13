@@ -255,6 +255,17 @@
     <div class="status-line" id="auditorStatusLine"></div>
   </div>
 
+  <div class="card" id="auditPushCard" style="display:none;border:2px solid var(--warn);">
+    <h2>Confirm POS Adjustment</h2>
+    <p class="sub">This is what will be written into the POS stock. Nothing has been changed yet — check the figures, then confirm.</p>
+    <div id="auditPushList"></div>
+    <div id="auditPushUnlinked"></div>
+    <div class="row" style="margin-top:14px;">
+      <button class="btn-primary" onclick="confirmAuditPush()">Confirm — Update POS Stock</button>
+      <button class="btn-ghost" onclick="cancelAuditPush()">Cancel</button>
+    </div>
+  </div>
+
   <div class="card result-card" id="auditorResultCard" style="display:none;">
     <h2>Audit Result</h2>
     <p class="sub">This audit resets each item's baseline to 0 — crew counts from here on will only flag new gaps.</p>
@@ -647,6 +658,13 @@ let POS_BRANCH = "";
 let POS_STOCK = {};        // posItemId -> current stock
 let POS_READY = false;
 
+// The figure the auditor was looking at when the rows were drawn, kept aside
+// so the push can tell a miscount apart from a sale that happened while the
+// freezer was being counted. Without it, writing the count straight into the
+// POS puts every one of those sales back on the shelf.
+let AUDIT_POS_AT_LOAD = {};
+let AUDIT_LOADED_AT = 0;
+
 function posInvCollection(branchId){
   return (branchId === "ct-main" || branchId === "main")
     ? "inventory" : "inventory_" + branchId;
@@ -948,7 +966,12 @@ async function enterAuditor(){
   document.getElementById('auditorResultCard').style.display = 'none';
   // The POS column is filled from live stock, so it has to be in hand before
   // the rows are drawn — otherwise every box renders empty and locked.
-  if(!POS_READY){ try{ await loadPosStock(); }catch(e){} }
+  // Always re-pull: a stale POS column read as a variance that was really just
+  // an old number left on screen.
+  try{ await loadPosStock(); }catch(e){}
+  AUDIT_POS_AT_LOAD = Object.assign({}, POS_STOCK);
+  AUDIT_LOADED_AT = Date.now();
+  document.getElementById('auditPushCard').style.display = 'none';
   renderAuditorItemsList();
 }
 function renderAuditorItemsList(){
@@ -1086,8 +1109,142 @@ function submitAudit(){
     }
   });
   if(filled === 0){ toast('Enter at least one item'); statusEl.textContent = 'Not submitted: no items filled in.'; return; }
-  statusEl.textContent = 'Submitting audit…'; statusEl.style.color = 'var(--muted)';
-  bref('varianceBaseline').once('value').then(snap=>{
+  // The audit is no longer just a record — it now moves the POS. So the
+  // figures are shown first and written only on a second, deliberate tap.
+  statusEl.textContent = 'Checking POS stock…'; statusEl.style.color = 'var(--muted)';
+  buildAuditPlan(values).then(plan=>{
+    window._pendingAudit = {values, auditorName, plan};
+    showAuditPushPreview(plan);
+    statusEl.style.color = 'var(--warn)';
+    statusEl.textContent = '⚠️ Review the POS adjustment below, then confirm.';
+  }).catch(e=>{
+    statusEl.style.color = 'var(--danger)';
+    statusEl.textContent = '✗ Could not read POS stock: '+e.message+' — nothing was submitted.';
+  });
+}
+
+// What the POS should be left holding for each counted item.
+//
+// The count was taken at one moment and submitted at another, and the store
+// keeps selling in between. Writing the raw count would put those sales back
+// into stock, so the movement since the rows were drawn is measured and taken
+// off: the tubs really did leave the freezer.
+async function buildAuditPlan(values){
+  const fs = posDB();
+  if(!fs) throw new Error('no POS connection');
+  if(!POS_BRANCH) throw new Error('this branch is not linked to a POS branch');
+  const snap = await fs.collection(posInvCollection(POS_BRANCH)).get();
+  const fresh = {};
+  snap.forEach(doc=>{ fresh[doc.id] = Number((doc.data()||{}).stock) || 0; });
+  const rows = [], unlinked = [];
+  Object.entries(values).forEach(([id, v])=>{
+    const it = items[id] || {};
+    const cfg = POS_MAP[id];
+    const pid = cfg ? (typeof cfg === 'string' ? cfg : cfg.id) : null;
+    const per = (cfg && typeof cfg === 'object') ? (Number(cfg.per)||1) : 1;
+    if(!pid || fresh[pid] === undefined){
+      unlinked.push({id, name: it.name||id});
+      return;
+    }
+    const atLoad  = Number(AUDIT_POS_AT_LOAD[pid]);
+    const posNow  = fresh[pid];
+    // No snapshot means no way to tell a sale from a gap, so nothing is
+    // assumed to have moved.
+    const movedSince = isNaN(atLoad) ? 0 : Math.round((atLoad - posNow)*1000)/1000;
+    const countedBase = Math.round((Number(v.freezer)||0) * per * 1000)/1000;
+    let newStock = Math.round((countedBase - movedSince)*1000)/1000;
+    let clamped = false;
+    if(newStock < 0){ newStock = 0; clamped = true; }
+    rows.push({id, pid, per, name: it.name||id, unit: it.unit||'',
+               posNow, newStock, movedSince, countedBase, clamped,
+               delta: Math.round((newStock - posNow)*1000)/1000});
+  });
+  return {rows, unlinked};
+}
+
+function showAuditPushPreview(plan){
+  const card = document.getElementById('auditPushCard');
+  const list = document.getElementById('auditPushList');
+  list.innerHTML = plan.rows.length ? plan.rows.map(r=>{
+    const dir = Math.abs(r.delta)<0.001 ? 'no change'
+      : (r.delta>0 ? '+'+fmt(r.delta) : fmt(r.delta));
+    const moved = Math.abs(r.movedSince)>0.001
+      ? `<br><small style="color:var(--muted);">${fmt(Math.abs(r.movedSince))} ${escapeHtml(r.unit||'pc')} moved in the POS while counting — already taken off</small>` : '';
+    const warn = r.clamped
+      ? `<br><small style="color:var(--danger);">Count was lower than what moved out — set to 0, please recheck</small>` : '';
+    return `<div class="result-row"><div><strong>${escapeHtml(r.name)}</strong>${moved}${warn}</div>`
+      + `<div class="result-tag ${Math.abs(r.delta)<0.001?'tag-ok':(r.delta<0?'tag-short':'tag-over')}">`
+      + `${fmt(r.posNow)} → ${fmt(r.newStock)} (${dir})</div></div>`;
+  }).join('') : '<p class="sub">No linked items to push.</p>';
+  const un = document.getElementById('auditPushUnlinked');
+  un.innerHTML = plan.unlinked.length
+    ? `<div class="waste-item" style="margin-top:12px;"><strong>Not linked to the POS — adjust these by hand:</strong><br>`
+      + plan.unlinked.map(u=>escapeHtml(u.name)).join(' · ') + `</div>`
+    : '';
+  card.style.display = 'block';
+  card.scrollIntoView({behavior:'smooth', block:'center'});
+}
+
+function cancelAuditPush(){
+  document.getElementById('auditPushCard').style.display = 'none';
+  window._pendingAudit = null;
+  const statusEl = document.getElementById('auditorStatusLine');
+  statusEl.style.color = '';
+  statusEl.textContent = 'Not submitted — nothing was changed.';
+}
+
+function confirmAuditPush(){
+  const p = window._pendingAudit;
+  if(!p) return;
+  document.getElementById('auditPushCard').style.display = 'none';
+  window._pendingAudit = null;
+  finalizeAudit(p.values, p.auditorName, p.plan);
+}
+
+// Order matters here. The POS is written FIRST and the baseline is cleared
+// only for the items that actually landed — clearing first would forgive the
+// gap while leaving the POS wrong, so the same missing stock would be charged
+// again on the next count with nothing to trace it back to.
+function finalizeAudit(values, auditorName, plan){
+  const statusEl = document.getElementById('auditorStatusLine');
+  statusEl.textContent = 'Updating POS stock…'; statusEl.style.color = 'var(--muted)';
+  const fs = posDB();
+  const invCol = posInvCollection(POS_BRANCH);
+  const logCol = invCol.replace(/^inventory/, 'inventory_log');
+  const pushed = {}, failed = {};
+  const auditTimestamp = Date.now();
+  const runPush = plan.rows.reduce((chain, r)=>chain.then(async()=>{
+    try{
+      // Absolute, not an increment: a double tap on Confirm then lands on the
+      // same figure instead of deducting twice.
+      await fs.collection(invCol).doc(r.pid).set({
+        stock: r.newStock,
+        lastAudit: firebase.firestore.FieldValue.serverTimestamp()
+      }, {merge:true});
+      await fs.collection(logCol).add({
+        itemId: r.pid, itemName: r.name, unit: r.unit,
+        type: 'adjust', amount: r.delta,
+        prevStock: r.posNow, newStock: r.newStock,
+        desc: 'Freezer audit — '+auditorName
+              + (Math.abs(r.movedSince)>0.001 ? ' (net of '+fmt(r.movedSince)+' moved during count)' : ''),
+        source: 'AUDIT', ref: 'audit-'+auditTimestamp,
+        branch: POS_BRANCH, by: auditorName,
+        date: todayStr(),
+        timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+        at: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      pushed[r.id] = {posItemId: r.pid, prevStock: r.posNow, newStock: r.newStock,
+                      delta: r.delta, movedSince: r.movedSince};
+    }catch(e){
+      failed[r.id] = (e && e.message) || 'write failed';
+      console.warn('POS push failed', r.pid, e);
+    }
+  }), Promise.resolve());
+
+  runPush.then(()=>{
+    statusEl.textContent = 'Saving audit…';
+    return bref('varianceBaseline').once('value');
+  }).then(snap=>{
     const baselines = snap.val() || {};
     const auditItems = {};
     const auditTimestamp = Date.now();
@@ -1100,16 +1257,26 @@ function submitAudit(){
         auditItems[id].loose = v.loose;
         auditItems[id].packSize = v.packSize;
       }
+      if(pushed[id]) auditItems[id].posAdjust = pushed[id];
+      if(failed[id]) auditItems[id].posAdjustError = failed[id];
     });
-    const payload = { items: auditItems, auditedBy: auditorName, timestamp: auditTimestamp };
+    // An item whose POS write failed keeps its baseline: the gap is still
+    // there, so it must stay measured from where it was.
+    const resettable = Object.keys(values).filter(id=>!failed[id]);
+    const payload = { items: auditItems, auditedBy: auditorName, timestamp: auditTimestamp,
+                      posBranch: POS_BRANCH, posPushed: Object.keys(pushed).length,
+                      posFailed: Object.keys(failed).length };
     return Promise.all([
       bref('audits/'+todayStr()+'/'+auditTimestamp).set(payload),
-      ...Object.keys(values).map(id => writeBaselineIfNewer(id, 0, auditTimestamp))
+      ...resettable.map(id => writeBaselineIfNewer(id, 0, auditTimestamp))
     ]).then(()=>auditItems);
   }).then(auditItems=>{
-    toast('Audit submitted — baselines reset for audited items');
-    statusEl.style.color = 'var(--good)';
-    statusEl.textContent = '✓ Audit submitted at '+new Date().toLocaleTimeString();
+    const nFail = Object.keys(failed).length;
+    toast(nFail ? ('Audit saved — '+nFail+' POS update/s failed') : 'Audit submitted — POS stock updated');
+    statusEl.style.color = nFail ? 'var(--danger)' : 'var(--good)';
+    statusEl.textContent = nFail
+      ? '⚠️ Audit saved at '+new Date().toLocaleTimeString()+' — '+nFail+' item/s did NOT reach the POS. Adjust those by hand; their baseline was kept.'
+      : '✓ Audit submitted at '+new Date().toLocaleTimeString()+' — POS stock updated.';
     const list = document.getElementById('auditorResultList'); list.innerHTML='';
     Object.entries(auditItems).forEach(([id,a])=>{
       let tag, cls;
@@ -1117,7 +1284,11 @@ function submitAudit(){
       else if(a.variance>0){ tag='FOUND SHORT '+fmt(a.variance); cls='tag-short'; }
       else { tag='FOUND OVER '+fmt(-a.variance); cls='tag-over'; }
       const row = document.createElement('div'); row.className='result-row';
-      row.innerHTML = `<div>${escapeHtml(items[id]?items[id].name:id)}</div><div class="result-tag ${cls}">${tag}</div>`;
+      let note = '';
+      if(a.posAdjust) note = `<br><small style="color:var(--muted);">POS ${fmt(a.posAdjust.prevStock)} → ${fmt(a.posAdjust.newStock)}</small>`;
+      else if(a.posAdjustError) note = `<br><small style="color:var(--danger);">POS not updated — ${escapeHtml(a.posAdjustError)}</small>`;
+      else note = `<br><small style="color:var(--muted);">not linked to POS — adjust by hand</small>`;
+      row.innerHTML = `<div>${escapeHtml(items[id]?items[id].name:id)}${note}</div><div class="result-tag ${cls}">${tag}</div>`;
       list.appendChild(row);
     });
     document.getElementById('auditorResultCard').style.display = 'block';
