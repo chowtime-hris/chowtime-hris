@@ -1238,7 +1238,7 @@ function finalizeAudit(values, auditorName, plan){
         itemId: r.pid, itemName: r.name, unit: r.unit,
         type: 'adjust', amount: r.delta,
         prevStock: r.posNow, newStock: r.newStock,
-        desc: 'Freezer audit — '+auditorName+' — set to counted figure',
+        desc: 'Freezer audit',
         source: 'AUDIT', ref: 'audit-'+auditTimestamp,
         branch: POS_BRANCH, by: auditorName,
         date: todayStr(),
