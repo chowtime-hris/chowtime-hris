@@ -249,7 +249,7 @@
 
   <div class="card">
     <h2>Verify Each Item</h2>
-    <p class="sub">Check the current POS stock number, then physically count the freezer/chiller. This is the official audit — submitting will reset the running baseline, so make sure counts are accurate.</p>
+    <p class="sub">Check the current POS stock number, then physically count the freezer/chiller. This is the official audit — submitting will update the POS stock to match your count and reset the running baseline. Ipapakita muna ang bawat pagbabago bago ito isulat.</p>
     <div id="auditorItemsList"></div>
     <button class="btn-primary" style="margin-top:16px;" onclick="submitAudit()">Submit Audit</button>
     <div class="status-line" id="auditorStatusLine"></div>
@@ -268,7 +268,7 @@
 
   <div class="card result-card" id="auditorResultCard" style="display:none;">
     <h2>Audit Result</h2>
-    <p class="sub">This audit resets each item's baseline to 0 — crew counts from here on will only flag new gaps.</p>
+    <p class="sub">POS stock has been updated to match this count, and each item's baseline is back to 0 — crew counts from here on will only flag new gaps.</p>
     <div id="auditorResultList"></div>
   </div>
 </main>
