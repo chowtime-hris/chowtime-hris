@@ -251,7 +251,7 @@
     <h2>Verify Each Item</h2>
     <p class="sub">Check the current POS stock number, then physically count the freezer/chiller. This is the official audit — submitting will update the POS stock to match your count and reset the running baseline. Ipapakita muna ang bawat pagbabago bago ito isulat.</p>
     <div id="auditorItemsList"></div>
-    <button class="btn-primary" style="margin-top:16px;" onclick="submitAudit()">Submit Audit</button>
+    <button class="btn-primary" id="auditSubmitBtn" style="margin-top:16px;" onclick="submitAudit()">Submit Audit</button>
     <div class="status-line" id="auditorStatusLine"></div>
   </div>
 
@@ -664,6 +664,9 @@ let POS_READY = false;
 // POS puts every one of those sales back on the shelf.
 let AUDIT_POS_AT_LOAD = {};
 let AUDIT_LOADED_AT = 0;
+// One entry into Auditor Count allows one submitted audit. Re-submitting the
+// same screen was applying a correction on top of a correction.
+let AUDIT_LOCKED = false;
 
 function posInvCollection(branchId){
   return (branchId === "ct-main" || branchId === "main")
@@ -971,6 +974,11 @@ async function enterAuditor(){
   try{ await loadPosStock(); }catch(e){}
   AUDIT_POS_AT_LOAD = Object.assign({}, POS_STOCK);
   AUDIT_LOADED_AT = Date.now();
+  AUDIT_LOCKED = false;
+  window._pendingAudit = null;
+  const sbtn = document.getElementById('auditSubmitBtn');
+  if(sbtn){ sbtn.disabled = false; sbtn.textContent = 'Submit Audit'; }
+  document.getElementById('auditorStatusLine').textContent = '';
   document.getElementById('auditPushCard').style.display = 'none';
   renderAuditorItemsList();
 }
@@ -1083,6 +1091,12 @@ function renderAuditorItemsList(){
 }
 function submitAudit(){
   const statusEl = document.getElementById('auditorStatusLine');
+  if(AUDIT_LOCKED){
+    toast('This audit was already submitted');
+    statusEl.style.color = 'var(--danger)';
+    statusEl.textContent = 'Already submitted. Exit Auditor Count and come back in to audit again — resubmitting here would correct the same stock twice.';
+    return;
+  }
   const auditorName = document.getElementById('auditorNameInput').value.trim();
   if(!auditorName){ toast('Enter the auditor name'); statusEl.textContent = 'Not submitted: auditor name is required.'; return; }
   const posInputs = document.querySelectorAll('#auditorItemsList input[data-field="pos"]');
@@ -1148,15 +1162,16 @@ async function buildAuditPlan(values){
     }
     const atLoad  = Number(AUDIT_POS_AT_LOAD[pid]);
     const posNow  = fresh[pid];
-    // No snapshot means no way to tell a sale from a gap, so nothing is
-    // assumed to have moved.
+    // Shown so the auditor can see the shelf moved under them, but it does NOT
+    // change what gets written. The audit is a reset: the freezer was counted,
+    // and that count is the figure the POS should hold. Netting movement off
+    // made the result depend on when Confirm was tapped and on how many times,
+    // which is how one count landed as four deductions.
     const movedSince = isNaN(atLoad) ? 0 : Math.round((atLoad - posNow)*1000)/1000;
     const countedBase = Math.round((Number(v.freezer)||0) * per * 1000)/1000;
-    let newStock = Math.round((countedBase - movedSince)*1000)/1000;
-    let clamped = false;
-    if(newStock < 0){ newStock = 0; clamped = true; }
+    const newStock = countedBase;
     rows.push({id, pid, per, name: it.name||id, unit: it.unit||'',
-               posNow, newStock, movedSince, countedBase, clamped,
+               posNow, newStock, movedSince, countedBase,
                delta: Math.round((newStock - posNow)*1000)/1000});
   });
   return {rows, unlinked};
@@ -1169,10 +1184,8 @@ function showAuditPushPreview(plan){
     const dir = Math.abs(r.delta)<0.001 ? 'no change'
       : (r.delta>0 ? '+'+fmt(r.delta) : fmt(r.delta));
     const moved = Math.abs(r.movedSince)>0.001
-      ? `<br><small style="color:var(--muted);">${fmt(Math.abs(r.movedSince))} ${escapeHtml(r.unit||'pc')} moved in the POS while counting — already taken off</small>` : '';
-    const warn = r.clamped
-      ? `<br><small style="color:var(--danger);">Count was lower than what moved out — set to 0, please recheck</small>` : '';
-    return `<div class="result-row"><div><strong>${escapeHtml(r.name)}</strong>${moved}${warn}</div>`
+      ? `<br><small style="color:var(--muted);">POS moved ${fmt(Math.abs(r.movedSince))} ${escapeHtml(r.unit||'pc')} since this screen opened — your count overwrites it</small>` : '';
+    return `<div class="result-row"><div><strong>${escapeHtml(r.name)}</strong>${moved}</div>`
       + `<div class="result-tag ${Math.abs(r.delta)<0.001?'tag-ok':(r.delta<0?'tag-short':'tag-over')}">`
       + `${fmt(r.posNow)} → ${fmt(r.newStock)} (${dir})</div></div>`;
   }).join('') : '<p class="sub">No linked items to push.</p>';
@@ -1215,8 +1228,8 @@ function finalizeAudit(values, auditorName, plan){
   const auditTimestamp = Date.now();
   const runPush = plan.rows.reduce((chain, r)=>chain.then(async()=>{
     try{
-      // Absolute, not an increment: a double tap on Confirm then lands on the
-      // same figure instead of deducting twice.
+      // Absolute, and equal to the count itself: submitting twice lands on the
+      // same figure both times.
       await fs.collection(invCol).doc(r.pid).set({
         stock: r.newStock,
         lastAudit: firebase.firestore.FieldValue.serverTimestamp()
@@ -1225,8 +1238,7 @@ function finalizeAudit(values, auditorName, plan){
         itemId: r.pid, itemName: r.name, unit: r.unit,
         type: 'adjust', amount: r.delta,
         prevStock: r.posNow, newStock: r.newStock,
-        desc: 'Freezer audit — '+auditorName
-              + (Math.abs(r.movedSince)>0.001 ? ' (net of '+fmt(r.movedSince)+' moved during count)' : ''),
+        desc: 'Freezer audit — '+auditorName+' — set to counted figure',
         source: 'AUDIT', ref: 'audit-'+auditTimestamp,
         branch: POS_BRANCH, by: auditorName,
         date: todayStr(),
@@ -1235,6 +1247,11 @@ function finalizeAudit(values, auditorName, plan){
       });
       pushed[r.id] = {posItemId: r.pid, prevStock: r.posNow, newStock: r.newStock,
                       delta: r.delta, movedSince: r.movedSince};
+      // Move the snapshot to what was just written. Left where it was, this
+      // app's own correction reads as a sale on the next pass and gets
+      // deducted a second time — which is how one count became four.
+      AUDIT_POS_AT_LOAD[r.pid] = r.newStock;
+      POS_STOCK[r.pid] = r.newStock;
     }catch(e){
       failed[r.id] = (e && e.message) || 'write failed';
       console.warn('POS push failed', r.pid, e);
@@ -1272,11 +1289,17 @@ function finalizeAudit(values, auditorName, plan){
     ]).then(()=>auditItems);
   }).then(auditItems=>{
     const nFail = Object.keys(failed).length;
+    // Re-entering the screen is still the clean way to run another audit, so
+    // the button closes — but a repeat submit is now harmless either way: the
+    // same count writes the same figure.
+    AUDIT_LOCKED = true;
+    const btn = document.getElementById('auditSubmitBtn');
+    if(btn){ btn.disabled = true; btn.textContent = 'Audit Submitted — Locked'; }
     toast(nFail ? ('Audit saved — '+nFail+' POS update/s failed') : 'Audit submitted — POS stock updated');
     statusEl.style.color = nFail ? 'var(--danger)' : 'var(--good)';
     statusEl.textContent = nFail
-      ? '⚠️ Audit saved at '+new Date().toLocaleTimeString()+' — '+nFail+' item/s did NOT reach the POS. Adjust those by hand; their baseline was kept.'
-      : '✓ Audit submitted at '+new Date().toLocaleTimeString()+' — POS stock updated.';
+      ? '⚠️ Audit saved at '+new Date().toLocaleTimeString()+' — '+nFail+' item/s did NOT reach the POS. Their baseline was kept; adjust those by hand.'
+      : '✓ Audit submitted at '+new Date().toLocaleTimeString()+' — POS stock now matches your count.';
     const list = document.getElementById('auditorResultList'); list.innerHTML='';
     Object.entries(auditItems).forEach(([id,a])=>{
       let tag, cls;
