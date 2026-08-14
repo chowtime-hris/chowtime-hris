@@ -2247,19 +2247,34 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
       // Issuing a DR moves goods OUT of main. Without this the branch gained
       // stock on receipt while main never lost any — stock from nothing.
       // stockIssued guards against a re-issue deducting twice.
-      let moved=0;
+      let moved=0; const shortAtMain=[];
       if(!po.stockIssued){
+        // Same rule as the other issue path: check the whole PO first, and
+        // move nothing at all if any line cannot be covered. This path had no
+        // check whatsoever — it drove Main's stock negative, then read a
+        // variable it never declared, so a successful issue reported itself
+        // as an error.
+        const _plan=[];
         for(const it of delivered){
           if(!it.id||!(it.actualQty>0))continue;
           try{
-            let _dprev=null, _dlots=null;
-            try{
-              const _ds=await getDoc(doc(db,"inventory",it.id));
-              if(_ds.exists()){
-                _dprev=Number(_ds.data().stock)||0;
-                _dlots=lotsConsume(_ds.data().lots,it.actualQty||0).lots;
-              }
-            }catch(e7){}
+            const _ds=await getDoc(doc(db,"inventory",it.id));
+            const _have=_ds.exists()?(Number(_ds.data().stock)||0):null;
+            if(_have!=null&&_have<(it.actualQty||0)){
+              shortAtMain.push({id:it.id,name:it.name||it.id,unit:it.unit||"",
+                have:_have,need:Number(it.actualQty)||0,
+                shortBy:Math.round(((it.actualQty||0)-_have)*1000)/1000});
+            }else{
+              _plan.push({it:it,prev:_have,
+                lots:_ds.exists()?lotsConsume(_ds.data().lots,it.actualQty||0).lots:null});
+            }
+          }catch(e7){ shortAtMain.push({id:it.id,name:it.name||it.id,
+            unit:it.unit||"",have:0,need:Number(it.actualQty)||0,
+            shortBy:Number(it.actualQty)||0}); }
+        }
+        for(const _row of (shortAtMain.length?[]:_plan)){
+          const it=_row.it, _dprev=_row.prev, _dlots=_row.lots;
+          try{
             await updateDoc(doc(db,"inventory",it.id),Object.assign({
               stock:increment(-(it.actualQty||0)),
               lastIssued:serverTimestamp()
@@ -2281,7 +2296,16 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
             });
           }catch(e2){console.warn("Main stock deduct failed",it.id,e2);}
         }
-        try{ await updateDoc(doc(db,"advances",po._docId),{stockIssued:true}); }catch(e3){}
+        // Only a complete deduction closes the door. Marking it issued while
+        // items were skipped meant the shortfall could never be taken later —
+        // the DR said the goods went out, Main's book said they never did.
+        try{
+          await updateDoc(doc(db,"advances",po._docId),
+            shortAtMain.length
+              ? {stockIssued:false,stockShort:shortAtMain,
+                 stockShortAt:serverTimestamp()}
+              : {stockIssued:true,stockShort:[]});
+        }catch(e3){}
       }
       await notify(db,{to:po.branch,type:"dr_issued",
         title:drNum+" — dispatched",
@@ -2289,8 +2313,9 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
           +(deliveryDate?" · arriving "+deliveryDate:""),
         page:"stock_order",ref:po.poNum||drNum,by:user.name});
       if(shortAtMain.length){
-        showT("Not deducted (Main is short): "+shortAtMain.slice(0,2).join(" · ")
-          +(shortAtMain.length>2?" +"+(shortAtMain.length-2):""),"warn");
+        showT("Hindi nabawas sa MAIN \u2014 kulang: "
+          +shortAtMain.slice(0,2).map(x=>x.name+" (kulang "+x.shortBy+" "+(x.unit||"")+")").join(" \u00b7 ")
+          +(shortAtMain.length>2?" +"+(shortAtMain.length-2):""),"err");
       }
       showT(drNum+" issued ✓ · "+moved+"  item/s deducted from main");
     }catch(e){showT("Error issuing DR","err");console.error(e);}
@@ -10560,6 +10585,7 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
   const [deliveryDate,setDD]  = useState(localDate());
   const [notes,setNotes]      = useState("");
   const [saving,setSaving]    = useState(false);
+  const [mainStock,setMainStock] = useState(null);   // null = still loading
 
   // Init from existing DR data if any
   useEffect(()=>{
@@ -10569,6 +10595,28 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
       q[i.id]=i.actualQty!=null?i.actualQty:i.qty;
     });
     setPrices(p); setActual(q);
+  },[po._docId]);
+
+  // What MAIN actually holds, read when the sheet opens.
+  //
+  // The shortage used to surface only after the DR was already out, which is
+  // the worst moment to learn it: the branch has the paper, Main's book is
+  // untouched, and someone has to reconcile the difference by hand. Reading it
+  // here turns that into a number on the row, before anything is committed.
+  useEffect(()=>{
+    let alive=true;
+    (async()=>{
+      const m={};
+      for(const i of (po. items||[])){
+        if(!i.id)continue;
+        try{
+          const ds=await getDoc(doc(db,"inventory",i.id));
+          m[i.id]=ds.exists()?(Number(ds.data().stock)||0):null;
+        }catch(e){ m[i.id]=null; }
+      }
+      if(alive)setMainStock(m);
+    })();
+    return()=>{alive=false;};
   },[po._docId]);
 
   const  items = po. items||[];
@@ -10801,21 +10849,34 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
       // told. Everything below mirrors that path.
       let moved=0; const shortAtMain=[];
       if(!po.stockIssued){
+        // Two passes, and the first one writes nothing.
+        //
+        // A PO moves as one shipment, so its stock moves as one deduction. Half
+        // a PO taken out of Main leaves both books wrong at once — Main short
+        // of goods it still holds, the branch billed for a delivery it did not
+        // get in full — and no single figure afterwards says which half.
+        const _plan=[];
         for(const it of delivered){
           if(!it.id||!(it.actualQty>0))continue;
           try{
-            let prev=null, _mlots=null;
-            try{
-              const ds=await getDoc(doc(db,"inventory",it.id));
-              if(ds.exists()){
-                prev=Number(ds.data().stock)||0;
-                _mlots=lotsConsume(ds.data().lots,it.actualQty||0).lots;
-              }
-            }catch(e1){}
-            if(prev!=null&&prev<(it.actualQty||0)){
-              shortAtMain.push((it.name||it.id)+": has "+prev+", needed "+it.actualQty);
-              continue;
+            const ds=await getDoc(doc(db,"inventory",it.id));
+            const have=ds.exists()?(Number(ds.data().stock)||0):null;
+            if(have!=null&&have<(it.actualQty||0)){
+              shortAtMain.push({id:it.id,name:it.name||it.id,unit:it.unit||"",
+                have:have,need:Number(it.actualQty)||0,
+                shortBy:Math.round(((it.actualQty||0)-have)*1000)/1000});
+            }else{
+              _plan.push({it:it,prev:have,
+                lots:ds.exists()?lotsConsume(ds.data().lots,it.actualQty||0).lots:null});
             }
+          }catch(e1){ shortAtMain.push({id:it.id,name:it.name||it.id,
+            unit:it.unit||"",have:0,need:Number(it.actualQty)||0,
+            shortBy:Number(it.actualQty)||0}); }
+        }
+        // One short item holds the whole deduction.
+        for(const row of (shortAtMain.length?[]:_plan)){
+          const it=row.it, prev=row.prev, _mlots=row.lots;
+          try{
             await updateDoc(doc(db,"inventory",it.id),Object.assign({
               stock:increment(-(it.actualQty||0)),
               lastIssued:serverTimestamp()
@@ -10834,7 +10895,14 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
             ,at:serverTimestamp()});
           }catch(e2){console.warn("main deduct failed",it.id,e2);}
         }
-        try{ await updateDoc(doc(db,"advances",po._docId),{stockIssued:true}); }catch(e3){}
+        // Only a complete deduction closes the door.
+        try{
+          await updateDoc(doc(db,"advances",po._docId),
+            shortAtMain.length
+              ? {stockIssued:false,stockShort:shortAtMain,
+                 stockShortAt:serverTimestamp()}
+              : {stockIssued:true,stockShort:[]});
+        }catch(e3){}
       }
 
       await notify(db,{to:po.branch,type:"dr_issued",
@@ -10844,8 +10912,9 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
         page:"stock_order",ref:po.poNum,by:user.name});
 
       if(shortAtMain.length){
-        showT("Not deducted (Main is short): "+shortAtMain.slice(0,2).join(" · ")
-          +(shortAtMain.length>2?" +"+(shortAtMain.length-2):""),"warn");
+        showT("Hindi nabawas sa MAIN \u2014 kulang: "
+          +shortAtMain.slice(0,2).map(x=>x.name+" (kulang "+x.shortBy+" "+(x.unit||"")+")").join(" \u00b7 ")
+          +(shortAtMain.length>2?" +"+(shortAtMain.length-2):""),"err");
       }
       showT("DR issued ✓ — "+po.poNum+" now PROCESSING · "+moved+" item/s deducted");
       renderDRDoc(Object.assign({},po,{deliveredItems:delivered,deliveryDate:deliveryDate}),companySettings,branches);
@@ -10905,13 +10974,28 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
         const aq = actualQtys[i.id]!=null?actualQtys[i.id]:i.qty;
         const p  = prices[i.id]||0;
         const diff = aq-(i.qty||0);
+        // What MAIN can actually cover for this line, and by how much it falls
+        // short. Red here means the whole PO will refuse to deduct — not just
+        // this row — so it has to be visible before Issue is pressed.
+        const have = mainStock?mainStock[i.id]:undefined;
+        const short = (have!=null&&have<aq);
+        const gap = short?Math.round((aq-have)*1000)/1000:0;
         return h("div",{key:i.id,
           style:{display:"grid",gridTemplateColumns:"1fr 70px 90px 100px 90px",
             padding:"8px 20px",borderBottom:"1px solid #f5f5f5",alignItems:"center",
-            background:diff!==0?"#FFF8E1":"#fff"}},
+            background:short?"#FFEBEE":(diff!==0?"#FFF8E1":"#fff")}},
           h("div",null,
-            h("div",{style:{fontSize:13,fontWeight:700}},i.name),
-            h("div",{style:{fontSize:12,color:"#5A5A5A"}},i.unit||"")
+            h("div",{style:{fontSize:13,fontWeight:700,
+              color:short?"#C62828":"inherit"}},i.name),
+            h("div",{style:{fontSize:12,color:"#5A5A5A"}},i.unit||""),
+            mainStock===null
+              ? h("div",{style:{fontSize:11,color:"#999"}},"tinitingnan ang MAIN…")
+              : have==null
+                ? h("div",{style:{fontSize:11,color:"#999"}},"wala sa MAIN inventory")
+                : h("div",{style:{fontSize:11,fontWeight:600,
+                    color:short?"#C62828":"#2E7D32"}},
+                    "MAIN: "+have+" "+(i.unit||"")
+                    +(short?" · kulang "+gap:""))
           ),
           h("div",{style:{fontSize:13,color:"#5A5A5A"}},i.qty+" "+(i.unit||"")),
           // Actual qty
@@ -20344,16 +20428,30 @@ function App(){
                 ),
 
                 // Items preview
-                h("div",{style:{padding:"8px 16px",
-                  display:"flex",gap:8,flexWrap:"wrap"}},
-                  (po. items||[]).slice(0,4).map((i,ix)=>
-                    h("span",{key:ix,style:{fontSize:13,padding:"2px 8px",
-                      background:"#f5f5f5",borderRadius:6,color:C.text}},
-                      i.name+" ×"+(i.qty||0)+" "+(i.unit||""))
-                  ),
-                  (po. items||[]).length>4&&h("span",{style:{fontSize:13,color:C.muted}},
-                    "+"+(po. items.length-4)+" more")
-                ),
+                //
+                // Red before the sheet is even opened. Anyone with PO Monitor
+                // is on MAIN, so `inventory` here already IS Main's shelf —
+                // the comparison costs nothing extra to read.
+                (function(){
+                  const mainMap={};
+                  (inventory||[]).forEach(x=>{mainMap[x.id]=Number(x.stock)||0;});
+                  const isShort=(i)=>{
+                    const have=mainMap[i.id];
+                    return have!=null&&have<(Number(i.qty)||0);
+                  };
+                  return h("div",{style:{padding:"8px 16px",
+                    display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}},
+                    (po. items||[]).slice(0,4).map((i,ix)=>{
+                      const sh=isShort(i);
+                      return h("span",{key:ix,style:{fontSize:13,padding:"2px 8px",
+                        background:sh?"#FFEBEE":"#f5f5f5",borderRadius:6,
+                        color:sh?"#C62828":C.text,fontWeight:sh?800:400}},
+                        i.name+" ×"+(i.qty||0)+" "+(i.unit||""));
+                    }),
+                    (po. items||[]).length>4&&h("span",{style:{fontSize:13,color:C.muted}},
+                      "+"+(po. items.length-4)+" more")
+                  );
+                })(),
 
                 // Action buttons
                 h("div",{style:{padding:"8px 16px",
@@ -20373,6 +20471,94 @@ function App(){
                   // branch asked for is always what the branch typed, so the
                   // discrepancy check at delivery still has a clean baseline
                   // and nobody is billed for a line they never chose.
+                  // The shortfall stays on the order until it is taken. A
+                  // toast is gone in seconds; this is the only record that
+                  // the DR went out while Main's book still holds the stock.
+                  (po.stockShort||[]).length>0&&h("div",{style:{
+                    background:C.danger+"12",border:"1px solid "+C.danger,
+                    borderRadius:11,padding:"11px 13px",marginBottom:10,
+                    width:"100%"}},
+                    h("div",{style:{fontSize:12,fontWeight:800,color:C.danger}},
+                      "\u26a0\ufe0f WALANG nabawas sa MAIN \u2014 kulang ang stock"),
+                    h("div",{style:{marginTop:6}},
+                      (po.stockShort||[]).map((x,xi)=>h("div",{key:xi,
+                        style:{display:"flex",justifyContent:"space-between",
+                          fontSize:12,padding:"3px 0",
+                          borderBottom:"1px solid "+C.border}},
+                        h("span",{style:{fontWeight:700}},x.name),
+                        h("span",{style:{color:C.muted}},
+                          "meron "+x.have+" \u00b7 kailangan "+x.need),
+                        h("span",{style:{fontWeight:800,color:C.danger}},
+                          "kulang "+x.shortBy+" "+(x.unit||""))))),
+                    h("div",{style:{fontSize:11,color:C.muted,marginTop:7,
+                      lineHeight:1.5}},
+                      "Naipadala na ang DR, pero WALANG nabawas sa MAIN para sa "
+                      +"buong PO na ito \u2014 hindi lang sa mga nakalista sa taas. "
+                      +"Kailangang kumpleto ang lahat bago mabawas, at hindi "
+                      +"matatapos ang bayad hangga't hindi ito nangyayari."),
+                    h("button",{
+                      onClick:async()=>{
+                        const rows=po.stockShort||[];
+                        if(!rows.length)return;
+                        // Check every line first. One item still short and
+                        // nothing moves — the PO deducts whole or not at all.
+                        const still=[]; const ready=[]; let done=0;
+                        for(const x of rows){
+                          try{
+                            const ds=await getDoc(doc(db,"inventory",x.id));
+                            const have=ds.exists()?(Number(ds.data().stock)||0):0;
+                            if(have<x.need){
+                              still.push(Object.assign({},x,{have:have,
+                                shortBy:Math.round((x.need-have)*1000)/1000}));
+                            }else{
+                              ready.push({x:x,have:have,
+                                lots:ds.exists()?lotsConsume(ds.data().lots,x.need).lots:null});
+                            }
+                          }catch(e){
+                            still.push(x);
+                            console.warn("retry check failed",x.id,e);
+                          }
+                        }
+                        for(const r of (still.length?[]:ready)){
+                          const x=r.x, have=r.have, _l=r.lots;
+                          try{
+                            await updateDoc(doc(db,"inventory",x.id),
+                              Object.assign({stock:increment(-x.need),
+                                lastIssued:serverTimestamp()},_l?{lots:_l}:{}));
+                            await addDoc(collection(db,"inventory_log"),{
+                              itemId:x.id,itemName:x.name,unit:x.unit||"",
+                              type:"deduct",amount:-x.need,
+                              prevStock:have,
+                              newStock:Math.round((have-x.need)*1000)/1000,
+                              desc:"Issued from Main (late): "+x.need+" "+(x.unit||"")
+                                +" to "+(po.branchName||po.branch),
+                              source:"TRANSFER",ref:po.poNum||"",
+                              branch:"ct-main",by:user.name,
+                              date:localDate(),timestamp:serverTimestamp(),
+                              at:serverTimestamp()});
+                            done++;
+                          }catch(e){
+                            still.push(x);
+                            console.warn("retry deduct failed",x.id,e);
+                          }
+                        }
+                        try{
+                          await updateDoc(doc(db,"advances",po._docId),
+                            still.length
+                              ? {stockShort:still,stockIssued:false}
+                              : {stockShort:[],stockIssued:true});
+                        }catch(e){}
+                        showT(still.length
+                          ? ("Walang nabawas \u2014 kulang pa ang "+still.length
+                             +" item/s. Punan muna ang lahat.")
+                          : ("Kumpleto na ang pagbawas \u2014 "+done+" item/s"),
+                          still.length?"err":"ok");
+                      },
+                      style:{marginTop:9,padding:"8px 14px",background:C.danger,
+                        border:"none",borderRadius:8,color:"#fff",fontSize:12,
+                        fontWeight:800,cursor:"pointer"}},
+                      "\ud83d\udd01 Ulitin ang Pagbawas")),
+
                   // Main edits the branch's order in place. Everything it
                   // changes is stamped with who and when, and the branch is
                   // told — an order that changes silently is worse than one
@@ -20550,12 +20736,26 @@ function App(){
                   ),
 
                   // PROCESSING → Record Payment
-                  (st==="processing"||st==="approved"||st==="paid")&&h("button",{
-                    onClick:()=>setModal("payment_"+po._docId),
-                    style:{padding:"7px 14px",background:C.success,
-                      border:"none",borderRadius:8,color:"#fff",
-                      fontSize:13,fontWeight:700,cursor:"pointer"}},
-                    balance<=0?"💰 View Payments":"💰 Record Payment"),
+                  //
+                  // Payment waits for the stock. Paying for a delivery Main's
+                  // book still shows on its own shelf settles a transfer that
+                  // has not happened, and after that neither side's inventory
+                  // can be reconciled against the money.
+                  (st==="processing"||st==="approved"||st==="paid")
+                    &&((po.stockShort||[]).length===0
+                      ? h("button",{
+                          onClick:()=>setModal("payment_"+po._docId),
+                          style:{padding:"7px 14px",background:C.success,
+                            border:"none",borderRadius:8,color:"#fff",
+                            fontSize:13,fontWeight:700,cursor:"pointer"}},
+                          balance<=0?"💰 View Payments":"💰 Record Payment")
+                      : h("button",{
+                          disabled:true,
+                          title:"Kailangan munang makumpleto ang pagbawas sa MAIN",
+                          style:{padding:"7px 14px",background:"#eee",
+                            border:"none",borderRadius:8,color:"#999",
+                            fontSize:13,fontWeight:700,cursor:"not-allowed"}},
+                          "🔒 Bayad — hintayin ang pagbawas")),
 
                   // Main-side cancel. Only the branch could cancel before, and
                   // only pre-processing — so a PO Main could not fulfil had no
