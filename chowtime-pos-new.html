@@ -7018,6 +7018,61 @@ function BranchSettingsPage({branchId,curBranch,user,db,showT}){
 // showed P0.00 — Main could not see the value of what was being requested.
 // The branch's own lines carry the agreed price, so the estimate is available
 // from the moment the PO is submitted. Confirmed amount always wins.
+// ─── MONTHLY STOCK SNAPSHOT ───────────────────────────────
+//
+// Cost of goods is read from the stock itself: opening plus purchases minus
+// what is left. That needs a figure nothing was storing — what the stock was
+// worth on the first of the month — so it is captured and kept.
+function invValueOf(rows){
+  return Math.round((rows||[]).reduce(function(a,i){
+    const st=Number(i.stock)||0;
+    // Lots price it exactly when they still add up to the stock on hand;
+    // after a physical count they may not, and the item's own cost is the
+    // honest fallback rather than a number that looks precise and is not.
+    if(Array.isArray(i.lots)&&i.lots.length
+       &&Math.abs(st-lotsQty(i.lots))<=0.01) return a+lotsValue(i.lots);
+    return a+st*(Number(i.cost)||0);
+  },0)*100)/100;
+}
+
+function monthKey(dateStr){ return String(dateStr||"").slice(0,7); }
+function prevMonthKey(mk){
+  const y=Number(String(mk).slice(0,4)), m=Number(String(mk).slice(5,7));
+  const d=new Date(y,m-2,1);
+  return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
+}
+
+// Written once per branch per month. Re-saving the same month overwrites it,
+// which is what you want the day someone recounts — but a month already
+// closed keeps whatever it was closed with.
+async function saveStockSnapshot(db,branch,mk,rows,byName,auto){
+  const value=invValueOf(rows);
+  await setDoc(doc(db,"stock_snapshots",branch+"_"+mk),{
+    branch:branch, month:mk, value:value,
+    itemCount:(rows||[]).length,
+    auto:!!auto, takenOn:localDate(),
+    by:byName||"", at:serverTimestamp()
+  },{merge:true});
+  return value;
+}
+
+// Nobody should have to remember a button on the first of the month, so the
+// app takes the reading itself the first time it opens in a new month.
+//
+// It will not backfill an older month. A value captured on the 9th is not what
+// the shelf held on the 31st — days of sales and a delivery sit in between —
+// and a wrong opening figure is worse than a missing one, because it looks
+// finished. Past the grace window the P&L asks for the number instead.
+const SNAP_GRACE_DAYS = 3;
+function snapshotIsDue(stockSnaps,today){
+  const nowMk=monthKey(today);
+  const prevMk=prevMonthKey(nowMk);
+  if(stockSnaps[prevMk]!=null) return null;      // already have it
+  const day=Number(String(today).slice(8,10))||99;
+  if(day>SNAP_GRACE_DAYS) return null;           // too late to pass as month-end
+  return prevMk;
+}
+
 function poValue(po){
   const t=Number(po&&po.totalAmount)||0;
   if(t>0)return t;
@@ -12488,6 +12543,9 @@ function App(){
   const [plFrom,setPlFrom]=useState(localDate());
   const [plTo,setPlTo]=useState(localDate());
   const [plLogs,setPlLogs]=useState([]);                 // deducts with FIFO cost
+  const [stockSnaps,setStockSnaps]=useState({});         // branch_YYYY-MM -> value
+  const [snapMeta,setSnapMeta]=useState({});             // was it auto-taken?
+  const [snapSaving,setSnapSaving]=useState(false);
   const [addLogs,setAddLogs]=useState([]);              // arrivals, for lot dating
   const [poOpen,setPoOpen]=useState("");                 // expanded PO row
   const [editSub,setEditSub]=useState(null);             // subscription being edited
@@ -12677,6 +12735,22 @@ function App(){
         query(collection(db,lc),where("type","==","deduct"),limit(4000)),
         snap=>setPlLogs(snap.docs.map(d=>({...d.data(),_id:d.id}))),
         err=>console.warn("P&L logs:",err.message)));
+
+      // Month-end stock values. One small document per branch per month —
+      // the only figure the P&L cannot recompute from anything else.
+      unsubs.push(onSnapshot(
+        query(collection(db,"stock_snapshots"),where("branch","==",bId)),
+        snap=>{
+          const m={},meta={};
+          snap.docs.forEach(function(d){
+            const v=d.data()||{};
+            if(!v.month)return;
+            m[v.month]=Number(v.value)||0;
+            meta[v.month]={auto:!!v.auto,takenOn:v.takenOn||"",by:v.by||""};
+          });
+          setStockSnaps(m); setSnapMeta(meta);
+        },
+        err=>console.warn("stock snapshots:",err.message)));
       // Stock coming in, for dating a lot rebuild. Far fewer of these than
       // deductions, so a smaller window covers a long stretch.
       unsubs.push(onSnapshot(
@@ -12976,6 +13050,26 @@ function App(){
       return()=>unsub();
     }catch(e){}
   },[user?.branch]);
+
+  // ── MONTH-END STOCK SNAPSHOT (auto) ──────────────────────
+  useEffect(()=>{
+    if(!user||!user.branch)return;
+    if(!inventory||!inventory.length)return;   // catalogue not loaded yet
+    if(!stockSnaps)return;
+    const bId=(user.branch==="all"||user.branch==="comm")?"ct-main":user.branch;
+    const due=snapshotIsDue(stockSnaps,localDate());
+    if(!due)return;
+    let alive=true;
+    (async()=>{
+      try{
+        // setDoc on a deterministic id, so two terminals opening at the same
+        // time write the same document rather than two of them.
+        await saveStockSnapshot(db,bId,due,inventory,"auto",true);
+      }catch(e){ console.warn("stock snapshot (auto):",e&&e.message); }
+      if(!alive)return;
+    })();
+    return()=>{alive=false;};
+  },[user?.branch,inventory.length,stockSnaps]);
 
   // ── BRANCH MENU OVERRIDES ────────────────────────────────
   useEffect(()=>{
@@ -18513,7 +18607,44 @@ function App(){
               expRows[k]=(expRows[k]||0)+(Number(e.amount)||0);
             });
 
-          const gross=sales-cogsFinal;
+          // ── Cost of goods the second way: what actually left the shelf.
+          //
+          //   opening stock + purchases − closing stock
+          //
+          // The BOM figure above says what the recipes should have used. This
+          // one says what is gone. It only works over a whole month, because
+          // that is the only period a stock value is captured for.
+          const mkTo=monthKey(R.to), mkFrom=monthKey(R.from);
+          const isWholeMonth=(mkFrom===mkTo)
+            &&String(R.from).slice(8)==="01"
+            &&String(R.to)>=(mkTo+"-28");
+          const thisMonthNow=monthKey(localDate());
+          // Purchases: what this branch actually RECEIVED in the period, at
+          // what it pays Main. An order still in transit has not become stock.
+          const poRows=(advances||[]).filter(a=>
+            a._type==="po"&&a.branch===branchId
+            &&(a.status==="completed"||a.status==="paid"
+               ||a.status==="received"||a.status==="discrepancy")
+            &&String(a.receivedDate||a.deliveryDate||a.date||"")>=R.from
+            &&String(a.receivedDate||a.deliveryDate||a.date||"")<=R.to);
+          const purchases=Math.round(poRows.reduce((a,po)=>a+poValue(po),0)*100)/100;
+          const openStock=stockSnaps[prevMonthKey(mkTo)];
+          // The month still running has no closing snapshot yet, so the shelf
+          // as it stands now is the honest stand-in. A finished month uses
+          // what was captured, never a later recount.
+          const closeStock=(mkTo===thisMonthNow)
+            ? invValueOf(inventory) : stockSnaps[mkTo];
+          const haveMovement=isWholeMonth
+            &&openStock!=null&&closeStock!=null;
+          const moveCogs=haveMovement
+            ? Math.round(((openStock+purchases)-closeStock)*100)/100 : null;
+
+          // One cost of goods, not two. Where a whole month has both stock
+          // values the movement figure IS the cost — opening plus purchases
+          // minus what is left. The BOM figure stops being a second deduction
+          // and becomes a check, shown apart from the arithmetic.
+          const cogsUsed=(moveCogs!=null)?moveCogs:cogsFinal;
+          const gross=sales-cogsUsed;
           const left=gross-exp;
           const pct=(v)=>sales>0?((v/sales)*100).toFixed(1)+"%":"—";
 
@@ -18603,8 +18734,30 @@ function App(){
               borderRadius:12,padding:"16px 18px",marginBottom:12}},
               line("Sales",sales,{big:true,noPct:true}),
               disc>0&&line("of which discounts given",-disc,{sub:true}),
-              line("Cost of goods sold",-cogsFinal,{rule:true,
+              // The stock-movement working, shown as its own block so the
+              // partner can add it up by hand: opening, what came in, what is
+              // left. Three figures, one subtraction.
+              haveMovement&&h("div",{style:{marginTop:6}},
+                h("div",{style:{fontSize:11,fontWeight:800,color:C.muted,
+                  letterSpacing:1,paddingTop:9,
+                  borderTop:"1px solid "+C.border}},"STOCK MOVEMENT"),
+                line("Opening stock \u00b7 "+prevMonthKey(mkTo)+" end",
+                  openStock,{sub:true}),
+                (snapMeta[prevMonthKey(mkTo)]||{}).auto&&h("div",{
+                  style:{fontSize:11,color:C.muted,paddingLeft:14,
+                    marginTop:-4,marginBottom:4}},
+                  "kusang kinuha noong "
+                  +((snapMeta[prevMonthKey(mkTo)]||{}).takenOn||"")
+                  +" \u2014 palitan kung may audit pagkatapos nito"),
+                line("Purchases received from Main",purchases,{sub:true}),
+                line("Closing stock"+(mkTo===thisMonthNow?" (as of today)":""),
+                  -closeStock,{sub:true}),
+                line("Cost of goods sold",-moveCogs,
+                  {rule:true,color:C.danger})),
+
+              !haveMovement&&line("Cost of goods sold",-cogsFinal,{rule:true,
                 color:cogsFinal>0?C.danger:C.muted}),
+
               line("Gross profit",gross,{big:true,rule:true,
                 color:gross>=0?C.success:C.danger}),
 
@@ -18620,13 +18773,56 @@ function App(){
               line("Left after branch costs",left,{big:true,rule:true,
                 color:left>=0?C.success:C.danger})),
 
+            // Without a captured month-end value the movement working cannot
+            // run at all, so the page says what is missing and offers to take
+            // it — rather than quietly falling back to the recipe figure.
+            isWholeMonth&&!haveMovement&&h("div",{
+              style:{background:C.info+"12",border:"1px solid "+C.info,
+                borderRadius:11,padding:"11px 13px",marginBottom:12}},
+              h("div",{style:{fontSize:12,fontWeight:800,color:C.info}},
+                "Stock movement needs a month-end value"),
+              h("div",{style:{fontSize:11,color:C.muted,marginTop:2,
+                lineHeight:1.5}},
+                (openStock==null
+                  ? ("Walang naitalang halaga ng stock sa katapusan ng "
+                     +prevMonthKey(mkTo)+". ")
+                  : "")
+                +(closeStock==null
+                  ? ("Walang naitalang halaga sa katapusan ng "+mkTo+". ")
+                  : "")
+                +"Kusang kinukuha ito sa unang pagbukas ng bagong buwan. "
+                +"Lampas na ang petsa para doon, kaya kailangan nang ilagay nang manwal "
+                +"\u2014 at ang bilang ngayon ay hindi na katumbas ng bilang noong katapusan."),
+              h("button",{disabled:snapSaving,
+                onClick:async()=>{
+                  const mk=(closeStock==null)?mkTo:prevMonthKey(mkTo);
+                  if(!window.confirm("Itala ang kasalukuyang halaga ng stock ("
+                    +"\u20b1"+peso(invValueOf(inventory))+") bilang katapusan ng "
+                    +mk+"?\n\nGamitin lang ito kung tapos na ang bilang para sa buwang iyon."))return;
+                  setSnapSaving(true);
+                  try{
+                    const v=await saveStockSnapshot(db,branchId,mk,inventory,user.name);
+                    showT("Naitala: \u20b1"+peso(v)+" \u00b7 "+mk);
+                  }catch(e){ showT("Hindi naitala: "+String(e&&e.message||e).slice(0,60),"err"); }
+                  setSnapSaving(false);
+                },
+                style:{marginTop:9,padding:"7px 13px",background:C.info,
+                  border:"none",borderRadius:8,color:"#fff",fontSize:12,
+                  fontWeight:700,cursor:snapSaving?"wait":"pointer"}},
+                snapSaving?"Itinatala\u2026":"\ud83d\udcf8 Itala ang stock ngayon")),
+
             h("div",{style:{fontSize:11,color:C.muted,lineHeight:1.6,
               background:C.bg,borderRadius:10,padding:"11px 13px"}},
               h("b",{style:{color:C.text}},"What this covers: "),
-              "sales rung at this branch, the FIFO cost of the stock those "+
-              "sales consumed, and expenses recorded here. It stops at what "+
-              "this branch controls — rent, franchise fees and head-office "+
-              "costs are not in it, so this is not the company's profit.")
+              (haveMovement
+                ? ("benta sa branch na ito, ang cost of goods mula sa aktwal "+
+                   "na galaw ng stock (opening + purchases − closing), at "+
+                   "ang mga gastos na naitala rito. ")
+                : ("sales rung at this branch, the FIFO cost of the stock those "+
+                   "sales consumed, and expenses recorded here. "))+
+              "It stops at what this branch controls — rent, franchise fees "+
+              "and head-office costs are not in it, so this is not the "+
+              "company's profit.")
           );
         })(),
 
