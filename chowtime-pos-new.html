@@ -255,7 +255,7 @@ const BRANCHES = [
 
 const ROLES = {
   owner:     {label:"Owner / Admin",    emoji:"\u{1F451}", color:"#6A1B9A",
-    nav:["dashboard","branches","subs","pos","orders","void_requests","all_orders","analytics","z_reading","reports","cash_count","cash_in","expenses","cash_monitor","cash_advance","discount_mgmt","inventory","inv_log","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","settings","printer","ext_payroll","ext_kiosk","hris_dash","ext_production","ext_stock","branch_pl"]},
+    nav:["dashboard","branches","subs","pos","orders","void_requests","all_orders","analytics","z_reading","reports","cash_count","cash_in","expenses","cash_monitor","discount_mgmt","inventory","inv_log","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","settings","printer","ext_payroll","ext_kiosk","hris_dash","ext_production","ext_stock","branch_pl"]},
   manager:   {label:"Branch Manager",   emoji:"\u{1F3EA}", color:"#007AFF",
     nav:["branch_dash","pos","orders","analytics","z_reading","reports","cash_count","cash_in","expenses","ext_payroll","inventory","inv_log","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","hris_dash","bom_mgmt","branch_settings","printer","ext_kiosk","ext_stock","branch_pl"]},
   cashier:   {label:"Cashier",          emoji:"\u{1F4B3}", color:"#34C759",
@@ -283,7 +283,7 @@ const NAV_GROUPS = [
   {id:"people",icon:"\u{1F465}", label:"People & HR",
    pages:["user_mgmt","crew_mgmt","ext_payroll","ext_kiosk","hris_dash",
           
-          "ca_request","loan_request","cash_advance"]},
+          "ca_request","loan_request"]},
   {id:"money", icon:"\u{1F4B8}", label:"Expenses",
    pages:["expenses"]},
   {id:"setup", icon:"\u2699\uFE0F", label:"Settings",
@@ -306,7 +306,6 @@ const NAV_META = {
   x_reading:   {icon:"📃",label:"X-Reading"},
   expenses:    {icon:"💸",label:"Expenses"},
   cash_monitor:{icon:"💵",label:"Cash Monitor"},
-  cash_advance:{icon:"💵",label:"Cash Advance"},
   discount_mgmt:{icon:"🏷️",label:"Discounts"},
   cash_in_out: {icon:"🔄",label:"Cash In/Out"},
   inventory:   {icon:"📦",label:"Inventory"},
@@ -3584,12 +3583,12 @@ function CALoanPage({user,branchId,curBranch,db,hrisDB,showT,mode,hrisEmps=[],pr
       await notify(db,{to:"ct-main",type:"info",
         title:(isCA?"Cash Advance":"Cash Loan")+" request — "+curBranch.full,
         message:hrisEmp.name+" \u00B7 \u20B1"+peso(amt)+" \u00B7 "+reason,
-        page:"cash_advance",ref:hrisEmp.name,by:user.name});
+        page:"hris_dash",ref:hrisEmp.name,by:user.name});
       if(branchId!=="ct-main"){
         await notify(db,{to:branchId,type:"info",
           title:(isCA?"Cash Advance":"Cash Loan")+" request \u2014 "+hrisEmp.name,
           message:"\u20B1"+peso(amt)+" \u00B7 "+reason+" \u00B7 nasa Main ang approval",
-          page:"cash_advance",ref:hrisEmp.name,by:user.name});
+          page:"ca_request",ref:hrisEmp.name,by:user.name});
       }
     }catch(e){console.warn("CA notify failed:",e);}
     showT((isCA?"Cash Advance":"Cash Loan")+" request submitted! Waiting for approval ✓");
@@ -5646,8 +5645,11 @@ function cardPrice(it){
 function navFor(user,companySettings){
   const role=ROLES[user&&user.role];
   const _rp=((companySettings&&companySettings.rolePerms)||{})[user&&user.role];
-  const _full=(user&&(user.role==="owner"||user.role==="commissary"
-                      ||user.role==="manager"));
+  // Only the owner is exempt, and only so the one account that edits
+  // permissions can never lock itself out of the screen that edits them.
+  // Managers used to be exempt too, which made every manager toggle on the
+  // Permissions screen do nothing — switched off, the page stayed in the menu.
+  const _full=(user&&user.role==="owner");
   const base=((role&&role.nav)||[]).filter(function(p){
     if(_full)return true;
     if(!_rp)return true;
@@ -11053,6 +11055,8 @@ function PermissionsTab({db,showT,companySettings,setCompanySettings}){
   // What a role gets without anyone touching this screen. Anything outside it
   // is off until switched on, and the switch now actually grants it.
   const ROLE_DEFAULTS = {
+    manager:    (ROLES.manager&&ROLES.manager.nav)||[],
+    commissary: (ROLES.commissary&&ROLES.commissary.nav)||[],
     cashier:    Object.keys(DEFAULT_PERMS.cashier),
     crew:       Object.keys(DEFAULT_PERMS.crew),
     stockclerk: Object.keys(DEFAULT_PERMS.stockclerk),
@@ -11060,10 +11064,11 @@ function PermissionsTab({db,showT,companySettings,setCompanySettings}){
 
 
   const ROLE_COLORS = {
-    cashier:"#34C759",
+    manager:"#007AFF", commissary:"#32ADE6", cashier:"#34C759",
     crew:"#FF9500", stockclerk:"#AF52DE"
   };
   const ROLE_LABELS = {
+    manager:"🏪 Branch Manager", commissary:"🏭 Commissary Staff",
     cashier:"💳 Cashier",
     crew:"🧑‍🍳 Crew / Kitchen", stockclerk:"📦 Stock Clerk"
   };
@@ -11098,7 +11103,7 @@ function PermissionsTab({db,showT,companySettings,setCompanySettings}){
   return h("div",null,
     h("div",{style:{background:"#E3F2FD",borderRadius:10,
       padding:"10px 14px",marginBottom:8,fontSize:13,color:"#1565C0"}},
-      "👔 Branch Manager — always has FULL ACCESS to all features. Cannot be restricted."),
+      "👑 Only the Owner cannot be restricted. Every other role, Branch Manager included, can be switched off page by page here."),
     h("div",{style:{background:"#fff3cd",borderRadius:10,
       padding:"10px 14px",marginBottom:14,fontSize:13,color:"#856404"}},
       "⚠️ All features are ON by default. Switch OFF only what is not needed. Changes take effect on next login."),
@@ -11155,9 +11160,13 @@ function PermissionsTab({db,showT,companySettings,setCompanySettings}){
                 g.items.map(nav=>{
                   const isOn=isOnFor(nav.key);
                   const isDefault=defs.indexOf(nav.key)>=0;
+                  // One page each role cannot be left without, or the account
+                  // signs in to an empty shell with nowhere to go.
                   const isRequired=
                     (role==="cashier"&&nav.key==="pos")||
-                    (role==="crew"&&nav.key==="kitchen");
+                    (role==="crew"&&nav.key==="kitchen")||
+                    (role==="manager"&&nav.key==="branch_dash")||
+                    (role==="commissary"&&nav.key==="comm_dash");
                   return h("button",{key:nav.key,
                     onClick:()=>!isRequired&&toggle(role,nav.key),
                     title:isDefault?"Standard for this role"
@@ -12529,7 +12538,6 @@ function App(){
   const [dbReady,setDbReady]=useState(false);
   const [newExp,setNewExp]=useState({cat:"Utilities",desc:"",amount:"",date:""});
   const [newCash,setNewCash]=useState({type:"in",desc:"",amount:""});
-  const [newAdv,setNewAdv]=useState({staff:"",amount:"",reason:"",deductDate:""});
   const [newStaff,setNewStaff]=useState({name:"",role:"cashier",branch:"ct-wsfp",email:"",password:""});
 
   const [invSrch,setInvSrch]=useState("");
@@ -17363,40 +17371,6 @@ function App(){
           )
         ),
 
-        // ══ CASH ADVANCE ══
-        page==="cash_advance"&&h("div",null,
-          h(SectionHeader,{title:"Cash Advance",action:()=>setModal("add_adv"),actionLabel:"New Request"}),
-          h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
-            advances.filter(a=>user.role==="owner"||a.branch===branchId).map(a=>h("div",{key:a._docId,style:{display:"flex",alignItems:"center",gap:9,padding:"11px 14px",borderBottom:"1px solid #f9f9f9"}},
-              h("div",{style:{width:34,height:34,background:"#F3E5F5",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,flexShrink:0}},"💵"),
-              h("div",{style:{flex:1}},h("div",{style:{fontSize:13,fontWeight:700}},a.staff),h("div",{style:{fontSize:12,color:C.muted}},a.reason+" · "+a.date+" → Deduct: "+a.deductDate)),
-              h("div",{style:{fontSize:14,fontWeight:800,color:C.purple,marginRight:7}},"₱"+(a.amount||0).toLocaleString()),
-              h(Badge,{label:a.status,color:a.status==="approved"?C.success:a.status==="declined"?C.danger:C.warning}),
-              a.status==="pending"&&user.role==="owner"&&h("div",{style:{display:"flex",gap:5}},
-                h("button",{onClick:async()=>{if(a._docId)await updateDoc(doc(db,"advances",a._docId),{status:"approved",approvedBy:user.name,approvedAt:serverTimestamp()});showT("Approved");},style:{padding:"3px 8px",background:"#E8F5E9",border:"none",borderRadius:6,color:C.success,fontSize:12,fontWeight:700,cursor:"pointer"}},"✓"),
-                h("button",{onClick:async()=>{if(a._docId)await updateDoc(doc(db,"advances",a._docId),{status:"declined"});showT("Declined","warn");},style:{padding:"3px 8px",background:"#FFEBEE",border:"none",borderRadius:6,color:C.danger,fontSize:12,fontWeight:700,cursor:"pointer"}},"✗")
-              )
-            )),
-            advances.length===0&&h("div",{style:{textAlign:"center",padding:"30px",color:C.muted,fontSize:14}},"No cash advances yet")
-          ),
-          modal==="add_adv"&&h("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:900}},
-            h("div",{style:{background:"#fff",width:360,borderRadius:14,padding:"18px",boxShadow:"0 20px 60px rgba(0,0,0,.3)"}},
-              h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:13}},h("b",null,"Cash Advance Request"),h("button",{onClick:()=>setModal(null),style:{background:"none",border:"none",fontSize:17,cursor:"pointer"}},"×")),
-              h("div",{style:{display:"grid",gap:8}},
-                h("div",null,h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"STAFF NAME"),h("input",{value:newAdv.staff,onChange:e=>setNewAdv(p=>({...p,staff:e.target.value})),placeholder:"Name",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:13,outline:"none",boxSizing:"border-box"}})),
-                h("div",null,h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"AMOUNT (₱)"),h("input",{type:"number",onFocus:e=>e.target.select(),value:newAdv.amount,onChange:e=>setNewAdv(p=>({...p,amount:e.target.value})),placeholder:"0.00",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:14,fontWeight:700,outline:"none",boxSizing:"border-box"}})),
-                h("div",null,h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"REASON"),h("input",{value:newAdv.reason,onChange:e=>setNewAdv(p=>({...p,reason:e.target.value})),placeholder:"e.g. Medical",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:13,outline:"none",boxSizing:"border-box"}})),
-                h("div",null,h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"DEDUCTION DATE"),h("input",{type:"date",value:newAdv.deductDate,onChange:e=>setNewAdv(p=>({...p,deductDate:e.target.value})),style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:13,outline:"none",boxSizing:"border-box"}})),
-                h("button",{onClick:async()=>{
-                  if(!newAdv.staff||!newAdv.amount){showT("Fill all fields","warn");return;}
-                  await addDoc(collection(db,"advances"),{branch:branchId,staff:newAdv.staff,amount:parseFloat(newAdv.amount),reason:newAdv.reason,date:localDate(),deductDate:newAdv.deductDate,status:"pending",requestedBy:user.name,timestamp:serverTimestamp()});
-                  setNewAdv({staff:"",amount:"",reason:"",deductDate:""});setModal(null);showT("Request submitted!");
-                },style:{padding:"10px",background:`linear-gradient(135deg,${C.primary},${C.dark})`,border:"none",borderRadius:8,color:"#fff",fontWeight:700,cursor:"pointer"}},"Submit Request")
-              )
-            )
-          )
-        ),
-
         // ══ CASH MONITOR ══
         page==="cash_monitor"&&h("div",null,
           h(SectionHeader,{title:"Cash Monitoring — All Branches"}),
@@ -20163,8 +20137,13 @@ function App(){
                   // Only MAIN processes a PO. Without this gate a branch
                   // manager could issue their own DR from their own order,
                   // deduct MAIN's stock and skip the commissary entirely.
+                  //
+                  // The test is which SIDE the account works, not which role
+                  // it holds. Checking for owner left a MAIN manager holding
+                  // the PO Monitor with only Cancel available — able to kill
+                  // an order but not to fulfil one.
                   st==="received_by_main"
-                    &&(user.role==="owner"||user.role==="commissary")
+                    &&seesAllPOs(user,companySettings)
                     &&h("button",{
                     onClick:()=>setModal("issue_dr_"+po._docId),
                     style:{padding:"7px 14px",
