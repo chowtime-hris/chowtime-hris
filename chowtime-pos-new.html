@@ -1083,12 +1083,14 @@ function printZ(zd,branchName,cashier){
   <div class="row"><span>Net Sales:</span><span>P${peso((zd.net||0))}</span></div>
   <div class="row"><span>Cash In:</span><span>P${peso((zd.cashIn||0))}</span></div>
   <div class="row"><span>Expenses:</span><span>-P${peso((zd.expenses||0))}</span></div>
-  <div class="row"><span>Remittance:</span><span>-P${peso((zd.remittance||0))}</span></div>
   <div class="row"><span>Other Cash Out:</span><span>-P${peso((zd.otherCashOut||0))}</span></div>
   <div class="hr"></div>
   <div class="row b"><span>EXPECTED CASH:</span><span>P${peso((zd.cashOnHand!=null?zd.cashOnHand:(zd.totalCash||0)))}</span></div>
   ${zd.countedCash!=null?`<div class="row"><span>COUNTED CASH:</span><span>P${peso(zd.countedCash)}</span></div>
   <div class="row b"><span>SHORT / OVER:</span><span>${zd.shortOver>=0?"+":""}P${peso(zd.shortOver||0)}</span></div>`:""}
+  <div class="hr"></div>
+  <div class="row"><span>Remitted:</span><span>P${peso((zd.remittance||0))}</span></div>
+  <div class="row b"><span>CARRIED TO TOMORROW:</span><span>P${peso((zd.carriedForward!=null?zd.carriedForward:Math.max(0,(zd.countedCash||0)-(zd.remittanceCounted||0))))}</span></div>
   <div class="hr"></div>
   <div class="b">PAYMENT BREAKDOWN</div>
   <div class="row"><span>Cash:</span><span>P${peso((zd.cashSales||0))}</span></div>
@@ -1170,11 +1172,6 @@ function buildEscPosZ(zd,branchName,cashier,cs,paperSize,isZ){
   // The paper listed one lumped Cash Out and no expenses at all, so it could
   // not be reconciled against the drawer it was printed for.
   a(row("Expenses","- P"+n(zd.expenses||0)));
-  a(row("Remittance","- P"+n(zd.remittance||0)));
-  if(zd.remittanceCounted>0&&zd.remittanceLogged>0){
-    a(row("  from count","P"+n(zd.remittanceCounted)));
-    a(row("  logged out","P"+n(zd.remittanceLogged)));
-  }
   a(row("Other Cash Out","- P"+n(zd.otherCashOut||0)));
   a(dash());
   a([ESC,0x21,0x10]);
@@ -1186,6 +1183,21 @@ function buildEscPosZ(zd,branchName,cashier,cs,paperSize,isZ){
     a(row("SHORT / OVER",(zd.shortOver>=0?"+":"")+"P"+n(zd.shortOver)));
     a([ESC,0x45,0x00]);
   }
+  a(dash());
+
+  // Remittance sits BELOW the variance now. Printed above it, inside the run
+  // of minus lines, it read as already deducted from Expected Cash when it
+  // was not — and the drawer looked short by the exact amount handed over.
+  a(row("Remitted","P"+n(zd.remittance||0)));
+  if(zd.remittanceCounted>0&&zd.remittanceLogged>0){
+    a(row("  from count","P"+n(zd.remittanceCounted)));
+    a(row("  logged out","P"+n(zd.remittanceLogged)));
+  }
+  a([ESC,0x45,0x01]);
+  a(row("CARRIED TO TOMORROW","P"+n(zd.carriedForward!=null?zd.carriedForward
+    :Math.max(0,(zd.countedCash||0)-(zd.remittanceCounted||0)))));
+  a([ESC,0x45,0x00]);
+  a(ln("Opening fund bukas."));
   a(dash());
 
   a(ln("PAYMENT BREAKDOWN"));
@@ -1641,6 +1653,28 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
     return()=>{alive=false;};
   },[]);
 
+  // The branch orders from Main's catalogue, but what it needs to order
+  // depends on what IS on its own shelf. Without it, quantities are guessed
+  // from memory — so the branch's own stock is loaded alongside.
+  const [branchStock,setBranchStock] = useState(null);
+  useEffect(()=>{
+    if(!branchId){setBranchStock({});return;}
+    let alive=true;
+    (async()=>{
+      try{
+        const snap=await getDocs(collection(db,invColFor(branchId)));
+        const map={};
+        snap.docs.forEach(d=>{
+          const v=d.data()||{};
+          map[d.id]={stock:Number(v.stock)||0,minStock:Number(v.minStock)||0,
+                     unit:v.unit||""};
+        });
+        if(alive)setBranchStock(map);
+      }catch(e){ if(alive)setBranchStock({}); }
+    })();
+    return()=>{alive=false;};
+  },[branchId]);
+
   // When editing, seed the catalogue with the quantities already ordered.
   const [ items,setItems]     = useState(()=>{
     const prev={};
@@ -1962,7 +1996,34 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
             h("div",{style:{fontSize:12,color:C.muted}},
               packSizeOf( item)>0
                 ? ("Order in "+packUnitOf( item)+" · 1 "+packUnitOf( item)+" = "+packSizeOf( item)+" "+ item.unit)
-                : ("Unit: "+ item.unit))
+                : ("Unit: "+ item.unit)),
+            // On hand at THIS branch — the reference for how much to order.
+            (function(){
+              if(branchStock===null)
+                return h("div",{style:{fontSize:11,color:C.muted}},"checking stock…");
+              const bs=branchStock[ item.id];
+              if(!bs)
+                return h("div",{style:{fontSize:11,color:C.muted}},
+                  "not carried here yet");
+              const sz=packSizeOf( item)||1;
+              const onHand=(function(){
+                if(sz>1){
+                  const p=Math.floor(bs.stock/sz);
+                  const r=Math.round((bs.stock-p*sz)*100)/100;
+                  return p+" "+packUnitOf( item)+(r?" + "+r+" "+( item.unit||""):"");
+                }
+                return (Math.round(bs.stock*100)/100)+" "+( item.unit||"");
+              })();
+              const low=bs.minStock>0&&bs.stock<=bs.minStock;
+              const out=bs.stock<=0;
+              return h("div",{style:{fontSize:11,marginTop:1,
+                color:out?C.danger:(low?C.warning:C.success),fontWeight:700}},
+                "On hand: "+onHand,
+                bs.minStock>0&&h("span",{style:{color:C.muted,fontWeight:400}},
+                  "  · reorder at "+bs.minStock+" "+( item.unit||"")),
+                out?h("span",{style:{color:C.danger}}," · OUT"):
+                  (low?h("span",null," · LOW"):null));
+            })()
           ),
           // Category
           h("div",{style:{fontSize:13,color:C.muted}}, item.cat),
@@ -2646,7 +2707,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
   const [counts,setCounts]   = useState(DENOMS.reduce((a,d)=>({...a,[d.value]:0}),{}));
   const [remit,setRemit]     = useState("");
   // true = the money was handed over BEFORE the drawer was counted
-  const [remitBefore,setRemitBefore] = useState(false);
+
   // Closing runs in an order for a reason: expenses first, then the count.
   // Counting before the day's spending is keyed in produces a shortage that
   // is nobody's fault and takes an hour to explain.
@@ -2687,7 +2748,6 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
         setRemit((todayCount.remittanceField!==undefined
           ? todayCount.remittanceField
           : todayCount.remittance)?.toString()||"");
-        setRemitBefore(!!todayCount.remittedBeforeCount);
         setNote(todayCount.note||"");
         setSaved(true);
       }
@@ -2770,10 +2830,18 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
   // And remittance depends on WHEN it left. Handed over before the count, the
   // drawer no longer holds it and Expected has to drop. Handed over after, the
   // money is still in the box while counting and Expected must not move.
-  const remitOutBefore = remitBefore ? remitField : 0;
-  const closingBalance = totalCash - (remitBefore ? 0 : remitField);
+  // Remittance no longer has a say in Expected Cash, and there is no longer a
+  // question to answer about when it left.
+  //
+  // Money handed over during the day is a Cash Out entry with a time on it, so
+  // it is already inside `cashOut` below. Money handed over at closing leaves
+  // AFTER the drawer is counted, so it was in the box while counting and must
+  // not be subtracted. Either way the drawer that was counted is the drawer
+  // that was expected — the remittance is settled below the variance instead,
+  // where it becomes tomorrow's opening fund.
+  const closingBalance = totalCash - remitField;
   const expectedCash = openingFund + todaySales + cashIn
-    - cashOut - todayExpenses - remitOutBefore;
+    - cashOut - todayExpenses;
   const variance = totalCash - expectedCash;
 
   const saveCashCount = async(isClosing=false)=>{
@@ -2794,7 +2862,6 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
         cashOut,
         expectedCash,
         expenses:todayExpenses,
-        remittedBeforeCount:!!remitBefore,
         expenses:todayExpenses,
         variance,
         remittance: remittanceAmt,
@@ -2839,7 +2906,6 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
     openingFund, todaySales, cashIn, cashOut, expectedCash, variance,
     expenses:todayExpenses,
     remittance:remittanceAmt, remittanceField:remitField,
-    remittedBeforeCount:remitBefore,
     remittanceLogged:remitLogged, closingBalance, note:countNote,
     countedBy:user.name, branchName:curBranch.full};
 
@@ -2865,9 +2931,6 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
     // Expected already has these taken off it. Printed without them, the
     // column could not be added up by the person holding the paper.
     const expenses      = num("expenses");
-    const remitBeforeAmt= R.remittedBeforeCount
-      ? (Number(R.remittanceField!==undefined?R.remittanceField:R.remittance)||0)
-      : 0;
     const variance      = num("variance");
     const remittanceAmt = num("remittance");
     const closingBalance= num("closingBalance");
@@ -2930,7 +2993,6 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
     <div class="r"><span>Cash in</span><span>+${P(cashIn)}</span></div>
     <div class="r"><span>Expenses</span><span>-${P(expenses)}</span></div>
     <div class="r"><span>Cash out</span><span>-${P(cashOut)}</span></div>
-    ${remitBeforeAmt>0?`<div class="r"><span>Remittance (before count)</span><span>-${P(remitBeforeAmt)}</span></div>`:""}
     <div class="r"><span>Expected Cash</span><span>${P(expectedCash)}</span></div>
     <div class="r b"><span>SHORT / OVER &middot; ${vTag}</span><span>${variance>=0?"+":"-"}${P(Math.abs(variance))}</span></div>
     ${showRemit?`<div class="hr"></div>
@@ -3243,12 +3305,6 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
                   h("span",{style:{fontSize:12,color:C.danger}},
                     "-₱"+peso(expByCat[k])))),
               grp(todayCash.filter(c=>c.type==="out"&&!isExpenseCopy(c)),-1),
-              remitOutBefore>0&&h("div",{style:{display:"flex",
-                justifyContent:"space-between",marginBottom:3}},
-                h("span",{style:{fontSize:13,color:C.muted}},
-                  "Remittance (before count)"),
-                h("span",{style:{fontSize:13,fontWeight:700,color:C.danger}},
-                  "-₱"+peso(remitOutBefore))),
               // Shown but never added: zeroing the order already took this out
               // of sales, so counting it here would remove the same peso twice.
               voidRef>0&&h("div",{style:{display:"flex",
@@ -3273,23 +3329,18 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
             variance>0?"📈 Cash is OVER expected":
             "⚠️ Cash is SHORT — check transactions"
           ),
-          // An over that matches the remittance almost to the peso is not
-          // money found — it is the timing box ticked the wrong way. Catching
-          // it here saves an hour of hunting for cash that never moved.
-          (remitField>0&&Math.abs(variance-remitOutBefore)<1&&remitOutBefore>0)
+          // A shortage the size of the remittance now means one thing only:
+          // the money left the drawer before it was counted and no Cash Out
+          // was recorded for it. The fix is to record it, not to reinterpret
+          // the count.
+          (remitField>0&&Math.abs(variance+remitField)<1)
             &&h("div",{style:{marginTop:7,padding:"8px 11px",borderRadius:8,
               background:"#FFF8E1",border:"1px solid #FFE082",fontSize:12,
               color:"#BF360C",fontWeight:700,lineHeight:1.5}},
-              "The over is almost exactly the ₱"+peso(remitField)
-              +" remittance. If the money was still in the drawer when you "
-              +"counted it, untick \u201Chanded over before counting\u201D."),
-          (remitField>0&&!remitBefore&&Math.abs(variance+remitField)<1)
-            &&h("div",{style:{marginTop:7,padding:"8px 11px",borderRadius:8,
-              background:"#FFF8E1",border:"1px solid #FFE082",fontSize:12,
-              color:"#BF360C",fontWeight:700,lineHeight:1.5}},
-              "The shortage is almost exactly the ₱"+peso(remitField)
-              +" remittance. If the money had already been handed over before "
-              +"you counted, tick \u201Chanded over before counting\u201D."),
+              "Kulang nang halos eksaktong ₱"+peso(remitField)
+              +" — ang laki ng remittance. Kung naipasa na ang pera bago "
+              +"ka nagbilang, itala muna ito sa Cash In/Out bilang Cash Out "
+              +"— Remittance, tapos bilangin ulit ang drawer."),
           // Nobody explained what the figures mean or what the colours are
           // saying, so a shortage read as an accusation instead of a checklist.
           h("div",{style:{marginTop:9,paddingTop:8,
@@ -3323,26 +3374,17 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
             h("div",{style:{fontSize:12,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"REMITTANCE AMOUNT (₱)"),
             h("input",{type:"number",onFocus:e=>e.target.select(),value:remit,onChange:e=>setRemit(e.target.value),placeholder:"0.00",
               style:{width:"100%",padding:"10px 12px",border:"2px solid "+C.warning,borderRadius:9,fontSize:16,fontWeight:700,outline:"none",boxSizing:"border-box",color:C.warning}}),
-            // The same peso means two different things depending on when it
-            // left. Nothing on screen used to ask, so an early hand-over read
-            // as a shortage of exactly that amount.
-            remitField>0&&h("label",{style:{display:"flex",gap:9,
-              alignItems:"flex-start",marginTop:9,cursor:"pointer",
-              background:remitBefore?"#FFF8E1":"#FAFAFA",
-              border:"1px solid "+(remitBefore?"#FFE082":C.border),
-              borderRadius:8,padding:"9px 11px"}},
-              h("input",{type:"checkbox",checked:remitBefore,
-                onChange:e=>setRemitBefore(e.target.checked),
-                style:{marginTop:2,width:17,height:17,cursor:"pointer"}}),
-              h("div",null,
-                h("div",{style:{fontSize:13,fontWeight:800,
-                  color:remitBefore?"#BF360C":C.text}},
-                  "Handed over before the count"),
-                h("div",{style:{fontSize:12,color:C.muted,marginTop:2,
-                  lineHeight:1.45}},
-                  remitBefore
-                    ? "No longer in the drawer, so it is taken off Expected Cash. What you counted is what stays."
-                    : "Still in the drawer while counting. It comes off the Closing Balance afterwards.")))
+            // The checkbox that used to sit here asked the crew to classify
+            // their own remittance, and a wrong tick moved Expected Cash by
+            // the full amount. There is nothing to classify now: this box is
+            // the money leaving AFTER the count, so it only ever comes off
+            // the closing balance.
+            remitField>0&&h("div",{style:{marginTop:9,background:"#FAFAFA",
+              border:"1px solid "+C.border,borderRadius:8,padding:"9px 11px",
+              fontSize:12,color:C.muted,lineHeight:1.45}},
+              "Ilalabas pagkatapos ng bilang, kaya hindi ito nakakaapekto sa "
+              +"SHORT / OVER. Kung may naipasa nang pera kanina, dapat naitala "
+              +"yun bilang Cash Out \u2014 Remittance, hindi dito.")
           ),
           remitLogged>0&&h("div",{style:{background:"#FFF8E1",
             border:"1px solid #FFE082",borderRadius:8,padding:"8px 11px",
@@ -5436,10 +5478,11 @@ const GUIDES=[
    steps:[
     "Open POS & Sales → Void Requests.",
     "The list shows today by default. For an order from an earlier day, switch to 7 days or All at the top of the list.",
-    "Pick the order, tick the items to void, and write the reason. Ticking only some items is a partial void — the rest of the order stays.",
+    "Pick the order and write the reason. Leave every item ticked — that is a normal full void.",
+    "Untick something only if you really mean to cancel part of the order. The system will stop and ask you to confirm, because a partial void keeps the rest of the receipt alive.",
     "Submit. A cashier's request waits for the manager; a manager or owner voids straight away.",
     "Once approved, the ingredients go back into stock and the sale comes off the day's total — at the branch the order came from, not the one approving it."],
-   note:"One request per order. If a request is already waiting, a second one is blocked — and an order that has already been voided cannot be voided again."},
+   note:"What goes back to stock is exactly what the sale took out — read from the inventory log, ingredient by ingredient, not recalculated from the recipe. So a sale that never deducted cannot hand back stock that never left. One request per order; an order already voided cannot be voided again."},
 
   {id:"stocks",roles:["manager","stockclerk","owner"],icon:"📦",
    title:"How to order stocks from Main",
@@ -5462,14 +5505,26 @@ const GUIDES=[
    note:"Count before confirming. Once received, the quantities are in your stock and correcting them means a manual adjustment with a reason attached."},
 
   {id:"count",roles:["manager","stockclerk","cashier","owner"],icon:"🧊",
-   title:"How to do the freezer count",
+   title:"How to do the freezer count (crew)",
    steps:[
     "Open Inventory → Freezer Count and sign in with your PIN.",
     "Pick the checkpoint: Open, Handoff or Close.",
     "Count what is physically in the freezer and enter it. Full packs and loose pieces have separate boxes.",
-    "The POS column fills itself — you do not enter it.",
+    "The POS column fills itself — you do not enter it, and you cannot see it while counting.",
     "Submit. The variance appears afterwards."],
-   note:"You cannot see the POS figure while counting — a count only means something if the answer is not known in advance. Nothing in the variance report is deducted from anyone's pay; it is a figure to look into, and any penalty is raised separately as a Fine."},
+   note:"A crew count does NOT change the POS stock. It records what you found and measures the gap from the last baseline. Only the Auditor Count corrects the POS. Nothing in the variance report is deducted from anyone's pay; it is a figure to look into, and any penalty is raised separately as a Fine."},
+
+  {id:"audit",roles:["manager","owner","stockclerk"],icon:"🔍",
+   title:"How to fix POS stock with an Auditor Count",
+   steps:[
+    "Bilangin ang freezer habang walang gumagalaw — mas mabuti bago magbukas o pagkasara.",
+    "Buksan ang Freezer Count app → Auditor Count, ilagay ang pangalan mo.",
+    "Ilagay ang aktwal na nabilang kada item. Kung wala nang natitira, 0 — hindi blangko.",
+    "Submit Audit. May lalabas na dilaw na Confirm POS Adjustment: makikita mo kada item ang 40 → 35 (-5) bago pa may masulat. Wala pang nagbabago dito.",
+    "Suriin ang listahan. Kung may mukhang mali, Cancel — walang mababago.",
+    "Confirm — Update POS Stock. Itatakda nito ang POS sa aktwal mong bilang at ire-reset ang baseline ng crew.",
+    "Balik sa POS → Inventory. Kung may babalang 'items without lot history', pindutin ang Rebuild lots from POs — presyo lang ang inaayos nito, hindi ang bilang."],
+   note:"Ang bilang mo ang batas: kung ano ang inilagay mo, yun ang isusulat sa POS — kahit ilang beses mong pindutin, pareho pa rin ang labas. Isang pasok, isang audit: pagkatapos mag-submit, kailangang lumabas at bumalik bago makapag-audit ulit. Ang mga item na walang kaugnay sa POS ay naka-flag — kamay pa rin ang pag-ayos doon. TIP: kung may item na napakalayo ng numero (halimbawa 2,265 pack), tingnan muna ang pack size bago mag-Confirm — madalas maling unit yun, hindi nawawalang stock."},
 
   {id:"cashin",roles:["cashier","manager","owner"],icon:"💵",
    title:"How to record cash in",
@@ -5478,7 +5533,7 @@ const GUIDES=[
     "Tap Opening Fund, Change Fund or Collection — or type your own description.",
     "Enter the amount and tap Add. It appears in the list underneath with the time and your name.",
     "That is all. The cash count reads these entries at closing; you do not enter them again."],
-   note:"Only money coming IN is here. Money going out has one door each: remittance is in the Cash Count, and anything bought is in Expenses. Two doors onto the same movement is how the same peso gets counted twice."},
+   note:"Only money coming IN is here. Money going out has one door each: anything bought goes in Expenses, and cash handed over goes in Cash Out — Remittance if it leaves during the day, or the Remittance box at closing if it leaves after the count. Two doors onto the same movement is how the same peso gets counted twice."},
 
   {id:"expense",roles:["cashier","manager","owner"],icon:"💸",
    title:"How to record an expense",
@@ -5495,19 +5550,20 @@ const GUIDES=[
     "Open POS & Sales → Cash Count at the end of your shift. It runs in four steps.",
     "1. Expenses — check that every peso spent today is already recorded, then tick the box. An expense keyed in AFTER the count reads as missing cash.",
     "2. Count — enter how many of each bill and coin. The total builds as you go.",
-    "3. Remittance — the amount being handed over. Tick 'handed over before counting' if the money already left the drawer, so it is not expected to be there.",
+    "3. Remittance — the amount you are handing over AFTER the count. It does not touch SHORT / OVER; it only sets what stays in the box as tomorrow's opening fund.",
     "4. Close — check the variance, write a note if there is any difference, then Close and print."],
-   note:"Expected cash = opening fund + cash sales + cash in − expenses − remittance already handed over. Cash sales means the CASH part only; a GCash sale never reaches the drawer. Every line is named with the exact wording that was typed, so a shortage can be traced instead of guessed at."},
+   note:"Expected cash = opening fund + cash sales + cash in − expenses − cash out. Remittance is not in that formula at all. Money handed over during the day is a Cash Out entry and is already inside `cash out`; money handed over at closing leaves after the count, so it was in the drawer while you counted. Cash sales means the CASH part only; a GCash sale never reaches the drawer."},
 
   {id:"close",roles:["cashier","manager","owner"],icon:"📃",
    title:"How to close the day",
    steps:[
     "Record every expense FIRST. This is the step people skip, and it is the one that causes the big shortages.",
-    "Finish the cash count — all four steps, ending with Close and print.",
-    "Open POS & Sales → Z-Reading.",
-    "Check SHORT / OVER against your drawer, then tap Close Day.",
-    "Print it — Bluetooth for the thermal printer, or Browser for a paper copy."],
-   note:"The Z-Reading reads the drawer you counted, so it can only show SHORT / OVER once the cash count is saved. If you forget to close, the next opening closes the previous day automatically — but the automatic one cannot ask you about a cash difference."},
+    "Huwag munang ilabas ang pera. Buo ang drawer habang binibilang — kasama ang iremremit mamaya.",
+    "Bilangin ang drawer — lahat ng apat na hakbang. Sa hakbang 3, ilagay ang halagang iremremit; hindi ito nakakaapekto sa SHORT / OVER.",
+    "Tingnan ang SHORT / OVER. Dapat malapit sa zero. Kung kasinlaki ito ng remittance, may naipasang pera bago ang bilang na hindi naitala — itala muna bilang Cash Out — Remittance, tapos bilangin ulit.",
+    "Close and print. Saka mo ilabas ang iremremit. Ang matitira ay ang CARRIED TO TOMORROW — opening fund bukas.",
+    "Open POS & Sales → Z-Reading, tapos Close Day at i-print — Bluetooth para sa thermal, Browser para sa papel."],
+   note:"Dalawang panuntunan lang: (1) kapag may kinuhang pera sa gitna ng araw, itala AGAD bilang Cash Out — Remittance; (2) ang remittance sa closing ay lumalabas PAGKATAPOS ng bilang. Sundin mo ito at hindi na kailanman magiging kasinlaki ng remittance ang SHORT / OVER. Kung makakalimutan mong mag-close, kusang isasara ng susunod na opening ang nakaraang araw — pero hindi ka nito matatanong tungkol sa kakulangan."},
 
   {id:"clock",roles:["cashier","crew","stockclerk","manager","owner","commissary"],icon:"⏰",
    title:"How to clock in and out",
@@ -5545,7 +5601,7 @@ const GUIDES=[
     "Stock is used oldest first, so the older lot empties before the newer one is touched.",
     "What remains is worth the sum of the lots still standing — not a blended average.",
     "So 34 pieces bought at ₱18.50 plus 600 at ₱21.00 is ₱13,229, not 634 at one price."],
-   note:"A physical count replaces the lots with one line at the current value, because the old structure no longer describes what is on the shelf. Items stocked before lots existed fall back to their cost until the next delivery opens one."},
+   note:"A physical count replaces the lots with one line at the current value, because the old structure no longer describes what is on the shelf. An Auditor Count sets the quantity but does not rebuild the lots, so afterwards the Inventory page will offer 'Rebuild lots from POs' — that only re-prices what is on hand from your delivery history and never moves the quantity. Items stocked before lots existed fall back to their cost until the next delivery opens one."},
 
   {id:"perms",roles:["owner"],icon:"🛡️",
    title:"How to give someone extra access",
@@ -5564,7 +5620,7 @@ const GUIDES=[
     "Choose Add, Deduct or Set exact.",
     "Enter the amount and pick a reason — Physical Count, Spoilage, Wastage, Correction.",
     "Save. The before and after are written to the log with your name."],
-   note:"Use Batch edit for many items at once — the toolbar button. Each row lets you enter the figure in its own unit or in packs, tubs or bottles, and shows the conversion before you save. Every change still writes its own log line."},
+   note:"Use Batch edit for many items at once — the toolbar button. Each row lets you enter the figure in its own unit or in packs, tubs or bottles, and shows the conversion before you save. Every change still writes its own log line. For a WHOLE freezer, do not adjust item by item here — use the Auditor Count instead: it sets every counted item at once and clears the crew's running baseline in the same pass, which this screen does not."},
 ];
 
 // The price to show on a card. When sizes carry the whole price the base is
@@ -8005,16 +8061,15 @@ async function attachCountedCash(db,branch,date,roll){
     // carried that same ₱7,000 as a shortage.
     const rField=Number(d.remittanceField!==undefined
       ?d.remittanceField:d.remittance)||0;
-    const rBefore=d.remittedBeforeCount?rField:0;
 
     roll.remittanceCounted=rField;
     roll.remittanceLogged=Number(roll.remittance)||0;
     roll.remittance=(Number(roll.remittance)||0)+rField;
-    roll.remittedBeforeCount=!!d.remittedBeforeCount;
 
-    // Money handed over before counting was never in the drawer to begin with.
-    roll.cashOnHand=Math.round(((Number(roll.cashOnHand)||0)-rBefore)*100)/100;
-    roll.remainingFunds=Math.round(((Number(roll.remainingFunds)||0)-rBefore)*100)/100;
+    // Expected cash no longer moves for the closing remittance. That money was
+    // in the drawer while it was being counted, so it belongs to the count;
+    // what it changes is the balance carried into tomorrow, below.
+    roll.carriedForward=Math.round((((Number(d.totalCash)||0))-rField)*100)/100;
 
     roll.countedCash=Number(d.totalCash)||0;
     roll.shortOver=Math.round(((Number(d.totalCash)||0)
@@ -13821,7 +13876,7 @@ function App(){
     const cnRemitField=cn
       ?Number(cn.remittanceField!==undefined?cn.remittanceField:cn.remittance)||0
       :0;
-    const cnRemitBefore=(cn&&cn.remittedBeforeCount)?cnRemitField:0;
+    const cnCarried=cn?Math.round((((Number(cn.totalCash)||0))-cnRemitField)*100)/100:null;
     const skuTally={};
     live.forEach(o=>(o. items||[]).forEach(i=>{
       const k=i.name||i.id||"?"; skuTally[k]=(skuTally[k]||0)+(Number(i.qty)||0);
@@ -13834,18 +13889,18 @@ function App(){
       // typed into the count at closing. The reading has to state both.
       remittance:remitOut+cnRemitField,
       remittanceLogged:remitOut,remittanceCounted:cnRemitField,
-      remittedBeforeCount:!!(cn&&cn.remittedBeforeCount),
+      carriedForward:cnCarried,
       otherCashOut:Math.max(0,cashOut-remitOut),
       skuCount:Object.keys(skuTally).length,
       // opening + CASH sales + cashIn - cashOut. Using net counted GCash and
       // delivery money as if it were sitting in the drawer.
-      cashOnHand:opening+cashSalesOnly+cashIn-cashOut-expensesOut-cnRemitBefore,
-      remainingFunds:opening+cashSalesOnly+cashIn-cashOut-expensesOut-remitOut-cnRemitBefore,
+      cashOnHand:opening+cashSalesOnly+cashIn-cashOut-expensesOut,
+      remainingFunds:opening+cashSalesOnly+cashIn-cashOut-expensesOut-remitOut,
       countedCash:cn?(Number(cn.totalCash)||0):null,
       countedBy:cn?(cn.countedBy||""):"",
       shortOver:cn
         ?Math.round(((Number(cn.totalCash)||0)
-          -(opening+cashSalesOnly+cashIn-cashOut-expensesOut-cnRemitBefore))*100)/100
+          -(opening+cashSalesOnly+cashIn-cashOut-expensesOut))*100)/100
         :null,
       cashSales:payTotal("cash"),gcash:payTotal("gcash"),
       maya:payTotal("maya"),bank:payTotal("bank"),
