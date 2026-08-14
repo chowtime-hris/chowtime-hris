@@ -5635,6 +5635,47 @@ function cardPrice(it){
 // Pages a role can be granted beyond its own defaults. The permissions screen
 // offers exactly this set, and the sidebar honours exactly this set — a page
 // retired from here cannot be resurrected by a permission saved before it went.
+// One answer to "what may this account open".
+//
+// The sidebar worked this out inline while the notification bell and the data
+// listeners each guessed on their own, using the hardcoded role list. So a page
+// switched ON in Permissions appeared in the menu and then did nothing: the
+// bell would not navigate to it, and the listener that feeds it kept filtering
+// to the account's own branch. A granted page has to come with the data it
+// exists to show, or the toggle is decoration.
+function navFor(user,companySettings){
+  const role=ROLES[user&&user.role];
+  const _rp=((companySettings&&companySettings.rolePerms)||{})[user&&user.role];
+  const _full=(user&&(user.role==="owner"||user.role==="commissary"
+                      ||user.role==="manager"));
+  const base=((role&&role.nav)||[]).filter(function(p){
+    if(_full)return true;
+    if(!_rp)return true;
+    return _rp[p]!==false;
+  });
+  const granted=(_full||!_rp)?[]
+    :Object.keys(_rp).filter(function(p){
+      return _rp[p]===true&&base.indexOf(p)<0
+        &&NAV_META[p]&&GRANTABLE.indexOf(p)>=0;});
+  const _extra=(user&&Array.isArray(user.navExtra))?user.navExtra:[];
+  return base.concat(granted)
+    .concat(_extra.filter(function(p){
+      return NAV_META[p]&&base.indexOf(p)<0&&granted.indexOf(p)<0;}));
+}
+
+// Whether this account is working the MAIN side of a purchase order. Being the
+// owner was the old test, which left a MAIN manager holding the PO Monitor
+// page with nothing in it — every branch's PO filtered away as if it belonged
+// to someone else.
+function seesAllPOs(user,companySettings){
+  if(!user)return false;
+  if(user.role==="owner"||user.role==="commissary")return true;
+  const bId=(user.branch==="all"||user.branch==="comm")?"ct-main":user.branch;
+  if(bId!=="ct-main")return false;
+  const nav=navFor(user,companySettings);
+  return nav.indexOf("po_monitor")>=0||nav.indexOf("comm_orders")>=0;
+}
+
 const GRANTABLE = [
   "pos","orders","all_orders","kitchen","void_request","void_requests",
   "x_reading","z_reading","reports","analytics","branch_pl",
@@ -12781,12 +12822,13 @@ function App(){
     // A branch account has no business holding that. Sorted in memory so the
     // branch query stays a single equality filter and needs no index.
     try{
-      const aq=isOwner
+      const allPOs=seesAllPOs(user,companySettings);
+      const aq=allPOs
         ?query(collection(db,"advances"),orderBy("timestamp","desc"),limit(100))
         :query(collection(db,"advances"),where("branch","==",bId),limit(100));
       unsubs.push(onSnapshot(aq,snap=>{
         const rows=snap.docs.map(d=>({...d.data(),_docId:d.id}));
-        if(!isOwner)rows.sort((a,b)=>
+        if(!allPOs)rows.sort((a,b)=>
           ((b.timestamp&&b.timestamp.seconds)||0)-((a.timestamp&&a.timestamp.seconds)||0));
         setAdvances(rows);
       },()=>{}));
@@ -12819,7 +12861,7 @@ function App(){
     }catch(e){}
 
     return()=>unsubs.forEach(u=>u());
-  },[user]);
+  },[user,companySettings&&companySettings.rolePerms]);
 
   // ── DERIVED ──────────────────────────────────────────────
   useEffect(()=>{
@@ -14768,32 +14810,9 @@ function App(){
       ),
       h("nav",{style:{flex:1,padding:"3px 6px",overflowY:"auto",minHeight:0}},
         (function(){
-          // A role's own list is the starting point, not the ceiling: a page
-          // switched ON in Permissions is granted even when the role never had
-          // it, which is what "permissions" ought to mean.
-          const _rp=(companySettings?.rolePerms||{})[user?.role];
-          const _full=(user?.role==="owner"||user?.role==="commissary"
-                       ||user?.role==="manager");
-          const base=(role?.nav||[]).filter(p=>{
-            if(_full)return true;
-            if(!_rp)return true;
-            return _rp[p]!==false;
-          });
-          // Only pages the permissions screen lists can be granted. A record
-          // saved before a page was retired must not be able to bring it back
-          // — that is how a cashier ended up looking at payroll.
-          const granted=(_full||!_rp)?[]
-            : Object.keys(_rp).filter(p=>_rp[p]===true&&base.indexOf(p)<0
-                &&NAV_META[p]&&GRANTABLE.indexOf(p)>=0);
-          let allowed=base.concat(granted);
-
-          // Per-ACCOUNT extras. rolePerms is one setting for a whole role
-          // across the company, and managers skip it entirely — so there was
-          // no way to give ONE manager a page without giving it to all of
-          // them. This only ever adds; it never takes a page away.
-          const _extra=Array.isArray(user&&user.navExtra)?user.navExtra:[];
-          allowed=allowed.concat(
-            _extra.filter(p=>NAV_META[p]&&allowed.indexOf(p)<0));
+          // Same resolver the bell and the data listeners use. Kept in one
+          // place so a page cannot be visible here and dead everywhere else.
+          let allowed=navFor(user,companySettings);
 
           // A franchise runs its own pay. Their cash advance and loan requests
           // would land in your approval queue and come off your payslips, and
@@ -15020,7 +15039,7 @@ function App(){
                         return h("button",{key:nf._docId,
                           onClick:async()=>{
                             // A notification is a pointer, not a permission.
-                            const allowed=(ROLES[user.role]&&ROLES[user.role].nav)||[];
+                            const allowed=navFor(user,companySettings);
                             if(nf.page&&allowed.indexOf(nf.page)>=0)setPage(nf.page);
                             setShowNotifs(false);
                             if(!nf.read){
