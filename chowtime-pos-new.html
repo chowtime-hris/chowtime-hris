@@ -8242,7 +8242,15 @@ async function performVoid(db, args){
   const reason  = args.reason || "";
   const partial = !!args.isPartial;
   const docId   = order._docId || args.docId;   // Firestore id, NOT the OR number
-  const out={voidAmt:0,restocked:0,restockFailed:0,missingId:0,orderUpdated:false};
+  const out={voidAmt:0,restocked:0,restockFailed:0,missingId:0,orderUpdated:false,
+             alreadyVoided:false,restockSkipped:false};
+
+  // A fully voided order must not be voided again. Nothing stopped a second
+  // press before, and each press handed the ingredients back once more.
+  if(!partial && String(order.status||"")==="void"){
+    out.alreadyVoided=true;
+    return out;
+  }
 
   out.voidAmt =  items.reduce((s,i)=>
     s+(Number(i.lineTotal)||((Number(i.unitPrice)||0)*(i.qty||1))),0);
@@ -8270,7 +8278,38 @@ async function performVoid(db, args){
     }catch(e){console.error("Void: order update failed",e);}
   }
 
-  // 2. put the ingredients back — mirrors the deduction exactly
+  // 2. put the ingredients back
+  //
+  // Recomputing the recipe assumes the deduction went perfectly. When it did
+  // not — half the loop ran, the branch never carried an ingredient, an old
+  // order predates a fix — the recipe hands back units that never left.
+  // So for a full void the inventory log is the source of truth: reverse
+  // exactly what was logged as deducted for this order, ingredient by
+  // ingredient. A partial void covers only some lines, which the log cannot
+  // tell apart, so it still works off the recipe.
+  let reverseRows=null;
+  if(!partial){
+    try{
+      const lc=logColFor(branch);
+      const qs=await getDocs(query(collection(db,lc),
+        where("ref","==",order.id||"")));
+      const agg={};
+      qs.docs.forEach(function(d){
+        const g=d.data()||{};
+        if(g.source!=="sales"||g.type!=="deduct")return;
+        const amt=Math.abs(Number(g.amount)||0);
+        if(!amt||!g.itemId)return;
+        const col=g.invCol||invColFor(branch);
+        const k=col+"|"+g.itemId;
+        if(!agg[k])agg[k]={col:col,ingId:g.itemId,
+          ingName:g. itemName||g.itemId,unit:g.unit||"",amt:0};
+        agg[k].amt+=amt;
+      });
+      const list=Object.keys(agg).map(function(k){return agg[k];});
+      if(list.length) reverseRows=list;
+    }catch(e){console.warn("Void: could not read deduction log",e);}
+  }
+
   try{
     const bomSnap=await getDocs(collection(db,"bom"));
     const bomData={};
@@ -8319,15 +8358,21 @@ async function performVoid(db, args){
       }
     };
 
-    for(const it of  items){
-      if(!it.id&&!(it.optionRefs||[]).length){out.missingId++;continue;}
-      if(it.id){
-        const v=it.variant||"default";
-        const vKey=(!v||v==="default")?it.id:it.id+"__"+String(v).replace(/\s+/g,"_");
-        const ib=bomData[it.id]||{};
-        await giveBack(ib[vKey]||ib[it.id]||[], it.qty||1,
-          v!=="default"?v:"", it.name||it.id);
+    if(reverseRows){
+      for(const r of reverseRows){
+        await giveBack([{ingId:r.ingId,qty:r.amt,convFactor:1,
+          ingName:r.ingName,unit:r.unit}], 1, "", "order "+(order.id||""));
       }
+    }else if(partial||order.bomDeducted===true){
+      for(const it of  items){
+        if(!it.id&&!(it.optionRefs||[]).length){out.missingId++;continue;}
+        if(it.id){
+          const v=it.variant||"default";
+          const vKey=(!v||v==="default")?it.id:it.id+"__"+String(v).replace(/\s+/g,"_");
+          const ib=bomData[it.id]||{};
+          await giveBack(ib[vKey]||ib[it.id]||[], it.qty||1,
+            v!=="default"?v:"", it.name||it.id);
+        }
       for(const ref of (it.optionRefs||[])){
         if(!ref.groupId||!ref.choiceId)continue;
         const d=bomData["optgrp_"+ref.groupId]||{};
@@ -8335,6 +8380,11 @@ async function performVoid(db, args){
         const mult=ref.free?(ref.qty||1):((ref.qty||1)*(it.qty||1));
         await giveBack(rows, mult, ref.label, it.name||"");
       }
+      }
+    }else{
+      // No deduction was ever logged for this order and nothing says stock
+      // moved, so there is nothing to return.
+      out.restockSkipped=true;
     }
   }catch(e){console.warn("Void restock error",e);}
 
@@ -8359,7 +8409,9 @@ async function performVoid(db, args){
 }
 
 function voidSummary(r){
+  if(r.alreadyVoided) return "Already voided — nothing changed";
   return "₱"+peso(r.voidAmt)+" reversed · "+r.restocked+" ingredient/s restocked"
+    +(r.restockSkipped?" (no restock — stock was never deducted for this order)":"")
     +(r.restockFailed?" ("+r.restockFailed+" failed)":"")
     +(r.missingId?" ("+r.missingId+" walang BOM link)":"")
     +(!r.orderUpdated?" ⚠️ order not updated":"");
@@ -8421,6 +8473,15 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
       return;
     }
     const isPartial = voidedItems.length < (selOrder. items||[]).length;
+    // Partial is not a mode anyone picks — it is what an unticked box quietly
+    // turns the void into, and it records a different status and returns stock
+    // a different way. So it has to be said out loud before it is submitted.
+    if(isPartial){
+      const total=(selOrder. items||[]).length;
+      if(!window.confirm("Partial void ito — "+voidedItems.length+" sa "+total
+        +" items lang ang kakanselahin.\n\nKung buong resibo ang gusto mong i-void, "
+        +"i-Cancel at i-check lahat ng items.\n\nItuloy ang partial void?")) return;
+    }
     // order  items store lineTotal/unitPrice — there is no `price` field,
     // so the old formula always produced 0.
     const voidAmt = voidedItems.reduce((s,i)=>
@@ -8549,7 +8610,7 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
       });
       showT((req.isPartial?"Partial void":"Order #"+req.orderId+" voided")
         +" · "+voidSummary(r),
-        (r.restockFailed||r.missingId||!r.orderUpdated)?"warn":"ok");
+        (r.alreadyVoided||r.restockSkipped||r.restockFailed||r.missingId||!r.orderUpdated)?"warn":"ok");
     }catch(e){showT("Error approving void","err");console.error(e);}
   };
 
@@ -13432,6 +13493,7 @@ function App(){
         const isOwnerRole = user.role==="owner"||user.role==="commissary";
         const logCol = logColFor(branchId);
         const missingIngs=[];   // ingredients this branch has not adopted yet
+        const fallbackVariants=[];  // variants deducted using the base recipe
         let totalDeductions = 0;
 
         for(const cartItem of cart){
@@ -13442,6 +13504,11 @@ function App(){
             :  itemId+"__"+variant.replace(/\s+/g,"_");
 
           const  itemBOM = bomData[ itemId]||{};
+          // A variant with no BOM of its own quietly borrows the base recipe.
+          // That is fine when the sizes match and a leak when they do not, so
+          // it is recorded rather than assumed.
+          const usedFallback = (variant!=="default") && !itemBOM[vKey] && !!itemBOM[ itemId];
+          if(usedFallback) fallbackVariants.push(cartItem.name+" – "+variant);
           const rows =  itemBOM[vKey]|| itemBOM[ itemId]||[];
 
           for(const row of rows){
@@ -13501,6 +13568,7 @@ function App(){
                 orderId:ord.id,
                 menuItem:cartItem.name,
                 menuVariant:variant!=="default"?variant:null,
+                bomFallback:usedFallback||null,
                 qty:cartItem.qty,
                 branch:branchId,
                 reason:"Order: "+ord.id+" — "+cartItem.name+(variant!=="default"?" ("+variant+")":"")+" x"+cartItem.qty,
@@ -13511,26 +13579,12 @@ function App(){
           }
         }
 
-        // ── Deduct Item Option Choice BOMs ──────────────────
-        for(const cartItem of cart){
-          const selectedOpts = cartItem.options||[];
-          const  itemBomDoc = bomData[cartItem.id]||{};
-          // Check  item's own options (choices with BOM)
-          for(const optKey of Object.keys( itemBomDoc)){
-            if(!optKey.includes("__opt_"))continue;
-            // Format:  itemId__opt_optId__choiceId
-            const parts=optKey.split("__opt_");
-            if(parts.length<2)continue;
-            const [,rest]=parts;
-            const [optId,choiceId]=rest.split("__");
-            // Check if this choice was selected
-            const menuItem=cart.find(function(c){return c.id===cartItem.id;});
-            // We don't have optId/choiceId in cart, just labels
-            // Match by checking if choice label is in options array
-            const rows= itemBomDoc[optKey]||[];
-            // TODO: need choice label to match - skip for now, use option group matching
-          }
-        }
+        // ── Item-level option BOMs (bom/<itemId> keys like id__opt_<grp>__<choice>)
+        // The old loop here read those keys and then did nothing — a TODO that
+        // said the cart had no choiceId. It does: cartItem.optionRefs carries
+        // groupId and choiceId. They are handled in the pass below, together
+        // with the optgrp_ BOMs, so a choice defined in both places cannot be
+        // deducted twice.
 
         // ── Deduct Option Group BOMs (flavors, drinks, freebies) ──
         // FIX: old code read group.options (Firebase writes choices[]) and looked for
@@ -13545,7 +13599,21 @@ function App(){
               try{const bs=await getDoc(doc(db,"bom",docId));bomCache[docId]=bs.exists()?bs.data():{};}
               catch(e2){bomCache[docId]={};}
             }
-            const rows=bomCache[docId][docId+"__"+ref.choiceId]||[];
+            const rows=(function(){
+              const grpRows=bomCache[docId][docId+"__"+ref.choiceId]||[];
+              if(grpRows.length) return grpRows;
+              // Fall back to a BOM stored on the item itself. Only reached when
+              // the group has none, so the same choice is never deducted twice.
+              const iDoc=bomData[cartItem.id]||{};
+              const exact=iDoc[cartItem.id+"__opt_"+ref.groupId+"__"+ref.choiceId];
+              if(exact&&exact.length) return exact;
+              const suffix="__"+ref.choiceId;
+              for(const k of Object.keys(iDoc)){
+                if(k.indexOf("__opt_")>-1&&k.slice(-suffix.length)===suffix
+                   &&(iDoc[k]||[]).length) return iDoc[k];
+              }
+              return [];
+            })();
             // freebie qty already counts every free unit; paid options scale with line qty
             const mult=ref.free?(ref.qty||1):((ref.qty||1)*(cartItem.qty||1));
             for(const row of rows){
@@ -13575,6 +13643,11 @@ function App(){
                   stock:increment(-actualDeduct),
                   lastDeducted:serverTimestamp()
                 }, _plots?{lots:_plots}:{}));
+                // Previously only the main-item loop counted. An order whose
+                // ingredients come solely from option groups was marked
+                // bomDeducted:false even though stock had moved — and a void
+                // guarded on that flag would then skip putting them back.
+                totalDeductions++;
                 await addDoc(collection(db,logCol),{
                    itemId:row.ingId, itemName:row.ingName||row.ingId,
                   unit:row.unit||"",type:"deduct",amount:-actualDeduct,
@@ -13620,7 +13693,29 @@ function App(){
             +(uniq.length>3?" +"+(uniq.length-3):"")
             +"  — not yet in the inventory of "+curBranch.name,"warn");
         }
-      }catch(bomErr){console.warn("BOM deduction error:",bomErr);}
+        if(fallbackVariants.length){
+          const uf=[...new Set(fallbackVariants)];
+          try{
+            await updateDoc(doc(db,"orders",ord._docId||ord.id),
+              {bomVariantFallback:uf}).catch(()=>{});
+          }catch(e6){}
+          showT("Deducted using the base recipe: "+uf.slice(0,2).join(", ")
+            +(uf.length>2?" +"+(uf.length-2):"")
+            +"  — these variants have no BOM of their own","warn");
+        }
+      }catch(bomErr){
+        console.warn("BOM deduction error:",bomErr);
+        // A silent console warning meant a sale could go through with no stock
+        // moved and nothing anywhere saying so. The order now carries the
+        // failure, and the cashier is told, because the fix is a recount.
+        try{
+          await updateDoc(doc(db,"orders",ord._docId||ord.id),{
+            bomDeducted:false, bomPending:true,
+            bomError:String((bomErr&&bomErr.message)||bomErr)
+          }).catch(()=>{});
+        }catch(e7){}
+        try{ showT("Stock was NOT deducted for this order — tell the manager","err"); }catch(e8){}
+      }
       // ────────────────────────────────────────────────────
 
       setCurOrd(ord);setOrdCounter(c=>c+1);
@@ -16083,7 +16178,7 @@ function App(){
                       reason:why.trim(),byName:user.name,branch:o.branch||branchId
                     });
                     showT("Void "+o.id+" · "+voidSummary(r),
-                      (r.restockFailed||r.missingId||!r.orderUpdated)?"warn":"ok");
+                      (r.alreadyVoided||r.restockSkipped||r.restockFailed||r.missingId||!r.orderUpdated)?"warn":"ok");
                   },
                   style:{padding:"3px 7px",background:"#FFEBEE",border:"none",
                     borderRadius:6,color:C.danger,fontSize:12,fontWeight:700,cursor:"pointer"}},
