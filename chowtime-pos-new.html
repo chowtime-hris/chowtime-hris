@@ -1635,7 +1635,7 @@ function ItemCustomizer({ item,onAdd,onClose,optionGroups=[],priceType="retail",
 
 
 // ─── PO FORM (Branch creates Purchase Order) ─────────────
-function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvances,branches=BRANCHES,editPO=null}){
+function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvances,branches=BRANCHES,editPO=null,userBranchId=null}){
   // Main's catalogue, loaded live. The branch is ordering FROM the commissary,
   // so the list must be Main's  items at Main's transfer price — not the
   // branch's own stock and not the hardcoded seed.
@@ -1842,16 +1842,34 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
           showT("No longer editable — Main has processed it","err");
           onClose();return;
         }
-        await updateDoc(doc(db,"advances",editPO._docId),{
+        await updateDoc(doc(db,"advances",editPO._docId),Object.assign({
            items:po. items,notes:po.notes,deliveryRequested:po.deliveryRequested,
           discount:po.discount,vatType:po.vatType,
-          editedBy:user.name,editedAt:serverTimestamp()
-        });
-        await notify(db,{to:"ct-main",type:"po_new",
-          title:"Na-edit na order — "+(po.branchName||branchId),
-          message:ordered.length+"  item/s (binago)",
-          page:"po_monitor",ref:editPO.poNum||po.poNum,by:user.name});
-        showT((editPO.poNum||po.poNum)+" updated ✓");
+          editedBy:user.name,editedAt:serverTimestamp(),
+          editedByMain:!!(editPO.branch&&userBranchId&&editPO.branch!==userBranchId)
+        // A revised order goes back into Main's queue, and the return note is
+        // cleared so the next reader is not looking at an answered objection.
+        }));
+
+        // Who edited decides who needs telling. A branch fixing its own order
+        // tells Main; Main changing a branch's order tells the branch, because
+        // they are the ones who will receive a delivery they did not type.
+        const editedByMain=!!(editPO.branch&&userBranchId
+                              &&editPO.branch!==userBranchId);
+        if(editedByMain){
+          await notify(db,{to:editPO.branch,type:"po_edited",
+            title:"Binago ng Main ang "+(editPO.poNum||po.poNum),
+            message:ordered.length+" item/s · tingnan bago dumating ang delivery",
+            page:"stock_order",ref:editPO.poNum||po.poNum,by:user.name});
+          showT((editPO.poNum||po.poNum)+" updated \u2014 naabisuhan ang "
+            +(po.branchName||editPO.branch));
+        }else{
+          await notify(db,{to:"ct-main",type:"po_new",
+            title:"Na-edit na order — "+(po.branchName||branchId),
+            message:ordered.length+"  item/s (binago)",
+            page:"po_monitor",ref:editPO.poNum||po.poNum,by:user.name});
+          showT((editPO.poNum||po.poNum)+" updated ✓");
+        }
         onClose();return;
       }
       await addDoc(collection(db,"advances"),po);
@@ -20015,6 +20033,18 @@ function App(){
                   h("div",{style:{display:"flex",alignItems:"center",gap:10}},
                     // Editable only while Main has not issued the DR. After
                     // that the request is the audit baseline for discrepancy.
+                    // A notification is read once and gone. This stays on the
+                    // order, so whoever receives the delivery sees that the
+                    // list changed before they start checking boxes against it.
+                    po.editedBy&&po.editedByMain&&h("div",{style:{
+                      background:C.warning+"14",border:"1px solid "+C.warning,
+                      borderRadius:10,padding:"9px 12px",marginBottom:9,
+                      fontSize:12,lineHeight:1.5,color:C.text,width:"100%"}},
+                      h("b",{style:{color:"#BF360C"}},"✏️ Binago ng Main ang order na ito"),
+                      h("div",{style:{fontSize:11,color:C.muted,marginTop:3}},
+                        "ni "+po.editedBy
+                        +" · Ihambing sa inorder ninyo bago tanggapin ang delivery")),
+
                     (po.status==="received_by_main")&&h("div",{style:{display:"flex",gap:5}},
                       h("button",{onClick:()=>{setEditingPO(po);setModal("new_po");},
                         style:{padding:"4px 10px",borderRadius:7,fontSize:12,fontWeight:700,
@@ -20338,6 +20368,25 @@ function App(){
                   // it holds. Checking for owner left a MAIN manager holding
                   // the PO Monitor with only Cancel available — able to kill
                   // an order but not to fulfil one.
+                  // Main does not rewrite a branch's order. Sending it back
+                  // with a reason keeps one version of the truth: what the
+                  // branch asked for is always what the branch typed, so the
+                  // discrepancy check at delivery still has a clean baseline
+                  // and nobody is billed for a line they never chose.
+                  // Main edits the branch's order in place. Everything it
+                  // changes is stamped with who and when, and the branch is
+                  // told — an order that changes silently is worse than one
+                  // sent back.
+                  st==="received_by_main"
+                    &&seesAllPOs(user,companySettings)
+                    &&h("button",{
+                    onClick:()=>{setEditingPO(po);setModal("new_po");},
+                    style:{padding:"9px 15px",background:"#fff",
+                      border:"1px solid "+C.border,borderRadius:9,
+                      color:C.text,fontSize:13,fontWeight:700,
+                      cursor:"pointer",marginRight:8}},
+                    "✏️ Edit Order"),
+
                   st==="received_by_main"
                     &&seesAllPOs(user,companySettings)
                     &&h("button",{
@@ -21051,7 +21100,14 @@ function App(){
         // and since this branch only renders while the modal is open the count
         // changes between renders -> "Rendered more hooks than during the
         // previous render". Direct calls are only safe for hook-free helpers.
-        h(POForm,{branchId,user,db,
+        h(POForm,{
+          // Main edits a branch's order, so the form has to belong to THAT
+          // branch — its stock levels, its PO numbering, its name on the
+          // document. Passing the editor's own branch would price the order
+          // against the wrong shelf.
+          branchId:(editingPO&&editingPO.branch)||branchId,
+          userBranchId:branchId,
+          user,db,
           // the live catalogue, not the hardcoded seed list
           INIT_INVENTORY:(inventory&&inventory.length?inventory:INIT_INVENTORY),
           editPO:editingPO,
