@@ -5454,6 +5454,34 @@ function localDate(d){
 // names where to tap and what the system does behind it, because the parts
 // that go wrong are the ones nobody explains: what a PIN is for, why a count
 // cannot be edited, what "received" actually moves.
+// Which page each guide explains.
+//
+// The list used to be filtered on role alone, so a page granted in Access
+// Control arrived with no instructions — the cashier could open Order Stocks
+// and had nothing telling them what to do there. Access and instruction now
+// come from the same answer: if you can open it, you can read about it.
+const GUIDE_PAGES = {
+  crew:      ["crew_mgmt"],
+  order:     ["pos","orders","all_orders"],
+  void:      ["void_request","void_requests"],
+  stocks:    ["stock_order"],
+  receive:   ["stock_order","stock_receive"],
+  count:     ["ext_stock"],
+  cashin:    ["cash_in"],
+  expense:   ["expenses"],
+  cash:      ["cash_count"],
+  close:     ["z_reading","x_reading"],
+  clock:     ["ext_kiosk"],
+  pl:        ["branch_pl"],
+  cost:      ["bom_mgmt"],
+  fifo:      ["inventory"],
+  perms:     ["settings"],
+  inventory: ["inventory"]
+  // `audit` is deliberately absent: the Auditor Count rewrites POS stock for a
+  // whole branch, so it stays with the roles named on the guide itself rather
+  // than following anyone who happens to hold the freezer page.
+};
+
 const GUIDES=[
   {id:"crew",roles:["manager","owner","commissary"],icon:"👥",
    title:"How to add crew",
@@ -15228,7 +15256,11 @@ function App(){
             (function(){
               // Only what this role can actually reach — a cashier reading how
               // to add crew is being shown a door they cannot open.
-              const mine=GUIDES.filter(g=>g.roles.indexOf(user.role)>=0);
+              // Role OR granted page — the same nav the sidebar is built from.
+              const _gnav=navFor(user,companySettings);
+              const mine=GUIDES.filter(g=>
+                g.roles.indexOf(user.role)>=0
+                || (GUIDE_PAGES[g.id]||[]).some(p=>_gnav.indexOf(p)>=0));
               if(!mine.length)
                 return h("div",{style:{padding:"26px",textAlign:"center",
                   color:C.muted,fontSize:13}},"No guides for this account yet.");
