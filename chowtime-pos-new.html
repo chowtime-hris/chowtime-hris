@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260815-184500 -->
+<!-- BUILD:20260815-193000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -7460,7 +7460,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260815-184500";
+const BUILD = "20260815-193000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -12914,13 +12914,29 @@ function App(){
         // console error carries a one-click link to create it. Until then,
         // fall back so the POS still works — with the old, incomplete window.
         if(/index/i.test(err.message||"")){
-          showT("Orders index missing — figures may be incomplete. "
-            +"Open the console link to create it.","warn");
+          // The old fallback was where(branch) + limit(500) and no ordering.
+          // Firestore then returns whichever 500 it likes — not the newest —
+          // so on a branch past 500 orders roughly two hundred simply vanished,
+          // and a different two hundred each reload. Receipts existed, sales
+          // were real, and the branch could not see them; the X and Z readings
+          // read the same array, so their totals were short too.
+          //
+          // This shape needs no composite index — one range filter on one
+          // field, exactly what the owner already runs — and the branch is
+          // matched in memory. It fetches more than it needs, which is the
+          // price of being complete until the index exists.
+          showT("Orders index missing — using a slower query. "
+            +"Figures are complete; open the console link to speed it up.","warn");
           try{
             unsubs.push(onSnapshot(
-              query(collection(db,"orders"),where("branch","==",bId),limit(500)),
-              s2=>setOrdersLive(s2.docs.map(d=>({...d.data(),_docId:d.id}))),
-              ()=>{}));
+              query(collection(db,"orders"),where("date",">=",winFrom)),
+              s2=>{
+                const mine=s2.docs.map(d=>({...d.data(),_docId:d.id}))
+                  .filter(o=>o.branch===bId);
+                mine.sort((a,b)=>(b.timestamp?.seconds||0)-(a.timestamp?.seconds||0));
+                setOrdersLive(mine);
+              },
+              e3=>console.warn("Orders fallback:",e3&&e3.message)));
           }catch(e2){}
         }
       }));
@@ -13851,12 +13867,21 @@ function App(){
   };
   const placeOrderInner=async()=>{
     // Sequential order number per branch — starts at 01
+    //
+    // The counter is advanced BEFORE the order is written, so a failed save
+    // burns the number: the cashier sees ORDER NOT SAVED, punches again, and
+    // gets the next one. The gap that leaves is not a void and not a missing
+    // sale — nothing was ever recorded — but it reads like both, and BIR
+    // sequence checks care. The number is handed back on failure, below.
     let orderNum=1;
+    let counterRef=null, counterWas=null;
     try{
       const settRef=doc(db,"settings","ordcounter_"+branchId);
       const snap=await getDoc(settRef);
-      if(snap.exists())orderNum=(snap.data().count||0)+1;
+      counterWas=snap.exists()?(snap.data().count||0):0;
+      orderNum=counterWas+1;
       await setDoc(settRef,{count:orderNum});
+      counterRef=settRef;
     }catch(e){orderNum=ordCounter+1;}
     const id=branchId.replace("ct-","").toUpperCase()+"-"+String(orderNum).padStart(4,"0");
     const now=new Date().toLocaleTimeString("en-PH",{hour:"2-digit",minute:"2-digit"});
@@ -14147,6 +14172,17 @@ function App(){
       showT("Order "+id+" placed! ✓");
     }catch(e){
       console.error("placeOrder failed:",e);
+      // Give the number back, but only if it is still ours — another terminal
+      // may have taken the next one while this was failing, and winding the
+      // counter back then would hand out a number twice.
+      if(counterRef){
+        try{
+          const cur=await getDoc(counterRef);
+          if(cur.exists()&&(cur.data().count||0)===orderNum){
+            await setDoc(counterRef,{count:counterWas});
+          }
+        }catch(e9){console.warn("counter rollback failed",e9);}
+      }
       showT("ORDER NOT SAVED: "+String(e&&e.message||e).slice(0,60)
         +" — do not hand over the receipt","err");
       // keep the cart intact so the cashier can retry rather than re-key it
