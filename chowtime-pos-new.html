@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260816-011500 -->
+<!-- BUILD:20260816-020000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -7505,7 +7505,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260816-011500";
+const BUILD = "20260816-020000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -17379,11 +17379,16 @@ function App(){
               h("div",{style:{background:"#fff",borderRadius:12,
                 padding:"13px 15px",border:"1px solid "+C.border}},
                 h("b",{style:{fontSize:13}},"Cash Drawer"),
+                // Remittance sits BELOW the variance, as it does on the
+                // printout. Listed here among the deductions it read as
+                // already taken off Expected Cash when it was not — the exact
+                // layout that made a balanced drawer look ₱4,000 short. The
+                // screen and the paper now say the same thing in the same
+                // order.
                 [["Opening Fund","₱"+peso(zd.opening||0)],
                  ["Cash Sales","₱"+peso(zd.cashSales||0)],
                  ["Cash In","₱"+peso(zd.cashIn||0)],
                  ["Expenses","₱"+peso(zd.expenses||0)],
-                 ["Remittance","₱"+peso(zd.remittance||0)],
                  ["Other Cash Out","₱"+peso(zd.otherCashOut||0)],
                  ["Expected Cash","₱"+peso(zd.cashOnHand||0)],
                  ["Counted Cash",zd.countedCash!=null
@@ -17399,7 +17404,26 @@ function App(){
                   h("span",{style:{fontSize:15,fontWeight:900,
                     color:Math.abs(zd.shortOver)<0.01?C.success
                       :(zd.shortOver>0?C.info:C.danger)}},
-                    (zd.shortOver>=0?"+":"")+"₱"+peso(zd.shortOver)))
+                    (zd.shortOver>=0?"+":"")+"₱"+peso(zd.shortOver))),
+
+                // Settled after the count, exactly like the receipt
+                (zd.remittance>0||zd.countedCash!=null)&&h("div",{
+                  style:{marginTop:9,paddingTop:8,
+                    borderTop:"1px solid "+C.border}},
+                  h("div",{style:{display:"flex",justifyContent:"space-between",
+                    padding:"4px 0"}},
+                    h("span",{style:{fontSize:13,color:C.muted}},"Remitted"),
+                    h("span",{style:{fontSize:14,fontWeight:800}},
+                      "₱"+peso(zd.remittance||0))),
+                  h("div",{style:{display:"flex",justifyContent:"space-between",
+                    padding:"4px 0"}},
+                    h("span",{style:{fontSize:13,fontWeight:800}},
+                      "CARRIED TO TOMORROW"),
+                    h("span",{style:{fontSize:14,fontWeight:900,color:C.primary}},
+                      "₱"+peso(zd.carriedForward!=null?zd.carriedForward
+                        :Math.max(0,(zd.countedCash||0)-(zd.remittanceCounted||0))))),
+                  h("div",{style:{fontSize:11,color:C.muted}},
+                    "Tomorrow's opening fund."))
               )
               ),
               h("div",{style:{background:"#fff",borderRadius:12,padding:"13px 15px",border:"1px solid "+C.border}},
