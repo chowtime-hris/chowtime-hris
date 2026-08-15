@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260815-170000 -->
+<!-- BUILD:20260815-180000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -2663,19 +2663,51 @@ function DRCheckForm({po,db,branchId,user,showT,INIT_INVENTORY,setAdvances,advan
           const drQty= item.actualQty?? item.qty;
           const received=receivedQtys[ item.id]??drQty;
           const diff=received-drQty;
+          // Deliveries arrive as packs and boxes, so that is how they are
+          // checked. 2,016 pc is a number nobody can verify against a pallet;
+          // "42 pack" is. The stored figure stays in base units — stock, lots
+          // and the BOM all read it that way — only the label changes.
+          const packs=(q)=>{
+            const t=fmtPacks( item,q);
+            return t||( _n(q)+" "+( item.unit||""));
+          };
+          const hasPack=!!packSizeOf( item);
           return h("div",{key: item.id,style:{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",borderRadius:8,background:diff!==0?"#FFEBEE":"#f9f9f9",border:diff!==0?"1px solid #FFCDD2":"1px solid transparent"}},
             h("div",{style:{flex:1}},
               h("div",{style:{fontSize:13,fontWeight:700}}, item.name),
-              h("div",{style:{fontSize:12,color:C.muted}},"DR Qty: "+drQty+" "+ item.unit+" (PO: "+ item.qty+")")
+              h("div",{style:{fontSize:12,color:C.muted}},
+                "DR Qty: "+packs(drQty)+" (PO: "+packs( item.qty)+")"),
+              hasPack&&h("div",{style:{fontSize:11,color:"#9A9A9A"}},
+                _n(drQty)+" "+( item.unit||"")+" \u00b7 1 "+packUnitOf( item)
+                +" = "+_n(packSizeOf( item))+" "+( item.unit||""))
             ),
             h("div",{style:{display:"flex",alignItems:"center",gap:7}},
               h("button",{onClick:()=>setReceivedQtys(p=>({...p,[ item.id]:Math.max(0,(p[ item.id]??drQty)-(Number( item.packSize)||1))})),
                 style:{width:26,height:26,borderRadius:6,border:"1px solid "+C.border,background:"#fff",cursor:"pointer",fontSize:14,fontWeight:900}},"−"),
-              h("span",{style:{minWidth:32,textAlign:"center",fontWeight:900,fontSize:13,color:diff<0?C.danger:diff>0?C.info:C.success}},received),
+              h("div",{style:{minWidth:104,textAlign:"center"}},
+                h("div",{style:{fontWeight:900,fontSize:13,
+                  color:diff<0?C.danger:diff>0?C.info:C.success}},packs(received)),
+                // The +/- buttons move a whole pack at a time, so a delivery of
+                // 42 packs and 4 loose pieces could not be entered at all — the
+                // crew could reach 42 or 43 and nothing between. What actually
+                // arrived is typed here, in base units, and read back as packs
+                // above.
+                h("input",{type:"number",inputMode:"decimal",
+                  value:received,
+                  onChange:e=>{
+                    const v=e.target.value;
+                    setReceivedQtys(p=>({...p,[ item.id]:v===""?0:(parseFloat(v)||0)}));
+                  },
+                  onFocus:e=>e.target.select(),
+                  style:{width:96,marginTop:3,padding:"4px 6px",textAlign:"center",
+                    border:"1px solid "+C.border,borderRadius:6,fontSize:12,
+                    fontFamily:"inherit",outline:"none"}}),
+                h("div",{style:{fontSize:10,color:"#9A9A9A",marginTop:1}},
+                   item.unit||"")),
               h("button",{onClick:()=>setReceivedQtys(p=>({...p,[ item.id]:(p[ item.id]??drQty)+(Number( item.packSize)||1)})),
                 style:{width:26,height:26,borderRadius:6,border:`1px solid ${C.primary}`,background:"#F3E9F7",cursor:"pointer",fontWeight:900,color:C.primary,fontSize:14}},"+"),
               diff!==0&&h("span",{style:{fontSize:12,fontWeight:700,color:diff<0?C.danger:C.info}},
-                (diff>0?"+":"")+diff+" ⚠️")
+                (diff>0?"+":"\u2212")+packs(Math.abs(diff))+" ⚠️")
             )
           );
         })
@@ -7428,7 +7460,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260815-170000";
+const BUILD = "20260815-180000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
