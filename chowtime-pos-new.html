@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260815-150000 -->
+<!-- BUILD:20260815-170000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -7428,7 +7428,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260815-150000";
+const BUILD = "20260815-170000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -10401,7 +10401,12 @@ function ReceiveItemsModal({po,db,user,showT,branchId,onClose}){
                 +" · "+(po.drNum||po.poNum||""),
               source:"TRANSFER",ref:po.poNum||"",
               branch:invBr,by:user.name,
-              date:localDate(),timestamp:serverTimestamp()
+              // The Inv. Log reads orderBy("at"), and Firestore drops any
+              // document that has no value for the field it is ordering on —
+              // it does not sort them last, it leaves them out. These entries
+              // were written, the stock was right, and the movement was
+              // invisible.
+              date:localDate(),timestamp:serverTimestamp(),at:serverTimestamp()
             });
           }catch(e2){console.error("receive into inventory failed",it.id,e2);}
         }
@@ -13933,6 +13938,8 @@ function App(){
                 cogs:_cost,          // what FIFO says these units cost
                 date:localDate(),    // the trading day, for the P&L range
                 timestamp:serverTimestamp(),
+                at:serverTimestamp(),  // the Inv. Log orders on this one
+
                 convFactor:convFactor,
                 invCol:deductCol,
                 prevStock:_prev,
@@ -20993,6 +21000,25 @@ function App(){
                      // error left the button looking dead: no dialog, no toast,
                      // no clue. Whatever goes wrong now says so.
                      try{
+                      // Read the PO as it stands right now, not as this screen
+                      // last saw it.
+                      //
+                      // The stock loop runs before the status is written, so a
+                      // failure in between left goods posted and the PO still
+                      // reading `discrepancy` — button live, no error, nothing
+                      // apparently done. Pressing again posted the same goods
+                      // again. One PO went in five times that way.
+                      const _live=await getDoc(doc(db,"advances",po._docId));
+                      const _d=_live.exists()?(_live.data()||{}):{};
+                      if(_d.stockPosted===true||_d.discrepancyStatus==="approved"
+                         ||_d.status==="completed"){
+                        showT(po.poNum+" is already settled — stock was posted "
+                          +"on "+(_d.discrepancyApprovedAt&&_d.discrepancyApprovedAt.toDate
+                              ?_d.discrepancyApprovedAt.toDate().toLocaleString("en-PH")
+                              :"an earlier attempt")
+                          +". Nothing was added.","warn");
+                        return;
+                      }
                       const lines=(po.receivedItems||po.deliveredItems||po.items||[]);
                       if(!lines.length){
                         showT("No delivery lines on "+po.poNum
@@ -21084,7 +21110,8 @@ function App(){
                               +(it.unit||"")+" · "+(po.drNum||po.poNum||""),
                             source:"TRANSFER",ref:po.poNum||"",
                             branch:invBr,by:user.name,
-                            date:localDate(),timestamp:serverTimestamp()
+                            date:localDate(),timestamp:serverTimestamp(),
+                            at:serverTimestamp()
                           });
                         }catch(e2){console.error("approve→stock",it.id,e2);}
                       }
