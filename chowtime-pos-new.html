@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260815-120000 -->
+<!-- BUILD:20260815-133000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -3165,6 +3165,66 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
           h("div",{style:{fontSize:24}},openingFund>0?"✅":"📭")
         ),
 
+        // Start the day from the drawer, not from yesterday's arithmetic.
+        //
+        // The Z-Reading is right and stays untouched: a day that was counted
+        // after the money left will always show that shortage, and it should —
+        // that is the record of what happened. What must not happen is the
+        // wrong figure being carried into the next morning, where it makes
+        // every following day look wrong too.
+        //
+        // Recording an Opening Fund today overrides the carried balance, which
+        // the ordering above already allows. This is only the button for it.
+        h("div",{style:{background:carriedOpening<=0&&openingSource!=="logged"
+            ?"#FFEBEE":"#FAFAFA",
+          border:"1px solid "+(carriedOpening<=0&&openingSource!=="logged"
+            ?"#EF9A9A":C.border),
+          borderRadius:10,padding:"10px 14px",marginBottom:12}},
+          carriedOpening<0&&openingSource!=="logged"
+            ? h("div",{style:{fontSize:12,fontWeight:800,color:C.danger,
+                marginBottom:4}},
+                "Carried opening is negative (\u20b1"+peso(carriedOpening)+")"
+                +" \u2014 yesterday was counted after the remittance left. "
+                +"Set what the drawer actually holds this morning.")
+            : h("div",{style:{fontSize:12,color:C.muted,marginBottom:4}},
+                "If the drawer does not match this figure, count it and record "
+                +"the real amount. Yesterday's record is not changed."),
+          h("button",{
+            onClick:async()=>{
+              const cur=prompt("Count the drawer NOW and enter the amount.\n\n"
+                +"Carried from yesterday: \u20b1"+peso(carriedOpening)+"\n"
+                +"This records today's Opening Fund and overrides the carried "
+                +"figure. Yesterday's Z-Reading is left as it is.",
+                openingFund>0?String(openingFund):"");
+              if(cur===null)return;
+              const amt=Number(String(cur).replace(/[^0-9.\-]/g,""));
+              if(!(amt>=0)){showT("Enter a valid amount","warn");return;}
+              const why=prompt("Reason (kept on the record):",
+                carriedOpening<0?"Previous day counted after remittance":"");
+              if(why===null)return;
+              try{
+                await addDoc(collection(db,"cash_log"),{
+                  branch:branchId,branchName:curBranch.full,
+                  type:"in",amount:amt,
+                  desc:"Opening Fund \u2014 counted",
+                  note:why.trim(),
+                  correctedFrom:carriedOpening,
+                  by:user.name,date:today,
+                  timestamp:serverTimestamp(),at:serverTimestamp()
+                });
+                showT("Opening Fund set to \u20b1"+peso(amt)
+                  +" \u2014 today starts from the drawer","ok");
+              }catch(e){
+                showT("Could not set opening fund: "
+                  +String(e&&e.message||e).slice(0,60),"err");
+              }
+            },
+            style:{padding:"7px 13px",borderRadius:8,border:"none",
+              background:carriedOpening<0&&openingSource!=="logged"
+                ?C.danger:C.info,
+              color:"#fff",fontSize:12,fontWeight:800,cursor:"pointer"}},
+            "\ud83d\udcb5 Set today's Opening Fund from the drawer")),
+
         // Bills
         ccStep===2&&h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden",marginBottom:10}},
           h("div",{style:{padding:"10px 14px",background:"#E3F2FD",borderBottom:"1px solid #BBDEFB",display:"flex",justifyContent:"space-between"}},
@@ -5565,7 +5625,7 @@ const GUIDES=[
    title:"How to record cash in",
    steps:[
     "Open Cash In at the START of the shift, not the end.",
-    "Tap Opening Fund, Change Fund or Collection — or type your own description.",
+    "Tap Opening Fund or Add Fund — or type your own description.",
     "Enter the amount and tap Add. It appears in the list underneath with the time and your name.",
     "That is all. The cash count reads these entries at closing; you do not enter them again."],
    note:"Only money coming IN is here. Money going out has one door each: anything bought goes in Expenses, and cash handed over goes in Cash Out — Remittance if it leaves during the day, or the Remittance box at closing if it leaves after the count. Two doors onto the same movement is how the same peso gets counted twice."},
@@ -5717,7 +5777,10 @@ function seesAllPOs(user,companySettings){
 const GRANTABLE = [
   "pos","orders","all_orders","kitchen","void_request","void_requests",
   "x_reading","z_reading","reports","analytics","branch_pl",
-  "cash_count","cash_monitor","expenses",
+  // cash_in was on the Permissions screen but missing here, so switching it
+  // off did nothing: the toggle was drawn, saved, and then ignored because a
+  // page absent from this list can be neither granted nor revoked.
+  "cash_count","cash_monitor","cash_in","expenses",
   "inventory","inv_log","stock_order","stock_receive","po_monitor","bom_mgmt",
   "ext_stock",
   "menu_mgmt","branch_menu",
@@ -7348,7 +7411,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260815-120000";
+const BUILD = "20260815-133000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -7792,15 +7855,51 @@ function CashInPage({branchId,curBranch,user,db,cashLog,showT}){
   const addCashEntry=async()=>{
     const amt=parseFloat(cashEntry.amount)||0;
     if(!cashEntry.desc.trim()||amt<=0){showT("Enter description and amount","warn");return;}
+    const isOpening=/opening/i.test(cashEntry.desc.trim());
     try{
       const now=new Date();
+      // The opening fund is a statement of what the drawer holds, so a second
+      // entry corrects the first rather than joining it. Every other kind of
+      // cash in is money genuinely arriving and does add up.
+      //
+      // Summing opening entries is what turned a ₱1,121 correction into a risk
+      // of ₱2,221: the crew could only ever make the figure worse by trying
+      // again, and there is no way to delete an entry.
+      if(isOpening){
+        const ex=await getDocs(query(collection(db,"cash_log"),
+          where("branch","==",branchId),where("date","==",today)));
+        const prior=ex.docs.filter(d=>{
+          const g=d.data()||{};
+          return g.type==="in"&&/opening/i.test(g.desc||"");
+        });
+        if(prior.length){
+          const was=prior.reduce((t,d)=>t+(Number((d.data()||{}).amount)||0),0);
+          if(!window.confirm(
+            "An opening fund of \u20b1"+peso(was)+" is already recorded today.\n\n"
+            +"This REPLACES it with \u20b1"+peso(amt)+" — it is not added on top.\n\n"
+            +"Continue?")) return;
+          // First entry carries the corrected figure, the rest go to zero so
+          // the total is what was just entered.
+          await updateDoc(prior[0].ref,{amount:amt,desc:cashEntry.desc.trim(),
+            correctedFrom:was,correctedBy:user.name,
+            correctedAt:serverTimestamp()});
+          for(let i=1;i<prior.length;i++){
+            await updateDoc(prior[i].ref,{amount:0,
+              desc:"(superseded) "+((prior[i].data()||{}).desc||""),
+              correctedBy:user.name,correctedAt:serverTimestamp()});
+          }
+          setCashEntry({type:"in",desc:"",amount:""});
+          showT("Opening fund set to \u20b1"+peso(amt)+" (was \u20b1"+peso(was)+")");
+          return;
+        }
+      }
       await addDoc(collection(db,"cash_log"),{
         branch:branchId,type:"in",desc:cashEntry.desc.trim(),amount:amt,
         time:now.toLocaleTimeString("en-PH",{hour:"2-digit",minute:"2-digit"}),
         date:today,by:user.name,
         timestamp:serverTimestamp(),at:serverTimestamp()});
       setCashEntry({type:"in",desc:"",amount:""});
-      showT("Cash in recorded ✓");
+      showT(isOpening?"Opening fund recorded ✓":"Cash in recorded ✓");
     }catch(e){showT("Failed: "+String(e&&e.message||e).slice(0,60),"err");}
   };
 
@@ -7810,11 +7909,14 @@ function CashInPage({branchId,curBranch,user,db,cashLog,showT}){
       borderRadius:10,padding:"10px 13px",marginBottom:12,fontSize:13,
       color:C.success,lineHeight:1.5}},
       h("b",null,"Money coming INTO the drawer."),
-      " Opening fund at the start of the shift, change fund, and any collection. Money going out is not here — remittance is in Cash Count, anything bought is in Expenses."),
+      " Opening Fund SETS what the drawer starts with — entering it again "
+      +"replaces the figure, it does not add to it. Add Fund is extra money put "
+      +"in during the day, and it does add. Money going out is not here — "
+      +"remittance is in Cash Count, anything bought is in Expenses."),
     h("div",{style:{background:"#fff",border:"1px solid "+C.border,
       borderRadius:12,padding:"13px 15px",marginBottom:10}},
       h("div",{style:{display:"flex",gap:5,flexWrap:"wrap",marginBottom:8}},
-        ["Opening Fund","Change Fund","Collection"].map(lbl=>
+        ["Opening Fund","Add Fund"].map(lbl=>
           h("button",{key:lbl,onClick:()=>setCashEntry(p=>({...p,desc:lbl})),
             style:{padding:"6px 13px",borderRadius:20,fontSize:13,
               cursor:"pointer",fontWeight:cashEntry.desc===lbl?800:500,
@@ -17596,7 +17698,7 @@ function App(){
                   h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"QUICK PICK"),
                   h("div",{style:{display:"flex",gap:5,flexWrap:"wrap",marginBottom:8}},
                     (newCash.type==="in"
-                      ? ["Opening Fund","Change Fund","Collection","Refund reversal"]
+                      ? ["Opening Fund","Add Fund","Refund reversal"]
                       : ["Remittance","Supplies","Ice delivery","Petty cash"]
                     ).map(lbl=>h("button",{key:lbl,
                       onClick:()=>setNewCash(p=>({...p,desc:lbl})),
