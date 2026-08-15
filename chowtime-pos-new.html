@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260815-193000 -->
+<!-- BUILD:20260815-200000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -7460,7 +7460,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260815-193000";
+const BUILD = "20260815-200000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -16540,11 +16540,50 @@ function App(){
           const _pg=Math.min(Math.max(1,ordPage),_pages);
           const _from=(_pg-1)*PER;
           const pageRows=_sorted.slice(_from,_from+PER);
+
+          // Twenty-five rows sat between the list and its own Next button, so
+          // on a phone the pager was a screen and a half below the fold — the
+          // page looked like it simply ended. Same control, rendered above the
+          // list as well as below it.
+          const pager=_sorted.length>0&&h("div",{style:{display:"flex",alignItems:"center",
+            gap:8,flexWrap:"wrap",marginTop:10,padding:"9px 13px",
+            background:"#fff",borderRadius:10,border:"1px solid "+C.border}},
+            h("span",{style:{fontSize:13,color:C.muted}},
+              (_from+1)+"\u2013"+Math.min(_from+PER,_sorted.length)
+              +" ng "+_sorted.length+" order"),
+            h("div",{style:{marginLeft:"auto",display:"flex",gap:6,
+              alignItems:"center"}},
+              h("button",{onClick:()=>setOrdPage(1),disabled:_pg<=1,
+                style:{padding:"5px 10px",fontSize:12,borderRadius:7,
+                  border:"1px solid "+C.border,background:"#fff",
+                  color:_pg<=1?C.muted:C.text,
+                  cursor:_pg<=1?"not-allowed":"pointer"}},"\u00AB"),
+              h("button",{onClick:()=>setOrdPage(_pg-1),disabled:_pg<=1,
+                style:{padding:"5px 12px",fontSize:12,borderRadius:7,
+                  border:"1px solid "+C.border,background:"#fff",
+                  color:_pg<=1?C.muted:C.text,fontWeight:700,
+                  cursor:_pg<=1?"not-allowed":"pointer"}},"\u2039 Prev"),
+              h("span",{style:{fontSize:13,fontWeight:800,minWidth:74,
+                textAlign:"center"}},"Page "+_pg+" / "+_pages),
+              h("button",{onClick:()=>setOrdPage(_pg+1),disabled:_pg>=_pages,
+                style:{padding:"5px 12px",fontSize:12,borderRadius:7,
+                  border:"1px solid "+C.border,background:"#fff",
+                  color:_pg>=_pages?C.muted:C.text,fontWeight:700,
+                  cursor:_pg>=_pages?"not-allowed":"pointer"}},"Next \u203A"),
+              h("button",{onClick:()=>setOrdPage(_pages),disabled:_pg>=_pages,
+                style:{padding:"5px 10px",fontSize:12,borderRadius:7,
+                  border:"1px solid "+C.border,background:"#fff",
+                  color:_pg>=_pages?C.muted:C.text,
+                  cursor:_pg>=_pages?"not-allowed":"pointer"}},"\u00BB"))
+          );
           return h("div",null,
           h(SectionHeader,{title:page==="all_orders"
             ?"All Orders — "+orders.length+" total, all branches"
             :("Orders — "+curBranch.name+" · "
               +(ordDate==="all"?"all dates":_pick))}),
+
+          pager,
+
 
           page==="orders"&&h("div",{style:{display:"flex",gap:8,marginBottom:12,
             alignItems:"center",flexWrap:"wrap"}},
@@ -16635,37 +16674,7 @@ function App(){
 
           // Pager. Shown whenever there is more than one page — the counts
           // stay visible either way so it is clear how much is behind them.
-          _sorted.length>0&&h("div",{style:{display:"flex",alignItems:"center",
-            gap:8,flexWrap:"wrap",marginTop:10,padding:"9px 13px",
-            background:"#fff",borderRadius:10,border:"1px solid "+C.border}},
-            h("span",{style:{fontSize:13,color:C.muted}},
-              (_from+1)+"\u2013"+Math.min(_from+PER,_sorted.length)
-              +" ng "+_sorted.length+" order"),
-            h("div",{style:{marginLeft:"auto",display:"flex",gap:6,
-              alignItems:"center"}},
-              h("button",{onClick:()=>setOrdPage(1),disabled:_pg<=1,
-                style:{padding:"5px 10px",fontSize:12,borderRadius:7,
-                  border:"1px solid "+C.border,background:"#fff",
-                  color:_pg<=1?C.muted:C.text,
-                  cursor:_pg<=1?"not-allowed":"pointer"}},"\u00AB"),
-              h("button",{onClick:()=>setOrdPage(_pg-1),disabled:_pg<=1,
-                style:{padding:"5px 12px",fontSize:12,borderRadius:7,
-                  border:"1px solid "+C.border,background:"#fff",
-                  color:_pg<=1?C.muted:C.text,fontWeight:700,
-                  cursor:_pg<=1?"not-allowed":"pointer"}},"\u2039 Prev"),
-              h("span",{style:{fontSize:13,fontWeight:800,minWidth:74,
-                textAlign:"center"}},"Page "+_pg+" / "+_pages),
-              h("button",{onClick:()=>setOrdPage(_pg+1),disabled:_pg>=_pages,
-                style:{padding:"5px 12px",fontSize:12,borderRadius:7,
-                  border:"1px solid "+C.border,background:"#fff",
-                  color:_pg>=_pages?C.muted:C.text,fontWeight:700,
-                  cursor:_pg>=_pages?"not-allowed":"pointer"}},"Next \u203A"),
-              h("button",{onClick:()=>setOrdPage(_pages),disabled:_pg>=_pages,
-                style:{padding:"5px 10px",fontSize:12,borderRadius:7,
-                  border:"1px solid "+C.border,background:"#fff",
-                  color:_pg>=_pages?C.muted:C.text,
-                  cursor:_pg>=_pages?"not-allowed":"pointer"}},"\u00BB"))
-          )
+          pager
           );
         })(),
 
