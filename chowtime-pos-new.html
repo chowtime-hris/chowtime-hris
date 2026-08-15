@@ -1858,8 +1858,8 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
                               &&editPO.branch!==userBranchId);
         if(editedByMain){
           await notify(db,{to:editPO.branch,type:"po_edited",
-            title:"Binago ng Main ang "+(editPO.poNum||po.poNum),
-            message:ordered.length+" item/s · tingnan bago dumating ang delivery",
+            title:"Main edited "+(editPO.poNum||po.poNum),
+            message:ordered.length+" item/s · review before the delivery arrives",
             page:"stock_order",ref:editPO.poNum||po.poNum,by:user.name});
           showT((editPO.poNum||po.poNum)+" updated \u2014 naabisuhan ang "
             +(po.branchName||editPO.branch));
@@ -3321,10 +3321,10 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
             &&h("div",{style:{marginTop:7,padding:"8px 11px",borderRadius:8,
               background:"#FFF8E1",border:"1px solid #FFE082",fontSize:12,
               color:"#BF360C",fontWeight:700,lineHeight:1.5}},
-              "Kulang nang halos eksaktong ₱"+peso(remitField)
-              +" — ang laki ng remittance. Kung naipasa na ang pera bago "
-              +"ka nagbilang, itala muna ito sa Cash In/Out bilang Cash Out "
-              +"— Remittance, tapos bilangin ulit ang drawer."),
+              "Short by almost exactly the ₱"+peso(remitField)
+              +" remittance. If the money had already been handed over before "
+              +"you counted, record it in Cash In/Out as Cash Out — "
+              +"Remittance first, then count the drawer again."),
           // Nobody explained what the figures mean or what the colours are
           // saying, so a shortage read as an accusation instead of a checklist.
           h("div",{style:{marginTop:9,paddingTop:8,
@@ -3366,9 +3366,9 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
             remitField>0&&h("div",{style:{marginTop:9,background:"#FAFAFA",
               border:"1px solid "+C.border,borderRadius:8,padding:"9px 11px",
               fontSize:12,color:C.muted,lineHeight:1.45}},
-              "Ilalabas pagkatapos ng bilang, kaya hindi ito nakakaapekto sa "
-              +"SHORT / OVER. Kung may naipasa nang pera kanina, dapat naitala "
-              +"yun bilang Cash Out \u2014 Remittance, hindi dito.")
+              "This leaves AFTER the count, so it does not affect SHORT / "
+              +"OVER. Money handed over earlier in the day belongs in "
+              +"Cash Out \u2014 Remittance, not here.")
           ),
           remitLogged>0&&h("div",{style:{background:"#FFF8E1",
             border:"1px solid #FFE082",borderRadius:8,padding:"8px 11px",
@@ -5501,14 +5501,14 @@ const GUIDES=[
   {id:"audit",roles:["manager","owner","stockclerk"],icon:"🔍",
    title:"How to fix POS stock with an Auditor Count",
    steps:[
-    "Bilangin ang freezer habang walang gumagalaw — mas mabuti bago magbukas o pagkasara.",
-    "Buksan ang Freezer Count app → Auditor Count, ilagay ang pangalan mo.",
-    "Ilagay ang aktwal na nabilang kada item. Kung wala nang natitira, 0 — hindi blangko.",
-    "Submit Audit. May lalabas na dilaw na Confirm POS Adjustment: makikita mo kada item ang 40 → 35 (-5) bago pa may masulat. Wala pang nagbabago dito.",
-    "Suriin ang listahan. Kung may mukhang mali, Cancel — walang mababago.",
-    "Confirm — Update POS Stock. Itatakda nito ang POS sa aktwal mong bilang at ire-reset ang baseline ng crew.",
-    "Balik sa POS → Inventory. Kung may babalang 'items without lot history', pindutin ang Rebuild lots from POs — presyo lang ang inaayos nito, hindi ang bilang."],
-   note:"Ang bilang mo ang batas: kung ano ang inilagay mo, yun ang isusulat sa POS — kahit ilang beses mong pindutin, pareho pa rin ang labas. Isang pasok, isang audit: pagkatapos mag-submit, kailangang lumabas at bumalik bago makapag-audit ulit. Ang mga item na walang kaugnay sa POS ay naka-flag — kamay pa rin ang pag-ayos doon. TIP: kung may item na napakalayo ng numero (halimbawa 2,265 pack), tingnan muna ang pack size bago mag-Confirm — madalas maling unit yun, hindi nawawalang stock."},
+    "Count the freezer while nothing is moving — best before opening or after close.",
+    "Open the Freezer Count app → Auditor Count and enter your name.",
+    "Enter what you actually counted for each item. If there is none left, enter 0 — not blank.",
+    "Submit Audit. A yellow Confirm POS Adjustment panel appears showing 40 → 35 (-5) for every item. Nothing has been written yet.",
+    "Check the list. If anything looks wrong, press Cancel — nothing changes.",
+    "Confirm — Update POS Stock. This sets the POS to your count and clears the crew's running baseline.",
+    "Back in POS → Inventory, if it warns about 'items without lot history', press Rebuild lots from POs — that only re-prices what is on hand, it never moves the quantity."],
+   note:"Your count is the answer: whatever you enter is what the POS will hold, however many times you press. One entry, one audit — after submitting you must leave and come back before auditing again. Items with no POS link are flagged and still have to be fixed by hand. TIP: if a number looks far off (say 2,265 pack), check the pack size before confirming — that is usually a wrong unit, not missing stock."},
 
   {id:"cashin",roles:["cashier","manager","owner"],icon:"💵",
    title:"How to record cash in",
@@ -5542,12 +5542,12 @@ const GUIDES=[
    title:"How to close the day",
    steps:[
     "Record every expense FIRST. This is the step people skip, and it is the one that causes the big shortages.",
-    "Huwag munang ilabas ang pera. Buo ang drawer habang binibilang — kasama ang iremremit mamaya.",
-    "Bilangin ang drawer — lahat ng apat na hakbang. Sa hakbang 3, ilagay ang halagang iremremit; hindi ito nakakaapekto sa SHORT / OVER.",
-    "Tingnan ang SHORT / OVER. Dapat malapit sa zero. Kung kasinlaki ito ng remittance, may naipasang pera bago ang bilang na hindi naitala — itala muna bilang Cash Out — Remittance, tapos bilangin ulit.",
-    "Close and print. Saka mo ilabas ang iremremit. Ang matitira ay ang CARRIED TO TOMORROW — opening fund bukas.",
-    "Open POS & Sales → Z-Reading, tapos Close Day at i-print — Bluetooth para sa thermal, Browser para sa papel."],
-   note:"Dalawang panuntunan lang: (1) kapag may kinuhang pera sa gitna ng araw, itala AGAD bilang Cash Out — Remittance; (2) ang remittance sa closing ay lumalabas PAGKATAPOS ng bilang. Sundin mo ito at hindi na kailanman magiging kasinlaki ng remittance ang SHORT / OVER. Kung makakalimutan mong mag-close, kusang isasara ng susunod na opening ang nakaraang araw — pero hindi ka nito matatanong tungkol sa kakulangan."},
+    "Do not take any money out yet. The drawer stays whole while you count it — including what you will remit later.",
+    "Count the drawer — all four steps. At step 3 enter the amount being remitted; it does not affect SHORT / OVER.",
+    "Check SHORT / OVER. It should be near zero. If it is the size of the remittance, money left before the count without being recorded — record it as Cash Out — Remittance, then count again.",
+    "Close and print. Only then take out the remittance. What stays is CARRIED TO TOMORROW — tomorrow's opening fund.",
+    "Open POS & Sales → Z-Reading, then Close Day and print — Bluetooth for the thermal printer, Browser for a paper copy."],
+   note:"Two rules only: (1) money taken out during the day is recorded IMMEDIATELY as Cash Out — Remittance; (2) the closing remittance leaves AFTER the count. Follow those and SHORT / OVER can never come out the size of the remittance. If you forget to close, the next opening closes the previous day automatically — but it cannot ask you about a cash difference."},
 
   {id:"clock",roles:["cashier","crew","stockclerk","manager","owner","commissary"],icon:"⏰",
    title:"How to clock in and out",
@@ -8616,9 +8616,9 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
     // a different way. So it has to be said out loud before it is submitted.
     if(isPartial){
       const total=(selOrder. items||[]).length;
-      if(!window.confirm("Partial void ito — "+voidedItems.length+" sa "+total
-        +" items lang ang kakanselahin.\n\nKung buong resibo ang gusto mong i-void, "
-        +"i-Cancel at i-check lahat ng items.\n\nItuloy ang partial void?")) return;
+      if(!window.confirm("This is a PARTIAL void — only "+voidedItems.length
+        +" of "+total+" items will be cancelled.\n\nTo void the whole receipt, "
+        +"press Cancel and tick every item.\n\nContinue with the partial void?")) return;
     }
     // order  items store lineTotal/unitPrice — there is no `price` field,
     // so the old formula always produced 0.
@@ -10878,13 +10878,13 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
               color:short?"#C62828":"inherit"}},i.name),
             h("div",{style:{fontSize:12,color:"#5A5A5A"}},i.unit||""),
             mainStock===null
-              ? h("div",{style:{fontSize:11,color:"#999"}},"tinitingnan ang MAIN…")
+              ? h("div",{style:{fontSize:11,color:"#999"}},"checking Main…")
               : have==null
-                ? h("div",{style:{fontSize:11,color:"#999"}},"wala sa MAIN inventory")
+                ? h("div",{style:{fontSize:11,color:"#999"}},"not in Main inventory")
                 : h("div",{style:{fontSize:11,fontWeight:600,
                     color:short?"#C62828":"#2E7D32"}},
                     "MAIN: "+have+" "+(i.unit||"")
-                    +(short?" · kulang "+gap:""))
+                    +(short?" · short "+gap:""))
           ),
           h("div",{style:{fontSize:13,color:"#5A5A5A"}},i.qty+" "+(i.unit||"")),
           // Actual qty
@@ -20013,10 +20013,10 @@ function App(){
                       background:C.warning+"14",border:"1px solid "+C.warning,
                       borderRadius:10,padding:"9px 12px",marginBottom:9,
                       fontSize:12,lineHeight:1.5,color:C.text,width:"100%"}},
-                      h("b",{style:{color:"#BF360C"}},"✏️ Binago ng Main ang order na ito"),
+                      h("b",{style:{color:"#BF360C"}},"✏️ Main edited this order"),
                       h("div",{style:{fontSize:11,color:C.muted,marginTop:3}},
-                        "ni "+po.editedBy
-                        +" · Ihambing sa inorder ninyo bago tanggapin ang delivery")),
+                        "by "+po.editedBy
+                        +" · Check against what you ordered before accepting the delivery")),
 
                     (po.status==="received_by_main")&&h("div",{style:{display:"flex",gap:5}},
                       h("button",{onClick:()=>{setEditingPO(po);setModal("new_po");},
@@ -20368,7 +20368,7 @@ function App(){
                     borderRadius:11,padding:"11px 13px",marginBottom:10,
                     width:"100%"}},
                     h("div",{style:{fontSize:12,fontWeight:800,color:C.danger}},
-                      "\u26a0\ufe0f WALANG nabawas sa MAIN \u2014 kulang ang stock"),
+                      "\u26a0\ufe0f NOT deducted \u2014 Main is short on stock"),
                     h("div",{style:{marginTop:6}},
                       (po.stockShort||[]).map((x,xi)=>h("div",{key:xi,
                         style:{display:"flex",justifyContent:"space-between",
@@ -20376,14 +20376,14 @@ function App(){
                           borderBottom:"1px solid "+C.border}},
                         h("span",{style:{fontWeight:700}},x.name),
                         h("span",{style:{color:C.muted}},
-                          "meron "+x.have+" \u00b7 kailangan "+x.need),
+                          "has "+x.have+" \u00b7 needs "+x.need),
                         h("span",{style:{fontWeight:800,color:C.danger}},
-                          "kulang "+x.shortBy+" "+(x.unit||""))))),
+                          "short "+x.shortBy+" "+(x.unit||""))))),
                     h("div",{style:{fontSize:11,color:C.muted,marginTop:7,
                       lineHeight:1.5}},
-                      "WALANG nabawas sa MAIN para sa buong PO na ito \u2014 hindi "
-                      +"lang ang mga nakalista sa taas. Punan muna ang lahat, "
-                      +"tapos pindutin ulit ang Deduct Main Inv.")),
+                      "Nothing was deducted for this PO \u2014 not just the "
+                      +"items listed above. Restock all of them, then press "
+                      +"Deduct Main Inv again.")),
 
                   // Main edits the branch's order in place. Everything it
                   // changes is stamped with who and when, and the branch is
@@ -20577,11 +20577,11 @@ function App(){
                           balance<=0?"💰 View Payments":"💰 Record Payment")
                       : h("button",{
                           disabled:true,
-                          title:"Kailangan munang makumpleto ang pagbawas sa MAIN",
+                          title:"Deduct Main inventory before recording payment",
                           style:{padding:"7px 14px",background:"#eee",
                             border:"none",borderRadius:8,color:"#999",
                             fontSize:13,fontWeight:700,cursor:"not-allowed"}},
-                          "🔒 Bayad — hintayin ang pagbawas")),
+                          "🔒 Payment — deduct stock first")),
 
                   // Main-side cancel. Only the branch could cancel before, and
                   // only pre-processing — so a PO Main could not fulfil had no
