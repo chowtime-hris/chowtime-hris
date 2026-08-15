@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260815-180000 -->
+<!-- BUILD:20260815-184500 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -7460,7 +7460,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260815-180000";
+const BUILD = "20260815-184500";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -16483,12 +16483,22 @@ function App(){
             .map(_dayOf).filter(Boolean))].sort().reverse();
 
           // Newest first, then paged. Firestore hands these back in document
-          // order, not time order — without an explicit sort the "latest"
-          // order is wherever it happens to land, and on All dates the list
-          // grows until it is unusable.
-          const _sorted=[...shown].sort((a,b)=>
-            String(_dayOf(b)+" "+(b.time||"")+" "+(b.id||""))
-              .localeCompare(String(_dayOf(a)+" "+(a.time||"")+" "+(a.id||""))));
+          // order, not time order.
+          //
+          // The key used to include o.time, which is a 12-hour string: compared
+          // as text, "11:30 AM" beats "06:15 PM" because "1" beats "0". Every
+          // afternoon order sank below the morning ones, so the newest receipt
+          // on screen was whatever came in latest that MORNING — 0687 was
+          // sitting on page two while 0661 looked like the last sale of the day.
+          // The real clock is the server timestamp; the receipt number, which
+          // is zero-padded and always increases, settles anything without one.
+          const _ts=(o)=>(o&&o.timestamp&&o.timestamp.seconds)||0;
+          const _sorted=[...shown].sort((a,b)=>{
+            const ta=_ts(a), tb=_ts(b);
+            if(ta&&tb&&ta!==tb) return tb-ta;
+            return String(_dayOf(b)+" "+(b.id||""))
+              .localeCompare(String(_dayOf(a)+" "+(a.id||"")));
+          });
           const PER=25;
           const _pages=Math.max(1,Math.ceil(_sorted.length/PER));
           const _pg=Math.min(Math.max(1,ordPage),_pages);
