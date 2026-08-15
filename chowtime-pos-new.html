@@ -1838,8 +1838,12 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
         let live=null;
         try{const snap=await getDoc(doc(db,"advances",editPO._docId));
             if(snap.exists())live=snap.data();}catch(e){}
-        if(live&&live.status!=="received_by_main"){
-          showT("No longer editable — Main has processed it","err");
+        const _st=live?(live.status||""):"";
+        const _locked=live&&(live.mainDeducted||live.stockIssued);
+        if(live&&(_locked||(_st!=="received_by_main"&&_st!=="processing"))){
+          showT(_locked
+            ? "No longer editable — stock already deducted. Revert the deduction first."
+            : "No longer editable — this PO has moved on","err");
           onClose();return;
         }
         await updateDoc(doc(db,"advances",editPO._docId),Object.assign({
@@ -20389,10 +20393,22 @@ function App(){
                   // changes is stamped with who and when, and the branch is
                   // told — an order that changes silently is worse than one
                   // sent back.
-                  st==="received_by_main"
+                  // Editing closes when the STOCK moves, not when the DR is
+                  // printed. Issuing a DR no longer deducts anything, so a
+                  // processing PO is still just a list — and this is exactly
+                  // when a shortage gets found and the order has to change.
+                  // Once deducted, the figures are committed and the way back
+                  // is Revert Deduction.
+                  (st==="received_by_main"
+                    ||(st==="processing"&&!po.mainDeducted&&!po.stockIssued))
                     &&seesAllPOs(user,companySettings)
                     &&h("button",{
-                    onClick:()=>{setEditingPO(po);setModal("new_po");},
+                    onClick:()=>{
+                      if(st==="processing"&&!window.confirm(
+                        "The DR for "+po.poNum+" has already been issued.\n\n"
+                        +"Editing now changes the order but NOT the printed DR — "
+                        +"reprint it after saving.\n\nContinue?"))return;
+                      setEditingPO(po);setModal("new_po");},
                     style:{padding:"9px 15px",background:"#fff",
                       border:"1px solid "+C.border,borderRadius:9,
                       color:C.text,fontSize:13,fontWeight:700,
