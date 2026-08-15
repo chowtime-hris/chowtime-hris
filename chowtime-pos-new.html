@@ -2247,77 +2247,19 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
       // Issuing a DR moves goods OUT of main. Without this the branch gained
       // stock on receipt while main never lost any — stock from nothing.
       // stockIssued guards against a re-issue deducting twice.
-      let moved=0; const shortAtMain=[];
-      if(!po.stockIssued){
-        // Same rule as the other issue path: check the whole PO first, and
-        // move nothing at all if any line cannot be covered. This path had no
-        // check whatsoever — it drove Main's stock negative, then read a
-        // variable it never declared, so a successful issue reported itself
-        // as an error.
-        const _plan=[];
-        for(const it of delivered){
-          if(!it.id||!(it.actualQty>0))continue;
-          try{
-            const _ds=await getDoc(doc(db,"inventory",it.id));
-            const _have=_ds.exists()?(Number(_ds.data().stock)||0):null;
-            if(_have!=null&&_have<(it.actualQty||0)){
-              shortAtMain.push({id:it.id,name:it.name||it.id,unit:it.unit||"",
-                have:_have,need:Number(it.actualQty)||0,
-                shortBy:Math.round(((it.actualQty||0)-_have)*1000)/1000});
-            }else{
-              _plan.push({it:it,prev:_have,
-                lots:_ds.exists()?lotsConsume(_ds.data().lots,it.actualQty||0).lots:null});
-            }
-          }catch(e7){ shortAtMain.push({id:it.id,name:it.name||it.id,
-            unit:it.unit||"",have:0,need:Number(it.actualQty)||0,
-            shortBy:Number(it.actualQty)||0}); }
-        }
-        for(const _row of (shortAtMain.length?[]:_plan)){
-          const it=_row.it, _dprev=_row.prev, _dlots=_row.lots;
-          try{
-            await updateDoc(doc(db,"inventory",it.id),Object.assign({
-              stock:increment(-(it.actualQty||0)),
-              lastIssued:serverTimestamp()
-            }, _dlots?{lots:_dlots}:{}));
-            moved++;
-            await addDoc(collection(db,"inventory_log"),{
-               itemId:it.id, itemName:it.name||it.id,unit:it.unit||"",
-              type:"deduct",amount:-(it.actualQty||0),
-              prevStock:_dprev,
-              newStock:_dprev==null?null:Math.round((_dprev-(it.actualQty||0))*1000)/1000,
-              desc:"Issued from Main: "+(it.actualQty||0)+" "+(it.unit||"")
-                +" to "+(po.branch||"")+" under "+drNum,
-              source:"transfer",
-              ref:drNum,
-              reason:"DR "+drNum+" — issued to "+(po.branch||""),
-              date:localDate(),
-              drNum:drNum,poId:po._docId,branch:po.branch||"",
-              by:user.name,at:serverTimestamp(),timestamp:serverTimestamp()
-            });
-          }catch(e2){console.warn("Main stock deduct failed",it.id,e2);}
-        }
-        // Only a complete deduction closes the door. Marking it issued while
-        // items were skipped meant the shortfall could never be taken later —
-        // the DR said the goods went out, Main's book said they never did.
-        try{
-          await updateDoc(doc(db,"advances",po._docId),
-            shortAtMain.length
-              ? {stockIssued:false,stockShort:shortAtMain,
-                 stockShortAt:serverTimestamp()}
-              : {stockIssued:true,stockShort:[]});
-        }catch(e3){}
-      }
+      // Issuing the DR moves paper, not stock.
+      //
+      // This used to deduct Main here AND the Deduct Main Inv button deducted
+      // again later, each setting its own flag and neither checking the
+      // other — so every PO left Main twice. The deduction now happens in one
+      // place only: the Deduct Main Inv button.
+      const moved=0;
       await notify(db,{to:po.branch,type:"dr_issued",
         title:drNum+" — dispatched",
         message:delivered.length+"  item/s · P"+(Number(totalAmt)||0).toFixed(2)
           +(deliveryDate?" · arriving "+deliveryDate:""),
         page:"stock_order",ref:po.poNum||drNum,by:user.name});
-      if(shortAtMain.length){
-        showT("Hindi nabawas sa MAIN \u2014 kulang: "
-          +shortAtMain.slice(0,2).map(x=>x.name+" (kulang "+x.shortBy+" "+(x.unit||"")+")").join(" \u00b7 ")
-          +(shortAtMain.length>2?" +"+(shortAtMain.length-2):""),"err");
-      }
-      showT(drNum+" issued ✓ · "+moved+"  item/s deducted from main");
+      showT(drNum+" issued ✓ — deduct Main inventory next");
     }catch(e){showT("Error issuing DR","err");console.error(e);}
   };
 
@@ -9776,11 +9718,13 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
   ];
 
   return h("div",{style:{background:"#fff",width:400,borderRadius:16,
-    overflow:"hidden",boxShadow:"0 20px 50px rgba(0,0,0,.4)"}},
+    overflow:"hidden",boxShadow:"0 20px 50px rgba(0,0,0,.4)",
+    margin:"auto 0"}},
 
     // Header
     h("div",{style:{background:"linear-gradient(135deg,#1565C0,#0D47A1)",
-      padding:"14px 18px",display:"flex",justifyContent:"space-between",alignItems:"center"}},
+      padding:"14px 18px",display:"flex",justifyContent:"space-between",
+      alignItems:"center",position:"sticky",top:0,zIndex:2}},
       h("div",null,
         h("div",{style:{color:"rgba(255,255,255,.6)",fontSize:12,letterSpacing:2,fontWeight:700}},"INVENTORY ITEM"),
         h("div",{style:{color:"#fff",fontWeight:900,fontSize:15}}, item.name),
@@ -10847,63 +10791,13 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
       // deliveryStatus and notifies the branch — this one did none of the
       // three, so goods left Main's book untouched and the branch was never
       // told. Everything below mirrors that path.
-      let moved=0; const shortAtMain=[];
-      if(!po.stockIssued){
-        // Two passes, and the first one writes nothing.
-        //
-        // A PO moves as one shipment, so its stock moves as one deduction. Half
-        // a PO taken out of Main leaves both books wrong at once — Main short
-        // of goods it still holds, the branch billed for a delivery it did not
-        // get in full — and no single figure afterwards says which half.
-        const _plan=[];
-        for(const it of delivered){
-          if(!it.id||!(it.actualQty>0))continue;
-          try{
-            const ds=await getDoc(doc(db,"inventory",it.id));
-            const have=ds.exists()?(Number(ds.data().stock)||0):null;
-            if(have!=null&&have<(it.actualQty||0)){
-              shortAtMain.push({id:it.id,name:it.name||it.id,unit:it.unit||"",
-                have:have,need:Number(it.actualQty)||0,
-                shortBy:Math.round(((it.actualQty||0)-have)*1000)/1000});
-            }else{
-              _plan.push({it:it,prev:have,
-                lots:ds.exists()?lotsConsume(ds.data().lots,it.actualQty||0).lots:null});
-            }
-          }catch(e1){ shortAtMain.push({id:it.id,name:it.name||it.id,
-            unit:it.unit||"",have:0,need:Number(it.actualQty)||0,
-            shortBy:Number(it.actualQty)||0}); }
-        }
-        // One short item holds the whole deduction.
-        for(const row of (shortAtMain.length?[]:_plan)){
-          const it=row.it, prev=row.prev, _mlots=row.lots;
-          try{
-            await updateDoc(doc(db,"inventory",it.id),Object.assign({
-              stock:increment(-(it.actualQty||0)),
-              lastIssued:serverTimestamp()
-            }, _mlots?{lots:_mlots}:{}));
-            moved++;
-            await addDoc(collection(db,"inventory_log"),{
-              itemId:it.id,itemName:it.name||it.id,unit:it.unit||"",
-              type:"deduct",amount:-(it.actualQty||0),
-              prevStock:prev,
-              newStock:prev==null?null:Math.round((prev-(it.actualQty||0))*1000)/1000,
-              desc:"Issued from Main: "+(it.actualQty||0)+" "+(it.unit||"")+
-                " to "+(po.branchName||po.branch),
-              source:"TRANSFER",ref:po.poNum||"",
-              branch:"ct-main",by:user.name,
-              date:localDate(),timestamp:serverTimestamp()
-            ,at:serverTimestamp()});
-          }catch(e2){console.warn("main deduct failed",it.id,e2);}
-        }
-        // Only a complete deduction closes the door.
-        try{
-          await updateDoc(doc(db,"advances",po._docId),
-            shortAtMain.length
-              ? {stockIssued:false,stockShort:shortAtMain,
-                 stockShortAt:serverTimestamp()}
-              : {stockIssued:true,stockShort:[]});
-        }catch(e3){}
-      }
+      // Issuing the DR moves paper, not stock.
+      //
+      // This used to deduct Main here AND the Deduct Main Inv button deducted
+      // again later, each setting its own flag and neither checking the
+      // other — so every PO left Main twice. The deduction now happens in one
+      // place only: the Deduct Main Inv button.
+      const moved=0;
 
       await notify(db,{to:po.branch,type:"dr_issued",
         title:"DR-"+po.poNum+" dispatched",
@@ -10911,11 +10805,6 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
           +(deliveryDate?" · arriving "+deliveryDate:""),
         page:"stock_order",ref:po.poNum,by:user.name});
 
-      if(shortAtMain.length){
-        showT("Hindi nabawas sa MAIN \u2014 kulang: "
-          +shortAtMain.slice(0,2).map(x=>x.name+" (kulang "+x.shortBy+" "+(x.unit||"")+")").join(" \u00b7 ")
-          +(shortAtMain.length>2?" +"+(shortAtMain.length-2):""),"err");
-      }
       showT("DR issued ✓ — "+po.poNum+" now PROCESSING · "+moved+" item/s deducted");
       renderDRDoc(Object.assign({},po,{deliveredItems:delivered,deliveryDate:deliveryDate}),companySettings,branches);
       onClose();
@@ -20492,72 +20381,9 @@ function App(){
                           "kulang "+x.shortBy+" "+(x.unit||""))))),
                     h("div",{style:{fontSize:11,color:C.muted,marginTop:7,
                       lineHeight:1.5}},
-                      "Naipadala na ang DR, pero WALANG nabawas sa MAIN para sa "
-                      +"buong PO na ito \u2014 hindi lang sa mga nakalista sa taas. "
-                      +"Kailangang kumpleto ang lahat bago mabawas, at hindi "
-                      +"matatapos ang bayad hangga't hindi ito nangyayari."),
-                    h("button",{
-                      onClick:async()=>{
-                        const rows=po.stockShort||[];
-                        if(!rows.length)return;
-                        // Check every line first. One item still short and
-                        // nothing moves — the PO deducts whole or not at all.
-                        const still=[]; const ready=[]; let done=0;
-                        for(const x of rows){
-                          try{
-                            const ds=await getDoc(doc(db,"inventory",x.id));
-                            const have=ds.exists()?(Number(ds.data().stock)||0):0;
-                            if(have<x.need){
-                              still.push(Object.assign({},x,{have:have,
-                                shortBy:Math.round((x.need-have)*1000)/1000}));
-                            }else{
-                              ready.push({x:x,have:have,
-                                lots:ds.exists()?lotsConsume(ds.data().lots,x.need).lots:null});
-                            }
-                          }catch(e){
-                            still.push(x);
-                            console.warn("retry check failed",x.id,e);
-                          }
-                        }
-                        for(const r of (still.length?[]:ready)){
-                          const x=r.x, have=r.have, _l=r.lots;
-                          try{
-                            await updateDoc(doc(db,"inventory",x.id),
-                              Object.assign({stock:increment(-x.need),
-                                lastIssued:serverTimestamp()},_l?{lots:_l}:{}));
-                            await addDoc(collection(db,"inventory_log"),{
-                              itemId:x.id,itemName:x.name,unit:x.unit||"",
-                              type:"deduct",amount:-x.need,
-                              prevStock:have,
-                              newStock:Math.round((have-x.need)*1000)/1000,
-                              desc:"Issued from Main (late): "+x.need+" "+(x.unit||"")
-                                +" to "+(po.branchName||po.branch),
-                              source:"TRANSFER",ref:po.poNum||"",
-                              branch:"ct-main",by:user.name,
-                              date:localDate(),timestamp:serverTimestamp(),
-                              at:serverTimestamp()});
-                            done++;
-                          }catch(e){
-                            still.push(x);
-                            console.warn("retry deduct failed",x.id,e);
-                          }
-                        }
-                        try{
-                          await updateDoc(doc(db,"advances",po._docId),
-                            still.length
-                              ? {stockShort:still,stockIssued:false}
-                              : {stockShort:[],stockIssued:true});
-                        }catch(e){}
-                        showT(still.length
-                          ? ("Walang nabawas \u2014 kulang pa ang "+still.length
-                             +" item/s. Punan muna ang lahat.")
-                          : ("Kumpleto na ang pagbawas \u2014 "+done+" item/s"),
-                          still.length?"err":"ok");
-                      },
-                      style:{marginTop:9,padding:"8px 14px",background:C.danger,
-                        border:"none",borderRadius:8,color:"#fff",fontSize:12,
-                        fontWeight:800,cursor:"pointer"}},
-                      "\ud83d\udd01 Ulitin ang Pagbawas")),
+                      "WALANG nabawas sa MAIN para sa buong PO na ito \u2014 hindi "
+                      +"lang ang mga nakalista sa taas. Punan muna ang lahat, "
+                      +"tapos pindutin ulit ang Deduct Main Inv.")),
 
                   // Main edits the branch's order in place. Everything it
                   // changes is stamped with who and when, and the branch is
@@ -20819,7 +20645,9 @@ function App(){
                           cancelReason:why.trim(),
                           cancelledBy:user.name,
                           cancelledAt:serverTimestamp(),
-                          stockIssued:false,
+                          // Both flags, or a cancelled PO comes back with the
+                          // deduct button still greyed out.
+                          stockIssued:false,mainDeducted:false,stockShort:[],
                           stockRestored:back
                         });
                         await notify(db,{to:po.branch,type:"discrepancy",
@@ -20966,17 +20794,34 @@ function App(){
                     "✅ Approve Discrepancy"),
 
                   // DEDUCT from Main Inventory button
+                  //
+                  // One PO, one deduction. Issuing the DR already takes the
+                  // stock out of Main and sets stockIssued; this button set a
+                  // SECOND flag of its own and checked neither, so pressing it
+                  // after an issue took the same goods out twice. The two flags
+                  // are now one question: has this PO been deducted or not.
                   (st==="processing"||st==="paid")&&h("button",{
+                    disabled:!!(po.mainDeducted||po.stockIssued),
                     onClick:async()=>{
+                      if(po.mainDeducted||po.stockIssued){
+                        showT("Already deducted for "+po.poNum
+                          +" — use Revert Deduction first if it needs redoing","warn");
+                        return;
+                      }
                       if(!confirm("Deduct  items from Main inventory?"))return;
                       try{
-                        for(const  item of (po.deliveredItems||po. items||[])){
+                        // Check the whole PO before moving anything.
+                        //
+                        // This button skipped short items one at a time and
+                        // then marked the PO deducted anyway — so part of a
+                        // shipment left Main's book, the rest never did, and
+                        // the button greyed out with no way back. A PO ships
+                        // as one lot, so it deducts as one lot.
+                        const _rows=(po.deliveredItems||po. items||[]);
+                        const _short=[], _plan=[];
+                        for(const  item of _rows){
                           const qty= item.actualQty!=null? item.actualQty:( item.qty||0);
                           if(!qty)continue;
-                          // Read the level first. increment() is atomic but
-                          // tells you nothing, so this was the one movement in
-                          // the system with no before and after — the log said
-                          // what left, never what remained.
                           let prev=null, _plots=null;
                           try{
                             const snap=await getDoc(doc(db,"inventory", item.id));
@@ -20986,10 +20831,26 @@ function App(){
                             }
                           }catch(e){}
                           if(prev!=null&&prev<qty){
-                            showT(( item.name|| item.id)+": Main has "+prev
-                              +", needs "+qty+" — skipped","warn");
-                            continue;
+                            _short.push({id: item.id,name: item.name|| item.id,
+                              unit: item.unit||"",have:prev,need:qty,
+                              shortBy:Math.round((qty-prev)*1000)/1000});
+                          }else{
+                            _plan.push({item: item,qty:qty,prev:prev,lots:_plots});
                           }
+                        }
+                        if(_short.length){
+                          // Keep it on the PO. The toast is gone in seconds and
+                          // this is the only place the shortage is recorded.
+                          try{
+                            await updateDoc(doc(db,"advances",po._docId),
+                              {stockShort:_short,stockShortAt:serverTimestamp()});
+                          }catch(e){}
+                          showT("Nothing deducted — Main is short on "
+                            +_short.length+" item(s). See the list on the PO.","err");
+                          return;
+                        }
+                        for(const _p of _plan){
+                          const  item=_p.item, qty=_p.qty, prev=_p.prev, _plots=_p.lots;
                           try{
                             await updateDoc(doc(db,"inventory", item.id),Object.assign({
                               stock:increment(-qty),
@@ -21014,18 +20875,99 @@ function App(){
                           }catch(e){}
                         }
                         await updateDoc(doc(db,"advances",po._docId),{
-                          mainDeducted:true,mainDeductedBy:user.name,
+                          mainDeducted:true,stockIssued:true,stockShort:[],
+                          mainDeductedBy:user.name,
                           mainDeductedAt:serverTimestamp()
                         });
                         showT("Main inventory deducted ✓","ok");
                       }catch(e){showT("Error","err");}
                     },
                     style:{padding:"7px 14px",
-                      background:po.mainDeducted?"#888":"#E65100",
+                      background:(po.mainDeducted||po.stockIssued)?"#888":"#E65100",
                       border:"none",borderRadius:8,color:"#fff",
-                      fontSize:13,fontWeight:700,cursor:"pointer",
-                      opacity:po.mainDeducted?0.6:1}},
-                    po.mainDeducted?"📦 Deducted":"📦 Deduct Main Inv"),
+                      fontSize:13,fontWeight:700,
+                      cursor:(po.mainDeducted||po.stockIssued)?"not-allowed":"pointer",
+                      opacity:(po.mainDeducted||po.stockIssued)?0.6:1}},
+                    (po.mainDeducted||po.stockIssued)?"📦 Deducted":"📦 Deduct Main Inv"),
+
+                  // Revert Deduction
+                  //
+                  // Works off the log, not the PO. What goes back is exactly
+                  // what the log says went out — so a deduction that only
+                  // half-ran puts back only the half that moved, and a PO
+                  // edited since still reverts to what actually happened.
+                  // Reversals are logged against the same ref, so the net is
+                  // recomputed each time and pressing twice cannot double.
+                  (st==="processing"||st==="paid")
+                    &&(po.mainDeducted||po.stockIssued)
+                    &&h("button",{
+                    onClick:async()=>{
+                      if(!confirm("Revert the Main inventory deduction for "
+                        +po.poNum+"?\n\nStock goes back to Main and the PO can "
+                        +"be deducted again."))return;
+                      try{
+                        const qs=await getDocs(query(
+                          collection(db,"inventory_log"),
+                          where("ref","==",po.poNum||"")));
+                        const net={},meta={};
+                        qs.docs.forEach(function(d){
+                          const g=d.data()||{};
+                          if(g.source!=="TRANSFER"||!g.itemId)return;
+                          net[g.itemId]=(net[g.itemId]||0)+(Number(g.amount)||0);
+                          if(!meta[g.itemId])meta[g.itemId]={
+                            name:g.itemName||g.itemId,unit:g.unit||""};
+                        });
+                        const back=Object.keys(net)
+                          .filter(function(k){return net[k]<-0.0001;})
+                          .map(function(k){return {id:k,qty:Math.round(-net[k]*1000)/1000,
+                            name:meta[k].name,unit:meta[k].unit};});
+                        if(!back.length){
+                          showT("Nothing to revert — no deduction on record for "
+                            +po.poNum,"warn");
+                          return;
+                        }
+                        let done=0;
+                        for(const b of back){
+                          try{
+                            let prev=null;
+                            try{
+                              const snap=await getDoc(doc(db,"inventory",b.id));
+                              if(snap.exists())prev=Number(snap.data().stock)||0;
+                            }catch(e){}
+                            await updateDoc(doc(db,"inventory",b.id),{
+                              stock:increment(b.qty),
+                              lastAdjusted:serverTimestamp()});
+                            await addDoc(collection(db,"inventory_log"),{
+                              itemId:b.id,itemName:b.name,unit:b.unit,
+                              type:"add",amount:b.qty,
+                              prevStock:prev,
+                              newStock:prev==null?null
+                                :Math.round((prev+b.qty)*1000)/1000,
+                              reason:"Reverted deduction: "+po.poNum,
+                              desc:"Reverted deduction: "+po.poNum,
+                              source:"TRANSFER",ref:po.poNum||"",
+                              branch:"ct-main",date:localDate(),
+                              by:user.name,at:serverTimestamp(),
+                              timestamp:serverTimestamp()});
+                            done++;
+                          }catch(e){console.warn("revert failed",b.id,e);}
+                        }
+                        await updateDoc(doc(db,"advances",po._docId),{
+                          mainDeducted:false,stockIssued:false,stockShort:[],
+                          mainDeductedBy:null,mainDeductedAt:null,
+                          mainRevertedBy:user.name,
+                          mainRevertedAt:serverTimestamp()});
+                        showT("Reverted "+done+" item(s) back to Main \u2014 "
+                          +po.poNum+" can be deducted again","ok");
+                      }catch(e){
+                        showT("Revert failed: "+String(e&&e.message||e).slice(0,60),"err");
+                      }
+                    },
+                    style:{padding:"7px 14px",background:"#fff",
+                      border:"1px solid "+C.danger,borderRadius:8,
+                      color:C.danger,fontSize:13,fontWeight:700,
+                      cursor:"pointer"}},
+                    "↩️ Revert Deduction"),
 
                   // Reopen a PO that was closed before the branch received it.
                   // Completion is the branch's confirmation that the goods
@@ -21332,9 +21274,14 @@ function App(){
     ),
 
     // STOCK EDIT MODAL
+    //
+    // Centred vertically, a long History pushed the header — and the only way
+    // out — above the top of the screen. Anchoring to the top and letting the
+    // overlay scroll keeps the × reachable however many movements an item has.
     modal&&modal.startsWith("stock_edit_")&&h("div",{
       style:{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",
-        display:"flex",alignItems:"center",justifyContent:"center",zIndex:900}},
+        display:"flex",alignItems:"flex-start",justifyContent:"center",
+        overflowY:"auto",padding:"24px 12px",zIndex:900}},
       h(StockEditModal,{
          item:inventory.find(function(i){return (i.id||i.name)===modal.replace("stock_edit_","");}),
         boms:Object.values(appBoms||{}),
