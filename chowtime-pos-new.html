@@ -1846,14 +1846,33 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
             : "No longer editable — this PO has moved on","err");
           onClose();return;
         }
+        // Once a DR has been issued the PO carries TWO item lists: `items` is
+        // what was ordered, `deliveredItems` is what the DR says ships — and
+        // the deduction reads the second one. Editing only the first left the
+        // order saying 920 while the deduction still demanded the 1,200 from
+        // the original DR, so it could never clear. The DR line is rebuilt
+        // from the edit, keeping the price that was agreed on it.
+        let _newDelivered=null;
+        if(live&&Array.isArray(live.deliveredItems)&&live.deliveredItems.length){
+          const byId={};
+          live.deliveredItems.forEach(function(d){ if(d&&d.id)byId[d.id]=d; });
+          _newDelivered=(po. items||[]).map(function(i){
+            const old=byId[i.id]||{};
+            return Object.assign({},old,i,{
+              actualQty:Number(i.qty)||0,
+              price:(old.price!=null?old.price:i.price)
+            });
+          });
+        }
         await updateDoc(doc(db,"advances",editPO._docId),Object.assign({
            items:po. items,notes:po.notes,deliveryRequested:po.deliveryRequested,
           discount:po.discount,vatType:po.vatType,
           editedBy:user.name,editedAt:serverTimestamp(),
-          editedByMain:!!(editPO.branch&&userBranchId&&editPO.branch!==userBranchId)
-        // A revised order goes back into Main's queue, and the return note is
-        // cleared so the next reader is not looking at an answered objection.
-        }));
+          editedByMain:!!(editPO.branch&&userBranchId&&editPO.branch!==userBranchId),
+          // The recorded shortage was measured against the old quantities.
+          // Leaving it up would keep showing a gap the edit may have closed.
+          stockShort:[]
+        }, _newDelivered?{deliveredItems:_newDelivered}:{}));
 
         // Who edited decides who needs telling. A branch fixing its own order
         // tells Main; Main changing a branch's order tells the branch, because
