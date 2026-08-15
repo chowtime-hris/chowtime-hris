@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260815-141500 -->
+<!-- BUILD:20260815-144500 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -1856,13 +1856,13 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
         if(live&&Array.isArray(live.deliveredItems)&&live.deliveredItems.length){
           const byId={};
           live.deliveredItems.forEach(function(d){ if(d&&d.id)byId[d.id]=d; });
-          _newDelivered=(po. items||[]).map(function(i){
+          _newDelivered=noUndef((po. items||[]).map(function(i){
             const old=byId[i.id]||{};
             return Object.assign({},old,i,{
               actualQty:Number(i.qty)||0,
-              price:(old.price!=null?old.price:i.price)
+              price:Number(old.price!=null?old.price:i.price)||0
             });
-          });
+          }));
         }
         await updateDoc(doc(db,"advances",editPO._docId),Object.assign({
            items:po. items,notes:po.notes,deliveryRequested:po.deliveryRequested,
@@ -2249,7 +2249,7 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
         status:"processing",           // the label map and payment button key off this
         deliveryStatus:"Dispatched",   // goods have left Main
         deliveryDate, drNum,
-        deliveredItems:delivered,
+        deliveredItems:noUndef(delivered),
         totalAmount:totalAmt,
         hasDiscrepancy:hasDisc,
         drNotes,
@@ -2547,7 +2547,7 @@ function DRCheckForm({po,db,branchId,user,showT,INIT_INVENTORY,setAdvances,advan
     try{
       await updateDoc(doc(db,"advances",po._docId),{
         status:"delivered",
-        receivedItems:received,
+        receivedItems:noUndef(received),
         hasDiscrepancy:hasDisc,
         discrepancyNotes:discNotes,
         confirmedBy:user.name,
@@ -7172,6 +7172,23 @@ function snapshotIsDue(stockSnaps,today){
   return prevMk;
 }
 
+// Firestore rejects `undefined` outright — it accepts null, but not a missing
+// value — and one absent field kills the whole write. Rows copied from an
+// existing document carry whatever keys it happened to have, so anything built
+// by spreading one object over another gets cleaned before it is saved.
+function noUndef(v){
+  if(Array.isArray(v)) return v.map(noUndef);
+  if(v&&typeof v==="object"&&v.constructor===Object){
+    const o={};
+    Object.keys(v).forEach(function(k){
+      const x=noUndef(v[k]);
+      if(x!==undefined)o[k]=x;
+    });
+    return o;
+  }
+  return v;
+}
+
 function poValue(po){
   const t=Number(po&&po.totalAmount)||0;
   if(t>0)return t;
@@ -7411,7 +7428,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260815-141500";
+const BUILD = "20260815-144500";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -10311,11 +10328,14 @@ function ReceiveItemsModal({po,db,user,showT,branchId,onClose}){
   const confirmReceipt = async()=>{
     setSaving(true);
     try{
-      const finalItems = drItems.map(i=>({
+      // Spreading the DR row carries across whatever keys it happens to have,
+      // including ones sitting at undefined — and Firestore refuses the entire
+      // write for a single one of those.
+      const finalItems = noUndef(drItems.map(i=>({
         ...i,
         receivedQty:(received[i.id]!=null?received[i.id]:(i.actualQty!=null?i.actualQty:(i.qty||0))),
         remark:remarks[i.id]||""
-      }));
+      })));
       // This modal only ever updated the PO status. The inventory logic lives
       // in DRCheckForm, whose page is in nobody's nav — so goods were received,
       // the PO closed, and the branch's stock never moved.
@@ -10394,12 +10414,12 @@ function ReceiveItemsModal({po,db,user,showT,branchId,onClose}){
           deliveryStatus:"Short",   // arrived, but not in full
           receivedItems:finalItems,
           receivedBy:user.name,receivedAt:serverTimestamp(),
-          discrepancyItems:discItems.map(i=>({
+          discrepancyItems:noUndef(discItems.map(i=>({
             ...i,drQty:(i.actualQty!=null?i.actualQty:(i.qty||0)),
             receivedQty:(received[i.id]||0),
             diff:(received[i.id]||0)-(i.actualQty!=null?i.actualQty:(i.qty||0)),
             remark:remarks[i.id]||""
-          })),discrepancyStatus:"pending_approval"
+          }))),discrepancyStatus:"pending_approval"
         });
         await notify(db,{to:"ct-main",type:"warning",
           title:"Shortage reported — "+po.poNum,
@@ -10923,7 +10943,7 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
         status:"processing",
         deliveryStatus:"Dispatched",
         drNum:"DR-"+po.poNum,
-        deliveredItems:delivered,
+        deliveredItems:noUndef(delivered),
         totalAmount:total,
         deliveryDate,
         drNotes:notes,
@@ -21064,9 +21084,9 @@ function App(){
                       await updateDoc(doc(db,"advances",po._docId),{
                         status:"completed",
                         stockPosted:true,
-                        items:corrected,
-                        deliveredItems:corrected,
-                        receivedItems:corrected,
+                        items:noUndef(corrected),
+                        deliveredItems:noUndef(corrected),
+                        receivedItems:noUndef(corrected),
                         totalBeforeDiscrepancy:oldTotal,
                         discrepancyCredit:credit,
                         discrepancyStatus:"approved",
@@ -21139,7 +21159,8 @@ function App(){
                           // this is the only place the shortage is recorded.
                           try{
                             await updateDoc(doc(db,"advances",po._docId),
-                              {stockShort:_short,stockShortAt:serverTimestamp()});
+                              {stockShort:noUndef(_short),
+                               stockShortAt:serverTimestamp()});
                           }catch(e){}
                           showT("Nothing deducted — Main is short on "
                             +_short.length+" item(s). See the list on the PO.","err");
