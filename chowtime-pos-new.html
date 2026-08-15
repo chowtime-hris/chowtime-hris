@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260816-003000 -->
+<!-- BUILD:20260816-010000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -7505,7 +7505,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260816-003000";
+const BUILD = "20260816-010000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -12816,6 +12816,14 @@ function App(){
   const [plTo,setPlTo]=useState(localDate());
   const [plLogs,setPlLogs]=useState([]);                 // deducts with FIFO cost
   const [stockSnaps,setStockSnaps]=useState([]);         // dated stock readings
+  // The inventory of the branch being LOOKED AT.
+  //
+  // The main `inventory` follows the account, not the selection: an owner
+  // always holds MAIN's shelf whichever branch is on screen. That is right for
+  // the PO screens, which compare against Main — and wrong for the P&L, which
+  // then valued a branch's closing stock at Main's, and filed Main's figure as
+  // that branch's daily reading.
+  const [branchInv,setBranchInv]=useState([]);
   const [snapSaving,setSnapSaving]=useState(false);
   const [addLogs,setAddLogs]=useState([]);              // arrivals, for lot dating
   const [poOpen,setPoOpen]=useState("");                 // expanded PO row
@@ -13235,6 +13243,13 @@ function App(){
       },()=>{}));
     }catch(e){}
 
+    // Whatever branch is selected, for the P&L and its stock readings.
+    try{
+      unsubs.push(onSnapshot(collection(db,invColFor(branchId)),
+        snap=>setBranchInv(snap.docs.map(d=>({...d.data(),id:d.id}))),
+        ()=>{}));
+    }catch(e){}
+
     // Inventory — per branch freezer stock
     // Owner/Commissary → sees master commissary inventory
     // Branch staff → sees their own branch inventory
@@ -13251,7 +13266,7 @@ function App(){
     }catch(e){}
 
     return()=>unsubs.forEach(u=>u());
-  },[user,companySettings&&companySettings.rolePerms]);
+  },[user,branchId,companySettings&&companySettings.rolePerms]);
 
   // ── DERIVED ──────────────────────────────────────────────
   useEffect(()=>{
@@ -13362,24 +13377,26 @@ function App(){
   // ── MONTH-END STOCK SNAPSHOT (auto) ──────────────────────
   useEffect(()=>{
     if(!user||!user.branch)return;
-    if(!inventory||!inventory.length)return;   // catalogue not loaded yet
+    if(!branchInv||!branchInv.length)return;   // catalogue not loaded yet
     if(!stockSnaps)return;
-    const bId=(user.branch==="all"||user.branch==="comm")?"ct-main":user.branch;
+    // The branch being looked at, not the account's home branch — otherwise an
+    // owner viewing WPAN files Main's stock value as WPAN's reading.
+    const bId=branchId;
     const due=snapshotIsDue(stockSnaps,localDate());
     if(!due)return;
     // Nothing to value yet — writing a zero would read as an empty shelf.
-    if(!invValueOf(inventory))return;
+    if(!invValueOf(branchInv))return;
     let alive=true;
     (async()=>{
       try{
         // setDoc on a deterministic id, so two terminals opening at the same
         // time write the same document rather than two of them.
-        await saveStockSnapshot(db,bId,due,inventory,"auto",true,true);
+        await saveStockSnapshot(db,bId,due,branchInv,"auto",true,true);
       }catch(e){ console.warn("stock snapshot (auto):",e&&e.message); }
       if(!alive)return;
     })();
     return()=>{alive=false;};
-  },[user?.branch,inventory.length,stockSnaps]);
+  },[branchId,branchInv.length,stockSnaps]);
 
   // ── BRANCH MENU OVERRIDES ────────────────────────────────
   useEffect(()=>{
@@ -19114,7 +19131,7 @@ function App(){
           const _closeSnap=snapshotOn(stockSnaps,R.to);
           const openStock=_openSnap?_openSnap.value:null;
           const closeStock=(R.to>=_todayStr)
-            ? invValueOf(inventory)
+            ? invValueOf(branchInv)
             : (_closeSnap?_closeSnap.value:null);
           const haveMovement=openStock!=null&&closeStock!=null;
           const moveCogs=haveMovement
@@ -19319,7 +19336,7 @@ function App(){
               // wrong. Naming the biggest few turns "that seems high" into a
               // line you can go and check.
               (function(){
-                const rows=(inventory||[]).map(function(i){
+                const rows=(branchInv||[]).map(function(i){
                   const st=Number(i.stock)||0;
                   const val=(Array.isArray(i.lots)&&i.lots.length
                     &&Math.abs(st-lotsQty(i.lots))<=0.01)
@@ -19361,13 +19378,13 @@ function App(){
                   const mk=localDate();
                   if(!window.confirm(
                     "Replace today's stock reading with \u20b1"
-                    +peso(invValueOf(inventory))+" for "+mk+"?"
+                    +peso(invValueOf(branchInv))+" for "+mk+"?"
                     +"\n\nA reading is already taken automatically each day. "
                     +"Use this after a physical count, so the figure reflects "
                     +"what was actually on the shelf."))return;
                   setSnapSaving(true);
                   try{
-                    const v=await saveStockSnapshot(db,branchId,mk,inventory,user.name);
+                    const v=await saveStockSnapshot(db,branchId,mk,branchInv,user.name);
                     showT("Recorded: \u20b1"+peso(v)+" \u00b7 "+mk);
                   }catch(e){ showT("Not recorded: "+String(e&&e.message||e).slice(0,60),"err"); }
                   setSnapSaving(false);
