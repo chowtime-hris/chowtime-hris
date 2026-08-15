@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260815-144500 -->
+<!-- BUILD:20260815-150000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -7428,7 +7428,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260815-144500";
+const BUILD = "20260815-150000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -20989,7 +20989,16 @@ function App(){
                   // never delivered.
                   st==="discrepancy"&&h("button",{
                     onClick:async()=>{
+                     // Nothing in this handler could report a failure, so any
+                     // error left the button looking dead: no dialog, no toast,
+                     // no clue. Whatever goes wrong now says so.
+                     try{
                       const lines=(po.receivedItems||po.deliveredItems||po.items||[]);
+                      if(!lines.length){
+                        showT("No delivery lines on "+po.poNum
+                          +" — nothing to approve","warn");
+                        return;
+                      }
                       const short=lines.filter(i=>{
                         const exp=(i.expectedQty!=null)?i.expectedQty
                           :(i.actualQty!=null?i.actualQty:(i.qty||0));
@@ -21103,6 +21112,11 @@ function App(){
 
                       showT(po.poNum+" settled — bill ₱"+peso(newTotal)
                         +", "+added+" item(s) in stock");
+                     }catch(err){
+                       console.error("approve discrepancy:",err);
+                       showT("Approve failed: "
+                         +String((err&&err.message)||err).slice(0,80),"err");
+                     }
                     },
                     style:{padding:"7px 14px",background:C.danger,
                       border:"none",borderRadius:8,color:"#fff",
