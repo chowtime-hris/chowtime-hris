@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260816-020000 -->
+<!-- BUILD:20260816-030000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -7505,7 +7505,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260816-020000";
+const BUILD = "20260816-030000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -12084,6 +12084,11 @@ function InvLogPage({db,user,branchId,branches,showT}){
   const [filter,setFilter]   = useState("all"); // all,deduct,add,created,edited,deleted
   const [selBranch,setSelBranch] = useState(branchId);
   const [srch,setSrch]     = useState("");
+  // Latest 300 was the whole page. On a branch that moves stock all day that
+  // is under a week, so anything older simply could not be reached — and a
+  // missing item is exactly the thing you go looking for weeks later.
+  const [lgFrom,setLgFrom] = useState("");
+  const [lgTo,setLgTo]     = useState("");
 
   const isOwner = user.role==="owner"||user.role==="commissary";
 
@@ -12097,10 +12102,12 @@ function InvLogPage({db,user,branchId,branches,showT}){
       // orderBy drops any document missing that field, and the log has been
       // written by several paths that used `timestamp` instead of `at` — those
       // entries existed but never appeared. Read plainly, sort in memory.
-      const q = query(
-        collection(db,col),
-        limit(300)
-      );
+      // A range filter on one field needs no composite index; ordering is
+      // done in memory below, as it already was.
+      const q = (lgFrom&&lgTo)
+        ? query(collection(db,col),
+            where("date",">=",lgFrom), where("date","<=",lgTo), limit(2000))
+        : query(collection(db,col), limit(300));
       const unsub = onSnapshot(q, snap=>{
         const rows=snap.docs.map(d=>({...d.data(),_id:d.id}));
         const t=(r)=>((r.at&&r.at.seconds)||(r.timestamp&&r.timestamp.seconds)||0);
@@ -12117,7 +12124,7 @@ function InvLogPage({db,user,branchId,branches,showT}){
       });
       return()=>unsub();
     }catch(e){setLoading(false);}
-  },[selBranch]);
+  },[selBranch,lgFrom,lgTo]);
 
   const TYPE_CONFIG = {
     deduct:  {label:"Deducted",    color:"#C62828", bg:"#FFEBEE", icon:"➖"},
@@ -12166,6 +12173,55 @@ function InvLogPage({db,user,branchId,branches,showT}){
       h(Stat,{label:"Total Deducted",value:totalDeducted.toFixed(1),icon:"➖",color:C.danger}),
       h(Stat,{label:"Total Added",value:totalAdded.toFixed(1),icon:"➕",color:C.success})
     ),
+
+    // Date range — presets plus an explicit From/To
+    h("div",{style:{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap",
+      alignItems:"center"}},
+      h("span",{style:{fontSize:11,fontWeight:800,color:C.muted,
+        letterSpacing:1}},"DATE"),
+      [["Latest",""],["Today","d0"],["Yesterday","d1"],
+       ["Last 7 days","d7"],["This month","m0"],["Last month","m1"]]
+        .map(function(o){
+          const key=o[1];
+          const rangeFor=function(k){
+            const t=new Date();
+            if(k==="d0")return [localDate(),localDate()];
+            if(k==="d1"){t.setDate(t.getDate()-1);return [localDate(t),localDate(t)];}
+            if(k==="d7"){const a=new Date();a.setDate(a.getDate()-6);
+              return [localDate(a),localDate()];}
+            if(k==="m0")return [localDate().slice(0,7)+"-01",localDate()];
+            const st=new Date(t.getFullYear(),t.getMonth()-1,1);
+            const en=new Date(t.getFullYear(),t.getMonth(),0);
+            return [localDate(st),localDate(en)];
+          };
+          const r=key?rangeFor(key):null;
+          const active=key?(lgFrom===r[0]&&lgTo===r[1]):!lgFrom;
+          return h("button",{key:key||"latest",
+            onClick:function(){
+              if(!key){setLgFrom("");setLgTo("");return;}
+              setLgFrom(r[0]);setLgTo(r[1]);
+            },
+            style:{padding:"5px 11px",borderRadius:20,fontSize:12,
+              border:"1px solid "+(active?C.primary:C.border),
+              background:active?"#F3E9F7":"#fff",
+              color:active?C.primary:C.text,
+              fontWeight:active?800:500,cursor:"pointer"}},o[0]);
+        }),
+      h("input",{type:"date",value:lgFrom,
+        onChange:function(e){setLgFrom(e.target.value);
+          if(!lgTo)setLgTo(localDate());},
+        style:{padding:"5px 8px",border:"1px solid "+C.border,
+          borderRadius:8,fontSize:12,fontFamily:"inherit"}}),
+      h("span",{style:{fontSize:12,color:C.muted}},"\u2192"),
+      h("input",{type:"date",value:lgTo,
+        onChange:function(e){setLgTo(e.target.value);
+          if(!lgFrom)setLgFrom(e.target.value);},
+        style:{padding:"5px 8px",border:"1px solid "+C.border,
+          borderRadius:8,fontSize:12,fontFamily:"inherit"}}),
+      h("span",{style:{fontSize:11,color:C.muted,marginLeft:"auto"}},
+        (lgFrom&&lgTo)
+          ? (logs.length+" movement"+(logs.length===1?"":"s")+" \u00b7 "+lgFrom+" \u2192 "+lgTo)
+          : "latest 300 movements")),
 
     // Search + filter
     h("div",{style:{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap",alignItems:"center"}},
