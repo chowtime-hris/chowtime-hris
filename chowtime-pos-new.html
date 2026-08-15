@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260815-210000 -->
+<!-- BUILD:20260815-230000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -7176,15 +7176,54 @@ function prevMonthKey(mk){
 // Written once per branch per month. Re-saving the same month overwrites it,
 // which is what you want the day someone recounts — but a month already
 // closed keeps whatever it was closed with.
-async function saveStockSnapshot(db,branch,mk,rows,byName,auto){
+// A snapshot is a reading of the shelf on a DAY, not a label for a month.
+//
+// Keyed by month, a value captured on the 15th was filed as the close of some
+// month — which is only true on the 31st, and silently wrong every other day.
+// It also meant no period could start mid-month, because there was nothing to
+// open it with. Keyed by date, the P&L just asks for the most recent reading
+// on or before the day it needs.
+async function saveStockSnapshot(db,branch,day,rows,byName,auto,keepFirst){
   const value=invValueOf(rows);
-  await setDoc(doc(db,"stock_snapshots",branch+"_"+mk),{
-    branch:branch, month:mk, value:value,
+  if(keepFirst){
+    // Two terminals opening at the same time must not fight over the figure,
+    // and a later opening must not overwrite the morning's.
+    try{
+      const ex=await getDoc(doc(db,"stock_snapshots",branch+"_"+day));
+      if(ex.exists())return Number((ex.data()||{}).value)||0;
+    }catch(e){}
+  }
+  await setDoc(doc(db,"stock_snapshots",branch+"_"+day),{
+    branch:branch, date:day, month:monthKey(day), value:value,
     itemCount:(rows||[]).length,
     auto:!!auto, takenOn:localDate(),
     by:byName||"", at:serverTimestamp()
   },{merge:true});
   return value;
+}
+
+// Last calendar day of a month, so month-keyed snapshots written by the old
+// build still line up on the date axis instead of being thrown away.
+function lastDayOf(mk){
+  const y=Number(String(mk).slice(0,4)), m=Number(String(mk).slice(5,7));
+  const d=new Date(y,m,0);
+  return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")
+    +"-"+String(d.getDate()).padStart(2,"0");
+}
+function dayBefore(dstr){
+  const d=new Date(dstr+"T00:00:00");
+  d.setDate(d.getDate()-1);
+  return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")
+    +"-"+String(d.getDate()).padStart(2,"0");
+}
+// The reading that was in force on a given day: the newest one taken on or
+// before it.
+function snapshotOn(list,day){
+  let best=null;
+  (list||[]).forEach(function(r){
+    if(r.date<=day&&(!best||r.date>best.date))best=r;
+  });
+  return best;
 }
 
 // Nobody should have to remember a button on the first of the month, so the
@@ -7194,14 +7233,20 @@ async function saveStockSnapshot(db,branch,mk,rows,byName,auto){
 // the shelf held on the 31st — days of sales and a delivery sit in between —
 // and a wrong opening figure is worse than a missing one, because it looks
 // finished. Past the grace window the P&L asks for the number instead.
-const SNAP_GRACE_DAYS = 3;
-function snapshotIsDue(stockSnaps,today){
-  const nowMk=monthKey(today);
-  const prevMk=prevMonthKey(nowMk);
-  if(stockSnaps[prevMk]!=null) return null;      // already have it
-  const day=Number(String(today).slice(8,10))||99;
-  if(day>SNAP_GRACE_DAYS) return null;           // too late to pass as month-end
-  return prevMk;
+// One reading a day, taken by the app itself.
+//
+// The button only ever saved invValueOf(inventory) — the same figure the app
+// already holds — so asking a person to press it added a step and no
+// information, and any month nobody pressed it in could not be worked out at
+// all. Captured daily, every period from here on has an opening value waiting
+// for it and nothing has to be remembered.
+//
+// The FIRST open of the day wins: the document id is branch_date and an
+// existing one is never overwritten, so the reading is the shelf before the
+// day's trading rather than whatever it had dropped to by closing.
+function snapshotIsDue(snapList,today){
+  const has=(snapList||[]).some(function(r){return r.date===today;});
+  return has?null:today;
 }
 
 // Firestore rejects `undefined` outright — it accepts null, but not a missing
@@ -7460,7 +7505,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260815-210000";
+const BUILD = "20260815-230000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -10373,6 +10418,7 @@ function ReceiveItemsModal({po,db,user,showT,branchId,onClose}){
       // the PO closed, and the branch's stock never moved.
       // Credit po.branch, not the signed-in branch: whoever confirms, the
       // goods belong to the branch that ordered them.
+      const _postFails=[];
       const invBr=po.branch||branchId;
       const invCol=(invBr==="ct-main"||invBr==="main")?"inventory":"inventory_"+invBr;
       const isMainDest=(invBr==="ct-main"||invBr==="main");
@@ -10440,11 +10486,23 @@ function ReceiveItemsModal({po,db,user,showT,branchId,onClose}){
               // invisible.
               date:localDate(),timestamp:serverTimestamp(),at:serverTimestamp()
             });
-          }catch(e2){console.error("receive into inventory failed",it.id,e2);}
+          }catch(e2){
+            // The stock write comes first and the log second, so a failure
+            // here leaves the shelf changed with nothing recording why. It
+            // used to say so only in the console, where nobody was looking.
+            console.error("receive into inventory failed",it.id,e2);
+            _postFails.push((it.name||it.id)+": "
+              +String((e2&&e2.message)||e2).slice(0,40));
+          }
         }
       }
 
       if(hasDisc){
+        if(_postFails.length){
+          showT("Stock posted, but "+_postFails.length
+            +" item(s) failed to log: "+_postFails.slice(0,2).join(" \u00b7 ")
+            +(_postFails.length>2?" +"+(_postFails.length-2):""),"err");
+        }
         await updateDoc(doc(db,"advances",po._docId),{
           status:"discrepancy",
           stockPosted:false,          // held until Main approves the shortage
@@ -12757,8 +12815,7 @@ function App(){
   const [plFrom,setPlFrom]=useState(localDate());
   const [plTo,setPlTo]=useState(localDate());
   const [plLogs,setPlLogs]=useState([]);                 // deducts with FIFO cost
-  const [stockSnaps,setStockSnaps]=useState({});         // branch_YYYY-MM -> value
-  const [snapMeta,setSnapMeta]=useState({});             // was it auto-taken?
+  const [stockSnaps,setStockSnaps]=useState([]);         // dated stock readings
   const [snapSaving,setSnapSaving]=useState(false);
   const [addLogs,setAddLogs]=useState([]);              // arrivals, for lot dating
   const [poOpen,setPoOpen]=useState("");                 // expanded PO row
@@ -12989,14 +13046,17 @@ function App(){
       unsubs.push(onSnapshot(
         query(collection(db,"stock_snapshots"),where("branch","==",bId)),
         snap=>{
-          const m={},meta={};
+          const rows=[];
           snap.docs.forEach(function(d){
             const v=d.data()||{};
-            if(!v.month)return;
-            m[v.month]=Number(v.value)||0;
-            meta[v.month]={auto:!!v.auto,takenOn:v.takenOn||"",by:v.by||""};
+            // Month-keyed rows from the old build land on that month's last day.
+            const day=v.date||(v.month?lastDayOf(v.month):null);
+            if(!day)return;
+            rows.push({date:day,value:Number(v.value)||0,
+              auto:!!v.auto,takenOn:v.takenOn||"",by:v.by||""});
           });
-          setStockSnaps(m); setSnapMeta(meta);
+          rows.sort(function(a,b){return a.date<b.date?-1:1;});
+          setStockSnaps(rows);
         },
         err=>console.warn("stock snapshots:",err.message)));
       // Stock coming in, for dating a lot rebuild. Far fewer of these than
@@ -13307,12 +13367,14 @@ function App(){
     const bId=(user.branch==="all"||user.branch==="comm")?"ct-main":user.branch;
     const due=snapshotIsDue(stockSnaps,localDate());
     if(!due)return;
+    // Nothing to value yet — writing a zero would read as an empty shelf.
+    if(!invValueOf(inventory))return;
     let alive=true;
     (async()=>{
       try{
         // setDoc on a deterministic id, so two terminals opening at the same
         // time write the same document rather than two of them.
-        await saveStockSnapshot(db,bId,due,inventory,"auto",true);
+        await saveStockSnapshot(db,bId,due,inventory,"auto",true,true);
       }catch(e){ console.warn("stock snapshot (auto):",e&&e.message); }
       if(!alive)return;
     })();
@@ -19032,11 +19094,8 @@ function App(){
           // The BOM figure above says what the recipes should have used. This
           // one says what is gone. It only works over a whole month, because
           // that is the only period a stock value is captured for.
-          const mkTo=monthKey(R.to), mkFrom=monthKey(R.from);
-          const isWholeMonth=(mkFrom===mkTo)
-            &&String(R.from).slice(8)==="01"
-            &&String(R.to)>=(mkTo+"-28");
-          const thisMonthNow=monthKey(localDate());
+          const mkTo=monthKey(R.to);
+          const _todayStr=localDate();
           // Purchases: what this branch actually RECEIVED in the period, at
           // what it pays Main. An order still in transit has not become stock.
           const poRows=(advances||[]).filter(a=>
@@ -19046,14 +19105,18 @@ function App(){
             &&String(a.receivedDate||a.deliveryDate||a.date||"")>=R.from
             &&String(a.receivedDate||a.deliveryDate||a.date||"")<=R.to);
           const purchases=Math.round(poRows.reduce((a,po)=>a+poValue(po),0)*100)/100;
-          const openStock=stockSnaps[prevMonthKey(mkTo)];
-          // The month still running has no closing snapshot yet, so the shelf
-          // as it stands now is the honest stand-in. A finished month uses
-          // what was captured, never a later recount.
-          const closeStock=(mkTo===thisMonthNow)
-            ? invValueOf(inventory) : stockSnaps[mkTo];
-          const haveMovement=isWholeMonth
-            &&openStock!=null&&closeStock!=null;
+          // Opening is the last reading taken BEFORE the period started;
+          // closing is the last one taken by the end of it. A period that runs
+          // up to today has no closing reading yet, so the shelf as it stands
+          // is the honest stand-in — a finished period uses what was captured
+          // and never a later recount.
+          const _openSnap=snapshotOn(stockSnaps,dayBefore(R.from));
+          const _closeSnap=snapshotOn(stockSnaps,R.to);
+          const openStock=_openSnap?_openSnap.value:null;
+          const closeStock=(R.to>=_todayStr)
+            ? invValueOf(inventory)
+            : (_closeSnap?_closeSnap.value:null);
+          const haveMovement=openStock!=null&&closeStock!=null;
           const moveCogs=haveMovement
             ? Math.round(((openStock+purchases)-closeStock)*100)/100 : null;
 
@@ -19159,16 +19222,15 @@ function App(){
                 h("div",{style:{fontSize:11,fontWeight:800,color:C.muted,
                   letterSpacing:1,paddingTop:9,
                   borderTop:"1px solid "+C.border}},"STOCK MOVEMENT"),
-                line("Opening stock \u00b7 "+prevMonthKey(mkTo)+" end",
+                line("Opening stock \u00b7 as of "+(_openSnap?_openSnap.date:"\u2014"),
                   openStock,{sub:true}),
-                (snapMeta[prevMonthKey(mkTo)]||{}).auto&&h("div",{
+                (_openSnap&&_openSnap.auto)&&h("div",{
                   style:{fontSize:11,color:C.muted,paddingLeft:14,
                     marginTop:-4,marginBottom:4}},
-                  "kusang kinuha noong "
-                  +((snapMeta[prevMonthKey(mkTo)]||{}).takenOn||"")
-                  +" \u2014 palitan kung may audit pagkatapos nito"),
+                  "auto-captured \u2014 replace it if an audit followed"),
                 line("Purchases received from Main",purchases,{sub:true}),
-                line("Closing stock"+(mkTo===thisMonthNow?" (as of today)":""),
+                line("Closing stock"+(R.to>=_todayStr?" (as of today)":
+                  (_closeSnap?" \u00b7 as of "+_closeSnap.date:"")),
                   -closeStock,{sub:true}),
                 line("Cost of goods sold",-moveCogs,
                   {rule:true,color:C.danger})),
@@ -19194,7 +19256,7 @@ function App(){
             // Without a captured month-end value the movement working cannot
             // run at all, so the page says what is missing and offers to take
             // it — rather than quietly falling back to the recipe figure.
-            isWholeMonth&&!haveMovement&&h("div",{
+            !haveMovement&&h("div",{
               style:{background:C.info+"12",border:"1px solid "+C.info,
                 borderRadius:11,padding:"11px 13px",marginBottom:12}},
               h("div",{style:{fontSize:12,fontWeight:800,color:C.info}},
@@ -19202,40 +19264,47 @@ function App(){
               h("div",{style:{fontSize:11,color:C.muted,marginTop:2,
                 lineHeight:1.5}},
                 (openStock==null
-                  ? ("Walang naitalang halaga ng stock sa katapusan ng "
-                     +prevMonthKey(mkTo)+". ")
+                  ? ("No stock reading exists on or before "+dayBefore(R.from)
+                     +", so this period has no opening value. ")
                   : "")
                 +(closeStock==null
-                  ? ("Walang naitalang halaga sa katapusan ng "+mkTo+". ")
+                  ? ("No stock reading exists for "+R.to+". ")
                   : "")
-                +"Kusang kinukuha ito sa unang pagbukas ng bagong buwan. "
-                +"Lampas na ang petsa para doon, kaya kailangan nang ilagay nang manwal "
-                +"\u2014 at ang bilang ngayon ay hindi na katumbas ng bilang noong katapusan."),
+                +"From now on a reading is taken automatically, once a day, "
+                +"the first time this branch opens the app \u2014 so every "
+                +"period after today works itself out. Use the button only to "
+                +"replace today's reading after a physical count."),
               h("button",{disabled:snapSaving,
                 onClick:async()=>{
-                  const mk=(closeStock==null)?mkTo:prevMonthKey(mkTo);
-                  if(!window.confirm("Itala ang kasalukuyang halaga ng stock ("
-                    +"\u20b1"+peso(invValueOf(inventory))+") bilang katapusan ng "
-                    +mk+"?\n\nGamitin lang ito kung tapos na ang bilang para sa buwang iyon."))return;
+                  // Always filed under the day it was actually taken. Nothing
+                  // is back-dated, so no figure can claim to be a month-end it
+                  // was not present for.
+                  const mk=localDate();
+                  if(!window.confirm(
+                    "Replace today's stock reading with \u20b1"
+                    +peso(invValueOf(inventory))+" for "+mk+"?"
+                    +"\n\nA reading is already taken automatically each day. "
+                    +"Use this after a physical count, so the figure reflects "
+                    +"what was actually on the shelf."))return;
                   setSnapSaving(true);
                   try{
                     const v=await saveStockSnapshot(db,branchId,mk,inventory,user.name);
-                    showT("Naitala: \u20b1"+peso(v)+" \u00b7 "+mk);
-                  }catch(e){ showT("Hindi naitala: "+String(e&&e.message||e).slice(0,60),"err"); }
+                    showT("Recorded: \u20b1"+peso(v)+" \u00b7 "+mk);
+                  }catch(e){ showT("Not recorded: "+String(e&&e.message||e).slice(0,60),"err"); }
                   setSnapSaving(false);
                 },
                 style:{marginTop:9,padding:"7px 13px",background:C.info,
                   border:"none",borderRadius:8,color:"#fff",fontSize:12,
                   fontWeight:700,cursor:snapSaving?"wait":"pointer"}},
-                snapSaving?"Itinatala\u2026":"\ud83d\udcf8 Itala ang stock ngayon")),
+                snapSaving?"Recording\u2026":"\ud83d\udcf8 Replace today's reading")),
 
             h("div",{style:{fontSize:11,color:C.muted,lineHeight:1.6,
               background:C.bg,borderRadius:10,padding:"11px 13px"}},
               h("b",{style:{color:C.text}},"What this covers: "),
               (haveMovement
-                ? ("benta sa branch na ito, ang cost of goods mula sa aktwal "+
-                   "na galaw ng stock (opening + purchases − closing), at "+
-                   "ang mga gastos na naitala rito. ")
+                ? ("sales rung at this branch, cost of goods from the actual "+
+                   "stock movement (opening + purchases − closing), and "+
+                   "expenses recorded here. ")
                 : ("sales rung at this branch, the FIFO cost of the stock those "+
                    "sales consumed, and expenses recorded here. "))+
               "It stops at what this branch controls — rent, franchise fees "+
