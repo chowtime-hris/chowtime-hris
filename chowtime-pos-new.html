@@ -12563,6 +12563,7 @@ function App(){
   const [addLogs,setAddLogs]=useState([]);              // arrivals, for lot dating
   const [poOpen,setPoOpen]=useState("");                 // expanded PO row
   const [editSub,setEditSub]=useState(null);             // subscription being edited
+  const [payingId,setPayingId]=useState(null);           // subscription write in flight
   const [newBuild,setNewBuild]=useState(null);           // a newer build is live
   const [subs,setSubs]=useState([]);                     // subscriptions, all branches
   const [proofs,setProofs]=useState([]);                 // submitted payment proofs
@@ -16432,6 +16433,12 @@ function App(){
           const expired=rows.filter(r=>!r.st.ok);
 
           const confirmPay=async(r)=>{
+            // Three guards, because each press stacks another month onto the
+            // expiry and there is no undo. One branch reached 455 days that
+            // way: the button looked identical before and after, said nothing
+            // about what it was about to do, and stayed live while the write
+            // was still going — so a slow connection collected the taps.
+            if(payingId)return;                       // a write is in flight
             const ref=prompt("Payment reference number for "+r.b.full+":","");
             if(ref===null)return;
             if(!ref.trim()){showT("Reference number required","warn");return;}
@@ -16443,6 +16450,30 @@ function App(){
             const base=(r.sub&&r.sub.paidUntil&&daysBetween(today,r.sub.paidUntil)>=0)
               ? r.sub.paidUntil : today;
             const next=addMonths(base,1);
+            const left=(r.sub&&r.sub.paidUntil)?daysBetween(today,r.sub.paidUntil):null;
+            if(!window.confirm(
+              r.b.full+"\n\n"
+              +"Paid until : "+((r.sub&&r.sub.paidUntil)||"— never paid")
+              +(left!=null&&left>0?"  ("+left+" days left)":"")
+              +"\nAfter this : "+next+"\n\n"
+              +(left!=null&&left>35
+                 ? "This branch is already paid well ahead. Confirming adds ANOTHER month.\n\n"
+                 : "")
+              +"Add one month for \u20b1"+peso(amt)+"?")) return;
+            setPayingId(r.b.id);
+            try{
+              // Same reference twice is the signature of a repeated press.
+              const dup=await getDocs(query(
+                collection(db,"subscription_payments"),
+                where("branch","==",r.b.id),
+                where("ref","==",ref.trim())));
+              if(!dup.empty){
+                showT("Reference "+ref.trim()+" is already recorded for "
+                  +r.b.full+" — nothing added","warn");
+                setPayingId(null);
+                return;
+              }
+            }catch(e){ /* a failed check must not block a real payment */ }
             try{
               await setDoc(doc(db,"subscriptions",r.b.id),{
                 branch:r.b.id,
@@ -16466,6 +16497,7 @@ function App(){
               console.error("confirm payment:",e);
               showT("Failed: "+String(e&&e.message||e).slice(0,60),"err");
             }
+            setPayingId(null);
           };
 
           const pending=proofs.filter(x=>x.status==="pending");
@@ -16607,8 +16639,11 @@ function App(){
                     color:C.muted,letterSpacing:1}},hh))),
               rows.map(r=>{
                 const st=r.st;
+                // Far ahead is not the same as healthy. Green on 455 days is
+                // how a stack of accidental presses stays invisible.
                 const col=st.unknown?C.muted:(!st.ok?C.danger
-                  :(st.days<=3?C.warning:C.success));
+                  :(st.days<=3?C.warning
+                    :(st.days>45?"#6A1B9A":C.success)));
                 const label=st.unknown?"no record"
                   :(!st.ok?"suspended"
                     :(st.mode==="trial"?"setup ("+st.days+"d)":st.days+" days"));
@@ -16626,9 +16661,13 @@ function App(){
                     (r.sub&&r.sub.amount)?"₱"+peso(r.sub.amount):"—"),
                   h("div",{style:{display:"flex",gap:5,justifyContent:"flex-end"}},
                     h("button",{onClick:()=>confirmPay(r),
+                      disabled:!!payingId,
                       style:{padding:"6px 11px",borderRadius:7,border:"none",
-                        background:"#2E7D32",color:"#fff",fontSize:13,
-                        fontWeight:800,cursor:"pointer"}},"✓ Confirm Payment"),
+                        background:payingId===r.b.id?"#888"
+                          :(payingId?"#BDBDBD":"#2E7D32"),
+                        color:"#fff",fontSize:13,fontWeight:800,
+                        cursor:payingId?"wait":"pointer"}},
+                      payingId===r.b.id?"Saving…":"✓ Confirm Payment"),
                     h("button",{
                       onClick:()=>setEditSub({
                         id:r.b.id, name:r.b.full,
