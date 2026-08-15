@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260815-233000 -->
+<!-- BUILD:20260816-000000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -7505,7 +7505,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260815-233000";
+const BUILD = "20260816-000000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -19292,6 +19292,24 @@ function App(){
                 +"the first time this branch opens the app \u2014 so every "
                 +"period after today works itself out. Use the button only to "
                 +"replace today's reading after a physical count."),
+
+              // Whether the daily capture actually ran is the one thing this
+              // panel could not answer, which left the only way to check it
+              // waiting until tomorrow.
+              (function(){
+                const last=(stockSnaps||[]).length
+                  ? stockSnaps[stockSnaps.length-1] : null;
+                const today=localDate();
+                return h("div",{style:{fontSize:11,marginTop:7,
+                  fontWeight:700,
+                  color:(last&&last.date===today)?C.success:C.warning}},
+                  last
+                    ? ((last.date===today?"\u2713 Reading taken today: ":
+                        "Latest reading on file: "+last.date+" \u00b7 ")
+                       +"\u20b1"+peso(last.value)
+                       +(last.date===today?"":" \u2014 today's not captured yet"))
+                    : "\u26a0\ufe0f No reading on file yet for this branch.");
+              })(),
               h("button",{disabled:snapSaving,
                 onClick:async()=>{
                   // Always filed under the day it was actually taken. Nothing
