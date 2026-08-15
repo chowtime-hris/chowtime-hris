@@ -12564,6 +12564,8 @@ function App(){
   const [poOpen,setPoOpen]=useState("");                 // expanded PO row
   const [editSub,setEditSub]=useState(null);             // subscription being edited
   const [payingId,setPayingId]=useState(null);           // subscription write in flight
+  const [subLogFor,setSubLogFor]=useState(null);         // branch whose payments are open
+  const [subLog,setSubLog]=useState(null);               // null = loading
   const [newBuild,setNewBuild]=useState(null);           // a newer build is live
   const [subs,setSubs]=useState([]);                     // subscriptions, all branches
   const [proofs,setProofs]=useState([]);                 // submitted payment proofs
@@ -16677,10 +16679,83 @@ function App(){
                       }),
                       style:{padding:"6px 9px",borderRadius:7,fontSize:13,
                         border:"1px solid "+C.border,background:"#fff",
-                        cursor:"pointer"}},"✎")
+                        cursor:"pointer"}},"✎"),
+                    // Every confirmation has been written to
+                    // subscription_payments since the beginning; nothing ever
+                    // read it back. Without the list there is no way to tell
+                    // one real payment from fifteen accidental presses, or to
+                    // work out what the expiry should have been.
+                    h("button",{
+                      onClick:async()=>{
+                        if(subLogFor===r.b.id){setSubLogFor(null);return;}
+                        setSubLogFor(r.b.id); setSubLog(null);
+                        try{
+                          const qs=await getDocs(query(
+                            collection(db,"subscription_payments"),
+                            where("branch","==",r.b.id)));
+                          const rows=qs.docs.map(d=>d.data()||{});
+                          // Sorted here, so the query stays a single equality
+                          // filter and needs no composite index.
+                          rows.sort((a,b)=>{
+                            const ta=(a.at&&a.at.seconds)||0;
+                            const tb=(b.at&&b.at.seconds)||0;
+                            return tb-ta;
+                          });
+                          setSubLog(rows);
+                        }catch(e){ setSubLog([]); showT("Could not load payments","err"); }
+                      },
+                      style:{padding:"6px 9px",borderRadius:7,fontSize:13,
+                        border:"1px solid "+C.border,
+                        background:subLogFor===r.b.id?"#EDE7F6":"#fff",
+                        cursor:"pointer"}},"🕘")
                   )
                 );
-              })
+              }),
+
+              // Payment history for the open branch
+              subLogFor&&h("div",{style:{padding:"12px 16px",
+                background:"#FAFAFA",borderTop:"2px solid "+C.border}},
+                h("div",{style:{fontSize:12,fontWeight:800,color:C.text,
+                  marginBottom:8}},
+                  "Payment history — "
+                  +((branches.find(b=>b.id===subLogFor)||{}).full||subLogFor)
+                  +(subLog?"  ·  "+subLog.length+" confirmation/s":"")),
+                subLog===null
+                  ? h("div",{style:{fontSize:12,color:C.muted}},"Loading…")
+                  : (!subLog.length
+                      ? h("div",{style:{fontSize:12,color:C.muted}},
+                          "No payments recorded.")
+                      : h("div",null,
+                          h("div",{style:{display:"grid",
+                            gridTemplateColumns:"170px 1fr 90px 110px 1fr",gap:8,
+                            padding:"6px 0",borderBottom:"1px solid "+C.border,
+                            fontSize:11,fontWeight:700,color:C.muted,
+                            letterSpacing:1}},
+                            ["CONFIRMED","REFERENCE","AMOUNT","COVERS UNTIL","BY"]
+                              .map(hh=>h("div",{key:hh},hh))),
+                          subLog.map((g,gi)=>{
+                            const t=(g.at&&g.at.toDate)?g.at.toDate():null;
+                            return h("div",{key:gi,style:{display:"grid",
+                              gridTemplateColumns:"170px 1fr 90px 110px 1fr",gap:8,
+                              padding:"7px 0",borderBottom:"1px solid #efefef",
+                              fontSize:12}},
+                              h("div",{style:{fontWeight:700}},
+                                t?t.toLocaleString("en-PH",{year:"numeric",
+                                  month:"short",day:"numeric",hour:"2-digit",
+                                  minute:"2-digit"}):(g.paidOn||"—")),
+                              h("div",{style:{color:C.muted,
+                                fontFamily:"ui-monospace,monospace"}},g.ref||"—"),
+                              h("div",null,"\u20b1"+peso(Number(g.amount)||0)),
+                              h("div",{style:{fontWeight:700}},g.coversUntil||"—"),
+                              h("div",{style:{color:C.muted}},g.confirmedBy||"—"));
+                          }),
+                          h("div",{style:{fontSize:11,color:C.muted,marginTop:8,
+                            lineHeight:1.5}},
+                            "Each line added one month to COVERS UNTIL. "
+                            +"Confirmations minutes apart with the same reference "
+                            +"are repeat presses \u2014 count the ones that were "
+                            +"real, then set the expiry with the \u270e pencil.")))
+              )
             ),
             h("div",{style:{fontSize:12,color:C.muted,marginTop:10,lineHeight:1.6}},
               "Confirm Payment adds one month. If still active, "+
