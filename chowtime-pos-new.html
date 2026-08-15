@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260816-030000 -->
+<!-- BUILD:20260816-040000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -5534,6 +5534,67 @@ function baseToPacks(it,base){
 // toISOString() converts to UTC. Manila is UTC+8, so every sale before 08:00
 // was being stamped with the PREVIOUS day's date — and every date arithmetic
 // helper shifted back one day. Always derive the calendar date locally.
+// One date bar, used by every page that needs one.
+//
+// Three pages grew three slightly different pickers, and a fourth had none at
+// all. Presets that mean the same thing should be the same control, or a crew
+// that learns it on one screen has to learn it again on the next.
+// A PO belongs to the day it was ORDERED. Delivery and payment move around;
+// the order date is the one that does not.
+function poInRange(a,from,to){
+  if(!from||!to)return true;
+  const d=String(a.date||"");
+  return d>=from&&d<=to;
+}
+
+function presetRange(k){
+  const t=new Date();
+  if(k==="d0")return [localDate(),localDate()];
+  if(k==="d1"){t.setDate(t.getDate()-1);return [localDate(t),localDate(t)];}
+  if(k==="d7"){const a=new Date();a.setDate(a.getDate()-6);
+    return [localDate(a),localDate()];}
+  if(k==="m0")return [localDate().slice(0,7)+"-01",localDate()];
+  const st=new Date(t.getFullYear(),t.getMonth()-1,1);
+  const en=new Date(t.getFullYear(),t.getMonth(),0);
+  return [localDate(st),localDate(en)];
+}
+
+function DateRangeBar({from,to,setFrom,setTo,note,allLabel}){
+  const PRESETS=[[allLabel||"All",""],["Today","d0"],["Yesterday","d1"],
+    ["Last 7 days","d7"],["This month","m0"],["Last month","m1"]];
+  return h("div",{style:{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap",
+    alignItems:"center"}},
+    h("span",{style:{fontSize:11,fontWeight:800,color:C.muted,
+      letterSpacing:1}},"DATE"),
+    PRESETS.map(function(o){
+      const key=o[1];
+      const r=key?presetRange(key):null;
+      const active=key?(from===r[0]&&to===r[1]):!from;
+      return h("button",{key:key||"all",
+        onClick:function(){
+          if(!key){setFrom("");setTo("");return;}
+          setFrom(r[0]);setTo(r[1]);
+        },
+        style:{padding:"5px 11px",borderRadius:20,fontSize:12,
+          border:"1px solid "+(active?C.primary:C.border),
+          background:active?"#F3E9F7":"#fff",
+          color:active?C.primary:C.text,
+          fontWeight:active?800:500,cursor:"pointer"}},o[0]);
+    }),
+    h("input",{type:"date",value:from,
+      onChange:function(e){setFrom(e.target.value);
+        if(!to)setTo(localDate());},
+      style:{padding:"5px 8px",border:"1px solid "+C.border,
+        borderRadius:8,fontSize:12,fontFamily:"inherit"}}),
+    h("span",{style:{fontSize:12,color:C.muted}},"\u2192"),
+    h("input",{type:"date",value:to,
+      onChange:function(e){setTo(e.target.value);
+        if(!from)setFrom(e.target.value);},
+      style:{padding:"5px 8px",border:"1px solid "+C.border,
+        borderRadius:8,fontSize:12,fontFamily:"inherit"}}),
+    note&&h("span",{style:{fontSize:11,color:C.muted,marginLeft:"auto"}},note));
+}
+
 function localDate(d){
   const x=(d instanceof Date)?d:new Date();
   return x.getFullYear()+"-"+
@@ -7505,7 +7566,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260816-030000";
+const BUILD = "20260816-040000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -12909,6 +12970,10 @@ function App(){
   const [expPer,setExpPer]=useState(30);
   const [ordDate,setOrdDate]=useState("");               // "" = today, "all" = no filter
   const [ordPage,setOrdPage]=useState(1);                // orders list pagination
+  const [cmFrom,setCmFrom]=useState(localDate());        // cash monitor range
+  const [cmTo,setCmTo]=useState(localDate());
+  const [poFrom,setPoFrom]=useState("");                 // PO monitor range
+  const [poTo,setPoTo]=useState("");
   // A 10" iPad is 768px in portrait and 1024 in landscape. A fixed 192px
   // sidebar costs a quarter of the portrait width, which is what pushed the
   // wider tables — Inventory, Reports, Subscriptions — past the right edge
@@ -18060,10 +18125,21 @@ function App(){
         // ══ CASH MONITOR ══
         page==="cash_monitor"&&h("div",null,
           h(SectionHeader,{title:"Cash Monitoring — All Branches"}),
+          // Every figure here was the whole loaded window with no way to ask
+          // about a particular day, so a drawer could not be checked against
+          // the day it went wrong.
+          h(DateRangeBar,{from:cmFrom,to:cmTo,setFrom:setCmFrom,setTo:setCmTo,
+            allLabel:"All loaded",
+            note:(cmFrom&&cmTo)
+              ? (cmFrom===cmTo?cmFrom:(cmFrom+" \u2192 "+cmTo))
+              : "everything currently loaded"}),
           h("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:10}},
             branches.map(b=>{
-              const bc=cashLog.filter(c=>c.branch===b.id);
-              const bo=orders.filter(o=>o.branch===b.id);
+              const _dOf=(r)=>r.date||"";
+              const _in=(r)=>!cmFrom||!cmTo
+                ||(_dOf(r)>=cmFrom&&_dOf(r)<=cmTo);
+              const bc=cashLog.filter(c=>c.branch===b.id&&_in(c));
+              const bo=orders.filter(o=>o.branch===b.id&&_in(o));
               const opening=bc.filter(c=>c.type==="in"&&(c.desc||"").includes("Opening")).reduce((s,c)=>s+(c.amount||0),0);
               const net=bo.reduce((s,o)=>s+(o.total||0),0);
               const cout=bc.filter(c=>c.type==="out").reduce((s,c)=>s+(c.amount||0),0);
@@ -20858,13 +20934,21 @@ function App(){
         page==="po_monitor"&&h("div",null,
           h(SectionHeader,{title:"📦 PO Monitor — Main/Commissary"}),
 
+          // Four branches ordering weekly is two hundred POs a year on one
+          // scrolling list, and the KPI counts above it grow with it — the
+          // numbers stop meaning "now" and start meaning "ever".
+          h(DateRangeBar,{from:poFrom,to:poTo,setFrom:setPoFrom,setTo:setPoTo,
+            allLabel:"All",
+            note:(poFrom&&poTo)?("ordered "+poFrom+" \u2192 "+poTo)
+              :"all POs, any date"}),
+
           // KPI Stats
           h("div",{style:{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:8,marginBottom:14}},
-            h(Stat,{label:"New POs",value:advances.filter(a=>a._type==="po"&&a.status==="received_by_main").length,icon:"📥",color:C.warning}),
-            h(Stat,{label:"Processing",value:advances.filter(a=>a._type==="po"&&a.status==="processing").length,icon:"⚙️",color:"#6A1B9A"}),
-            h(Stat,{label:"For Payment",value:advances.filter(a=>a._type==="po"&&a.status==="processing"&&a.paymentStatus!=="Paid").length,icon:"💰",color:C.info}),
-            h(Stat,{label:"Discrepancy",value:advances.filter(a=>a._type==="po"&&a.status==="discrepancy").length,icon:"⚠️",color:C.danger}),
-            h(Stat,{label:"Completed",value:advances.filter(a=>a._type==="po"&&a.status==="completed").length,icon:"✅",color:C.success})
+            h(Stat,{label:"New POs",value:advances.filter(a=>a._type==="po"&&poInRange(a,poFrom,poTo)&&a.status==="received_by_main").length,icon:"📥",color:C.warning}),
+            h(Stat,{label:"Processing",value:advances.filter(a=>a._type==="po"&&poInRange(a,poFrom,poTo)&&a.status==="processing").length,icon:"⚙️",color:"#6A1B9A"}),
+            h(Stat,{label:"For Payment",value:advances.filter(a=>a._type==="po"&&poInRange(a,poFrom,poTo)&&a.status==="processing"&&a.paymentStatus!=="Paid").length,icon:"💰",color:C.info}),
+            h(Stat,{label:"Discrepancy",value:advances.filter(a=>a._type==="po"&&poInRange(a,poFrom,poTo)&&a.status==="discrepancy").length,icon:"⚠️",color:C.danger}),
+            h(Stat,{label:"Completed",value:advances.filter(a=>a._type==="po"&&poInRange(a,poFrom,poTo)&&a.status==="completed").length,icon:"✅",color:C.success})
           ),
 
           // Filter tabs
@@ -20883,7 +20967,8 @@ function App(){
           // force a scroll per row and hide exactly that comparison.
           (function(){
             const rows=advances
-              .filter(a=>a._type==="po"&&(poFilter==="all"||a.status===poFilter))
+              .filter(a=>a._type==="po"&&poInRange(a,poFrom,poTo)
+                &&(poFilter==="all"||a.status===poFilter))
               .sort((a,b)=>(b.timestamp?.seconds||0)-(a.timestamp?.seconds||0));
             const COLS="150px 128px 100px 100px 96px 112px 116px 96px 96px 46px";
             const HEAD=["BRANCH","PO NUMBER","TOTAL","PAID","BALANCE","PAYMENT",
