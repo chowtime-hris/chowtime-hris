@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260815-200000 -->
+<!-- BUILD:20260815-210000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -7460,7 +7460,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260815-200000";
+const BUILD = "20260815-210000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -12783,6 +12783,21 @@ function App(){
   const [expPer,setExpPer]=useState(30);
   const [ordDate,setOrdDate]=useState("");               // "" = today, "all" = no filter
   const [ordPage,setOrdPage]=useState(1);                // orders list pagination
+  // A 10" iPad is 768px in portrait and 1024 in landscape. A fixed 192px
+  // sidebar costs a quarter of the portrait width, which is what pushed the
+  // wider tables — Inventory, Reports, Subscriptions — past the right edge
+  // with nothing to scroll them back. The shell now measures instead of
+  // assuming, and rotating the tablet re-measures.
+  const [vw,setVw]=useState(typeof window!=="undefined"?window.innerWidth:1200);
+  useEffect(()=>{
+    const onR=()=>setVw(window.innerWidth);
+    window.addEventListener("resize",onR);
+    window.addEventListener("orientationchange",onR);
+    return()=>{window.removeEventListener("resize",onR);
+               window.removeEventListener("orientationchange",onR);};
+  },[]);
+  const narrow=vw<900;                       // iPad portrait and below
+  const [navOpen,setNavOpen]=useState(false); // manual override on narrow
   const [placing,setPlacing]=useState(false);            // order submit in flight
   const [kitchenFlow,setKitchenFlow]=useState(true);     // pending→preparing→served
   // Split payment: the non-cash legs are listed here and whatever is left of
@@ -15141,7 +15156,17 @@ function App(){
   return h("div",{style:{display:"flex",height:"100vh",background:C.bg,fontFamily:"'Segoe UI',system-ui,sans-serif",overflow:"hidden"}},
 
     // SIDEBAR
-    h("div",{style:{width:192,background:"#FFFFFF",borderRight:"1px solid #E6E6E6",display:"flex",flexDirection:"column",flexShrink:0,height:"100vh",position:"relative"}},
+    h("div",{style:{width:(narrow&&!navOpen)?58:192,background:"#FFFFFF",
+      borderRight:"1px solid #E6E6E6",display:"flex",flexDirection:"column",
+      flexShrink:0,height:"100vh",position:"relative",
+      transition:"width .15s ease",overflowX:"hidden",zIndex:30}},
+      narrow&&h("button",{onClick:()=>setNavOpen(o=>!o),
+        title:navOpen?"Collapse menu":"Expand menu",
+        style:{position:"absolute",top:8,right:6,zIndex:2,width:30,height:30,
+          borderRadius:8,border:"1px solid "+C.border,background:"#fff",
+          cursor:"pointer",fontSize:14,lineHeight:1,padding:0}},
+        navOpen?"\u2039":"\u203A"),
+
       h("div",{style:{padding:"10px 11px 6px",flexShrink:0}},
         h("div",{style:{display:"flex",alignItems:"center",gap:7,marginBottom:9}},
           h("div",{style:{width:28,height:28,background:`linear-gradient(135deg,${C.primary},${C.dark})`,borderRadius:7,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13}},"🍽️"),
@@ -15274,7 +15299,7 @@ function App(){
                 color:page===p?C.primary:"#3A3A3A",
                 cursor:"pointer",fontSize:13,fontWeight:page===p?700:500,textAlign:"left"}},
               h("span",{style:{fontSize:13}},m.icon),
-              h("span",{style:{flex:1}},m.label),
+              !(narrow&&!navOpen)&&h("span",{style:{flex:1}},m.label),
               pill(badgeFor(p)));
           };
 
@@ -15329,8 +15354,12 @@ function App(){
       // PAGE CONTENT
       h("div",{style:{flex:1,
           overflow:page==="pos"||page==="kitchen"?"hidden":"auto",
-          padding:page==="pos"||page==="kitchen"?0:"16px 18px",
-          display:"flex",flexDirection:"column",
+          // Content narrower than its own columns used to be cut off at the
+          // right edge with no way to reach it. A table that cannot shrink
+          // can at least be slid.
+          overflowX:page==="pos"||page==="kitchen"?"hidden":"auto",
+          padding:page==="pos"||page==="kitchen"?0:(narrow?"12px 12px":"16px 18px"),
+          display:"flex",flexDirection:"column",minWidth:0,
           height:page==="pos"||page==="kitchen"?"100%":"auto"}},
 
         // STICKY MINI HEADER - always at top
