@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260816-000000 -->
+<!-- BUILD:20260816-003000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -7505,7 +7505,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260816-000000";
+const BUILD = "20260816-003000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -19309,6 +19309,49 @@ function App(){
                        +"\u20b1"+peso(last.value)
                        +(last.date===today?"":" \u2014 today's not captured yet"))
                     : "\u26a0\ufe0f No reading on file yet for this branch.");
+              })(),
+
+              // What the total is actually made of.
+              //
+              // A stock value is one number standing in for a whole shelf, so a
+              // single item priced per pack while its stock is counted in pieces
+              // can carry almost the entire figure and look like nothing is
+              // wrong. Naming the biggest few turns "that seems high" into a
+              // line you can go and check.
+              (function(){
+                const rows=(inventory||[]).map(function(i){
+                  const st=Number(i.stock)||0;
+                  const val=(Array.isArray(i.lots)&&i.lots.length
+                    &&Math.abs(st-lotsQty(i.lots))<=0.01)
+                      ? lotsValue(i.lots) : st*(Number(i.cost)||0);
+                  return {name:i.name||i.id,stock:st,unit:i.unit||"",
+                    cost:Number(i.cost)||0,val:Math.round(val*100)/100};
+                }).filter(function(r){return r.val>0;})
+                  .sort(function(a,b){return b.val-a.val;});
+                if(!rows.length)return null;
+                const total=rows.reduce(function(t,r){return t+r.val;},0)||1;
+                return h("div",{style:{marginTop:9,paddingTop:8,
+                  borderTop:"1px dashed "+C.border}},
+                  h("div",{style:{fontSize:11,fontWeight:800,color:C.muted,
+                    letterSpacing:1,marginBottom:4}},"BIGGEST ITEMS IN THAT TOTAL"),
+                  rows.slice(0,5).map(function(r,ri){
+                    const share=Math.round((r.val/total)*1000)/10;
+                    return h("div",{key:ri,style:{display:"flex",
+                      justifyContent:"space-between",gap:8,fontSize:11,
+                      padding:"2px 0",
+                      color:share>=40?C.danger:C.text,
+                      fontWeight:share>=40?800:400}},
+                      h("span",null,r.name+"  \u00b7  "+_n(r.stock)+" "+r.unit
+                        +" \u00d7 \u20b1"+peso(r.cost)),
+                      h("span",null,"\u20b1"+peso(r.val)+"  ("+share+"%)"));
+                  }),
+                  (rows[0]&&(rows[0].val/total)>=0.4)&&h("div",{
+                    style:{fontSize:11,color:C.danger,marginTop:4,
+                      lineHeight:1.45,fontWeight:700}},
+                    "One item is carrying most of this total \u2014 check its "
+                    +"unit against its cost before using this reading. A cost "
+                    +"set per pack against a stock counted in pieces reads "
+                    +"this way."));
               })(),
               h("button",{disabled:snapSaving,
                 onClick:async()=>{
