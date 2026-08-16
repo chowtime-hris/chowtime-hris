@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260816-120000 -->
+<!-- BUILD:20260816-124500 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -7566,7 +7566,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260816-120000";
+const BUILD = "20260816-124500";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -17623,7 +17623,15 @@ function App(){
                    ["Voids ("+(zd.voidCount||0)+") — already out of Gross",
                     "₱"+peso(zd.voidAmt||0),C.muted],
                    ["Net Sales","₱"+peso(zd.net),C.success],
+                   // Net Sales counts every tender; only the cash part ever
+                   // reaches the drawer. Without this line the total dropped by
+                   // the card and delivery takings with nothing to explain it.
+                   ["  of which cash","₱"+peso(zd.cashSales||0),C.muted],
                    ["Cash In","₱"+peso(zd.cashIn),C.info],
+                   // Expenses were subtracted from TOTAL CASH and shown
+                   // nowhere. On this reading ₱5,669 left the drawer with no
+                   // line naming it, so the total simply looked wrong.
+                   ["Expenses","-₱"+peso(zd.expenses||0),C.warning],
                    ["Cash Out","-₱"+peso(zd.cashOut),C.warning],
                    ["TOTAL CASH","₱"+peso(zd.totalCash),C.primary]
                   ].map(([l,v,col])=>h("div",{key:l,style:{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f5f5f5"}},
