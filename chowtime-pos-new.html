@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260816-040000 -->
+<!-- BUILD:20260816-113000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -7566,7 +7566,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260816-040000";
+const BUILD = "20260816-113000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -12974,6 +12974,9 @@ function App(){
   const [cmTo,setCmTo]=useState(localDate());
   const [poFrom,setPoFrom]=useState("");                 // PO monitor range
   const [poTo,setPoTo]=useState("");
+  const [brStatus,setBrStatus]=useState({});             // per-branch heartbeat
+  const [brFrom,setBrFrom]=useState(localDate());        // branches overview range
+  const [brTo,setBrTo]=useState(localDate());
   // A 10" iPad is 768px in portrait and 1024 in landscape. A fixed 192px
   // sidebar costs a quarter of the portrait width, which is what pushed the
   // wider tables — Inventory, Reports, Subscriptions — past the right edge
@@ -13492,6 +13495,36 @@ function App(){
       return()=>unsub();
     }catch(e){}
   },[user?.branch]);
+
+  // ── BRANCH HEARTBEAT ─────────────────────────────────────
+  //
+  // There was no way to tell which branches had picked up a new build. Every
+  // update meant asking each one by hand, and a branch running a stale copy
+  // looked identical to one that was up to date — which is how a fix could sit
+  // undeployed for days without anyone noticing.
+  useEffect(()=>{
+    if(!user||!_selBranch)return;
+    let alive=true;
+    (async()=>{
+      try{
+        await setDoc(doc(db,"branch_status",_selBranch),{
+          branch:_selBranch, build:BUILD,
+          lastSeen:serverTimestamp(), lastSeenDate:localDate(),
+          by:user.name||""
+        },{merge:true});
+      }catch(e){}
+      if(!alive)return;
+    })();
+    try{
+      const un=onSnapshot(collection(db,"branch_status"),snap=>{
+        const m={};
+        snap.docs.forEach(d=>{m[d.id]=d.data()||{};});
+        if(alive)setBrStatus(m);
+      },()=>{});
+      return()=>{alive=false;un();};
+    }catch(e){}
+    return()=>{alive=false;};
+  },[user,_selBranch]);
 
   // ── SELECTED BRANCH INVENTORY ────────────────────────────
   // The main `inventory` follows the ACCOUNT: an owner always holds Main's
@@ -16167,14 +16200,72 @@ function App(){
               ?()=>setEditBr({_isNew:true,id:"",name:"",full:"",loc:"",status:"open"})
               :undefined,
             actionLabel:"Add Branch"}),
+
+          // Sales and the closing record follow the range. The rest — opening
+          // fund, POs waiting, subscription, build — are facts about NOW and
+          // would mean nothing dated to last week, so they do not move.
+          h(DateRangeBar,{from:brFrom,to:brTo,setFrom:setBrFrom,setTo:setBrTo,
+            allLabel:"All loaded",
+            note:(brFrom&&brTo)
+              ? (brFrom===brTo
+                  ? (brFrom===localDate()?"today":brFrom)
+                  : (brFrom+" \u2192 "+brTo))
+              : "everything currently loaded"}),
+
           h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10}},
             branches.map(b=>{
               const _t=localDate();
+              const _inR=(d)=>!brFrom||!brTo||((d||"")>=brFrom&&(d||"")<=brTo);
               const bOrds=orders.filter(o=>o.branch===b.id
                 &&o.status!=="void"&&o.status!=="cancelled"
-                &&((o.date||"")===_t));
+                &&_inR(o.date));
               const bSales=bOrds.reduce((s,o)=>s+(o.total||0),0);
-              return h("div",{key:b.id,style:{background:"#fff",borderRadius:12,padding:"14px",border:"1px solid "+C.border}},
+
+              // The page showed today's sales, which the Dashboard already
+              // says. What an owner cannot see anywhere is which branch needs
+              // attention — a day left unclosed, a drawer that came up short,
+              // an opening fund too small to make change, a PO waiting, a
+              // subscription about to lapse, a copy of the app three builds
+              // behind. Each of those was found by hand yesterday.
+              const _y=(function(){const d=new Date();d.setDate(d.getDate()-1);
+                return localDate(d);})();
+              // Over a range, one day's variance is the wrong question — what
+              // matters is how many days were closed at all, and what they
+              // came to together.
+              const zRows=(zHistAll||[]).filter(r=>r.branch===b.id&&_inR(r.date));
+              const zVar=zRows.reduce((t,r)=>t+(Number(r.shortOver)||0),0);
+              const spanDays=(brFrom&&brTo)
+                ? Math.max(1,Math.round((new Date(brTo)-new Date(brFrom))/86400000)+1)
+                : null;
+              // A range ending today cannot expect today to be closed yet.
+              const dueDays=(spanDays!=null&&brTo>=_t)?Math.max(0,spanDays-1):spanDays;
+              const zY=(zHistAll||[]).find(r=>r.branch===b.id&&r.date===_y);
+              const singleDay=(brFrom&&brTo&&brFrom===brTo);
+              const openFund=(cashLog||[]).filter(c=>c.branch===b.id
+                &&(c.date||"")===_t&&c.type==="in"
+                &&/opening/i.test(c.desc||""))
+                .reduce((sum,c)=>sum+(Number(c.amount)||0),0);
+              const poWait=(advances||[]).filter(a=>a._type==="po"&&a.branch===b.id
+                &&(a.status==="received_by_main"||a.status==="discrepancy")).length;
+              const st=subState((subs||[]).find(x=>x.branch===b.id)||null);
+              const hb=brStatus[b.id]||null;
+              const stale=hb&&hb.build&&hb.build!==BUILD;
+              const alerts=[];
+              if(!zY&&b.status!=="closed") alerts.push("yesterday not closed");
+              if(zY&&Math.abs(Number(zY.shortOver)||0)>=50) alerts.push("cash variance");
+              if(openFund>0&&openFund<300) alerts.push("low opening fund");
+              if(poWait) alerts.push("PO waiting");
+              if(!st.unknown&&st.days!=null&&st.days<=7) alerts.push("subscription");
+              if(stale) alerts.push("old build");
+              const rowLine=(label,value,bad)=>h("div",{style:{display:"flex",
+                justifyContent:"space-between",gap:8,fontSize:12,padding:"3px 0",
+                borderTop:"1px solid #f5f5f5",
+                color:bad?C.danger:C.text,fontWeight:bad?800:400}},
+                h("span",{style:{color:bad?C.danger:C.muted}},label),
+                h("span",null,value));
+
+              return h("div",{key:b.id,style:{background:"#fff",borderRadius:12,padding:"14px",
+                border:"1px solid "+(alerts.length?C.danger:C.border)}},
                 h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:10}},
                   h("div",null,
                     h("div",{style:{fontWeight:900,fontSize:14}},b.full),
@@ -16188,7 +16279,12 @@ function App(){
                         style:{marginLeft:6,color:"#1565C0",fontSize:12,
                           textDecoration:"none",fontWeight:700}},"📍 Map"))
                   ),
-                  h(Badge,{label:b.status||"open",color:b.status==="closed"?C.muted:C.success})
+                  h("div",{style:{display:"flex",gap:5,alignItems:"center"}},
+                    alerts.length>0&&h("span",{title:alerts.join(" \u00b7 "),
+                      style:{background:C.danger,color:"#fff",borderRadius:20,
+                        padding:"1px 8px",fontSize:11,fontWeight:900}},
+                      "\u26a0\ufe0f "+alerts.length),
+                    h(Badge,{label:b.status||"open",color:b.status==="closed"?C.muted:C.success}))
                 ),
                 h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:8}},
                   h("div",{style:{background:"#F3E9F7",borderRadius:7,padding:"7px 9px"}},
@@ -16199,6 +16295,32 @@ function App(){
                     h("div",{style:{fontSize:12,color:C.info,fontWeight:700,marginBottom:1}},"ORDERS"),
                     h("div",{style:{fontSize:14,fontWeight:900}},bOrds.length)
                   )
+                ),
+
+                h("div",{style:{marginBottom:9}},
+                  (singleDay&&brFrom===_t)
+                    ? rowLine("Yesterday",
+                        zY ? ((Number(zY.shortOver)||0)===0 ? "closed \u00b7 balanced"
+                              : "closed \u00b7 "+((zY.shortOver>=0?"+":"\u2212")
+                                 +"\u20b1"+peso(Math.abs(Number(zY.shortOver)||0))))
+                           : (b.status==="closed"?"\u2014":"NOT CLOSED"),
+                        !zY&&b.status!=="closed"
+                          ? true : (zY&&Math.abs(Number(zY.shortOver)||0)>=50))
+                    : rowLine("Days closed",
+                        (dueDays!=null?(zRows.length+" of "+dueDays):String(zRows.length))
+                        +(zVar!==0?("  \u00b7  "+(zVar>=0?"+":"\u2212")
+                          +"\u20b1"+peso(Math.abs(zVar))):"  \u00b7  balanced"),
+                        (dueDays!=null&&zRows.length<dueDays)||Math.abs(zVar)>=50),
+                  rowLine("Opening fund",
+                    openFund>0?("\u20b1"+peso(openFund)):"not recorded",
+                    openFund>0&&openFund<300),
+                  rowLine("POs waiting", poWait?String(poWait):"none", poWait>0),
+                  rowLine("Subscription",
+                    st.unknown?"\u2014":(st.days<0?"EXPIRED":st.days+" days"),
+                    !st.unknown&&st.days!=null&&st.days<=7),
+                  rowLine("App build",
+                    hb ? ((stale?"old \u00b7 ":"")+(hb.lastSeenDate||"")) : "never opened",
+                    !!stale||!hb)
                 ),
                 user.role==="owner"&&h("div",{style:{display:"flex",gap:6}},
                   h("button",{onClick:()=>setEditBr(Object.assign({},b)),
