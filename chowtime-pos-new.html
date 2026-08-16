@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260816-113000 -->
+<!-- BUILD:20260816-120000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -7566,7 +7566,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260816-113000";
+const BUILD = "20260816-120000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -16241,10 +16241,25 @@ function App(){
               const dueDays=(spanDays!=null&&brTo>=_t)?Math.max(0,spanDays-1):spanDays;
               const zY=(zHistAll||[]).find(r=>r.branch===b.id&&r.date===_y);
               const singleDay=(brFrom&&brTo&&brFrom===brTo);
-              const openFund=(cashLog||[]).filter(c=>c.branch===b.id
+              // The same rule the Z-Reading uses: a logged Opening Fund entry
+              // wins, and otherwise the drawer opens with whatever yesterday
+              // carried forward. Looking only for a logged entry reported
+              // "not recorded" on every branch, when in the normal case there
+              // is nothing to record — the money simply stayed in the box.
+              const loggedOpen=(cashLog||[]).filter(c=>c.branch===b.id
                 &&(c.date||"")===_t&&c.type==="in"
                 &&/opening/i.test(c.desc||""))
                 .reduce((sum,c)=>sum+(Number(c.amount)||0),0);
+              const _yRec=(zHistAll||[]).find(r=>r.branch===b.id&&r.date===_y);
+              const carried=_yRec
+                ? (_yRec.carriedForward!=null
+                    ? Number(_yRec.carriedForward)||0
+                    : Math.max(0,(Number(_yRec.countedCash)||0)
+                        -(Number(_yRec.remittanceCounted)||0)))
+                : null;
+              const openFund=loggedOpen>0?loggedOpen:(carried!=null?carried:0);
+              const openSrc=loggedOpen>0?"recorded today"
+                :(carried!=null?"carried from "+_y:null);
               const poWait=(advances||[]).filter(a=>a._type==="po"&&a.branch===b.id
                 &&(a.status==="received_by_main"||a.status==="discrepancy")).length;
               const st=subState((subs||[]).find(x=>x.branch===b.id)||null);
@@ -16312,8 +16327,10 @@ function App(){
                           +"\u20b1"+peso(Math.abs(zVar))):"  \u00b7  balanced"),
                         (dueDays!=null&&zRows.length<dueDays)||Math.abs(zVar)>=50),
                   rowLine("Opening fund",
-                    openFund>0?("\u20b1"+peso(openFund)):"not recorded",
-                    openFund>0&&openFund<300),
+                    openSrc
+                      ? ("\u20b1"+peso(openFund)+"  \u00b7  "+openSrc)
+                      : "no closing yesterday",
+                    (openFund>0&&openFund<300)||!openSrc),
                   rowLine("POs waiting", poWait?String(poWait):"none", poWait>0),
                   rowLine("Subscription",
                     st.unknown?"\u2014":(st.days<0?"EXPIRED":st.days+" days"),
