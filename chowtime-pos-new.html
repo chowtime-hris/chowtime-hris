@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260816-193000 -->
+<!-- BUILD:20260816-200000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -7566,7 +7566,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260816-193000";
+const BUILD = "20260816-200000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -21702,57 +21702,6 @@ function App(){
                       "Add to stock")
                   ),
 
-                  // Margin — owner only. po_monitor is already owner-gated in
-                  // the nav, but the check stays explicit: this is Main's
-                  // markup and no branch account should ever read it.
-                  (user.role==="owner"||user.role==="commissary")&&(function(){
-                    const m=poMargin(po);
-                    if(m.rev<=0)return null;
-                    const bad=m.cost<=0;
-                    return h("div",{style:{width:"100%",background:"#F1F8E9",
-                      border:"1px solid #C5E1A5",borderRadius:8,
-                      padding:"8px 10px",marginBottom:8}},
-                      h("div",{style:{fontSize:11,fontWeight:800,color:"#33691E",
-                        letterSpacing:1,marginBottom:5}},"MARGIN"),
-                      [["Gross sales","₱"+peso(m.rev),C.text],
-                       ["Direct cost","₱"+peso(m.cost),C.muted],
-                       ["Gross profit","₱"+peso(m.margin),
-                        m.margin>=0?"#2E7D32":C.danger],
-                       ["Margin %",m.pct.toFixed(2)+"%",
-                        m.pct>=0?"#2E7D32":C.danger]].map(([l,v,col])=>
-                        h("div",{key:l,style:{display:"flex",
-                          justifyContent:"space-between",fontSize:13,marginBottom:1}},
-                          h("span",{style:{color:C.muted}},l),
-                          h("span",{style:{fontWeight:800,color:col}},v))),
-                      bad&&h("div",{style:{fontSize:12,color:"#BF360C",
-                        fontWeight:700,marginTop:4}},
-                        "No cost on the items — margin reads as 100%")
-                    );
-                  })(),
-
-                  // Payment history — uses this block's own totalPaid/balance
-                  ((po.payments||[]).length>0)&&h("div",{style:{width:"100%",
-                    background:C.bg,borderRadius:8,padding:"8px 10px",marginBottom:8}},
-                    h("div",{style:{display:"flex",justifyContent:"space-between",
-                      alignItems:"center",marginBottom:5}},
-                      h("span",{style:{fontSize:11,fontWeight:800,color:C.muted,
-                        letterSpacing:1}},"PAYMENTS ("+(po.payments||[]).length+")"),
-                      h("span",{style:{fontSize:13,fontWeight:900,
-                        color:(balance||0)<=0?C.success:C.danger}},
-                        (balance||0)<=0?"FULLY PAID":"Balance ₱"+peso(balance))
-                    ),
-                    (po.payments||[]).slice().reverse().map((p,pi)=>h("div",{key:pi,
-                      style:{display:"flex",justifyContent:"space-between",
-                        fontSize:12,marginBottom:2}},
-                      h("span",{style:{color:C.muted}},
-                        (p.at?String(p.at).slice(0,10):"")+
-                        (p.method?" · "+p.method:"")+
-                        (p.ref?" · "+p.ref:"")+
-                        (p.by?" · "+p.by:"")),
-                      h("span",{style:{fontWeight:800}},"₱"+peso(p.amount))
-                    ))
-                  ),
-
                   // PROCESSING → Record Payment
                   //
                   // Payment waits for the stock. Paying for a delivery Main's
@@ -22253,6 +22202,63 @@ function App(){
                       border:"1px solid "+C.border,borderRadius:8,
                       fontSize:13,fontWeight:700,cursor:"pointer"}},
                     "🖨️ DR"),
+
+                // The action row sits above these now. Margin and the payment
+                // history are reference; the buttons are why the card was
+                // opened, and they had a screen and a half of reading in
+                // front of them.
+
+                  // Margin — owner only. po_monitor is already owner-gated in
+                  // the nav, but the check stays explicit: this is Main's
+                  // markup and no branch account should ever read it.
+                  (user.role==="owner"||user.role==="commissary")&&(function(){
+                    const m=poMargin(po);
+                    if(m.rev<=0)return null;
+                    const bad=m.cost<=0;
+                    return h("div",{style:{width:"100%",background:"#F1F8E9",
+                      border:"1px solid #C5E1A5",borderRadius:8,
+                      padding:"8px 10px",marginBottom:8}},
+                      h("div",{style:{fontSize:11,fontWeight:800,color:"#33691E",
+                        letterSpacing:1,marginBottom:5}},"MARGIN"),
+                      [["Gross sales","₱"+peso(m.rev),C.text],
+                       ["Direct cost","₱"+peso(m.cost),C.muted],
+                       ["Gross profit","₱"+peso(m.margin),
+                        m.margin>=0?"#2E7D32":C.danger],
+                       ["Margin %",m.pct.toFixed(2)+"%",
+                        m.pct>=0?"#2E7D32":C.danger]].map(([l,v,col])=>
+                        h("div",{key:l,style:{display:"flex",
+                          justifyContent:"space-between",fontSize:13,marginBottom:1}},
+                          h("span",{style:{color:C.muted}},l),
+                          h("span",{style:{fontWeight:800,color:col}},v))),
+                      bad&&h("div",{style:{fontSize:12,color:"#BF360C",
+                        fontWeight:700,marginTop:4}},
+                        "No cost on the items — margin reads as 100%")
+                    );
+                  })(),
+
+                  // Payment history — uses this block's own totalPaid/balance
+                  ((po.payments||[]).length>0)&&h("div",{style:{width:"100%",
+                    background:C.bg,borderRadius:8,padding:"8px 10px",marginBottom:8}},
+                    h("div",{style:{display:"flex",justifyContent:"space-between",
+                      alignItems:"center",marginBottom:5}},
+                      h("span",{style:{fontSize:11,fontWeight:800,color:C.muted,
+                        letterSpacing:1}},"PAYMENTS ("+(po.payments||[]).length+")"),
+                      h("span",{style:{fontSize:13,fontWeight:900,
+                        color:(balance||0)<=0?C.success:C.danger}},
+                        (balance||0)<=0?"FULLY PAID":"Balance ₱"+peso(balance))
+                    ),
+                    (po.payments||[]).slice().reverse().map((p,pi)=>h("div",{key:pi,
+                      style:{display:"flex",justifyContent:"space-between",
+                        fontSize:12,marginBottom:2}},
+                      h("span",{style:{color:C.muted}},
+                        (p.at?String(p.at).slice(0,10):"")+
+                        (p.method?" · "+p.method:"")+
+                        (p.ref?" · "+p.ref:"")+
+                        (p.by?" · "+p.by:"")),
+                      h("span",{style:{fontWeight:800}},"₱"+peso(p.amount))
+                    ))
+                  ),
+
 
                   // Payment status badge
                   h("span",{style:{marginLeft:"auto",fontSize:13,
