@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260816-140000 -->
+<!-- BUILD:20260816-150000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -7566,7 +7566,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260816-140000";
+const BUILD = "20260816-150000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -21275,11 +21275,26 @@ function App(){
 
           // KPI Stats
           h("div",{style:{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:8,marginBottom:14}},
-            h(Stat,{label:"New POs",value:advances.filter(a=>a._type==="po"&&poInRange(a,poFrom,poTo)&&a.status==="received_by_main").length,icon:"📥",color:C.warning}),
-            h(Stat,{label:"Processing",value:advances.filter(a=>a._type==="po"&&poInRange(a,poFrom,poTo)&&a.status==="processing").length,icon:"⚙️",color:"#6A1B9A"}),
-            h(Stat,{label:"For Payment",value:advances.filter(a=>a._type==="po"&&poInRange(a,poFrom,poTo)&&a.status==="processing"&&a.paymentStatus!=="Paid").length,icon:"💰",color:C.info}),
-            h(Stat,{label:"Discrepancy",value:advances.filter(a=>a._type==="po"&&poInRange(a,poFrom,poTo)&&a.status==="discrepancy").length,icon:"⚠️",color:C.danger}),
-            h(Stat,{label:"Completed",value:advances.filter(a=>a._type==="po"&&poInRange(a,poFrom,poTo)&&a.status==="completed").length,icon:"✅",color:C.success})
+            // The counts and the tabs below were the same five states shown
+            // twice, and only one of them did anything. A number you can read
+            // but not act on sends you hunting for the matching tab.
+            [["New POs","received_by_main","📥",C.warning],
+             ["Processing","processing","⚙️","#6A1B9A"],
+             ["For Payment","forpay","💰",C.info],
+             ["Discrepancy","discrepancy","⚠️",C.danger],
+             ["Completed","completed","✅",C.success]].map(function(k){
+              const n=advances.filter(a=>a._type==="po"&&poInRange(a,poFrom,poTo)
+                &&(k[1]==="forpay"
+                    ? (a.status==="processing"&&a.paymentStatus!=="Paid")
+                    : a.status===k[1])).length;
+              const tab=(k[1]==="forpay")?"paid":k[1];
+              const on=(poFilter===tab);
+              return h("div",{key:k[1],
+                onClick:()=>setPoFilter(on?"all":tab),
+                style:{cursor:"pointer",outline:on?"2px solid "+k[3]:"none",
+                  borderRadius:12}},
+                h(Stat,{label:k[0],value:n,icon:k[2],color:k[3]}));
+            })
           ),
 
           // Filter tabs
@@ -21351,10 +21366,21 @@ function App(){
                             fontWeight:700}},"₱"+peso(val)),
                           h("div",{style:{fontSize:13,textAlign:"right",
                             color:paid>0?C.success:C.muted}},"₱"+peso(paid)),
-                          h("div",{style:{fontSize:13,textAlign:"right",
-                            fontWeight:bal>0?800:400,
-                            color:bal>0?C.danger:C.muted}},
-                            bal>0?"₱"+peso(bal):"—"),
+                          h("div",{style:{textAlign:"right"}},
+                            h("div",{style:{fontSize:13,
+                              fontWeight:bal>0?800:400,
+                              color:bal>0?C.danger:C.muted}},
+                              bal>0?"\u20b1"+peso(bal):"\u2014"),
+                            // A date is not an age. Two POs read the same until
+                            // you work out that one has been unpaid a day and
+                            // the other three weeks.
+                            (bal>0&&po.date)&&(function(){
+                              const age=daysBetween(po.date,localDate());
+                              if(age<1)return null;
+                              return h("div",{style:{fontSize:10,fontWeight:800,
+                                color:age>=14?C.danger:(age>=7?C.warning:C.muted)}},
+                                age+"d unpaid");
+                            })()),
                           h("div",null,h("span",{style:{fontSize:11,fontWeight:800,
                             padding:"3px 9px",borderRadius:20,
                             background:payC+"18",color:payC}},pay)),
@@ -21368,7 +21394,37 @@ function App(){
                             textAlign:"right"}},open?"▾":"▸")
                         )
                       );
-                    })
+                    }),
+
+                // What the branches owe MAIN right now. Every figure was on
+                // the page and none of them were added up, so the one number
+                // that decides whether to chase anybody had to be worked out
+                // by eye each time.
+                rows.length>0&&(function(){
+                  const t=rows.reduce(function(a,po){
+                    const v=poValue(po);
+                    const p=(po.payments||[]).reduce((x,y)=>x+(y.amount||0),0);
+                    const dead=(po.status==="cancelled");
+                    return {val:a.val+(dead?0:v), paid:a.paid+(dead?0:p),
+                            bal:a.bal+(dead?0:Math.max(0,v-p)),
+                            live:a.live+(dead?0:1)};
+                  },{val:0,paid:0,bal:0,live:0});
+                  return h("div",{style:{display:"grid",gridTemplateColumns:COLS,
+                    gap:6,padding:"11px 14px",background:C.bg,
+                    borderTop:"2px solid "+C.border,fontWeight:800}},
+                    h("div",{style:{fontSize:12}},t.live+" PO"+(t.live===1?"":"s")),
+                    h("div"),
+                    h("div",{style:{fontSize:13,textAlign:"right"}},
+                      "\u20b1"+peso(t.val)),
+                    h("div",{style:{fontSize:13,textAlign:"right",color:C.success}},
+                      "\u20b1"+peso(t.paid)),
+                    h("div",{style:{fontSize:13,textAlign:"right",
+                      color:t.bal>0?C.danger:C.muted}},
+                      t.bal>0?"\u20b1"+peso(t.bal):"\u2014"),
+                    h("div",{style:{fontSize:11,color:C.muted,fontWeight:600}},
+                      t.bal>0?"unpaid":"all settled"),
+                    h("div"),h("div"),h("div"),h("div"));
+                })()
               )
             );
           })(),
