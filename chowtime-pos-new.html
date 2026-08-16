@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260816-200000 -->
+<!-- BUILD:20260816-210000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -7566,7 +7566,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260816-200000";
+const BUILD = "20260816-210000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -22081,8 +22081,14 @@ function App(){
                   // edited since still reverts to what actually happened.
                   // Reversals are logged against the same ref, so the net is
                   // recomputed each time and pressing twice cannot double.
+                  // Once the branch has paid in full, the goods and the money
+                  // are settled against each other. Pulling the stock back
+                  // into Main after that leaves them holding a receipt for
+                  // something Main still owns — so the way back is to reverse
+                  // the payment first, not the deduction.
                   (st==="processing"||st==="paid")
                     &&(po.mainDeducted||po.stockIssued)
+                    &&(balance>0.005)
                     &&h("button",{
                     onClick:async()=>{
                       if(!confirm("Revert the Main inventory deduction for "
@@ -22151,6 +22157,16 @@ function App(){
                       color:C.danger,fontSize:13,fontWeight:700,
                       cursor:"pointer"}},
                     "↩️ Revert Deduction"),
+
+                  // Says why the button is gone, instead of leaving a gap
+                  (st==="processing"||st==="paid")
+                    &&(po.mainDeducted||po.stockIssued)
+                    &&!(balance>0.005)
+                    &&h("span",{style:{fontSize:12,color:C.muted,
+                      padding:"7px 10px",borderRadius:8,background:C.bg,
+                      border:"1px dashed "+C.border,fontWeight:600}},
+                      "\ud83d\udd12 Settled \u2014 paid in full and deducted. "
+                      +"Reverse the payment first if this needs undoing."),
 
                   // Reopen a PO that was closed before the branch received it.
                   // Completion is the branch's confirmation that the goods
