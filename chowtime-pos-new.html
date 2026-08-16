@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260816-160000 -->
+<!-- BUILD:20260816-180000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -7566,7 +7566,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260816-160000";
+const BUILD = "20260816-180000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -12978,6 +12978,7 @@ function App(){
   const [brFrom,setBrFrom]=useState(localDate());        // branches overview range
   const [brTo,setBrTo]=useState(localDate());
   const [brSort,setBrSort]=useState("sales_desc");       // branches overview order
+  const [zBranch,setZBranch]=useState("");               // Z-Reading branch (owner)
   // A 10" iPad is 768px in portrait and 1024 in landscape. A fixed 192px
   // sidebar costs a quarter of the portrait width, which is what pushed the
   // wider tables — Inventory, Reports, Subscriptions — past the right edge
@@ -17621,8 +17622,16 @@ function App(){
         // ══ Z/X READING ══
         (page==="z_reading"||page==="x_reading")&&(()=>{
           const isZ=page==="z_reading";
-          const live=buildZ(branchId,zSel||localDate());
-          const saved=zSel?zHist.find(x=>x.date===zSel):null;
+          // The page was pinned to the signed-in branch, so an owner could
+          // only ever read MAIN's — and the amend button, which is owner-only,
+          // sat on the one reading its owner could not open.
+          const canPickBranch=(user.role==="owner"||user.role==="commissary");
+          const zBr=(canPickBranch&&zBranch)?zBranch:branchId;
+          const zBrName=((branches||[]).find(b=>b.id===zBr)||curBranch||{});
+          const live=buildZ(zBr,zSel||localDate());
+          const saved=zSel
+            ? (canPickBranch?zHistAll:zHist).find(x=>x.date===zSel&&x.branch===zBr)
+            : null;
           // a chosen day with no saved rollup is still readable from the live
           // orders if they are within the subscription window; only fall back
           // to an empty state when there is genuinely nothing
@@ -17639,6 +17648,18 @@ function App(){
             : live;
           const isSaved=!!saved;
           return h("div",null,
+            // Which branch am I looking at — owner and commissary only
+            canPickBranch&&h("div",{style:{display:"flex",gap:8,
+              alignItems:"center",marginBottom:9,flexWrap:"wrap"}},
+              h("span",{style:{fontSize:12,fontWeight:800,color:C.muted,
+                letterSpacing:1}},"BRANCH"),
+              h("select",{value:zBr,onChange:e=>{setZBranch(e.target.value);setZSel("");},
+                style:{padding:"6px 10px",borderRadius:8,fontSize:13,
+                  border:"1px solid "+C.border,fontFamily:"inherit",
+                  fontWeight:700,cursor:"pointer"}},
+                (branches||[]).map(b=>h("option",{key:b.id,value:b.id},
+                  b.full||b.name||b.id)))),
+
             // Which day am I looking at
             isZ&&h("div",{style:{display:"flex",gap:8,alignItems:"center",
               marginBottom:11,flexWrap:"wrap"}},
@@ -17688,24 +17709,7 @@ function App(){
                   isSaved
                     ? ("Saved · "+saved.date+" · ni "+(saved.closedBy||"?"))
                     : ("Cashier: "+user.name+" · "+new Date().toLocaleDateString("en-PH"))),
-                h("div",{style:{color:"rgba(255,255,255,.75)",fontSize:11,marginTop:2}},dbReady?"✓ From Firebase ("+orders.length+" orders)":"Loading Firebase data..."),
-                // An amended record that looks untouched is worse than one
-                // that was never corrected: the figures moved and the page
-                // gives no sign. What it was is stated on the record itself.
-                isSaved&&Array.isArray(saved.amendedFrom)&&saved.amendedFrom.length
-                  ?h("div",{style:{marginTop:6,background:"rgba(255,255,255,.15)",
-                    borderRadius:8,padding:"6px 9px",color:"#fff",fontSize:11,
-                    lineHeight:1.5}},
-                    h("b",null,"\u267b\ufe0f Amended "+saved.amendedFrom.length+"\u00d7"),
-                    " \u00b7 last by "+(saved.amendedBy||"?"),
-                    h("div",{style:{opacity:.85}},
-                      "was SHORT / OVER "
-                      +(function(){
-                        const p0=saved.amendedFrom[saved.amendedFrom.length-1]||{};
-                        const v=Number(p0.shortOver)||0;
-                        return (v>=0?"+":"\u2212")+"\u20b1"+peso(Math.abs(v));
-                      })()))
-                  :null
+                h("div",{style:{color:"rgba(255,255,255,.75)",fontSize:11,marginTop:2}},dbReady?"✓ From Firebase ("+orders.length+" orders)":"Loading Firebase data...")
               ),
               h("div",{style:{textAlign:"right"}},
                 h("div",{style:{color:C.accent,fontSize:11}},"EXPECTED CASH"),
@@ -17863,61 +17867,6 @@ function App(){
               // Close Day used to only show a toast — nothing was ever written,
               // so yesterday's Z-Reading became unrecoverable once the orders
               // subscription scrolled past it.
-              // A closed day is frozen on purpose — a Z-Reading that keeps
-              // moving is not a Z-Reading. But the figures it froze can turn
-              // out to be wrong: a duplicated expense caught the next morning
-              // leaves a permanent record of a shortage that never happened,
-              // and until now there was no way to correct it.
-              //
-              // Amending, not rewriting: the previous figures are kept inside
-              // the record, with who changed them and when, so the correction
-              // is visible rather than silent.
-              isZ&&isSaved&&user.role==="owner"&&h("button",{
-                onClick:async()=>{
-                  const d=zSel;
-                  if(!d)return;
-                  const was=(Number(saved.shortOver)||0);
-                  if(!confirm("Recompute "+d+" for "+curBranch.name+"?\n\n"
-                    +"This amends a closed record. The current figures are kept "
-                    +"inside it as the previous version:\n"
-                    +"   SHORT / OVER  "+(was>=0?"+":"\u2212")+"\u20b1"+peso(Math.abs(was))+"\n"
-                    +"   Net sales     \u20b1"+peso(Number(saved.net)||0)+"\n\n"
-                    +"Use this after correcting an expense or a cash entry for "
-                    +"that day."))return;
-                  setClosing(true);
-                  try{
-                    const ref=doc(db,"daily_sales",branchId+"_"+d);
-                    const prior={at:new Date().toISOString(),by:user.name||"",
-                      shortOver:Number(saved.shortOver)||0,
-                      net:Number(saved.net)||0,
-                      expenses:Number(saved.expenses)||0,
-                      cashOnHand:Number(saved.cashOnHand)||0,
-                      countedCash:saved.countedCash==null?null
-                        :Number(saved.countedCash)||0};
-                    // Written BEFORE the recompute; rollupDay merges, so a
-                    // field it does not set survives.
-                    await updateDoc(ref,{
-                      amendedFrom:arrayUnion(prior),
-                      amendedBy:user.name||"", amendedAt:serverTimestamp()
-                    });
-                    const r=await rollupDay(db,branchId,d,
-                      (companySettings&&companySettings.vatMode)||"vat",
-                      user.name+" (amended)");
-                    showT(r?("Recomputed "+d+" \u00b7 previous figures kept in the record")
-                           :"Recompute failed — try again", r?"ok":"err");
-                  }catch(e){
-                    showT("Recompute failed: "
-                      +String((e&&e.message)||e).slice(0,60),"err");
-                  }
-                  setClosing(false);
-                },
-                disabled:closing,
-                style:{padding:"10px 22px",background:"#fff",
-                  border:"1px solid "+C.warning,borderRadius:9,
-                  color:"#BF360C",fontWeight:800,fontSize:13,
-                  cursor:closing?"wait":"pointer"}},
-                closing?"Recomputing…":"\u267b\ufe0f Recompute this day"),
-
               isZ&&!isSaved&&h("button",{
                 onClick:async()=>{
                   const d=localDate();
@@ -17951,7 +17900,13 @@ function App(){
             // who did it and when, and the recomputed values take their place.
             // A corrected record you can audit beats a permanent record you
             // know is wrong.
-            isZ&&isSaved&&(user.role==="owner"||user.role==="commissary")
+            // The branch manager closed the day, so the branch manager corrects
+            // it. MAIN oversees the numbers; it does not run the branches'
+            // accounts, and routing every correction through it would put the
+            // fix furthest from the person who knows what actually happened.
+            isZ&&isSaved
+              &&(user.role==="manager"||user.role==="owner"
+                 ||user.role==="commissary")
               &&h("div",{style:{background:"#fff",border:"1px solid "+C.warning,
                 borderRadius:12,padding:"14px 16px",marginTop:14}},
               h("div",{style:{fontSize:14,fontWeight:800,marginBottom:3}},
@@ -17960,8 +17915,10 @@ function App(){
                 lineHeight:1.5}},
                 "Rebuilds "+(zSel||"")+" from the orders, cash and expenses as "
                 +"they stand now. Use it after correcting a mistake that was "
-                +"only found once the day was closed. The current figures are "
-                +"kept as a previous version inside the record."),
+                +"only found once the day was closed \u2014 a duplicated expense, "
+                +"a cash entry fixed the next morning. The current figures are "
+                +"kept as a previous version inside the record, so nothing is "
+                +"overwritten without a trace."),
               (Array.isArray(saved&&saved.amendments)&&saved.amendments.length>0)
                 &&h("div",{style:{background:C.bg,borderRadius:9,
                   padding:"9px 11px",marginBottom:10}},
@@ -17979,7 +17936,7 @@ function App(){
                 onClick:async()=>{
                   const d=zSel;
                   if(!d)return;
-                  if(!confirm("Recompute "+d+" for "+curBranch.name+"?\n\n"
+                  if(!confirm("Recompute "+d+" for "+(zBrName.full||zBr)+"?\n\n"
                     +"This amends a closed record. The figures standing now "
                     +"(net \u20b1"+peso(saved.net||0)+", short/over "
                     +((saved.shortOver||0)>=0?"+":"\u2212")+"\u20b1"
@@ -17987,7 +17944,7 @@ function App(){
                     +") will be kept as a previous version.\n\nContinue?"))return;
                   setClosing(true);
                   try{
-                    const ref=doc(db,"daily_sales",branchId+"_"+d);
+                    const ref=doc(db,"daily_sales",zBr+"_"+d);
                     const cur=await getDoc(ref);
                     const c=cur.exists()?(cur.data()||{}):{};
                     const hist=Array.isArray(c.amendments)?c.amendments.slice():[];
@@ -17998,7 +17955,7 @@ function App(){
                       countedCash:c.countedCash!=null?Number(c.countedCash):null});
                     await updateDoc(ref,{amendments:hist,
                       amendedBy:user.name||"",amendedAt:serverTimestamp()});
-                    const r=await rollupDay(db,branchId,d,
+                    const r=await rollupDay(db,zBr,d,
                       (companySettings&&companySettings.vatMode)||"vat",user.name);
                     showT(r?("Recomputed "+d+" \u00b7 \u20b1"+peso(r.net)+" net")
                            :"Recompute failed \u2014 try again", r?"ok":"err");
