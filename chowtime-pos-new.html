@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260816-124500 -->
+<!-- BUILD:20260816-130000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -7566,7 +7566,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260816-124500";
+const BUILD = "20260816-130000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -12977,6 +12977,7 @@ function App(){
   const [brStatus,setBrStatus]=useState({});             // per-branch heartbeat
   const [brFrom,setBrFrom]=useState(localDate());        // branches overview range
   const [brTo,setBrTo]=useState(localDate());
+  const [brSort,setBrSort]=useState("sales_desc");       // branches overview order
   // A 10" iPad is 768px in portrait and 1024 in landscape. A fixed 192px
   // sidebar costs a quarter of the portrait width, which is what pushed the
   // wider tables — Inventory, Reports, Subscriptions — past the right edge
@@ -16212,8 +16213,43 @@ function App(){
                   : (brFrom+" \u2192 "+brTo))
               : "everything currently loaded"}),
 
+          // Fixed order made the list a lookup: you had to already know which
+          // branch you were checking. Sorted by takings it answers a question
+          // instead — who is carrying the week, and who has stopped selling.
+          h("div",{style:{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap",
+            alignItems:"center"}},
+            h("span",{style:{fontSize:11,fontWeight:800,color:C.muted,
+              letterSpacing:1}},"SORT"),
+            [["Sales \u2193","sales_desc"],["Sales \u2191","sales_asc"],
+             ["Orders \u2193","ord_desc"],["Name","name"]].map(function(o){
+              const active=brSort===o[1];
+              return h("button",{key:o[1],onClick:()=>setBrSort(o[1]),
+                style:{padding:"5px 11px",borderRadius:20,fontSize:12,
+                  border:"1px solid "+(active?C.primary:C.border),
+                  background:active?"#F3E9F7":"#fff",
+                  color:active?C.primary:C.text,
+                  fontWeight:active?800:500,cursor:"pointer"}},o[0]);
+            })),
+
           h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10}},
-            branches.map(b=>{
+            (function(){
+              const _t0=localDate();
+              const _r=(d)=>!brFrom||!brTo||((d||"")>=brFrom&&(d||"")<=brTo);
+              const tally=(bid)=>{
+                const rows=orders.filter(o=>o.branch===bid
+                  &&o.status!=="void"&&o.status!=="cancelled"&&_r(o.date));
+                return {sales:rows.reduce((s,o)=>s+(o.total||0),0),
+                        orders:rows.length};
+              };
+              return [...branches].sort((x,y)=>{
+                if(brSort==="name")
+                  return String(x.full||x.id).localeCompare(String(y.full||y.id));
+                const a=tally(x.id), b2=tally(y.id);
+                if(brSort==="ord_desc")return b2.orders-a.orders;
+                if(brSort==="sales_asc")return a.sales-b2.sales;
+                return b2.sales-a.sales;
+              });
+            })().map(b=>{
               const _t=localDate();
               const _inR=(d)=>!brFrom||!brTo||((d||"")>=brFrom&&(d||"")<=brTo);
               const bOrds=orders.filter(o=>o.branch===b.id
