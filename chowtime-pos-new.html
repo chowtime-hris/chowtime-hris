@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260816-210000 -->
+<!-- BUILD:20260817-090000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -7566,7 +7566,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260816-210000";
+const BUILD = "20260817-090000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -13227,8 +13227,16 @@ function App(){
     // Saved cash counts. The Z-Reading has to compare against the drawer that
     // was actually counted, and that only ever lived in cash_counts.
     try{
-      unsubs.push(onSnapshot(query(collection(db,"cash_counts"),
-        where("branch","==",branchId),limit(120)),
+    const wideRollups=(user.role==="owner"||user.role==="commissary");
+      // Counting and closing are two different acts, and the Branches page
+      // judges every branch — so it needs everyone's counts, not just this
+      // account's. A branch that counted but never pressed Close Day read as
+      // if the crew had done nothing.
+      unsubs.push(onSnapshot(
+        wideRollups
+          ? query(collection(db,"cash_counts"),limit(600))
+          : query(collection(db,"cash_counts"),
+              where("branch","==",branchId),limit(120)),
         snap=>setCashCounts(snap.docs.map(d=>({...d.data(),_docId:d.id}))),
         ()=>{}));
     }catch(e){}
@@ -13266,7 +13274,6 @@ function App(){
     // Saved daily rollups. Branch staff only ever need their own; the owner
     // and commissary need every branch for the Reports archive, so load the
     // wider set once instead of one subscription per branch.
-    const wideRollups=(user.role==="owner"||user.role==="commissary");
     try{
       unsubs.push(onSnapshot(
         wideRollups
@@ -16340,15 +16347,24 @@ function App(){
                 &&/opening/i.test(c.desc||""))
                 .reduce((sum,c)=>sum+(Number(c.amount)||0),0);
               const _yRec=(zHistAll||[]).find(r=>r.branch===b.id&&r.date===_y);
+              // A saved cash count carries the drawer forward even when the day
+              // was never closed — the money is real either way.
+              const _yCount=(cashCounts||[]).filter(c=>c.branch===b.id
+                &&(c.date||"")===_y)
+                .sort((x,z)=>String(z.savedAt||z.time||"")
+                  .localeCompare(String(x.savedAt||x.time||"")))[0]||null;
               const carried=_yRec
                 ? (_yRec.carriedForward!=null
                     ? Number(_yRec.carriedForward)||0
                     : Math.max(0,(Number(_yRec.countedCash)||0)
                         -(Number(_yRec.remittanceCounted)||0)))
-                : null;
+                : (_yCount&&_yCount.closingBalance!=null
+                    ? Number(_yCount.closingBalance)||0 : null);
               const openFund=loggedOpen>0?loggedOpen:(carried!=null?carried:0);
               const openSrc=loggedOpen>0?"recorded today"
-                :(carried!=null?"carried from "+_y:null);
+                :(carried!=null
+                   ? ("carried from "+_y+(_yRec?"":" (count only)"))
+                   : null);
               const poWait=(advances||[]).filter(a=>a._type==="po"&&a.branch===b.id
                 &&(a.status==="received_by_main"||a.status==="discrepancy")).length;
               const st=subState((subs||[]).find(x=>x.branch===b.id)||null);
@@ -16407,7 +16423,16 @@ function App(){
                         zY ? ((Number(zY.shortOver)||0)===0 ? "closed \u00b7 balanced"
                               : "closed \u00b7 "+((zY.shortOver>=0?"+":"\u2212")
                                  +"\u20b1"+peso(Math.abs(Number(zY.shortOver)||0))))
-                           : (b.status==="closed"?"\u2014":"NOT CLOSED"),
+                           // Counted but not closed is a different problem from
+                           // nothing at all: the drawer was checked and only the
+                           // Z-Reading is missing.
+                           : (_yCount
+                               ? ("counted \u00b7 not closed"
+                                  +(Number(_yCount.variance)
+                                     ? "  "+((_yCount.variance>=0?"+":"\u2212")
+                                       +"\u20b1"+peso(Math.abs(Number(_yCount.variance)||0)))
+                                     : ""))
+                               : (b.status==="closed"?"\u2014":"NOT COUNTED")),
                         !zY&&b.status!=="closed"
                           ? true : (zY&&Math.abs(Number(zY.shortOver)||0)>=50))
                     : rowLine("Days closed",
