@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260817-230000 -->
+<!-- BUILD:20260818-120000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -504,10 +504,14 @@ function testPrint(cs,paperSize,showT){
 
 async function testPrintBT(cs,paperSize,showT){
   cs=cs||{}; paperSize=paperSize||"80mm";
-  if(!_btChar){
+  // Written before USB existed, so it demanded a Bluetooth connection up front
+  // — the pairing dialog appeared even with a USB printer already connected
+  // and printing. Ask for Bluetooth only when there is no other way out.
+  if(!usbReady() && !_btChar){
     var ok=await btConnect();
-    if(!ok){if(showT)showT("Connect printer first","warn");return;}
+    if(!ok){if(showT)showT("Connect a printer first","warn");return;}
   }
+  var _road=usbReady()?"USB":"Bluetooth";
   var W=paperSize==="58mm"?32:48;
   var enc=new TextEncoder();
   var ESC=0x1B,GS=0x1D,NL=0x0A;
@@ -531,7 +535,8 @@ async function testPrintBT(cs,paperSize,showT){
   var out=new Uint8Array(total),off=0;
   parts.forEach(function(p){out.set(p,off);off+=p.length;});
   var ok=await sendToPrinter(out);
-  if(showT)ok?showT("✅ BT Test print OK!","ok"):showT("❌ BT print failed","warn");
+  if(showT)showT(ok?("\u2705 Test print sent over "+_road)
+                   :("\u274c Print failed over "+_road),ok?"ok":"err");
 }
 
 // ─── ESC/POS BLUETOOTH PRINTER ───────────────────────────
@@ -603,24 +608,37 @@ async function _usbBind(dev){
   return true;
 }
 
+function usbName(){
+  if(!_usbDev) return "";
+  return (_usbDev.productName||"USB device")
+    +"  ("+_usbDev.vendorId.toString(16).padStart(4,"0")
+    +":"+_usbDev.productId.toString(16).padStart(4,"0")+")";
+}
+
 async function usbConnect(){
   if(!usbSupported()) return false;
   if(usbReady()) return true;
-  // Xprinter and the common 58mm clones, then the printer class, then
-  // everything — the chooser hides whatever the filter does not name.
+  // "Show me everything" is acceptAllDevices, NOT an empty filter array.
+  // filters:[] matches nothing at all — which is why the chooser kept coming
+  // up empty however many brands were listed. That was the whole bug: the
+  // printer was there the entire time and the last, widest attempt was asking
+  // for devices matching no criteria.
   var TRIES=[
-    [{vendorId:0x0483},{vendorId:0x0416},{vendorId:0x1a86},
-     {vendorId:0x0fe6},{vendorId:0x28e9},{vendorId:0x1fc9}],
-    [{classCode:7}],
-    []
+    {filters:[{classCode:7}]},                     // declares itself a printer
+    {filters:[{vendorId:0x0483},{vendorId:0x0416},{vendorId:0x1a86},
+              {vendorId:0x0fe6},{vendorId:0x28e9},{vendorId:0x1fc9},
+              {vendorId:0x04b8},{vendorId:0x0dd4},{vendorId:0x1504}]},
+    {acceptAllDevices:true}                        // every USB device
   ];
   for(var t=0;t<TRIES.length;t++){
     try{
-      var dev=await navigator.usb.requestDevice({filters:TRIES[t]});
+      var dev=await navigator.usb.requestDevice(TRIES[t]);
       await _usbBind(dev);
       return true;
     }catch(e){
-      if(e&&e.name==="NotFoundError") continue;   // nothing matched; widen
+      // NotFoundError covers both "nothing matched" and "the person cancelled",
+      // so widening on it is right: the next prompt shows a broader list.
+      if(e&&e.name==="NotFoundError") continue;
       console.warn("USB connect:",e);
       return false;
     }
@@ -628,8 +646,27 @@ async function usbConnect(){
   return false;
 }
 
+// Chrome remembers a device the person has already granted, so the handle can
+// be picked up again without a prompt. Without this, every reload silently
+// dropped back to Bluetooth — the printer was still plugged in, still
+// permitted, and the page had simply forgotten it.
+async function usbResume(){
+  if(!usbSupported()||usbReady()) return usbReady();
+  try{
+    var list=await navigator.usb.getDevices();
+    for(var i=0;i<list.length;i++){
+      try{ await _usbBind(list[i]); return true; }catch(e){}
+    }
+  }catch(e){ console.warn("USB resume:",e); }
+  return false;
+}
+
 async function usbPrint(bytes){
-  if(!usbReady()){ var ok=await usbConnect(); if(!ok) return false; }
+  if(!usbReady()){
+    // Reconnect silently first; only prompt if that is not possible.
+    var back=await usbResume();
+    if(!back){ var ok=await usbConnect(); if(!ok) return false; }
+  }
   try{
     // Small buffers on these modules — a whole Z-Reading in one transfer
     // comes out truncated.
@@ -648,6 +685,8 @@ async function usbPrint(bytes){
 // One door. USB only when one is actually connected on this device;
 // otherwise this is the Bluetooth path, unchanged.
 async function sendToPrinter(bytes){
+  // A granted USB printer counts as connected even if the page has reloaded.
+  if(!usbReady()) await usbResume();
   if(usbReady()){
     var ok=await usbPrint(bytes);
     if(ok) return true;
@@ -949,7 +988,7 @@ function kickBytes(ord,cs){
 // Auto-open after a sale. Silent no-op when the printer is not connected —
 // never prompts, never blocks the next order.
 async function btKickIfConnected(ord,cs){
-  if(!_btChar)return false;
+  if(!usbReady() && !_btChar)return false;
   if(!shouldKick(ord,cs))return false;
   try{ return await sendToPrinter(escposKick((cs&&cs.drawerPin)||2)); }
   catch(e){ return false; }
@@ -957,7 +996,7 @@ async function btKickIfConnected(ord,cs){
 
 // Manual open — for no-sale, change fund, or a drawer that failed to pop.
 async function btKickDrawer(cs){
-  if(!_btChar){var ok=await btConnect();if(!ok)return false;}
+  if(!usbReady() && !_btChar){var ok=await btConnect();if(!ok)return false;}
   return await sendToPrinter(escposKick((cs&&cs.drawerPin)||2));
 }
 
@@ -7672,7 +7711,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260817-230000";
+const BUILD = "20260818-120000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -12075,6 +12114,15 @@ function SettingsPage({db,user,showT,branches,companySettings,setCompanySettings
 
 // ─── PRINTER PAGE ─────────────────────────────────────────
 function PrinterPage({db,user,showT,companySettings,setCompanySettings}){
+  // The USB handle lives outside React, so "connected" was something you had
+  // to take on trust — and a page reload silently drops it, which is exactly
+  // when printing falls back to Bluetooth without saying so.
+  const [usbOn,setUsbOn]=useState(usbReady());
+  useEffect(()=>{
+    usbResume().then(()=>setUsbOn(usbReady()));
+    const t=setInterval(()=>setUsbOn(usbReady()),1500);
+    return()=>clearInterval(t);
+  },[]);
   const save=async()=>{
     try{
       await setDoc(doc(db,"settings","company"),companySettings,{merge:true});
@@ -12237,6 +12285,16 @@ function PrinterPage({db,user,showT,companySettings,setCompanySettings}){
             fontWeight:800,fontSize:14,cursor:"pointer",
             marginBottom:8}},
           "🔌 Connect USB Printer"),
+
+        usbSupported()&&h("div",{style:{fontSize:12,fontWeight:800,
+          marginBottom:8,padding:"8px 10px",borderRadius:8,
+          background:usbOn?"#E8F5E9":C.bg,
+          border:"1px solid "+(usbOn?C.success:C.border),
+          color:usbOn?"#1B5E20":C.muted}},
+          usbOn ? ("\u2705 USB connected \u00b7 "+usbName()
+                   +" \u2014 printing uses this")
+                : "\u26aa USB not connected \u2014 printing uses Bluetooth. "
+                  +"A page reload drops the USB connection; press Connect again."),
 
         usbSupported()&&h("div",{style:{fontSize:11,color:C.muted,
           marginBottom:10,lineHeight:1.5}},
