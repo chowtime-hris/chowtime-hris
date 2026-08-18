@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260818-150000 -->
+<!-- BUILD:20260818-160000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -1017,12 +1017,33 @@ async function btKickDrawerBoth(cs){
   return await sendToPrinter(_cat(escposKick(2),escposKick(5)));
 }
 
+// The standalone kick sends more than the receipt's does, on purpose.
+//
+// The drawer opens from ItemCount on this same printer and cable, so the
+// hardware is sound and the five bytes we send are not enough on their own.
+// Two things are different about a kick with no receipt behind it: some
+// firmware holds a tiny buffer until something flushes it, and some units
+// answer only the real-time pulse (DLE DC4) rather than ESC p. This sends the
+// real-time form first, then the standard one, then a newline to push it out.
+//
+// The kick embedded in a receipt is untouched — that one is followed by a
+// whole document and already works where it works.
+function escposKickStrong(pin){
+  var m=(Number(pin)===5)?0x01:0x00;
+  return new Uint8Array([
+    0x1B,0x40,                    // init
+    0x10,0x14,0x01,m,0x01,        // DLE DC4 — real-time pulse, ~100ms
+    0x1B,0x70,m,0x40,0x50,        // ESC p — longer pulse than the receipt kick
+    0x0A                          // flush
+  ]);
+}
+
 async function btKickDrawer(cs){
   // Pick the USB printer back up before deciding there is nothing but
   // Bluetooth — after a reload it is granted but not yet opened.
   if(!usbReady()) await usbResume();
   if(!usbReady() && !_btChar){var ok=await btConnect();if(!ok)return false;}
-  return await sendToPrinter(escposKick((cs&&cs.drawerPin)||2));
+  return await sendToPrinter(escposKickStrong((cs&&cs.drawerPin)||2));
 }
 
 async function printEscPos(ord,bName,cs,paperSize){
@@ -7736,7 +7757,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260818-150000";
+const BUILD = "20260818-160000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
