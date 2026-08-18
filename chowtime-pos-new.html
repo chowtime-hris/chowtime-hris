@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260818-170000 -->
+<!-- BUILD:20260818-190000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -600,11 +600,13 @@ async function _usbBind(dev){
     });
   });
   if(!chosen) throw new Error("No bulk OUT endpoint on this device");
-  try{ await dev.claimInterface(chosen.iface); }
-  catch(e){
-    try{ await dev.releaseInterface(chosen.iface); }catch(e2){}
-    await dev.claimInterface(chosen.iface);
-  }
+  // Deliberately NOT claimed here.
+  //
+  // claimInterface is exclusive for as long as it is held, and this held it
+  // from the moment of connecting until the tab closed. That locked the
+  // printer away from everything else — the cash drawer stopped opening from
+  // ItemCount, and unplugging our POS was what made it work again. The claim
+  // is taken per print now and given straight back.
   _usbDev=dev; _usbEp=chosen.ep; _usbIface=chosen.iface;
   return true;
 }
@@ -668,20 +670,32 @@ async function usbPrint(bytes){
     var back=await usbResume();
     if(!back){ var ok=await usbConnect(); if(!ok) return false; }
   }
+  var claimed=false;
   try{
+    try{ await _usbDev.claimInterface(_usbIface); claimed=true; }
+    catch(eC){
+      // Someone else has it. Say so plainly rather than failing silently.
+      console.warn("USB busy:",eC);
+      throw new Error("Printer is in use by another app");
+    }
     // Small buffers on these modules — a whole Z-Reading in one transfer
     // comes out truncated.
     for(var i=0;i<bytes.length;i+=4096){
       await _usbDev.transferOut(_usbEp, bytes.slice(i,i+4096));
     }
+    // A moment for the printer to drain before the interface goes back.
+    await new Promise(function(r){setTimeout(r,300);});
+    try{ await _usbDev.releaseInterface(_usbIface); }catch(e3){}
     return true;
   }catch(e){
     console.warn("USB print:",e);
     // A stalled pipe is recoverable; closing the device and forgetting it is
     // not. One failed transfer used to drop the whole connection, and then
     // nothing could reach the printer until it was physically replugged.
-    try{ await _usbDev.clearHalt("out",_usbEp); return false; }catch(e2){}
-    // Only give up the handle if the device itself is gone.
+    // Always hand the interface back, however the transfer ended — holding it
+    // after a failure is what starved every other app.
+    if(claimed){ try{ await _usbDev.releaseInterface(_usbIface); }catch(e4){} }
+    try{ await _usbDev.clearHalt("out",_usbEp); }catch(e2){}
     if(!_usbDev || !_usbDev.opened){ _usbDev=null; _usbEp=0; }
     return false;
   }
@@ -968,16 +982,7 @@ function buildEscPosKOT(ord,bName,cs,paperSize){
 // The drawer must be cabled to the PRINTER, not the tablet: the tablet has no
 // way to reach it, so this only fires on the Bluetooth path, never browser print.
 function escposKick(pin){
-  // The setting arrives as a string from the picker, and "5"===5 is false — so
-  // a drawer wired to pin 5 was always sent the pin 2 pulse and never opened.
-  var m=(Number(pin)===5)?0x01:0x00;
-  // Real-time pulse first: it is executed on arrival rather than queued, so
-  // nothing later in the stream can cancel it. ESC p follows for the units
-  // that only answer that one.
-  return new Uint8Array([
-    0x10,0x14,0x01,m,0x01,
-    0x1B,0x70,m,0x40,0x50
-  ]);
+  return new Uint8Array([0x1B,0x70,(pin===5?0x01:0x00),0x19,0xFA]);
 }
 
 function _cat(){
@@ -996,15 +1001,7 @@ function shouldKick(ord,cs){
 }
 
 function kickBytes(ord,cs){
-  if(!shouldKick(ord,cs)) return null;
-  // The receipt that follows begins with ESC @ — a reset — and that wiped the
-  // pulse before the solenoid ever fired. Initialising FIRST, then kicking,
-  // leaves the command as the last thing standing when the receipt data
-  // arrives. The drawer has never opened from a receipt for this reason.
-  return _cat(
-    new Uint8Array([0x1B,0x40]),                 // init, ahead of the pulse
-    escposKick((cs&&cs.drawerPin)||2)
-  );
+  return shouldKick(ord,cs)?escposKick((cs&&cs.drawerPin)||2):null;
 }
 
 // Auto-open after a sale. Silent no-op when the printer is not connected —
@@ -1031,33 +1028,12 @@ async function btKickDrawerBoth(cs){
   return await sendToPrinter(_cat(escposKick(2),escposKick(5)));
 }
 
-// The standalone kick sends more than the receipt's does, on purpose.
-//
-// The drawer opens from ItemCount on this same printer and cable, so the
-// hardware is sound and the five bytes we send are not enough on their own.
-// Two things are different about a kick with no receipt behind it: some
-// firmware holds a tiny buffer until something flushes it, and some units
-// answer only the real-time pulse (DLE DC4) rather than ESC p. This sends the
-// real-time form first, then the standard one, then a newline to push it out.
-//
-// The kick embedded in a receipt is untouched — that one is followed by a
-// whole document and already works where it works.
-function escposKickStrong(pin){
-  var m=(Number(pin)===5)?0x01:0x00;
-  return new Uint8Array([
-    0x1B,0x40,                    // init
-    0x10,0x14,0x01,m,0x01,        // DLE DC4 — real-time pulse, ~100ms
-    0x1B,0x70,m,0x40,0x50,        // ESC p — longer pulse than the receipt kick
-    0x0A                          // flush
-  ]);
-}
-
 async function btKickDrawer(cs){
   // Pick the USB printer back up before deciding there is nothing but
   // Bluetooth — after a reload it is granted but not yet opened.
   if(!usbReady()) await usbResume();
   if(!usbReady() && !_btChar){var ok=await btConnect();if(!ok)return false;}
-  return await sendToPrinter(escposKickStrong((cs&&cs.drawerPin)||2));
+  return await sendToPrinter(escposKick((cs&&cs.drawerPin)||2));
 }
 
 async function printEscPos(ord,bName,cs,paperSize){
@@ -7771,7 +7747,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260818-170000";
+const BUILD = "20260818-190000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
