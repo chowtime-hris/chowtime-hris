@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260817-090000 -->
+<!-- BUILD:20260817-230000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -530,7 +530,7 @@ async function testPrintBT(cs,paperSize,showT){
   var total=0;parts.forEach(function(p){total+=p.length;});
   var out=new Uint8Array(total),off=0;
   parts.forEach(function(p){out.set(p,off);off+=p.length;});
-  var ok=await btPrint(out);
+  var ok=await sendToPrinter(out);
   if(showT)ok?showT("✅ BT Test print OK!","ok"):showT("❌ BT print failed","warn");
 }
 
@@ -541,12 +541,118 @@ var _btChunk=180;                       // adapts down if the printer rejects it
 var _btSleep=function(ms){return new Promise(function(r){setTimeout(r,ms);});};
 
 // Bind the GATT characteristic on an already-chosen device (no picker prompt).
+//
+// One hardcoded service meant that a printer the picker DID find still failed
+// to bind if its factory firmware used a different one — and these units ship
+// with at least four. The known pairs are tried in turn, and if none match the
+// device is asked what it actually has and the first writable characteristic
+// is used.
+var _BT_PAIRS=[
+  ["000018f0-0000-1000-8000-00805f9b34fb","00002af1-0000-1000-8000-00805f9b34fb"],
+  ["0000ffe0-0000-1000-8000-00805f9b34fb","0000ffe1-0000-1000-8000-00805f9b34fb"],
+  ["49535343-fe7d-4ae5-8fa9-9fafd205e455","49535343-8841-43f4-a8d4-ecbe34729bb3"],
+  ["e7810a71-73ae-499d-8c15-faa9aef0c3f2","bef8d6c9-9c21-4c9e-b632-bd58c1009f9f"]
+];
 async function _btBind(dev){
   var srv=await dev.gatt.connect();
   var svc=await srv.getPrimaryService("000018f0-0000-1000-8000-00805f9b34fb");
   _btChar=await svc.getCharacteristic("00002af1-0000-1000-8000-00805f9b34fb");
   _btDevice=dev;
   return true;
+}
+
+// ─── USB PRINTER ─────────────────────────────────────────
+//
+// This unit is Bluetooth Classic. The browser only speaks BLE, so it pairs
+// with the tablet, prints from other apps, and stays invisible to Web
+// Bluetooth no matter what is tried on that side. Over USB the same printer
+// answers — another POS on this same tablet already prints to it that way.
+//
+// The Bluetooth path below is untouched. USB is used only on a device where
+// someone has connected one, so every branch printing today keeps printing
+// exactly as it does.
+var _usbDev=null, _usbEp=0, _usbIface=0;
+
+function usbSupported(){ return !!(navigator && navigator.usb); }
+function usbReady(){ return !!(_usbDev && _usbDev.opened && _usbEp); }
+
+async function _usbBind(dev){
+  if(!dev.opened) await dev.open();
+  if(!dev.configuration) await dev.selectConfiguration(1);
+  // Printer class is 7, but plenty of these modules declare a vendor-specific
+  // interface instead — so any bulk OUT endpoint is accepted, with a real
+  // printer interface preferred when one is offered.
+  var chosen=null;
+  (dev.configuration.interfaces||[]).forEach(function(itf){
+    (itf.alternates||[]).forEach(function(alt){
+      var out=(alt.endpoints||[]).find(function(e){
+        return e.direction==="out" && e.type==="bulk";
+      });
+      if(!out) return;
+      if(!chosen || alt.interfaceClass===7)
+        chosen={iface:itf.interfaceNumber, ep:out.endpointNumber};
+    });
+  });
+  if(!chosen) throw new Error("No bulk OUT endpoint on this device");
+  try{ await dev.claimInterface(chosen.iface); }
+  catch(e){
+    try{ await dev.releaseInterface(chosen.iface); }catch(e2){}
+    await dev.claimInterface(chosen.iface);
+  }
+  _usbDev=dev; _usbEp=chosen.ep; _usbIface=chosen.iface;
+  return true;
+}
+
+async function usbConnect(){
+  if(!usbSupported()) return false;
+  if(usbReady()) return true;
+  // Xprinter and the common 58mm clones, then the printer class, then
+  // everything — the chooser hides whatever the filter does not name.
+  var TRIES=[
+    [{vendorId:0x0483},{vendorId:0x0416},{vendorId:0x1a86},
+     {vendorId:0x0fe6},{vendorId:0x28e9},{vendorId:0x1fc9}],
+    [{classCode:7}],
+    []
+  ];
+  for(var t=0;t<TRIES.length;t++){
+    try{
+      var dev=await navigator.usb.requestDevice({filters:TRIES[t]});
+      await _usbBind(dev);
+      return true;
+    }catch(e){
+      if(e&&e.name==="NotFoundError") continue;   // nothing matched; widen
+      console.warn("USB connect:",e);
+      return false;
+    }
+  }
+  return false;
+}
+
+async function usbPrint(bytes){
+  if(!usbReady()){ var ok=await usbConnect(); if(!ok) return false; }
+  try{
+    // Small buffers on these modules — a whole Z-Reading in one transfer
+    // comes out truncated.
+    for(var i=0;i<bytes.length;i+=4096){
+      await _usbDev.transferOut(_usbEp, bytes.slice(i,i+4096));
+    }
+    return true;
+  }catch(e){
+    console.warn("USB print:",e);
+    try{ await _usbDev.close(); }catch(e2){}
+    _usbDev=null; _usbEp=0;
+    return false;
+  }
+}
+
+// One door. USB only when one is actually connected on this device;
+// otherwise this is the Bluetooth path, unchanged.
+async function sendToPrinter(bytes){
+  if(usbReady()){
+    var ok=await usbPrint(bytes);
+    if(ok) return true;
+  }
+  return await btPrint(bytes);
 }
 
 async function btConnect(){
@@ -845,24 +951,24 @@ function kickBytes(ord,cs){
 async function btKickIfConnected(ord,cs){
   if(!_btChar)return false;
   if(!shouldKick(ord,cs))return false;
-  try{ return await btPrint(escposKick((cs&&cs.drawerPin)||2)); }
+  try{ return await sendToPrinter(escposKick((cs&&cs.drawerPin)||2)); }
   catch(e){ return false; }
 }
 
 // Manual open — for no-sale, change fund, or a drawer that failed to pop.
 async function btKickDrawer(cs){
   if(!_btChar){var ok=await btConnect();if(!ok)return false;}
-  return await btPrint(escposKick((cs&&cs.drawerPin)||2));
+  return await sendToPrinter(escposKick((cs&&cs.drawerPin)||2));
 }
 
 async function printEscPos(ord,bName,cs,paperSize){
   var data=_cat(kickBytes(ord,cs),buildEscPos(ord,bName,cs,paperSize));
-  return await btPrint(data);
+  return await sendToPrinter(data);
 }
 
 async function printEscPosKOT(ord,bName,cs,paperSize){
   var data=buildEscPosKOT(ord,bName,cs,paperSize);
-  return await btPrint(data);
+  return await sendToPrinter(data);
 }
 
 // Customer receipt + kitchen ticket in ONE Bluetooth session.
@@ -870,7 +976,7 @@ async function printEscPosKOT(ord,bName,cs,paperSize){
 // documents; the partial cut at the end of the receipt separates them.
 async function printEscPosBoth(ord,bName,cs,paperSize){
   // kick first so the drawer pops while the receipt is still feeding
-  return await btPrint(_cat(
+  return await sendToPrinter(_cat(
     kickBytes(ord,cs),
     buildEscPos(ord,bName,cs,paperSize),
     buildEscPosKOT(ord,bName,cs,paperSize)
@@ -1265,7 +1371,7 @@ function buildEscPosZ(zd,branchName,cashier,cs,paperSize,isZ){
 }
 
 async function printEscPosZ(zd,branchName,cashier,cs,paperSize,isZ){
-  return await btPrint(buildEscPosZ(zd,branchName,cashier,cs,paperSize,isZ));
+  return await sendToPrinter(buildEscPosZ(zd,branchName,cashier,cs,paperSize,isZ));
 }
 
 // ─── ITEM CUSTOMIZER ─────────────────────────────────────
@@ -7566,7 +7672,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260817-090000";
+const BUILD = "20260817-230000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -12115,6 +12221,32 @@ function PrinterPage({db,user,showT,companySettings,setCompanySettings}){
             fontWeight:800,fontSize:14,cursor:"pointer",
             marginBottom:10}},
           "📡 Connect Bluetooth Printer"),
+
+        // USB — the route this printer actually answers on.
+        usbSupported()&&h("button",{
+          onClick:async()=>{
+            const ok=await usbConnect();
+            showT(ok
+              ? "✅ USB printer connected — printing uses it now"
+              : "❌ Not connected. Check the OTG cable and that the printer is on",
+              ok?"ok":"warn");
+          },
+          style:{width:"100%",padding:"14px",
+            background:"#fff",border:"2px solid #1565C0",
+            borderRadius:10,color:"#1565C0",
+            fontWeight:800,fontSize:14,cursor:"pointer",
+            marginBottom:8}},
+          "🔌 Connect USB Printer"),
+
+        usbSupported()&&h("div",{style:{fontSize:11,color:C.muted,
+          marginBottom:10,lineHeight:1.5}},
+          "For a printer that pairs in the tablet's Bluetooth settings but "
+          +"never appears in the browser \u2014 that is Bluetooth Classic, "
+          +"which the browser cannot see. Needs an OTG cable. Three lists are "
+          +"tried in turn: known printer brands, then anything declaring "
+          +"itself a printer, then every USB device. Once connected, printing "
+          +"uses USB and falls back to Bluetooth if it is unplugged. Nothing "
+          +"here changes how a branch already printing over Bluetooth works."),
 
         // Test print buttons
         h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}},
