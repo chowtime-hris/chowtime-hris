@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260818-220000 -->
+<!-- BUILD:20260819-100000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -7711,7 +7711,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260818-220000";
+const BUILD = "20260819-100000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -13148,6 +13148,20 @@ function App(){
   const [proofOpen,setProofOpen]=useState(false);        // proof modal
   const [openDisc,setOpenDisc]=useState({});             // expanded discrepancy reports
   const [editBr,setEditBr]=useState(null);               // branch being added/edited
+  // Franchise credentials are written to settings/franchise_keys, apart from
+  // the branch list, so a cashier reading the sidebar never sees them. The
+  // edit form read them back off the branch record — where they are not — so
+  // every reopen showed empty boxes and looked like the save had failed. It
+  // had not; the values were simply somewhere else.
+  const [frKeys,setFrKeys]=useState({});
+  useEffect(()=>{
+    if(user.role!=="owner"&&user.role!=="commissary")return;
+    let alive=true;
+    getDoc(doc(db,"settings","franchise_keys"))
+      .then(d=>{ if(alive&&d.exists())setFrKeys(d.data()||{}); })
+      .catch(()=>{});
+    return()=>{alive=false;};
+  },[user]);
   const [expMonth,setExpMonth]=useState("");             // "" = all months
   const [expCat,setExpCat]=useState("");
   const [expBranch,setExpBranch]=useState("");           // owner only, "" = all
@@ -16641,7 +16655,8 @@ function App(){
                     !!stale||!hb)
                 ),
                 user.role==="owner"&&h("div",{style:{display:"flex",gap:6}},
-                  h("button",{onClick:()=>setEditBr(Object.assign({},b)),
+                  h("button",{onClick:()=>setEditBr(
+                    Object.assign({},b,frKeys[b.id]||{})),
                     style:{flex:1,padding:"6px",borderRadius:7,fontSize:13,cursor:"pointer",
                       border:"1px solid "+C.border,background:"#fff",fontWeight:700}},
                     "✏️ Edit"),
@@ -16934,12 +16949,16 @@ function App(){
                     // Credentials live apart from the branch list, so a
                     // cashier reading the sidebar never reads them.
                     if(b.ownership==="franchise"){
+                      const _fk={
+                        hrisUrl:b.hrisUrl||"",
+                        hrisApiKey:b.hrisApiKey||"",
+                        hrisProjectId:b.hrisProjectId||""
+                      };
                       await setDoc(doc(db,"settings","franchise_keys"),
-                        {[b.id]:{
-                          hrisUrl:b.hrisUrl||"",
-                          hrisApiKey:b.hrisApiKey||"",
-                          hrisProjectId:b.hrisProjectId||""
-                        }},{merge:true});
+                        {[b.id]:_fk},{merge:true});
+                      // Keep the copy in memory in step, or reopening before a
+                      // reload shows the old values back again.
+                      setFrKeys(p=>Object.assign({},p,{[b.id]:_fk}));
                     }
                   }catch(e){
                     console.error("branch save:",e);
