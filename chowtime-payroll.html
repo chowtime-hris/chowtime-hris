@@ -1598,9 +1598,27 @@ function scheduleAutoClockOut() {
 }
 scheduleAutoClockOut();
 
+// Branches come from the POS, which mirrors them into HRIS on every save.
+let posBranches = load('posBranches') || [];
+
 function addBranchSchedule() {
-  const name = prompt('Branch name (must match kiosk branch name exactly):');
-  if (!name) return;
+  // Asking someone to retype a name that "must match exactly" is asking for
+  // the mismatch: that prompt is how HRIS-WSPF was created for a branch called
+  // WSFP, and it then matched nothing for weeks. Pick from the list instead.
+  let name = '';
+  if (posBranches.length) {
+    const opts = posBranches.map((b,i)=>(i+1)+'. '+b.name).join('\n');
+    const pickRaw = prompt('Which branch?\n\n'+opts
+      +'\n\nType the number:');
+    if (!pickRaw) return;
+    const idx = parseInt(pickRaw,10)-1;
+    if (isNaN(idx) || !posBranches[idx]) { alert('No branch with that number.'); return; }
+    name = posBranches[idx].name;
+  } else {
+    name = prompt('Branch name (must match the kiosk branch name exactly):')||'';
+    if (!name) return;
+  }
+  if (branchSchedules[name]) { alert(name+' already has a schedule.'); return; }
   if (!branchSchedules[name]) {
     branchSchedules[name] = { start:'09:00', end:'18:00', bstart:'12:00', bend:'13:00', grace:5 };
   }
@@ -4344,6 +4362,15 @@ window.saveSettings = function() {
 // Runs once to remove EMP-001 to EMP-005 if they exist in Firebase
 // These were seeded during initial testing and should be removed
 // Which tablets are out there, and what they are running.
+// The branch list the POS mirrors here. One source, so no one retypes a name.
+onValue(ref(db,'branches'), snap => {
+  const data=snap.val()||{};
+  posBranches=Object.values(data)
+    .filter(b=>b&&b.name)
+    .sort((a,b)=>String(a.name).localeCompare(String(b.name)));
+  lsSet('posBranches',posBranches);
+});
+
 onValue(ref(db,'devices'), snap => {
   const tb=document.getElementById('kiosk-devices');
   if(!tb)return;

@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260819-130000 -->
+<!-- BUILD:20260819-160000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -7711,7 +7711,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260819-130000";
+const BUILD = "20260819-160000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -16659,6 +16659,42 @@ function App(){
                     !!stale||!hb)
                 ),
                 user.role==="owner"&&h("div",{style:{display:"flex",gap:6}},
+                  // The kiosk config, ready to send.
+                  //
+                  // A tablet's branch lives in its own localStorage and cannot
+                  // be set from here, so every mis-set kiosk meant a trip or a
+                  // phone call. This builds the same link by hand-free means:
+                  // the branch name comes from this record, so it cannot be
+                  // typed wrong.
+                  h("button",{onClick:()=>{
+                      const payload={
+                        apiKey:"AIzaSyB8PlWl-qfmAn2GDdrJ1Y5pZQs4RAjhTo4",
+                        projectId:"chowtime-hris",
+                        databaseURL:"https://chowtime-hris-default-rtdb"
+                          +".asia-southeast1.firebasedatabase.app",
+                        appId:"1:443134962503:web:7959dc5a6c9cbc967d7a62",
+                        branch:b.full,
+                        lat:Number(b.lat)||14.5995,
+                        lng:Number(b.lng)||120.9842,
+                        radius:Number(b.geoRadius)||500,
+                        enforceGeo:false
+                      };
+                      const b64=btoa(unescape(encodeURIComponent(
+                        JSON.stringify(payload))));
+                      const url="https://chowtime-hris.github.io/chowtime-hris/"
+                        +"chowtime-kiosk.html#cfg="+b64;
+                      const done=()=>showT("Kiosk link copied — send it to "
+                        +b.full+" and have them open it once","ok");
+                      if(navigator.clipboard&&navigator.clipboard.writeText){
+                        navigator.clipboard.writeText(url).then(done,()=>prompt(
+                          "Copy this link for "+b.full,url));
+                      } else { prompt("Copy this link for "+b.full,url); }
+                    },
+                    title:"Copy the kiosk setup link for "+b.full,
+                    style:{padding:"7px 9px",borderRadius:7,fontSize:12,
+                      border:"1px solid "+C.border,background:"#fff",
+                      cursor:"pointer",marginRight:6}},"📋 Kiosk link"),
+
                   h("button",{onClick:()=>setEditBr(
                     Object.assign({},b,frKeys[b.id]||{})),
                     style:{flex:1,padding:"6px",borderRadius:7,fontSize:13,cursor:"pointer",
@@ -16970,6 +17006,29 @@ function App(){
                     : branches.map(x=>x.id===b.id?Object.assign({},x,clean):x);
                   try{
                     await setDoc(doc(db,"settings","branches"),{branches:next},{merge:true});
+
+                    // Mirror the branch into HRIS so nobody has to type its
+                    // name again.
+                    //
+                    // The name was being re-keyed in four places — shift
+                    // schedules, geofence, the kiosk config and here — and a
+                    // single transposed pair of letters made "HRIS-WSPF"
+                    // instead of WSFP, which then matched nothing. Written
+                    // once, read everywhere: the payroll app picks branches
+                    // from this list rather than asking for the name.
+                    if(hrisDB){
+                      try{
+                        await set(ref(hrisDB,"branches/"
+                          +clean.id.replace(/[^a-zA-Z0-9]/g,"_")),{
+                          id:clean.id,
+                          name:clean.full,          // the one true label
+                          short:clean.name||"",
+                          ownership:clean.ownership||"company",
+                          status:clean.status||"open",
+                          updatedAt:Date.now()
+                        });
+                      }catch(e2){ console.warn("HRIS branch mirror:",e2); }
+                    }
                     // Credentials live apart from the branch list, so a
                     // cashier reading the sidebar never reads them.
                     if(b.ownership==="franchise"){
