@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260818-190000 -->
+<!-- BUILD:20260819-120000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -504,15 +504,10 @@ function testPrint(cs,paperSize,showT){
 
 async function testPrintBT(cs,paperSize,showT){
   cs=cs||{}; paperSize=paperSize||"80mm";
-  // Written before USB existed, so it demanded a Bluetooth connection up front
-  // — the pairing dialog appeared even with a USB printer already connected
-  // and printing. Ask for Bluetooth only when there is no other way out.
-  if(!usbReady()) await usbResume();
-  if(!usbReady() && !_btChar){
+  if(!_btChar){
     var ok=await btConnect();
-    if(!ok){if(showT)showT("Connect a printer first","warn");return;}
+    if(!ok){if(showT)showT("Connect printer first","warn");return;}
   }
-  var _road=usbReady()?"USB":"Bluetooth";
   var W=paperSize==="58mm"?32:48;
   var enc=new TextEncoder();
   var ESC=0x1B,GS=0x1D,NL=0x0A;
@@ -536,8 +531,10 @@ async function testPrintBT(cs,paperSize,showT){
   var out=new Uint8Array(total),off=0;
   parts.forEach(function(p){out.set(p,off);off+=p.length;});
   var ok=await sendToPrinter(out);
+  // Name the road it took — "it printed" and "it printed over USB" are
+  // different facts, and only one of them tells you the connection is live.
   if(showT)showT(ok?("\u2705 Test print sent over "+_road)
-                   :("\u274c Print failed over "+_road),ok?"ok":"err");
+                   :("\u274c Print failed over "+_road),ok?"ok":"warn");
 }
 
 // ─── ESC/POS BLUETOOTH PRINTER ───────────────────────────
@@ -569,25 +566,24 @@ async function _btBind(dev){
 
 // ─── USB PRINTER ─────────────────────────────────────────
 //
-// This unit is Bluetooth Classic. The browser only speaks BLE, so it pairs
-// with the tablet, prints from other apps, and stays invisible to Web
-// Bluetooth no matter what is tried on that side. Over USB the same printer
-// answers — another POS on this same tablet already prints to it that way.
-//
-// The Bluetooth path below is untouched. USB is used only on a device where
-// someone has connected one, so every branch printing today keeps printing
-// exactly as it does.
+// This unit is Bluetooth Classic; the browser only speaks BLE, so it pairs
+// with the tablet and stays invisible to Web Bluetooth. Over USB it answers.
+// The Bluetooth path below is untouched — USB is used only where one has been
+// connected.
 var _usbDev=null, _usbEp=0, _usbIface=0;
 
 function usbSupported(){ return !!(navigator && navigator.usb); }
 function usbReady(){ return !!(_usbDev && _usbDev.opened && _usbEp); }
+function usbName(){
+  if(!_usbDev) return "";
+  return (_usbDev.productName||"USB device")
+    +"  ("+_usbDev.vendorId.toString(16).padStart(4,"0")
+    +":"+_usbDev.productId.toString(16).padStart(4,"0")+")";
+}
 
 async function _usbBind(dev){
   if(!dev.opened) await dev.open();
   if(!dev.configuration) await dev.selectConfiguration(1);
-  // Printer class is 7, but plenty of these modules declare a vendor-specific
-  // interface instead — so any bulk OUT endpoint is accepted, with a real
-  // printer interface preferred when one is offered.
   var chosen=null;
   (dev.configuration.interfaces||[]).forEach(function(itf){
     (itf.alternates||[]).forEach(function(alt){
@@ -600,38 +596,22 @@ async function _usbBind(dev){
     });
   });
   if(!chosen) throw new Error("No bulk OUT endpoint on this device");
-  // Deliberately NOT claimed here.
-  //
-  // claimInterface is exclusive for as long as it is held, and this held it
-  // from the moment of connecting until the tab closed. That locked the
-  // printer away from everything else — the cash drawer stopped opening from
-  // ItemCount, and unplugging our POS was what made it work again. The claim
-  // is taken per print now and given straight back.
+  // Not claimed here: an exclusive claim held from connect until the tab
+  // closed locked the printer away from every other app on the tablet.
   _usbDev=dev; _usbEp=chosen.ep; _usbIface=chosen.iface;
   return true;
-}
-
-function usbName(){
-  if(!_usbDev) return "";
-  return (_usbDev.productName||"USB device")
-    +"  ("+_usbDev.vendorId.toString(16).padStart(4,"0")
-    +":"+_usbDev.productId.toString(16).padStart(4,"0")+")";
 }
 
 async function usbConnect(){
   if(!usbSupported()) return false;
   if(usbReady()) return true;
-  // "Show me everything" is acceptAllDevices, NOT an empty filter array.
-  // filters:[] matches nothing at all — which is why the chooser kept coming
-  // up empty however many brands were listed. That was the whole bug: the
-  // printer was there the entire time and the last, widest attempt was asking
-  // for devices matching no criteria.
+  // "Everything" is acceptAllDevices — filters:[] matches nothing at all.
   var TRIES=[
-    {filters:[{classCode:7}]},                     // declares itself a printer
+    {filters:[{classCode:7}]},
     {filters:[{vendorId:0x0483},{vendorId:0x0416},{vendorId:0x1a86},
               {vendorId:0x0fe6},{vendorId:0x28e9},{vendorId:0x1fc9},
               {vendorId:0x04b8},{vendorId:0x0dd4},{vendorId:0x1504}]},
-    {acceptAllDevices:true}                        // every USB device
+    {acceptAllDevices:true}
   ];
   for(var t=0;t<TRIES.length;t++){
     try{
@@ -639,8 +619,6 @@ async function usbConnect(){
       await _usbBind(dev);
       return true;
     }catch(e){
-      // NotFoundError covers both "nothing matched" and "the person cancelled",
-      // so widening on it is right: the next prompt shows a broader list.
       if(e&&e.name==="NotFoundError") continue;
       console.warn("USB connect:",e);
       return false;
@@ -649,10 +627,8 @@ async function usbConnect(){
   return false;
 }
 
-// Chrome remembers a device the person has already granted, so the handle can
-// be picked up again without a prompt. Without this, every reload silently
-// dropped back to Bluetooth — the printer was still plugged in, still
-// permitted, and the page had simply forgotten it.
+// Chrome remembers a granted device, so the handle can be picked up again
+// without a prompt. Without this every reload silently fell back to Bluetooth.
 async function usbResume(){
   if(!usbSupported()||usbReady()) return usbReady();
   try{
@@ -664,36 +640,27 @@ async function usbResume(){
   return false;
 }
 
-async function usbPrint(bytes){
+async function usbPrint(bytes,holdMs){
   if(!usbReady()){
-    // Reconnect silently first; only prompt if that is not possible.
     var back=await usbResume();
     if(!back){ var ok=await usbConnect(); if(!ok) return false; }
   }
   var claimed=false;
   try{
     try{ await _usbDev.claimInterface(_usbIface); claimed=true; }
-    catch(eC){
-      // Someone else has it. Say so plainly rather than failing silently.
-      console.warn("USB busy:",eC);
-      throw new Error("Printer is in use by another app");
-    }
-    // Small buffers on these modules — a whole Z-Reading in one transfer
-    // comes out truncated.
+    catch(eC){ throw new Error("Printer is in use by another app"); }
     for(var i=0;i<bytes.length;i+=4096){
       await _usbDev.transferOut(_usbEp, bytes.slice(i,i+4096));
     }
-    // A moment for the printer to drain before the interface goes back.
-    await new Promise(function(r){setTimeout(r,300);});
+    // Over Bluetooth the link simply stays open, and the drawer fires. Here the
+    // interface is handed back straight after the write, and releasing it can
+    // reset the device — cancelling a pulse that had not run yet. The solenoid
+    // needs its full cycle before the interface goes anywhere.
+    await new Promise(function(r){setTimeout(r, holdMs||300);});
     try{ await _usbDev.releaseInterface(_usbIface); }catch(e3){}
     return true;
   }catch(e){
     console.warn("USB print:",e);
-    // A stalled pipe is recoverable; closing the device and forgetting it is
-    // not. One failed transfer used to drop the whole connection, and then
-    // nothing could reach the printer until it was physically replugged.
-    // Always hand the interface back, however the transfer ended — holding it
-    // after a failure is what starved every other app.
     if(claimed){ try{ await _usbDev.releaseInterface(_usbIface); }catch(e4){} }
     try{ await _usbDev.clearHalt("out",_usbEp); }catch(e2){}
     if(!_usbDev || !_usbDev.opened){ _usbDev=null; _usbEp=0; }
@@ -701,13 +668,12 @@ async function usbPrint(bytes){
   }
 }
 
-// One door. USB only when one is actually connected on this device;
-// otherwise this is the Bluetooth path, unchanged.
-async function sendToPrinter(bytes){
-  // A granted USB printer counts as connected even if the page has reloaded.
+// One door. USB only where one is connected; otherwise the Bluetooth path.
+// holdMs lets a drawer pulse finish before the interface is released.
+async function sendToPrinter(bytes,holdMs){
   if(!usbReady()) await usbResume();
   if(usbReady()){
-    var ok=await usbPrint(bytes);
+    var ok=await usbPrint(bytes,holdMs);
     if(ok) return true;
   }
   return await btPrint(bytes);
@@ -1006,39 +972,37 @@ function kickBytes(ord,cs){
 
 // Auto-open after a sale. Silent no-op when the printer is not connected —
 // never prompts, never blocks the next order.
+// A kick with nothing behind it.
+//
+// Inside a receipt the same five bytes are followed by hundreds more, and the
+// firmware processes the lot. Sent alone they can sit in the buffer with
+// nothing to push them through — which is why the drawer opens on some paths
+// and not on a bare punch. A few nulls after the pulse cost no paper and give
+// the printer something to chew on.
+function kickAlone(pin){
+  return _cat(escposKick(pin), new Uint8Array([0,0,0,0,0,0,0,0]));
+}
+
 async function btKickIfConnected(ord,cs){
   if(!usbReady()) await usbResume();
   if(!usbReady() && !_btChar)return false;
   if(!shouldKick(ord,cs))return false;
-  try{ return await sendToPrinter(escposKick((cs&&cs.drawerPin)||2)); }
+  try{ return await sendToPrinter(kickAlone((cs&&cs.drawerPin)||2),1500); }
   catch(e){ return false; }
 }
 
-// Manual open — for no-sale, change fund, or a drawer that failed to pop.
-// The manual button fires BOTH pins.
-//
-// Which pin a drawer is wired to is not visible from the outside, and getting
-// it wrong looks exactly like a broken cable — the printer accepts the command
-// either way and nothing moves. A drawer ignores a pulse meant for the other
-// pin, so sending both costs nothing and removes the guess. The automatic kick
-// after a sale still uses the configured pin only.
-async function btKickDrawerBoth(cs){
-  if(!usbReady()) await usbResume();
-  if(!usbReady() && !_btChar){var ok=await btConnect();if(!ok)return false;}
-  return await sendToPrinter(_cat(escposKick(2),escposKick(5)));
-}
-
 async function btKickDrawer(cs){
-  // Pick the USB printer back up before deciding there is nothing but
-  // Bluetooth — after a reload it is granted but not yet opened.
   if(!usbReady()) await usbResume();
   if(!usbReady() && !_btChar){var ok=await btConnect();if(!ok)return false;}
-  return await sendToPrinter(escposKick((cs&&cs.drawerPin)||2));
+  // The pulse is 50ms on, 500ms off. Over Bluetooth the link just stays open
+  // and it completes; on USB the interface is handed back straight after the
+  // write, and that release can reset the device before the solenoid moves.
+  return await sendToPrinter(kickAlone((cs&&cs.drawerPin)||2),1500);
 }
 
 async function printEscPos(ord,bName,cs,paperSize){
   var data=_cat(kickBytes(ord,cs),buildEscPos(ord,bName,cs,paperSize));
-  return await sendToPrinter(data);
+  return await sendToPrinter(data, kickBytes(ord,cs)?1500:300);
 }
 
 async function printEscPosKOT(ord,bName,cs,paperSize){
@@ -1055,7 +1019,7 @@ async function printEscPosBoth(ord,bName,cs,paperSize){
     kickBytes(ord,cs),
     buildEscPos(ord,bName,cs,paperSize),
     buildEscPosKOT(ord,bName,cs,paperSize)
-  ));
+  ), kickBytes(ord,cs)?1500:300);
 }
 
 
@@ -7747,7 +7711,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260818-190000";
+const BUILD = "20260819-120000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -12150,9 +12114,8 @@ function SettingsPage({db,user,showT,branches,companySettings,setCompanySettings
 
 // ─── PRINTER PAGE ─────────────────────────────────────────
 function PrinterPage({db,user,showT,companySettings,setCompanySettings}){
-  // The USB handle lives outside React, so "connected" was something you had
-  // to take on trust — and a page reload silently drops it, which is exactly
-  // when printing falls back to Bluetooth without saying so.
+  // The USB handle lives outside React, and a reload drops it — which is
+  // exactly when printing quietly falls back to Bluetooth.
   const [usbOn,setUsbOn]=useState(usbReady());
   useEffect(()=>{
     usbResume().then(()=>setUsbOn(usbReady()));
@@ -12306,10 +12269,10 @@ function PrinterPage({db,user,showT,companySettings,setCompanySettings}){
             marginBottom:10}},
           "📡 Connect Bluetooth Printer"),
 
-        // USB — the route this printer actually answers on.
         usbSupported()&&h("button",{
           onClick:async()=>{
             const ok=await usbConnect();
+            setUsbOn(usbReady());
             showT(ok
               ? "✅ USB printer connected — printing uses it now"
               : "❌ Not connected. Check the OTG cable and that the printer is on",
@@ -12329,18 +12292,16 @@ function PrinterPage({db,user,showT,companySettings,setCompanySettings}){
           color:usbOn?"#1B5E20":C.muted}},
           usbOn ? ("\u2705 USB connected \u00b7 "+usbName()
                    +" \u2014 printing uses this")
-                : "\u26aa USB not connected \u2014 printing uses Bluetooth. "
-                  +"A page reload drops the USB connection; press Connect again."),
+                : "\u26aa USB not connected \u2014 printing uses Bluetooth"),
 
         usbSupported()&&h("div",{style:{fontSize:11,color:C.muted,
           marginBottom:10,lineHeight:1.5}},
           "For a printer that pairs in the tablet's Bluetooth settings but "
           +"never appears in the browser \u2014 that is Bluetooth Classic, "
-          +"which the browser cannot see. Needs an OTG cable. Three lists are "
-          +"tried in turn: known printer brands, then anything declaring "
-          +"itself a printer, then every USB device. Once connected, printing "
-          +"uses USB and falls back to Bluetooth if it is unplugged. Nothing "
-          +"here changes how a branch already printing over Bluetooth works."),
+          +"which the browser cannot see. Needs an OTG cable. The printer is "
+          +"held only while a receipt is going out, so other apps can still "
+          +"reach it. Nothing here changes how a branch already printing over "
+          +"Bluetooth works."),
 
         // Test print buttons
         h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}},
@@ -13187,6 +13148,20 @@ function App(){
   const [proofOpen,setProofOpen]=useState(false);        // proof modal
   const [openDisc,setOpenDisc]=useState({});             // expanded discrepancy reports
   const [editBr,setEditBr]=useState(null);               // branch being added/edited
+  // Franchise credentials are written to settings/franchise_keys, apart from
+  // the branch list, so a cashier reading the sidebar never sees them. The
+  // edit form read them back off the branch record — where they are not — so
+  // every reopen showed empty boxes and looked like the save had failed. It
+  // had not; the values were simply somewhere else.
+  const [frKeys,setFrKeys]=useState({});
+  useEffect(()=>{
+    if(user.role!=="owner"&&user.role!=="commissary")return;
+    let alive=true;
+    getDoc(doc(db,"settings","franchise_keys"))
+      .then(d=>{ if(alive&&d.exists())setFrKeys(d.data()||{}); })
+      .catch(()=>{});
+    return()=>{alive=false;};
+  },[user]);
   const [expMonth,setExpMonth]=useState("");             // "" = all months
   const [expCat,setExpCat]=useState("");
   const [expBranch,setExpBranch]=useState("");           // owner only, "" = all
@@ -16680,7 +16655,8 @@ function App(){
                     !!stale||!hb)
                 ),
                 user.role==="owner"&&h("div",{style:{display:"flex",gap:6}},
-                  h("button",{onClick:()=>setEditBr(Object.assign({},b)),
+                  h("button",{onClick:()=>setEditBr(
+                    Object.assign({},b,frKeys[b.id]||{})),
                     style:{flex:1,padding:"6px",borderRadius:7,fontSize:13,cursor:"pointer",
                       border:"1px solid "+C.border,background:"#fff",fontWeight:700}},
                     "✏️ Edit"),
@@ -16721,7 +16697,13 @@ function App(){
         const stepName=brSteps[brStep-1];
         return h("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",
           display:"flex",alignItems:"center",justifyContent:"center",zIndex:900,padding:16},
-          onClick:e=>e.target===e.currentTarget&&setEditBr(null)},
+          onClick:e=>{
+            if(e.target!==e.currentTarget)return;
+            // Tapping the backdrop threw away everything typed, silently.
+            if(!confirm("Close without saving? Anything typed since the last "
+              +"save is lost."))return;
+            setEditBr(null);
+          }},
           h("div",{style:{background:"#fff",width:380,borderRadius:14,padding:"18px"}},
             h("div",{style:{fontSize:14,fontWeight:800,marginBottom:4}},
               editBr._isNew?"➕ New Branch":"✏️ Edit Branch"),
@@ -16923,7 +16905,15 @@ function App(){
                     st==="open"?"Open":"Closed")))
               )
             ),
-            h("div",{style:{display:"flex",gap:8,marginTop:16}},
+            // Save gets its own full-width row.
+            //
+            // Three buttons on one line with no wrap ran past the edge of a
+            // phone-width modal: the save button existed, rendered, and could
+            // not be seen or reached — which looks exactly like a form that
+            // refuses to save.
+            h("div",{style:{marginTop:16}},
+              h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",
+                marginBottom:8}},
               h("button",{onClick:()=>{
                   if(brStep>1)setEditBr(p=>Object.assign({},p,{_step:brStep-1}));
                   else setEditBr(null);
@@ -16942,8 +16932,14 @@ function App(){
                 },
                 style:{flex:1,padding:"10px",borderRadius:9,border:"none",
                   background:C.primary,color:"#fff",fontSize:14,fontWeight:800,
-                  cursor:"pointer"}},"Next → "+brSteps[brStep]),
-              (brStep===brSteps.length)&&h("button",{
+                  cursor:"pointer"}},"Next → "+brSteps[brStep])),
+              // Save on EVERY step, not only the last.
+              //
+              // Three tabs with a single save button at the end reads as three
+              // saves. Anyone who filled in the Franchise tab, pressed Next and
+              // then closed lost the lot — and the form gave no sign, because
+              // nothing had gone wrong: it had simply never been asked to write.
+              h("button",{
                 onClick:async()=>{
                   const b=editBr;
                   if(!b.id||!b.full){showT("ID and full name are required","warn");return;}
@@ -16973,12 +16969,16 @@ function App(){
                     // Credentials live apart from the branch list, so a
                     // cashier reading the sidebar never reads them.
                     if(b.ownership==="franchise"){
+                      const _fk={
+                        hrisUrl:b.hrisUrl||"",
+                        hrisApiKey:b.hrisApiKey||"",
+                        hrisProjectId:b.hrisProjectId||""
+                      };
                       await setDoc(doc(db,"settings","franchise_keys"),
-                        {[b.id]:{
-                          hrisUrl:b.hrisUrl||"",
-                          hrisApiKey:b.hrisApiKey||"",
-                          hrisProjectId:b.hrisProjectId||""
-                        }},{merge:true});
+                        {[b.id]:_fk},{merge:true});
+                      // Keep the copy in memory in step, or reopening before a
+                      // reload shows the old values back again.
+                      setFrKeys(p=>Object.assign({},p,{[b.id]:_fk}));
                     }
                   }catch(e){
                     console.error("branch save:",e);
@@ -17032,14 +17032,22 @@ function App(){
                       }
                     }
                   }
-                  setEditBr(null);
-                  showT(clean.full+(b._isNew?" added ✓":" updated ✓")+note,
+                  // Closing on a mid-wizard save would drop whoever is still
+                  // working through the tabs back to the list. Saved and still
+                  // open on the way through; closed only on the last step.
+                  const _done=(brStep===brSteps.length);
+                  if(_done){ setEditBr(null); }
+                  else {
+                    // the record is no longer new once it exists
+                    setEditBr(p=>Object.assign({},p,{_isNew:false,_saved:true}));
+                  }
+                  showT(clean.full+(b._isNew?" added ✓":" saved ✓")+note,
                     note.indexOf("not created")>=0?"warn":"ok");
                 },
-                style:{flex:2,padding:"10px",borderRadius:9,border:"none",
+                style:{width:"100%",padding:"12px",borderRadius:9,border:"none",
                   background:C.primary,color:"#fff",fontWeight:800,fontSize:14,
-                  cursor:"pointer"}},
-                "💾 Save")
+                  cursor:"pointer",boxSizing:"border-box"}},
+                (brStep===brSteps.length)?"💾 Save":"💾 Save now")
             )
           )
         );
