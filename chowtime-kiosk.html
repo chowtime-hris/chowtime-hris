@@ -137,7 +137,7 @@ body{font-family:'Inter',sans-serif;background:#FFFFFF;color:#111111;min-height:
 /* face loading */
 .model-loading{background:rgba(26,111,168,.1);border:1px solid rgba(26,111,168,.25);border-radius:10px;padding:10px 14px;font-size:12px;color:#6A1B9A;display:none;}
 </style>
-<!-- BUILD:20260802-234526 -->
+<!-- BUILD:20260819-140000 -->
 </head>
 <body>
 
@@ -275,6 +275,13 @@ body{font-family:'Inter',sans-serif;background:#FFFFFF;color:#111111;min-height:
       <span id="sync-label">Offline</span>
     </div>
     <div id="today-log"><div class="log-empty">No entries yet today.</div></div>
+    <!-- What this tablet actually is. Read it out over the phone and the
+         branch visit is unnecessary: branch, database, build and how many
+         names it can see are the four things every question came down to. -->
+    <div id="cfg-line" style="margin-top:10px;padding-top:8px;
+      border-top:1px dashed #ddd;font-size:10px;color:#999;
+      line-height:1.5;font-family:ui-monospace,monospace;
+      word-break:break-all;">checking…</div>
   </div>
 
   <!-- Loading screen while Firebase connects -->
@@ -1397,10 +1404,35 @@ if(!fbCfg?.apiKey||!fbCfg?.databaseURL){
       document.getElementById('badge-sync').className='badge bg-green';
     });
 
-    // Heartbeat
+    // Heartbeat — now says WHAT is running, not just that something is.
+    //
+    // A kiosk that is misconfigured looks identical to one that is fine: it
+    // reports in either way. Every question worth asking about a branch tablet
+    // — which build, which database, which branch it thinks it is, how many
+    // people it can see — was only answerable by standing in front of it.
     const BRANCH=fbCfg.branch||'Kiosk';
-    const hb=()=>set(ref(db,`devices/${BRANCH.replace(/[^a-zA-Z0-9]/g,'_')}`),{name:BRANCH,lastSeen:Date.now(),type:'kiosk',online:true});
+    const KIOSK_BUILD='20260819-140000';
+    const hb=()=>set(ref(db,`devices/${BRANCH.replace(/[^a-zA-Z0-9]/g,'_')}`),{
+      name:BRANCH, lastSeen:Date.now(), type:'kiosk', online:true,
+      build:KIOSK_BUILD,
+      projectId:(fbCfg.projectId||'?'),
+      tenant:(TENANT_CODE||'main'),
+      staffCount:((window.employees||[]).length||0),
+      ua:(navigator.userAgent||'').slice(0,80)
+    });
     hb(); setInterval(hb,60000);
+
+    // Same four facts, on the screen the crew is already looking at.
+    const paintCfg=()=>{
+      const el=document.getElementById('cfg-line');
+      if(!el)return;
+      el.textContent=
+        'branch: '+BRANCH
+        +'  ·  db: '+(fbCfg.projectId||'?')
+        +'  ·  build: '+KIOSK_BUILD
+        +'  ·  staff loaded: '+((window.employees||[]).length||0);
+    };
+    paintCfg(); setInterval(paintCfg,5000);
 
   }catch(e){
     console.error('Firebase error',e);

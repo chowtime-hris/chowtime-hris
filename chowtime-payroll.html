@@ -99,7 +99,7 @@ tbody td{padding:9px 11px;}
 .modal-box h2{font-family:'Syne',sans-serif;font-size:18px;margin-bottom:16px;}
 @media(max-width:600px){nav.tabs{padding:5px 10px;}.kpi-value{font-size:20px;}.panel{padding:14px;}}
 </style>
-<!-- BUILD:20260802-234526 -->
+<!-- BUILD:20260819-140000 -->
 </head>
 <body>
 
@@ -783,6 +783,26 @@ tbody td{padding:9px 11px;}
       <table>
         <thead><tr><th>Photo</th><th>Employee</th><th>Action</th><th>Time</th><th>Date</th><th>Location</th><th>Distance</th><th>Status</th></tr></thead>
         <tbody id="clockmon-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Every kiosk that has ever reported in, and what it is running.
+       A misconfigured tablet reports in exactly like a healthy one, so the
+       only way to tell them apart was to go and look at the tablet. -->
+  <div class="panel">
+    <div class="panel-title"><span>📟</span> Kiosk Devices</div>
+    <div class="alert alert-warn">Each tablet reports its branch, database and
+      build every minute. A row that shows an unexpected database, a stale
+      build, or 0 staff loaded is a tablet that needs its config link resent —
+      no visit required.</div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr>
+          <th>BRANCH</th><th>DATABASE</th><th>BUILD</th>
+          <th>STAFF</th><th>LAST SEEN</th>
+        </tr></thead>
+        <tbody id="kiosk-devices"><tr><td colspan="5">Loading…</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -4323,6 +4343,41 @@ window.saveSettings = function() {
 // Clean up sample/default employees from Firebase ────────
 // Runs once to remove EMP-001 to EMP-005 if they exist in Firebase
 // These were seeded during initial testing and should be removed
+// Which tablets are out there, and what they are running.
+onValue(ref(db,'devices'), snap => {
+  const tb=document.getElementById('kiosk-devices');
+  if(!tb)return;
+  const data=snap.val()||{};
+  const rows=Object.keys(data).map(k=>Object.assign({_key:k},data[k]||{}))
+    .filter(d=>d && d.type==='kiosk')
+    .sort((a,b)=>(b.lastSeen||0)-(a.lastSeen||0));
+  if(!rows.length){
+    tb.innerHTML='<tr><td colspan="5" style="text-align:center;padding:18px;'
+      +'color:var(--muted)">No kiosk has reported in yet.</td></tr>';
+    return;
+  }
+  const now=Date.now();
+  tb.innerHTML=rows.map(d=>{
+    const mins=Math.round((now-(d.lastSeen||0))/60000);
+    const seen = mins<3 ? '<span style="color:#2E7D32;font-weight:700">online</span>'
+      : (mins<180 ? mins+'m ago'
+        : (mins<2880 ? Math.round(mins/60)+'h ago'
+          : Math.round(mins/1440)+'d ago'));
+    // The three things that go wrong, called out rather than left to be spotted
+    const odd = (v,bad)=>bad
+      ? '<span style="color:#C62828;font-weight:800">'+v+'</span>' : v;
+    const staff=Number(d.staffCount||0);
+    return '<tr>'
+      +'<td><b>'+(d.name||d._key)+'</b></td>'
+      +'<td>'+odd(d.projectId||'—', !d.projectId)+'</td>'
+      +'<td style="font-family:ui-monospace,monospace;font-size:11px">'
+        +(d.build||'—')+'</td>'
+      +'<td>'+odd(String(staff), staff===0)+'</td>'
+      +'<td>'+seen+'</td>'
+      +'</tr>';
+  }).join('');
+});
+
 onValue(ref(db,'employees'), snap => {
   const data = snap.val();
   employees = data ? Object.values(data) : [];
