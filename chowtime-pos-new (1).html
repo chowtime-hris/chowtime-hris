@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260819-100000 -->
+<!-- BUILD:20260819-110000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -7711,7 +7711,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260819-100000";
+const BUILD = "20260819-110000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -16697,7 +16697,13 @@ function App(){
         const stepName=brSteps[brStep-1];
         return h("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",
           display:"flex",alignItems:"center",justifyContent:"center",zIndex:900,padding:16},
-          onClick:e=>e.target===e.currentTarget&&setEditBr(null)},
+          onClick:e=>{
+            if(e.target!==e.currentTarget)return;
+            // Tapping the backdrop threw away everything typed, silently.
+            if(!confirm("Close without saving? Anything typed since the last "
+              +"save is lost."))return;
+            setEditBr(null);
+          }},
           h("div",{style:{background:"#fff",width:380,borderRadius:14,padding:"18px"}},
             h("div",{style:{fontSize:14,fontWeight:800,marginBottom:4}},
               editBr._isNew?"➕ New Branch":"✏️ Edit Branch"),
@@ -16919,7 +16925,13 @@ function App(){
                 style:{flex:1,padding:"10px",borderRadius:9,border:"none",
                   background:C.primary,color:"#fff",fontSize:14,fontWeight:800,
                   cursor:"pointer"}},"Next → "+brSteps[brStep]),
-              (brStep===brSteps.length)&&h("button",{
+              // Save on EVERY step, not only the last.
+              //
+              // Three tabs with a single save button at the end reads as three
+              // saves. Anyone who filled in the Franchise tab, pressed Next and
+              // then closed lost the lot — and the form gave no sign, because
+              // nothing had gone wrong: it had simply never been asked to write.
+              h("button",{
                 onClick:async()=>{
                   const b=editBr;
                   if(!b.id||!b.full){showT("ID and full name are required","warn");return;}
@@ -17012,14 +17024,22 @@ function App(){
                       }
                     }
                   }
-                  setEditBr(null);
-                  showT(clean.full+(b._isNew?" added ✓":" updated ✓")+note,
+                  // Closing on a mid-wizard save would drop whoever is still
+                  // working through the tabs back to the list. Saved and still
+                  // open on the way through; closed only on the last step.
+                  const _done=(brStep===brSteps.length);
+                  if(_done){ setEditBr(null); }
+                  else {
+                    // the record is no longer new once it exists
+                    setEditBr(p=>Object.assign({},p,{_isNew:false,_saved:true}));
+                  }
+                  showT(clean.full+(b._isNew?" added ✓":" saved ✓")+note,
                     note.indexOf("not created")>=0?"warn":"ok");
                 },
                 style:{flex:2,padding:"10px",borderRadius:9,border:"none",
                   background:C.primary,color:"#fff",fontWeight:800,fontSize:14,
                   cursor:"pointer"}},
-                "💾 Save")
+                (brStep===brSteps.length)?"💾 Save":"💾 Save now")
             )
           )
         );
