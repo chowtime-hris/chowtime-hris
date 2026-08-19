@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260819-110000 -->
+<!-- BUILD:20260819-120000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -7711,7 +7711,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260819-110000";
+const BUILD = "20260819-120000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -16905,7 +16905,15 @@ function App(){
                     st==="open"?"Open":"Closed")))
               )
             ),
-            h("div",{style:{display:"flex",gap:8,marginTop:16}},
+            // Save gets its own full-width row.
+            //
+            // Three buttons on one line with no wrap ran past the edge of a
+            // phone-width modal: the save button existed, rendered, and could
+            // not be seen or reached — which looks exactly like a form that
+            // refuses to save.
+            h("div",{style:{marginTop:16}},
+              h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",
+                marginBottom:8}},
               h("button",{onClick:()=>{
                   if(brStep>1)setEditBr(p=>Object.assign({},p,{_step:brStep-1}));
                   else setEditBr(null);
@@ -16924,7 +16932,7 @@ function App(){
                 },
                 style:{flex:1,padding:"10px",borderRadius:9,border:"none",
                   background:C.primary,color:"#fff",fontSize:14,fontWeight:800,
-                  cursor:"pointer"}},"Next → "+brSteps[brStep]),
+                  cursor:"pointer"}},"Next → "+brSteps[brStep])),
               // Save on EVERY step, not only the last.
               //
               // Three tabs with a single save button at the end reads as three
@@ -17036,9 +17044,9 @@ function App(){
                   showT(clean.full+(b._isNew?" added ✓":" saved ✓")+note,
                     note.indexOf("not created")>=0?"warn":"ok");
                 },
-                style:{flex:2,padding:"10px",borderRadius:9,border:"none",
+                style:{width:"100%",padding:"12px",borderRadius:9,border:"none",
                   background:C.primary,color:"#fff",fontWeight:800,fontSize:14,
-                  cursor:"pointer"}},
+                  cursor:"pointer",boxSizing:"border-box"}},
                 (brStep===brSteps.length)?"💾 Save":"💾 Save now")
             )
           )
