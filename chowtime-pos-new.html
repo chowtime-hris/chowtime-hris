@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260820-090000 -->
+<!-- BUILD:20260820-100000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -987,6 +987,24 @@ function feedbackURL(branchFull){
     +"?store="+encodeURIComponent(branchFull||"");
 }
 
+// Paper width belongs to the TABLET, not the company.
+//
+// It was stored in settings/company, so every branch shared one value and the
+// last person to touch it decided for all of them. A 58mm printer fed an
+// 80mm layout wraps every line — the label lands on one row and the amount on
+// the next, which is exactly how a Z-Reading came out unreadable while the
+// setting on screen said 58mm.
+function paperFor(cs){
+  try{
+    const dev=localStorage.getItem("ct_paperSize");
+    if(dev==="58mm"||dev==="80mm") return dev;
+  }catch(e){}
+  return (cs&&cs.paperSize)||"80mm";
+}
+function setPaperFor(v){
+  try{ localStorage.setItem("ct_paperSize",v); }catch(e){}
+}
+
 function escposKick(pin){
   return new Uint8Array([0x1B,0x70,(pin===5?0x01:0x00),0x19,0xFA]);
 }
@@ -1065,7 +1083,7 @@ async function printEscPosBoth(ord,bName,cs,paperSize){
 
 function printReceipt(ord, branchName, companySettings, paperSize){
   companySettings = companySettings||{};
-  paperSize = paperSize||companySettings.paperSize||"80mm";
+  paperSize = paperSize||paperFor(companySettings);
   const isVAT = companySettings.vatMode!=="nonvat";
   const zerovat = companySettings.vatMode==="zerovat";
   const w = paperSize==="58mm" ? 220 : 302; // px width
@@ -1181,7 +1199,7 @@ function printReceipt(ord, branchName, companySettings, paperSize){
 
 function printKOT(ord, branchName, companySettings, paperSize){
   companySettings = companySettings||{};
-  paperSize = paperSize||companySettings.paperSize||"80mm";
+  paperSize = paperSize||paperFor(companySettings);
   const mmW = paperSize==="58mm"?"58mm":"80mm";
   const fs = paperSize==="58mm"?"11px":"13px";
 
@@ -7751,7 +7769,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260820-090000";
+const BUILD = "20260820-100000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -12081,13 +12099,17 @@ function SettingsPage({db,user,showT,branches,companySettings,setCompanySettings
         // LEFT: Print settings
         h("div",null,
           h("div",{style:{fontSize:13,fontWeight:700,color:C.muted,marginBottom:8}},"PAPER SIZE"),
+          h("div",{style:{fontSize:11,color:C.muted,marginBottom:6,lineHeight:1.5}},
+            "Set per tablet, not per company \u2014 the printer belongs to this "
+            +"device. A 58mm printer given the 80mm layout wraps every line, "
+            +"which is what makes a Z-Reading unreadable."),
           h("div",{style:{display:"flex",gap:6,marginBottom:12}},
             ["80mm","58mm"].map(s=>h("button",{key:s,
-              onClick:()=>setCompanySettings(p=>({...p,paperSize:s})),
+              onClick:()=>{ setPaperFor(s); setCompanySettings(p=>({...p,paperSize:s})); },
               style:{flex:1,padding:"9px",borderRadius:8,border:"none",cursor:"pointer",
                 fontWeight:700,fontSize:14,
-                background:(companySettings.paperSize||"80mm")===s?C.primary:"#eee",
-                color:(companySettings.paperSize||"80mm")===s?"#fff":C.text}},s))
+                background:paperFor(companySettings)===s?C.primary:"#eee",
+                color:paperFor(companySettings)===s?"#fff":C.text}},s))
           ),
           h("div",{style:{fontSize:13,fontWeight:700,color:C.muted,marginBottom:8}},"TAX MODE"),
           h("div",{style:{display:"flex",flexDirection:"column",gap:4,marginBottom:12}},
@@ -12124,12 +12146,12 @@ function SettingsPage({db,user,showT,branches,companySettings,setCompanySettings
             background:"linear-gradient(135deg,#1565C0,#0D47A1)",
             border:"none",borderRadius:9,color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer"}},
             "📡 Connect Printer"),
-          h("button",{onClick:()=>testPrint(companySettings,companySettings.paperSize||"80mm",showT),
+          h("button",{onClick:()=>testPrint(companySettings,paperFor(companySettings),showT),
             style:{width:"100%",padding:"9px",marginBottom:6,background:"#fff",
               border:"2px solid "+C.primary,borderRadius:8,color:C.primary,
               fontWeight:700,fontSize:14,cursor:"pointer"}},
             "🖨️ Test Print"),
-          h("button",{onClick:()=>testPrintBT(companySettings,companySettings.paperSize||"80mm",showT),
+          h("button",{onClick:()=>testPrintBT(companySettings,paperFor(companySettings),showT),
             style:{width:"100%",padding:"9px",background:"#1565C0",border:"none",
               borderRadius:8,color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer"}},
             "📡 BT Test Print")
@@ -12218,11 +12240,11 @@ function PrinterPage({db,user,showT,companySettings,setCompanySettings}){
           h("div",{style:{fontSize:13,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:8}},"PAPER SIZE"),
           h("div",{style:{display:"flex",gap:8}},
             ["80mm","58mm"].map(s=>h("button",{key:s,
-              onClick:()=>setCompanySettings(p=>({...p,paperSize:s})),
+              onClick:()=>{ setPaperFor(s); setCompanySettings(p=>({...p,paperSize:s})); },
               style:{flex:1,padding:"12px 8px",borderRadius:9,border:"none",
                 cursor:"pointer",fontWeight:700,fontSize:13,
-                background:(companySettings.paperSize||"80mm")===s?C.primary:"#eee",
-                color:(companySettings.paperSize||"80mm")===s?"#fff":C.text}},s))
+                background:paperFor(companySettings)===s?C.primary:"#eee",
+                color:paperFor(companySettings)===s?"#fff":C.text}},s))
           )
         ),
         h("div",null,
@@ -12370,12 +12392,12 @@ function PrinterPage({db,user,showT,companySettings,setCompanySettings}){
         // Test print buttons
         h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}},
           h("button",{
-            onClick:()=>testPrint(companySettings,companySettings.paperSize||"80mm",showT),
+            onClick:()=>testPrint(companySettings,paperFor(companySettings),showT),
             style:{padding:"11px",background:"#fff",border:"2px solid #1565C0",
               borderRadius:9,color:"#1565C0",fontWeight:700,fontSize:14,cursor:"pointer"}},
             "🖨️ Test Print\n(Window)"),
           h("button",{
-            onClick:()=>testPrintBT(companySettings,companySettings.paperSize||"80mm",showT),
+            onClick:()=>testPrintBT(companySettings,paperFor(companySettings),showT),
             style:{padding:"11px",background:"#1565C0",border:"none",
               borderRadius:9,color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer"}},
             "📡 BT Test Print")
@@ -15547,7 +15569,7 @@ function App(){
             // PRIMARY: both docs over one Bluetooth session
             h("button",{
               onClick:async function(){
-                var ps=(companySettings&&companySettings.paperSize)||"80mm";
+                var ps=paperFor(companySettings);
                 showT("Sending 2 docs to printer...","ok");
                 var ok=await printEscPosBoth(ord,curBranch.full,companySettings,ps);
                 if(ok)showT("Receipt + KOT printed ✓");
@@ -15563,7 +15585,7 @@ function App(){
             h("button",{
               onClick:async function(){
                 var ok=await printEscPos(ord,curBranch.full,companySettings,
-                  (companySettings&&companySettings.paperSize)||"80mm");
+                  paperFor(companySettings));
                 showT(ok?"Receipt printed ✓":"BT print failed",ok?"ok":"warn");
               },
               style:{padding:"10px",background:"#1976D2",
@@ -15573,7 +15595,7 @@ function App(){
             h("button",{
               onClick:async function(){
                 var ok=await printEscPosKOT(ord,curBranch.full,companySettings,
-                  (companySettings&&companySettings.paperSize)||"80mm");
+                  paperFor(companySettings));
                 showT(ok?"KOT printed ✓":"BT print failed",ok?"ok":"warn");
               },
               style:{padding:"10px",background:"#E65100",
@@ -15615,7 +15637,7 @@ function App(){
                 "📡 Connect Printer"),
               h("button",{
                 onClick:function(){testPrint(companySettings,
-                  companySettings.paperSize||"80mm",showT);},
+                  paperFor(companySettings),showT);},
                 style:{flex:1,padding:"8px",background:"#fff",
                   border:"2px solid #1565C0",borderRadius:8,
                   color:"#1565C0",fontWeight:700,fontSize:13,cursor:"pointer"}},
@@ -18258,7 +18280,7 @@ function App(){
               // Bluetooth first — the browser copy stays as a fallback
               h("button",{
                 onClick:async()=>{
-                  const ps=(companySettings&&companySettings.paperSize)||"80mm";
+                  const ps=paperFor(companySettings);
                   showT("Sending to printer...","ok");
                   const ok=await printEscPosZ(zd,curBranch.full,user.name,companySettings,ps,isZ);
                   if(ok)showT((isZ?"Z":"X")+"-Reading printed ✓");
