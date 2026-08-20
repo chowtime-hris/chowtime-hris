@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260819-160000 -->
+<!-- BUILD:20260820-090000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -854,6 +854,18 @@ function buildEscPos(ord,bName,cs,paperSize){
   if(cs.posSerial)a(ln("Serial No: "+cs.posSerial));
   a(B([NL]));
   a(ln(cs.receiptFooter||"Thank you for dining with us!"));
+
+  // Feedback QR — carries the branch, so the reply lands against the right one
+  if(cs.feedbackQR!==false){
+    a(B([NL]));
+    a(ln("How did we do?"));
+    a([ESC,0x61,0x01]);                       // centre
+    a(escposQR(feedbackURL(bName),5));
+    a([ESC,0x61,0x01]);
+    a(B([NL]));
+    a(ln("Scan to rate " + (bName||"this store")));
+  }
+
   a(B([NL]));
   a([ESC,0x45,0x01]);
   a(ln(isVAT&&!zerovat?"*** VAT RECEIPT ***":zerovat?"*** ZERO-RATED ***":"*** NON-VAT RECEIPT ***"));
@@ -947,6 +959,34 @@ function buildEscPosKOT(ord,bName,cs,paperSize){
 // m=0 -> pin 2 (near-universal), m=1 -> pin 5. t1/t2 are on/off pulse widths.
 // The drawer must be cabled to the PRINTER, not the tablet: the tablet has no
 // way to reach it, so this only fires on the Bluetooth path, never browser print.
+// A QR the printer draws itself.
+//
+// GS ( k is the model-2 QR command every ESC/POS thermal unit understands, so
+// nothing is rendered as an image and nothing depends on paper width beyond
+// the module size. The store name is baked into the URL, which is the whole
+// point: a customer scanning at Paniqui cannot file feedback against Capas,
+// and nobody has to pick a branch from a list they might get wrong.
+function escposQR(text,size){
+  var enc=new TextEncoder();
+  var d=enc.encode(text);
+  var len=d.length+3;
+  var pL=len&0xFF, pH=(len>>8)&0xFF;
+  var out=[];
+  var push=function(arr){ for(var i=0;i<arr.length;i++) out.push(arr[i]); };
+  push([0x1D,0x28,0x6B,0x04,0x00,0x31,0x41,0x32,0x00]);      // model 2
+  push([0x1D,0x28,0x6B,0x03,0x00,0x31,0x43,size||5]);         // module size
+  push([0x1D,0x28,0x6B,0x03,0x00,0x31,0x45,0x31]);            // error correction M
+  push([0x1D,0x28,0x6B,pL,pH,0x31,0x50,0x30]);                // store the data
+  for(var i=0;i<d.length;i++) out.push(d[i]);
+  push([0x1D,0x28,0x6B,0x03,0x00,0x31,0x51,0x30]);            // print it
+  return new Uint8Array(out);
+}
+
+function feedbackURL(branchFull){
+  return "https://chowtime-hris.github.io/chowtime-hris/chowtime-feedback.html"
+    +"?store="+encodeURIComponent(branchFull||"");
+}
+
 function escposKick(pin){
   return new Uint8Array([0x1B,0x70,(pin===5?0x01:0x00),0x19,0xFA]);
 }
@@ -7711,7 +7751,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260819-160000";
+const BUILD = "20260820-090000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -12302,6 +12342,30 @@ function PrinterPage({db,user,showT,companySettings,setCompanySettings}){
           +"held only while a receipt is going out, so other apps can still "
           +"reach it. Nothing here changes how a branch already printing over "
           +"Bluetooth works."),
+
+        // Feedback QR toggle
+        h("div",{style:{border:"1px solid "+C.border,borderRadius:10,
+          padding:"12px",marginBottom:10,background:C.bg}},
+          h("div",{style:{display:"flex",justifyContent:"space-between",
+            alignItems:"center",marginBottom:4}},
+            h("div",{style:{fontSize:13,fontWeight:800}},
+              "\u2b1c Feedback QR on receipts"),
+            h("div",{onClick:()=>setCompanySettings(p=>Object.assign({},p,
+                {feedbackQR:(p&&p.feedbackQR===false)})),
+              style:{width:44,height:24,borderRadius:20,cursor:"pointer",
+                position:"relative",transition:"background .15s",
+                background:(companySettings.feedbackQR!==false)?"#558B2F":"#ccc"}},
+              h("div",{style:{position:"absolute",top:3,width:18,height:18,
+                borderRadius:"50%",background:"#fff",transition:"left .15s",
+                left:(companySettings.feedbackQR!==false)?"calc(100% - 21px)":"3px"}}))),
+          h("div",{style:{fontSize:11,color:C.muted,lineHeight:1.5}},
+            "Prints a QR at the bottom of every receipt. It carries this "
+            +"branch's name, so a reply is filed against the store the customer "
+            +"actually visited \u2014 they never pick from a list. Printed by "
+            +"the printer itself, so it costs a little paper and nothing else."),
+          h("div",{style:{fontSize:10,color:C.muted,marginTop:6,
+            fontFamily:"ui-monospace,monospace",wordBreak:"break-all"}},
+            feedbackURL(curBranch&&curBranch.full))),
 
         // Test print buttons
         h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}},
@@ -16998,12 +17062,33 @@ function App(){
                     payrollUrl:(b.ownership==="franchise")?(b.payrollUrl||""):"",
                     kioskUrl:(b.ownership==="franchise")?(b.kioskUrl||""):"",
                     stockUrl:(b.ownership==="franchise")?(b.stockUrl||""):""};
-                  const next=b._isNew
+                  let next=b._isNew
                     ? branches.concat([clean])
                     // keep whatever else the record carries — the delivery
                     // address and the active flag are not on this form, and
                     // replacing the object outright quietly deleted them
                     : branches.map(x=>x.id===b.id?Object.assign({},x,clean):x);
+
+                  // Never write a list shorter than the one already stored.
+                  //
+                  // `next` is built from the branches held in memory. Saving
+                  // before that list has loaded makes it one entry long, and
+                  // this write replaces the whole document — which is how
+                  // seven branches disappeared in a single press. Read what is
+                  // actually on file and merge into it rather than over it.
+                  try{
+                    const _cur=await getDoc(doc(db,"settings","branches"));
+                    const _have=((_cur.exists()&&_cur.data().branches)||[]);
+                    if(_have.length>next.length){
+                      const _byId={};
+                      _have.forEach(x=>{ if(x&&x.id)_byId[x.id]=x; });
+                      _byId[clean.id]=Object.assign({},_byId[clean.id]||{},clean);
+                      next=Object.keys(_byId).map(k=>_byId[k]);
+                      console.warn("branch save: merged against stored list ("
+                        +_have.length+" on file, "+next.length+" after merge)");
+                    }
+                  }catch(e0){ console.warn("branch precheck:",e0); }
+
                   try{
                     await setDoc(doc(db,"settings","branches"),{branches:next},{merge:true});
 
@@ -20509,7 +20594,7 @@ function App(){
 
         // ══ PRINTER SETTINGS ══
         page==="printer"&&h(PrinterPage,{
-          db,user,showT,companySettings,setCompanySettings
+          db,user,showT,companySettings,setCompanySettings,curBranch
         }),
 
         // ══ MENU MGMT (Full Editor) ══
