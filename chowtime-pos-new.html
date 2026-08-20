@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260820-100000 -->
+<!-- BUILD:20260820-120000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -7769,7 +7769,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260820-100000";
+const BUILD = "20260820-120000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -12175,7 +12175,7 @@ function SettingsPage({db,user,showT,branches,companySettings,setCompanySettings
 
 
 // ─── PRINTER PAGE ─────────────────────────────────────────
-function PrinterPage({db,user,showT,companySettings,setCompanySettings}){
+function PrinterPage({db,user,showT,companySettings,setCompanySettings,curBranch}){
   // The USB handle lives outside React, and a reload drops it — which is
   // exactly when printing quietly falls back to Bluetooth.
   const [usbOn,setUsbOn]=useState(usbReady());
@@ -13396,8 +13396,18 @@ function App(){
       // Branch: branch equality PLUS the date range, which Firestore needs a
       // composite index for. If it is missing the query errors, so we fall
       // back to the old shape rather than leaving the screen blank.
-      const _wf=new Date(); _wf.setDate(_wf.getDate()-14);
+      // 14 days of orders across 8 branches is the single largest read in the
+      // app — 2,500+ documents, re-fetched on every open. A week covers the
+      // Z-Reading history, the dashboard and every date preset except This
+      // month, which fetches on demand anyway.
+      const _wf=new Date(); _wf.setDate(_wf.getDate()-7);
       const winFrom=localDate(_wf);
+      // Everything below reads a window, not a history. Free-tier Firestore
+      // allows 50,000 reads a day; the listeners here were fetching close to
+      // 7,000 documents on EVERY app open, across every tablet, all day. That
+      // is what exhausted the quota and made the branch list look deleted.
+      const _rf=new Date(); _rf.setDate(_rf.getDate()-60);
+      const readFrom=localDate(_rf);
       setOrdersWindowFrom(winFrom);
       const oq=isOwner
         ?query(collection(db,"orders"),where("date",">=",winFrom))
@@ -13467,7 +13477,9 @@ function App(){
     try{
       const lc=logColFor(bId);
       unsubs.push(onSnapshot(
-        query(collection(db,lc),where("type","==","deduct"),limit(4000)),
+        // Was 4,000 documents on every load. The P&L works one period at a
+        // time and never looks past 60 days.
+        query(collection(db,lc),where("date",">=",readFrom),limit(1200)),
         snap=>setPlLogs(snap.docs.map(d=>({...d.data(),_id:d.id}))),
         err=>console.warn("P&L logs:",err.message)));
 
@@ -13492,7 +13504,7 @@ function App(){
       // Stock coming in, for dating a lot rebuild. Far fewer of these than
       // deductions, so a smaller window covers a long stretch.
       unsubs.push(onSnapshot(
-        query(collection(db,lc),where("type","==","add"),limit(800)),
+        query(collection(db,lc),where("date",">=",readFrom),limit(400)),
         snap=>setAddLogs(snap.docs.map(d=>({...d.data(),_id:d.id}))),
         err=>console.warn("add logs:",err.message)));
     }catch(e){console.warn("P&L log query:",e);}
@@ -13525,7 +13537,7 @@ function App(){
       // if the crew had done nothing.
       unsubs.push(onSnapshot(
         wideRollups
-          ? query(collection(db,"cash_counts"),limit(600))
+          ? query(collection(db,"cash_counts"),where("date",">=",readFrom),limit(200))
           : query(collection(db,"cash_counts"),
               where("branch","==",branchId),limit(120)),
         snap=>setCashCounts(snap.docs.map(d=>({...d.data(),_docId:d.id}))),
@@ -13555,7 +13567,7 @@ function App(){
     // Submitted payment proofs. No orderBy — that needs a composite index
     // this project does not have, and the failure is silent.
     try{
-      unsubs.push(onSnapshot(query(collection(db,"subscription_proofs"),limit(200)),
+      unsubs.push(onSnapshot(query(collection(db,"subscription_proofs"),limit(60)),
         snap=>setProofs(snap.docs.map(d=>({...d.data(),_docId:d.id}))
           .sort((a,b)=>String((b.submittedOn||"")+(b.paidOn||""))
             .localeCompare(String((a.submittedOn||"")+(a.paidOn||""))))),
@@ -13568,8 +13580,8 @@ function App(){
     try{
       unsubs.push(onSnapshot(
         wideRollups
-          ? query(collection(db,"daily_sales"),limit(800))
-          : query(collection(db,"daily_sales"),where("branch","==",bId),limit(200)),
+          ? query(collection(db,"daily_sales"),where("date",">=",readFrom),limit(400))
+          : query(collection(db,"daily_sales"),where("branch","==",bId),limit(120)),
         snap=>{
           const rows=snap.docs.map(d=>({...d.data(),_docId:d.id}));
           rows.sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")));
