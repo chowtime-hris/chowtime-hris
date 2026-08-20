@@ -99,6 +99,10 @@ body{font-family:'Inter',sans-serif;background:#FFFFFF;color:#111111;min-height:
 /* geo warn */
 .geo-warn{background:rgba(192,57,43,.15);border:1px solid rgba(192,57,43,.35);border-radius:10px;padding:10px 14px;font-size:12px;color:#C62828;display:none;}
 .geo-warn.show{display:block;}
+.gps-gate{border-radius:10px;padding:10px 14px;font-size:13px;font-weight:600;margin-bottom:10px;display:none;}
+.gps-gate.show{display:block;}
+.gps-gate.waiting{background:rgba(240,165,0,.15);border:1px solid rgba(240,165,0,.4);color:#8a5a00;}
+.gps-gate.failed{background:rgba(192,57,43,.15);border:1px solid rgba(192,57,43,.4);color:#C62828;}
 
 /* log */
 .log-box{background:#FAFAFA;border:1px solid #DDDDDD;border-radius:var(--radius);padding:13px;}
@@ -137,7 +141,7 @@ body{font-family:'Inter',sans-serif;background:#FFFFFF;color:#111111;min-height:
 /* face loading */
 .model-loading{background:rgba(26,111,168,.1);border:1px solid rgba(26,111,168,.25);border-radius:10px;padding:10px 14px;font-size:12px;color:#6A1B9A;display:none;}
 </style>
-<!-- BUILD:20260819-140000 -->
+<!-- BUILD:20260820-120000 -->
 </head>
 <body>
 
@@ -179,6 +183,17 @@ body{font-family:'Inter',sans-serif;background:#FFFFFF;color:#111111;min-height:
   <!-- Geofence warning -->
   <div class="geo-warn" id="geo-warn">
     ⚠️ Outside branch zone (<span id="geo-dist-txt"></span>m). Clock-in blocked.
+  </div>
+
+  <!-- GPS status. A punch with no location used to save silently with a blank
+       lat/lng and nobody noticed until the monitor was read days later. The
+       kiosk now says out loud what it is waiting for, and holds the buttons
+       until it has a fix. -->
+  <div class="gps-gate" id="gps-gate">
+    <div id="gps-gate-msg">📡 Kumukuha ng lokasyon…</div>
+    <div id="gps-gate-sub" style="font-size:11px;opacity:.8;margin-top:3px;"></div>
+    <button class="cam-retry" id="gps-retry" style="display:none;margin-top:8px;"
+      onclick="startGeoWatch(true)">↺ Subukan Ulit</button>
   </div>
 
   <!-- Camera -->
@@ -523,17 +538,117 @@ function haversine(a,b,c,d){
   const x=Math.sin(r(c-a)/2)**2+Math.cos(r(a))*Math.cos(r(c))*Math.sin(r(d-b)/2)**2;
   return R*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x));
 }
-if(navigator.geolocation){
-  navigator.geolocation.watchPosition(pos=>{
-    currentPos=pos.coords;
-    currentDist=Math.round(haversine(currentPos.latitude,currentPos.longitude,branchCfg.lat,branchCfg.lng));
-    const inside=currentDist<=branchCfg.radius;
-    document.getElementById('badge-geo').textContent=`📍 ${currentDist}m`;
-    document.getElementById('badge-geo').className='badge '+(inside?'bg-green':'bg-red');
-    document.getElementById('geo-dist-txt').textContent=currentDist;
-    document.getElementById('geo-warn').classList.toggle('show',!inside&&branchCfg.enforceGeo);
-  },()=>{ document.getElementById('badge-geo').textContent='📡 No GPS'; document.getElementById('badge-geo').className='badge bg-gray'; },{enableHighAccuracy:true,maximumAge:6000});
+// ── GPS ACQUISITION ──────────────────────────────────────────────
+// A punch is a payroll record, so it must not be saved without knowing
+// where it happened. The old watch was fire-and-forget: if it never
+// returned a fix, `currentPos` stayed null, the punch saved anyway with a
+// blank lat/lng, and the screen gave no sign anything was missing.
+//
+// Two things changed. The buttons are held until there is a fix, and a
+// high-accuracy attempt that fails falls back to a coarse one. Indoors in a
+// mall a satellite fix often never arrives; a WiFi/cell estimate is good to
+// a few hundred metres, which is well inside the branch radius and is far
+// better than recording nothing at all.
+const GPS_TIMEOUT_MS = 45000;   // how long before we call it a failure
+let gpsState   = 'waiting';     // waiting | ready | denied | failed
+// Declared here, not next to setActionButtons further down: startGeoWatch()
+// runs on load and reaches refreshActionAvailability(), which reads this. A
+// `let` below that point would still be in its temporal dead zone and throw.
+let faceOk     = false;
+// Same reason as faceOk: refreshActionAvailability() reads this on load.
+// Set while a punch is being written. The save awaits a Firebase round trip,
+// and on a slow branch line that is seconds of a screen that looks like
+// nothing happened — so the crew taps again. Andrea's three 08:28 entries
+// came in exactly that way.
+let punchBusy  = false;
+let gpsWatchId = null;
+let gpsTimer   = null;
+let gpsCoarse  = false;         // true once we have dropped to low accuracy
+
+function gpsGate(state, msg, sub, showRetry){
+  gpsState = state;
+  const box=document.getElementById('gps-gate');
+  const m=document.getElementById('gps-gate-msg');
+  const s=document.getElementById('gps-gate-sub');
+  const r=document.getElementById('gps-retry');
+  if(!box) return;
+  if(state==='ready'){ box.className='gps-gate'; }
+  else{ box.className='gps-gate show '+(state==='waiting'?'waiting':'failed'); }
+  if(m) m.textContent=msg||'';
+  if(s) s.textContent=sub||'';
+  if(r) r.style.display=showRetry?'inline-block':'none';
+  refreshActionAvailability();
 }
+
+function onGpsFix(pos){
+  currentPos=pos.coords;
+  currentDist=Math.round(haversine(currentPos.latitude,currentPos.longitude,
+    branchCfg.lat,branchCfg.lng));
+  const inside=currentDist<=branchCfg.radius;
+  const badge=document.getElementById('badge-geo');
+  if(badge){
+    badge.textContent=`📍 ${currentDist}m`;
+    badge.className='badge '+(inside?'bg-green':'bg-red');
+  }
+  const t=document.getElementById('geo-dist-txt');
+  if(t) t.textContent=currentDist;
+  const w=document.getElementById('geo-warn');
+  if(w) w.classList.toggle('show',!inside&&branchCfg.enforceGeo);
+  if(gpsTimer){ clearTimeout(gpsTimer); gpsTimer=null; }
+  if(gpsState!=='ready') gpsGate('ready','','',false);
+}
+
+function startGeoWatch(isRetry){
+  if(!navigator.geolocation){
+    gpsGate('failed','❌ Walang GPS ang device na ito.',
+      'Hindi makakapag-time in. I-report sa may-ari.',false);
+    return;
+  }
+  if(gpsWatchId!==null){ navigator.geolocation.clearWatch(gpsWatchId); gpsWatchId=null; }
+  if(gpsTimer){ clearTimeout(gpsTimer); gpsTimer=null; }
+  if(isRetry){ gpsCoarse=false; currentPos=null; currentDist=null; }
+
+  gpsGate('waiting','📡 Kumukuha ng lokasyon…',
+    'Sandali lang — kailangan ito bago makapag-time in.',false);
+
+  const opts = gpsCoarse
+    ? {enableHighAccuracy:false, maximumAge:60000, timeout:GPS_TIMEOUT_MS}
+    : {enableHighAccuracy:true,  maximumAge:6000,  timeout:GPS_TIMEOUT_MS};
+
+  gpsWatchId = navigator.geolocation.watchPosition(onGpsFix, err=>{
+    const badge=document.getElementById('badge-geo');
+    if(badge){ badge.textContent='📡 No GPS'; badge.className='badge bg-gray'; }
+    // 1 === PERMISSION_DENIED. Nothing to retry against until the person
+    // changes it in Chrome, so say that rather than spinning.
+    if(err && err.code===1){
+      gpsGate('denied','🚫 Naka-block ang Location.',
+        'Chrome → icon sa kaliwa ng address bar → Permissions → Location → Allow. '
+        +'Pagkatapos, i-reload ang page.',true);
+      return;
+    }
+    // Position unavailable or timed out. Try once more, coarse.
+    if(!gpsCoarse){
+      gpsCoarse=true;
+      startGeoWatch(false);
+      return;
+    }
+    gpsGate('failed','❌ Walang makuhang lokasyon.',
+      'Hindi makakapag-time in. Lumapit sa bintana o labas sandali, tapos Subukan Ulit. '
+      +'Kung ayaw pa rin, i-report sa may-ari para ma-encode ang oras.',true);
+  }, opts);
+
+  // watchPosition's own timeout only fires per attempt; this is the wall
+  // clock the crew actually experiences.
+  gpsTimer=setTimeout(()=>{
+    if(currentPos) return;
+    if(!gpsCoarse){ gpsCoarse=true; startGeoWatch(false); return; }
+    gpsGate('failed','❌ Walang makuhang lokasyon.',
+      'Hindi makakapag-time in. Lumapit sa bintana o labas sandali, tapos Subukan Ulit. '
+      +'Kung ayaw pa rin, i-report sa may-ari para ma-encode ang oras.',true);
+  },GPS_TIMEOUT_MS);
+}
+
+startGeoWatch(false);
 
 // ══════════════════════════════════════════════════════
 //  EMPLOYEES
@@ -577,9 +692,20 @@ function onEmployeeSelect(){
   }
 }
 
+// Two independent gates now stand in front of a punch: the face must be
+// verified, and there must be a location fix. Either one missing keeps the
+// buttons down. `faceOk` is remembered (declared up with gpsState) so that a
+// GPS fix arriving later can re-open the buttons without another face scan.
 function setActionButtons(enabled){
+  faceOk=!!enabled;
+  refreshActionAvailability();
+}
+
+function refreshActionAvailability(){
+  const ok = faceOk && gpsState==='ready' && !punchBusy;
   ['btn-in','btn-out','btn-brk','btn-rsm'].forEach(id=>{
-    document.getElementById(id).disabled=!enabled;
+    const el=document.getElementById(id);
+    if(el) el.disabled=!ok;
   });
 }
 
@@ -773,6 +899,7 @@ function setSyncStatus(state,label){
 //  CLOCK ACTION
 // ══════════════════════════════════════════════════════
 async function doAction(action){
+  if(punchBusy){ showToast('⏳ Sandali lang — sine-save pa…'); return; }
   const empId=document.getElementById('emp-select').value;
   if(!empId){ showToast('⚠️ Select your name first.'); return; }
 
@@ -781,8 +908,19 @@ async function doAction(action){
     showToast('❌ Face verification required.'); return;
   }
 
+  // A location is required for EVERY punch, not only when geofence
+  // enforcement is on. Enforcement decides whether you are close enough;
+  // this decides whether we know where you are at all. A payroll record
+  // with a blank location is the thing we are trying to stop.
+  //
+  // Checked here as well as on the button because the button state is a
+  // convenience, not a guarantee — anything that re-enables it early would
+  // otherwise let a blank punch through.
+  if(!currentPos || currentDist===null){
+    showToast('📡 Hindi pa alam ang lokasyon — hindi pa pwedeng mag-time in.');
+    return;
+  }
   if(branchCfg.enforceGeo&&action==='in'){
-    if(!currentPos){ showToast('⚠️ Waiting for GPS…'); return; }
     if(currentDist>branchCfg.radius){ showToast(`🚫 ${currentDist}m away — outside branch zone.`); return; }
   }
 
@@ -840,6 +978,8 @@ async function doAction(action){
   lsSet('kioskLog',kioskLog);
 
   if(window._fbDB){
+    punchBusy=true;
+    refreshActionAvailability();
     setSyncStatus('syncing','Saving…');
     try{
       const{ref,push,set}=window._fbFns;
@@ -853,6 +993,7 @@ async function doAction(action){
         {name:BRANCH,lastSeen:Date.now(),type:'kiosk',online:true});
       setSyncStatus('online','Synced');
     }catch(e){ setSyncStatus('offline','Sync failed — saved locally'); }
+    finally{ punchBusy=false; refreshActionAvailability(); }
   }
 
   // Show confirmation
@@ -1411,7 +1552,7 @@ if(!fbCfg?.apiKey||!fbCfg?.databaseURL){
     // — which build, which database, which branch it thinks it is, how many
     // people it can see — was only answerable by standing in front of it.
     const BRANCH=fbCfg.branch||'Kiosk';
-    const KIOSK_BUILD='20260819-140000';
+    const KIOSK_BUILD='20260820-120000';
     const hb=()=>set(ref(db,`devices/${BRANCH.replace(/[^a-zA-Z0-9]/g,'_')}`),{
       name:BRANCH, lastSeen:Date.now(), type:'kiosk', online:true,
       build:KIOSK_BUILD,
