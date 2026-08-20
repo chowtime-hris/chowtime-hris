@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260820-120000 -->
+<!-- BUILD:20260820-183000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -1887,7 +1887,12 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
   });
   const [deliveryReq,setDeliveryReq] = useState("");
   const [notes,setNotes]     = useState("");
-  const [discount,setDiscount] = useState(0);
+  // Seed from the PO being edited, not from a constant. Both of these were
+  // hardcoded, so opening an existing PO showed the wrong tax type and a zero
+  // discount — and saving then wrote those defaults back over what was on
+  // file. Editing a Non-VAT PO silently turned it into a VAT one.
+  const [discount,setDiscount] = useState(
+    (editPO&&Number(editPO.discount))||0);
   const today = localDate();
   const [soNum,setSoNum] = useState("");
   // Generate branch-sequential PO number on mount
@@ -1931,7 +1936,11 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
   },[mainCat]);
 
   const ordered =  items.filter(i=>i.orderQty>0);
-  const [vatType,setVatType] = useState("vat"); // vat | nonvat | zerovat
+  // Inventory prices are Non-VAT, so a new order starts Non-VAT. When VAT is
+  // picked the 12% is ADDED on top, which is correct for prices that do not
+  // already carry it.
+  const [vatType,setVatType] = useState(
+    (editPO&&editPO.vatType)||"nonvat"); // vat | nonvat | zerovat
   const [srch,setSrch]       = useState("");
   const [catFilter,setCat]   = useState("");
   const [onlyPicked,setOnlyPicked] = useState(false);
@@ -2013,6 +2022,23 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
     return true;
   });
 
+  // ONE place that turns the basket into money. The modal used to compute the
+  // displayed total inline while the saved document carried no total at all,
+  // so poValue() fell back to re-deriving it from the line items — and any
+  // edit left the stored totalAmount untouched and stale. Display and storage
+  // now read the same function.
+  //
+  // Prices are Non-VAT, so VAT is added on top rather than extracted. The
+  // discount comes off first: VAT is due on what is actually charged.
+  const poTotals = (()=>{
+    const subtotal = ordered.reduce((s,i)=>
+      s+(Number(i.price)||0)*(Number(i.orderQty)||0),0);
+    const disc = Math.min(Math.max(parseFloat(discount)||0,0),subtotal);
+    const net  = subtotal-disc;
+    const vat  = vatType==="vat" ? net*0.12 : 0;
+    return {subtotal:subtotal,disc:disc,net:net,vat:vat,grand:net+vat};
+  })();
+
   const submit = async()=>{
     if(!ordered.length){showT("Add at least 1  item","warn");return;}
     const po = {
@@ -2026,7 +2052,8 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
       date:today,
       deliveryRequested:deliveryReq,
       notes,
-      discount:parseFloat(discount)||0,
+      discount:poTotals.disc,
+      totalAmount:poTotals.grand,
       status:"received_by_main",
       paymentStatus:"Unpaid",
       deliveryStatus:"Pending",
@@ -2070,6 +2097,11 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
         await updateDoc(doc(db,"advances",editPO._docId),Object.assign({
            items:po. items,notes:po.notes,deliveryRequested:po.deliveryRequested,
           discount:po.discount,vatType:po.vatType,
+          // The bill has to move with the order. Without this the stored
+          // totalAmount kept the figure from the original submission while
+          // the lines underneath changed, and poValue() prefers the stored
+          // number — so the PO Monitor went on billing the old amount.
+          totalAmount:po.totalAmount,
           editedBy:user.name,editedAt:serverTimestamp(),
           editedByMain:!!(editPO.branch&&userBranchId&&editPO.branch!==userBranchId),
           // The recorded shortage was measured against the old quantities.
@@ -2362,16 +2394,32 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
                   v.label))
               )
             ),
+            // Discount entry. The field was written to Firestore on every
+            // submit but there was no way to set it, so it was always zero.
+            h("div",{style:{marginBottom:10,padding:"8px 12px",background:"#f9f9f9",borderRadius:8}},
+              h("div",{style:{fontSize:12,fontWeight:700,color:C.muted,marginBottom:6,letterSpacing:1}},"DISCOUNT (₱)"),
+              h("input",{type:"number",value:discount||"",min:0,
+                placeholder:"0.00 — iwanang blangko kung wala",
+                onChange:e=>setDiscount(e.target.value),
+                style:{width:"100%",padding:"7px",border:"1px solid "+C.border,
+                  borderRadius:7,fontSize:13,outline:"none",boxSizing:"border-box"}}),
+              poTotals.disc>0&&h("div",{style:{fontSize:11,color:C.muted,marginTop:4}},
+                "Binabawas bago ang VAT.")
+            ),
             // Computed totals
             (()=>{
-              const estSubtotal=ordered.reduce((s,i)=>s+(i.price||0)*(i.orderQty||0),0);
-              const vatAmt=vatType==="vat"?estSubtotal*0.12:0;
-              const grandTotal=estSubtotal+vatAmt;
+              const estSubtotal=poTotals.subtotal;
+              const vatAmt=poTotals.vat;
+              const grandTotal=poTotals.grand;
               return h("div",{style:{background:"#fff",borderRadius:8,padding:"10px",
                 border:"1px solid "+C.border}},
                 h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:4}},
                   h("span",{style:{fontSize:13,color:C.muted}},"Est. Subtotal:"),
                   h("span",{style:{fontSize:13,fontWeight:700}},"₱"+peso(estSubtotal))
+                ),
+                poTotals.disc>0&&h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:4}},
+                  h("span",{style:{fontSize:13,color:C.muted}},"Discount:"),
+                  h("span",{style:{fontSize:13,fontWeight:700,color:"#2E7D32"}},"−₱"+peso(poTotals.disc))
                 ),
                 vatType==="vat"&&h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:4}},
                   h("span",{style:{fontSize:13,color:C.muted}},"VAT (12%):"),
@@ -2383,7 +2431,7 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
                   h("span",{style:{fontSize:14,fontWeight:900,color:C.primary}},"₱"+peso(grandTotal))
                 ),
                 h("div",{style:{fontSize:12,color:C.muted,marginTop:4}},
-                  vatType==="vat"?"✓ VAT Inclusive":
+                  vatType==="vat"?"✓ VAT added on top (prices are Non-VAT)":
                   vatType==="zerovat"?"✓ Zero-Rated VAT":"✓ Non-VAT Transaction")
               );
             })(),
@@ -7769,7 +7817,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260820-120000";
+const BUILD = "20260820-183000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
