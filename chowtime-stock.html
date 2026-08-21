@@ -250,6 +250,7 @@
   <div class="card">
     <h2>Verify Each Item</h2>
     <p class="sub">Check the current POS stock number, then physically count the freezer/chiller. This is the official audit — submitting will update the POS stock to match your count and reset the running baseline. Ipapakita muna ang bawat pagbabago bago ito isulat.</p>
+    <div id="crewCloseBanner" style="display:none"></div>
     <div id="auditorItemsList"></div>
     <button class="btn-primary" id="auditSubmitBtn" style="margin-top:16px;" onclick="submitAudit()">Submit Audit</button>
     <div class="status-line" id="auditorStatusLine"></div>
@@ -995,7 +996,35 @@ function renderAuditorItemsList(){
       return String(items[a].name||'').localeCompare(String(items[b].name||''));
     });
   if(!keys.length){ list.innerHTML='<p class="sub">No items in catalog yet.</p>'; return; }
-  bref('varianceBaseline').once('value').then(snap=>{
+  // The crew already counted this freezer at close. Reading it here does not
+  // replace the auditor's own count — it gives them the figure to check
+  // against, and one tap to adopt it when it agrees. The audit stays an
+  // audit: nothing is prefilled, so a blank field is still a blank field.
+  Promise.all([bref('varianceBaseline').once('value'),
+               bref('counts/'+todayStr()+'/close').once('value')]).then(([snap, crewSnap])=>{
+    const crewClose = (crewSnap.val()||{});
+    const crewItems = crewClose.items || {};
+    const crewWho   = crewClose.countedByName
+                      || (crewClose.countedBy ? crewName(crewClose.countedBy) : '');
+    const banner = document.getElementById('crewCloseBanner');
+    if(banner){
+      const n = Object.keys(crewItems).length;
+      if(n){
+        banner.style.display = 'block';
+        banner.style.cssText = 'display:block;margin-bottom:12px;padding:9px 12px;'
+          + 'background:#F5F3FF;border:1px solid #DDD6FE;border-radius:8px;font-size:12px';
+        banner.innerHTML = '👥 May closing count ang crew para ngayong araw — '
+          + n + ' item' + (n===1?'':'s')
+          + (crewWho ? ', binilang ni <strong>'+escapeHtml(crewWho)+'</strong>' : '')
+          + (crewClose.timestamp ? ' ('+new Date(crewClose.timestamp).toLocaleTimeString()+')' : '')
+          + '. Ipinapakita sa ilalim ng bawat item bilang panghambing — bilangin mo pa rin, tapos pindutin ang <strong>Gamitin</strong> kung tugma.';
+      }else{
+        banner.style.display = 'block';
+        banner.style.cssText = 'display:block;margin-bottom:12px;padding:9px 12px;'
+          + 'background:#FFF7ED;border:1px solid #FED7AA;border-radius:8px;font-size:12px';
+        banner.innerHTML = '⚠️ Walang closing count ang crew para ngayong araw — walang maihahambing sa bilang mo.';
+      }
+    }
     const baselines = snap.val() || {};
     // The POS figure is already in the POS — retyping it invited a typo that
     // then read as a variance nobody could account for. Filled in and locked;
@@ -1046,6 +1075,64 @@ function renderAuditorItemsList(){
             : `<div class="field"><label>Freezer Count${it.unit?' ('+escapeHtml(it.unit)+')':''}</label><input type="number" min="0" step="any" data-item="${id}" data-field="freezer" placeholder="0"></div>`}
         </div>`;
       list.appendChild(block);
+      // Crew's closing count for this item, shown as a reference row under the
+      // inputs. The variance against POS is spelled out here deliberately —
+      // the auditor should know which items are worth a careful recount before
+      // they start, not discover it afterwards.
+      const cRec = crewItems[id];
+      const cVal = cRec && cRec.freezer !== undefined && cRec.freezer !== null
+                   ? Number(cRec.freezer) : null;
+      if(cVal !== null){
+        const ref = document.createElement('div');
+        ref.className = 'hint';
+        ref.style.cssText = 'margin:-4px 0 8px;padding:6px 9px;background:#F5F3FF;'
+          + 'border:1px solid #DDD6FE;border-radius:7px;display:flex;'
+          + 'align-items:center;gap:8px;flex-wrap:wrap';
+        const posV = posOf(id);
+        let vTxt = '';
+        if(posV !== null){
+          const gap = Math.round((posV - cVal)*1000)/1000;
+          const col = Math.abs(gap) < 0.001 ? 'var(--muted)' : 'var(--danger)';
+          vTxt = '<span style="color:'+col+';font-weight:700">'
+               + (Math.abs(gap)<0.001 ? 'tugma sa POS'
+                  : (gap>0?'kulang ':'sobra ')+fmt(Math.abs(gap))+' vs POS')
+               + '</span>';
+        }
+        ref.innerHTML = '<span>👥 Crew close: <strong>'+fmt(cVal)+' '
+          + escapeHtml(it.unit||'')+'</strong>'
+          + (cRec.freezerPacks!==undefined&&cRec.freezerPacks!==null&&fps>1
+             ? ' <span style="color:var(--muted)">('+fmt(cRec.freezerPacks)+' pack'
+               +(cRec.freezerLoose?' + '+fmt(cRec.freezerLoose):'')+')</span>' : '')
+          + '</span>' + vTxt
+          + '<button type="button" class="btn ghost" style="padding:3px 9px;font-size:11px;margin-left:auto">Gamitin</button>';
+        ref.querySelector('button').onclick = ()=>{
+          if(fps > 1){
+            const pIn2 = block.querySelector('[data-field="packs"]');
+            const lIn2 = block.querySelector('[data-field="loose"]');
+            // Trust the stored packs/loose split only when BOTH halves are
+            // there. A stored packs figure with a missing loose used to adopt
+            // as "4 packs + 0", quietly dropping the loose pieces — so if
+            // either half is absent, derive the whole split from the base
+            // total instead. The base total is the number that was verified.
+            const hasSplit = cRec.freezerPacks !== undefined && cRec.freezerPacks !== null
+                          && cRec.freezerLoose !== undefined && cRec.freezerLoose !== null;
+            if(hasSplit){
+              pIn2.value = cRec.freezerPacks;
+              lIn2.value = cRec.freezerLoose;
+            }else{
+              const pk = Math.floor(cVal/fps);
+              pIn2.value = pk;
+              lIn2.value = Math.round((cVal - pk*fps)*1000)/1000;
+            }
+            pIn2.dispatchEvent(new Event('input'));
+          }else{
+            const fIn = block.querySelector('input[data-field="freezer"]');
+            fIn.value = cVal;
+            fIn.dispatchEvent(new Event('input'));
+          }
+        };
+        block.appendChild(ref);
+      }
       const posVal = posOf(id);
       const posInp = block.querySelector('input[data-field="pos"]');
       if(posVal === null){
@@ -2022,6 +2109,12 @@ function crewName(id){ return (crewList[id]&&crewList[id].name) || id || '—'; 
 
 // Reads the three date-keyed nodes and lists the days that have something in
 // them, newest first. Cheap: one read each, and only the counts are summed.
+// Which day the Activity Log is showing, kept outside loadActivityLog() so a
+// refresh does not throw the auditor back to the newest date.
+let ACTIVITY_VIEW = {date:null, all:false};
+function pickActivityDate(d){ ACTIVITY_VIEW.date = d; loadActivityLog(); }
+function toggleActivityAll(){ ACTIVITY_VIEW.all = !ACTIVITY_VIEW.all; loadActivityLog(); }
+
 function loadActivityLog(){
   const box = document.getElementById('activityLog');
   if(!box || !currentBranchId) return;
@@ -2050,20 +2143,40 @@ function loadActivityLog(){
     const list = Object.keys(days).sort().reverse();
     if(!list.length){ box.innerHTML = '<p class="empty">No activity recorded yet.</p>'; return; }
 
+    // The log grew to every day the branch has ever traded, which is a lot of
+    // scrolling to reach the one date anyone actually wants. Default to the
+    // newest day and let the rest be picked, with a way back to the full list.
+    const prev = document.getElementById('activityDatePick');
+    const chosen = (prev && prev.value) || ACTIVITY_VIEW.date || list[0];
+    const showAll = ACTIVITY_VIEW.all;
+    const shown = showAll ? list : list.filter(d => d === chosen);
+
+    const rowsHtml = shown.map(d=>{
+      const r = days[d];
+      const who = Object.keys(r.crew).join(', ') || '—';
+      return '<tr><td><strong>'+d+'</strong></td>'
+        + '<td>'+(r.cp||'—')+'</td>'
+        + '<td>'+(r.waste||'—')+'</td>'
+        + '<td>'+(r.audits||'—')+'</td>'
+        + '<td style="font-size:12px">'+who+'</td>'
+        + '<td><button class="btn ghost" onclick="openDay(\''+d+'\')">Open</button></td></tr>';
+    }).join('');
+
     box.innerHTML =
-      '<div class="table-wrap"><table><thead><tr>'
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'
+      + '<label class="hint" style="margin:0">Petsa</label>'
+      + '<select id="activityDatePick" onchange="pickActivityDate(this.value)"'
+      +   (showAll?' disabled':'') + '>'
+      +   list.map(d=>'<option value="'+d+'"'+(d===chosen?' selected':'')+'>'+d+'</option>').join('')
+      + '</select>'
+      + '<button class="btn ghost" onclick="toggleActivityAll()">'
+      +   (showAll ? 'Isang petsa lang' : 'Ipakita lahat ('+list.length+')')
+      + '</button>'
+      + '</div>'
+      + '<div class="table-wrap"><table><thead><tr>'
       + '<th>Date</th><th>Checkpoints</th><th>Waste</th><th>Audits</th><th>Counted by</th><th></th>'
       + '</tr></thead><tbody>'
-      + list.map(d=>{
-          const r = days[d];
-          const who = Object.keys(r.crew).join(', ') || '—';
-          return '<tr><td><strong>'+d+'</strong></td>'
-            + '<td>'+(r.cp||'—')+'</td>'
-            + '<td>'+(r.waste||'—')+'</td>'
-            + '<td>'+(r.audits||'—')+'</td>'
-            + '<td style="font-size:12px">'+who+'</td>'
-            + '<td><button class="btn ghost" onclick="openDay(\''+d+'\')">Open</button></td></tr>';
-        }).join('')
+      + rowsHtml
       + '</tbody></table></div>';
   })
   .catch(()=>{ box.innerHTML = '<p class="hint">Could not load the log.</p>'; });
