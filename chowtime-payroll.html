@@ -1189,6 +1189,90 @@ function saveAll(){ save('employees',employees);save('leaves',leaves);save('loan
 // ══════════════════════════════════════════════════════════
 //  DTR HELPERS
 // ══════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════
+//  PHILIPPINE HOLIDAY CALENDAR
+// ══════════════════════════════════════════════════════════
+// Three kinds of Philippine holiday, and only two of them can be known in
+// advance:
+//
+//   fixed     — same date every year (Labor Day, Christmas). Safe forever.
+//   computed  — derived from Easter, or "last Monday of August". Safe forever.
+//   proclaimed— Eid'l Fitr, Eid'l Adha, Chinese New Year, and any holiday-
+//               economics move. These come from a Malacañang proclamation each
+//               year and CANNOT be predicted. They live in PROCLAIMED below and
+//               must be updated annually from the official proclamation.
+//
+// Nothing here writes to the DTR on its own. It only tells the payroll page
+// what today's date means, so a holiday stops being something to remember.
+const HOLIDAY_FIXED = [
+  // [month(1-12), day, type, name]
+  [1, 1,'RH',"New Year's Day"],
+  [4, 9,'RH','Araw ng Kagitingan'],
+  [5, 1,'RH','Labor Day'],
+  [6,12,'RH','Independence Day'],
+  [11,30,'RH','Bonifacio Day'],
+  [12,25,'RH','Christmas Day'],
+  [12,30,'RH','Rizal Day'],
+  [8,21,'SH','Ninoy Aquino Day'],
+  [11, 1,'SH',"All Saints' Day"],
+  [12, 8,'SH','Immaculate Conception'],
+  [12,31,'SH','Last Day of the Year'],
+];
+
+// Proclaimed / movable dates. UPDATE EACH YEAR from the official proclamation.
+// A year that is missing here simply has no entry for these — the fixed and
+// computed holidays still work, so payroll never breaks, it just stops
+// reminding about the lunar and proclaimed ones.
+const HOLIDAY_PROCLAIMED = {
+  // '2026': [['2026-02-17','SH','Chinese New Year'], ...]
+};
+
+// Easter Sunday (Meeus/Jones/Butcher). Maundy Thursday, Good Friday and Black
+// Saturday all hang off it.
+function easterSunday(y){
+  const a=y%19,b=Math.floor(y/100),c=y%100,d=Math.floor(b/4),e=b%4,
+        f=Math.floor((b+8)/25),g=Math.floor((b-f+1)/3),h=(19*a+b-d-g+15)%30,
+        i=Math.floor(c/4),k=c%4,l=(32+2*e+2*i-h-k)%7,
+        m=Math.floor((a+11*h+22*l)/451),
+        mo=Math.floor((h+l-7*m+114)/31),da=((h+l-7*m+114)%31)+1;
+  return new Date(y,mo-1,da);
+}
+function ymd(d){
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')
+        +'-'+String(d.getDate()).padStart(2,'0');
+}
+function addDays(d,n){ const x=new Date(d); x.setDate(x.getDate()+n); return x; }
+
+// Every holiday in a given year, as { 'YYYY-MM-DD': {type,name} }.
+const _holCache = {};
+function holidaysForYear(y){
+  if(_holCache[y]) return _holCache[y];
+  const map = {};
+  HOLIDAY_FIXED.forEach(([mo,da,type,name])=>{
+    map[y+'-'+String(mo).padStart(2,'0')+'-'+String(da).padStart(2,'0')] = {type,name};
+  });
+  const e = easterSunday(y);
+  map[ymd(addDays(e,-3))] = {type:'RH', name:'Maundy Thursday'};
+  map[ymd(addDays(e,-2))] = {type:'RH', name:'Good Friday'};
+  map[ymd(addDays(e,-1))] = {type:'SH', name:'Black Saturday'};
+  // National Heroes Day — last Monday of August.
+  const aug = new Date(y,7,31);
+  while(aug.getDay()!==1) aug.setDate(aug.getDate()-1);
+  map[ymd(aug)] = {type:'RH', name:'National Heroes Day'};
+  (HOLIDAY_PROCLAIMED[String(y)]||[]).forEach(([date,type,name])=>{
+    map[date] = {type,name};
+  });
+  _holCache[y] = map;
+  return map;
+}
+
+function holidayOn(dateStr){
+  if(!dateStr) return null;
+  const y = parseInt(String(dateStr).slice(0,4),10);
+  if(!y) return null;
+  return holidaysForYear(y)[dateStr] || null;
+}
+
 function getDTRKey(periodKey, empId) { return periodKey+'__'+empId; }
 
 function getDTREntry(periodKey, empId, dateStr) {
@@ -1302,7 +1386,7 @@ function computeDTRRow(entry, shiftSched) {
 
 function getDTRTotals(periodKey, empId) {
   const p = getPeriodDetails(periodKey);
-  if (!p || !periodKey) return {days:0,ot:0,nd:0,late:0,ut:0,holPay:0,ded:0,breakHrs:0};
+  if (!p || !periodKey) return {days:0,ot:0,nd:0,late:0,ut:0,holPay:0,ded:0,breakHrs:0,holDays:[]};
   const k = getDTRKey(periodKey, empId);
   const emp = employees.find(e=>e.id===empId);
   const rate = emp ? +emp.rate : 0;
@@ -1317,6 +1401,7 @@ function getDTRTotals(periodKey, empId) {
   }
 
   let days=0,ot=0,nd=0,late=0,ut=0,holPay=0,ded=0,breakHrs=0;
+  const holDays=[];   // the RH/SH days behind holPay, for the payslip
   for (let d=p.start; d<=p.end; d++) {
     const dateStr = `${p.year}-${String(p.month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const entry = (periodDTR && periodDTR[dateStr]) || {};
@@ -1340,9 +1425,21 @@ function getDTRTotals(periodKey, empId) {
     breakHrs += c.breakHrs;
     if (entry.holiday==='RH')      holPay += rate * (+settings.rh||2.0);
     else if (entry.holiday==='SH') holPay += rate * (+settings.sh||1.30);
+    // Keep the actual days behind holPay. A lump sum on a payslip invites the
+    // question "bakit ganito?" — naming the dates answers it before it is
+    // asked, and lets the crew see their RH/SH really was paid.
+    if (entry.holiday==='RH' || entry.holiday==='SH'){
+      const hInfo = holidayOn(dateStr);
+      holDays.push({
+        date: dateStr,
+        type: entry.holiday,
+        name: hInfo ? hInfo.name : (entry.holiday==='RH'?'Regular Holiday':'Special Holiday'),
+        amount: rate * (entry.holiday==='RH' ? (+settings.rh||2.0) : (+settings.sh||1.30))
+      });
+    }
     ded += ((c.late + c.ut)/60) * hourlyRate;
   }
-  return {days, ot:+ot.toFixed(2), nd:+nd.toFixed(2), late, ut, holPay:+holPay.toFixed(2), ded:+ded.toFixed(2), breakHrs:+breakHrs.toFixed(2)};
+  return {days, ot:+ot.toFixed(2), nd:+nd.toFixed(2), late, ut, holPay:+holPay.toFixed(2), ded:+ded.toFixed(2), breakHrs:+breakHrs.toFixed(2), holDays};
 }
 
 
@@ -1383,6 +1480,7 @@ function buildPayrollRow(emp, periodKey, opts) {
   const otPay    = +(totals.ot * hourly * (+settings.ot||1.25)).toFixed(2);
   const ndPay    = +(totals.nd * hourly * (+settings.nd||1.10)).toFixed(2);
   const holPay   = totals.holPay || 0;
+  const holDays  = totals.holDays || [];
   // ── Quota Sales Incentive for this period ───────────────
   const incentive = getEmpIncentive ? (getEmpIncentive(emp.id, periodKey) || {}) : {};
   const incentiveAmt = +(incentive.amount || 0);
@@ -1443,7 +1541,7 @@ function buildPayrollRow(emp, periodKey, opts) {
   const loanDed  = +Object.values(loanByCategory).reduce((a,b)=>a+b, 0).toFixed(2);
   const totalDed = gross > 0 ? totals.ded : 0;
   const net      = Math.max(0, gross - sss - phic - pagibig - tax - loanDed - totalDed);
-  return {id:emp.id,name:emp.name,pos:emp.pos,rate,days,hasDTR,basic,otPay,ndPay,holPay,incentiveAmt,incentiveType,gross,sss,phic,pagibig,tax,loanDed,loanByCategory,loanLines,loanPending,periodReleased,totalDed,net,ot:totals.ot,nd:totals.nd,late:totals.late};
+  return {id:emp.id,name:emp.name,pos:emp.pos,rate,days,hasDTR,basic,otPay,ndPay,holPay,holDays,incentiveAmt,incentiveType,gross,sss,phic,pagibig,tax,loanDed,loanByCategory,loanLines,loanPending,periodReleased,totalDed,net,ot:totals.ot,nd:totals.nd,late:totals.late};
 }
 
 // ══════════════════════════════════════════════════════════
@@ -1750,10 +1848,16 @@ function loadDTREditor() {
     const entry = getDTREntry(periodKey, empId, dateStr);
     const c = computeDTRRow(entry, schedule);
     const isAuto = entry.auto;
-    const rowBg = isSun ? 'background:#fff0ec;' : '';
+    const hol = holidayOn(dateStr);
+    // A holiday the calendar knows about but the DTR has not been set to. This
+    // is the whole point of the feature: the row says so, rather than the
+    // holiday being remembered or not.
+    const holMissing = hol && entry.holiday !== hol.type;
+    const rowBg = holMissing ? 'background:#FFF7E6;'
+                : (hol ? 'background:#F1F8E9;' : (isSun ? 'background:#fff0ec;' : ''));
 
     rows += `<tr style="${rowBg}">
-      <td>${dateStr}</td>
+      <td>${dateStr}${hol?`<div style="font-size:10px;font-weight:700;color:${holMissing?'#B26A00':'var(--green)'};">${holMissing?'\u26A0\uFE0F ':'\u2713 '}${hol.name} (${hol.type})</div>`:''}</td>
       <td style="${isSun?'color:var(--red);font-weight:700;':''}">${dayName}</td>
       <td><input class="dtr-input" type="time" value="${entry.in||''}"
           onchange="adminEditDTR('${dateStr}','in',this.value,'${empId}','${periodKey}')"
@@ -1787,6 +1891,62 @@ function loadDTREditor() {
 
   document.getElementById('editor-tbody').innerHTML = rows;
 
+  // Holiday reminder. Nothing has been written — this only reports which days
+  // in this period are holidays that the DTR does not yet reflect, and offers
+  // one deliberate press to set them.
+  let holBox = document.getElementById('editor-holiday-note');
+  if(!holBox){
+    holBox = document.createElement('div');
+    holBox.id = 'editor-holiday-note';
+    const tb = document.getElementById('editor-tbody');
+    const tbl = tb.closest('table');
+    if(tbl && tbl.parentNode) tbl.parentNode.insertBefore(holBox, tbl);
+  }
+  const missing = [];
+  for (let d = p.start; d <= p.end; d++) {
+    const ds = `${p.year}-${String(p.month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const h = holidayOn(ds);
+    if(h) missing.push([ds,h,getDTREntry(periodKey, empId, ds).holiday === h.type]);
+  }
+  const gaps = holidayGapsForPeriod(periodKey);
+  const gapPeople = new Set(gaps.map(g=>g.emp.id)).size;
+  // How many crew each date was applied to by the calendar — that is what an
+  // undo of that date would clear.
+  const autoCount = (ds)=> (employees||[]).filter(e=>{
+    if(!e || !e.id) return false;
+    const en = getDTREntry(periodKey, e.id, ds);
+    return en.holAuto === true && en.holiday;
+  }).length;
+
+  if(missing.length){
+    holBox.style.cssText = 'margin:0 0 12px;padding:10px 14px;background:'
+      + (gaps.length?'#FFF7E6':'#F1F8E9') + ';border:1px solid '
+      + (gaps.length?'#FFD591':'#C5E1A5') + ';border-radius:8px;font-size:13px;';
+    holBox.innerHTML = '<strong>'+(gaps.length?'⚠️':'✓')+' Holiday sa period na ito:</strong><br>'
+      + missing.map(([ds,h,setForThis])=>{
+          const n = autoCount(ds);
+          return '• '+ds+' — '+h.name+' <strong>('+h.type+')</strong>'
+            + (setForThis?' <span style="color:var(--green)">✓</span>':'')
+            + (n?' <span style="color:var(--muted)">· naka-set sa '+n+' crew</span>'
+                + ' <button onclick="undoHolidayForDate(\''+ds+'\')" style="padding:2px 8px;'
+                + 'font-size:11px;border:1px solid var(--border);border-radius:5px;'
+                + 'background:#fff;cursor:pointer;margin-left:4px;">Ibalik</button>':'');
+        }).join('<br>')
+      + (gaps.length
+          ? '<br><strong style="color:#B26A00">Kulang pa sa '+gapPeople+' crew.</strong>'
+            + '<br><button onclick="applyHolidaysForEditor()" style="margin-top:8px;padding:6px 14px;'
+            + 'border:0;border-radius:6px;background:var(--green,#2E7D32);color:#fff;font-weight:700;'
+            + 'cursor:pointer;">I-apply sa LAHAT ng crew (' + gapPeople + ')</button>'
+          : '<br><span style="color:var(--green);font-weight:700">Naka-set na sa lahat ng crew.</span>')
+      + '<div style="font-size:11px;color:var(--muted);margin-top:6px;">'
+      + 'Ang Holiday column lang ang ginagalaw — hindi ang time in/out. '
+      + '"Ibalik" ay para sa petsang iyon lang, at hindi nito buburahin ang manu-mano mong nilagay. '
+      + 'Hindi ito umaabot sa franchise payroll — sila mismo ang mag-se-set para sa crew nila.</div>';
+  }else{
+    holBox.style.cssText = 'display:none';
+    holBox.innerHTML = '';
+  }
+
   // Summary
   const t = getDTRTotals(periodKey, empId);
   document.getElementById('editor-summary').innerHTML = `
@@ -1798,7 +1958,98 @@ function loadDTREditor() {
   `;
 }
 
+// Sets the Holiday column for every calendar holiday in the open period, for
+// EVERY employee — a holiday is a fact about the date, not about one person,
+// so setting it one crew member at a time was just an invitation to miss
+// somebody. Deliberately does NOT touch time in/out: whether a person actually
+// worked the holiday is a separate fact that only the DTR knows.
+//
+// Scope stops at this database. Company-owned branches share this payroll
+// project, but each franchise runs its own — their holidays are theirs to set.
+function holidayGapsForPeriod(periodKey){
+  const p = getPeriodDetails(periodKey);
+  const gaps = [];
+  if(!p) return gaps;
+  for (let d = p.start; d <= p.end; d++) {
+    const ds = `${p.year}-${String(p.month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const h = holidayOn(ds);
+    if(!h) continue;
+    (employees||[]).forEach(e=>{
+      if(!e || !e.id) return;
+      const en = getDTREntry(periodKey, e.id, ds);
+      // Fill blanks, and correct a value this same button wrote earlier (say
+      // the proclamation list changed an SH to an RH). Never overwrite a
+      // holiday you set by hand — a rest day you granted on a holiday is a
+      // decision, and the calendar has no business undoing it.
+      const isBlank = !en.holiday;
+      const isStaleAuto = en.holAuto === true && en.holiday !== h.type;
+      if(isBlank || isStaleAuto) gaps.push({date:ds, hol:h, emp:e});
+    });
+  }
+  return gaps;
+}
+
+function applyHolidaysForEditor(){
+  const periodKey = document.getElementById('editor-period').value;
+  if(!periodKey) return;
+  const gaps = holidayGapsForPeriod(periodKey);
+  if(!gaps.length){ if(typeof toast==='function') toast('Wala nang holiday na kailangang i-set'); return; }
+  const people = new Set(gaps.map(g=>g.emp.id)).size;
+  const dates  = [...new Set(gaps.map(g=>g.date))].sort();
+  if(!confirm('I-set ang holiday para sa '+people+' crew?\n\n'
+      + dates.map(d=>'• '+d+' — '+holidayOn(d).name+' ('+holidayOn(d).type+')').join('\n')
+      + '\n\nAng Holiday column lang ang mababago. Hindi gagalawin ang time in/out.')) return;
+  gaps.forEach(g=>{
+    adminEditDTR(g.date, 'holiday', g.hol.type, g.emp.id, periodKey);
+    // Marks this row as the calendar's doing, not yours. The per-date undo
+    // removes only marked rows, so a holiday you set by hand — a local fiesta,
+    // a one-off rest day — survives an undo of the same date. Editing the row
+    // afterwards clears the mark, because it is then your value, not the
+    // calendar's.
+    adminEditDTR(g.date, 'holAuto', true, g.emp.id, periodKey);
+  });
+  if(typeof toast === 'function') toast('Na-set ang holiday para sa '+people+' crew');
+  loadDTREditor();
+}
+
+// Undoes ONE date. Deliberately not an "undo everything" — the other holidays
+// in the period stay exactly as they are. Only rows still carrying the
+// calendar's mark are cleared, so anything set or changed by hand is left
+// alone.
+function undoHolidayForDate(dateStr){
+  const periodKey = document.getElementById('editor-period').value;
+  if(!periodKey || !dateStr) return;
+  const marked = (employees||[]).filter(e=>{
+    if(!e || !e.id) return false;
+    const en = getDTREntry(periodKey, e.id, dateStr);
+    return en.holAuto === true && en.holiday;
+  });
+  if(!marked.length){
+    if(typeof toast==='function') toast('Walang maibabalik sa '+dateStr+' — manu-mano lahat o wala pang naka-set');
+    return;
+  }
+  const h = holidayOn(dateStr);
+  if(!confirm('Ibalik sa blangko ang holiday ng '+marked.length+' crew para sa '+dateStr
+      + (h?' ('+h.name+')':'') + '?\n\n'
+      + 'Ang petsang ito lang — hindi maaapektuhan ang ibang araw.\n'
+      + 'Ang manu-mano mong nilagay ay hindi gagalawin.')) return;
+  marked.forEach(e=> adminEditDTR(dateStr, 'holiday', '', e.id, periodKey));
+  if(typeof toast === 'function') toast('Naibalik ang '+dateStr+' para sa '+marked.length+' crew');
+  loadDTREditor();
+}
+
 function adminEditDTR(dateStr, field, value, empId, periodKey) {
+  // A hand-edit of the holiday cell takes ownership of it: clear the calendar
+  // mark so the per-date undo leaves this row alone. Guarded against the
+  // 'holAuto' write itself, which would otherwise immediately erase its own
+  // mark.
+  if (field === 'holiday') {
+    setDTREntry(periodKey, empId, dateStr, 'holAuto', null);
+    if (window._fbDB && window._fbFns) {
+      window._fbFns.remove(window._fbFns.ref(window._fbDB,
+        `dtrData/${periodKey}__${empId}/${dateStr}/holAuto`)).catch(e=>console.warn(e));
+    }
+  }
   // Set entry locally
   setDTREntry(periodKey, empId, dateStr, field, value);
   // Clear auto flag when admin manually edits
@@ -2664,6 +2915,7 @@ function generatePayslip() {
     <div class="payslip-row"><span>Overtime Pay (${r.ot}h)</span><span>₱${fmt(r.otPay)}</span></div>
     <div class="payslip-row"><span>Night Differential (${r.nd}h)</span><span>₱${fmt(r.ndPay)}</span></div>
     <div class="payslip-row"><span>Holiday Pay</span><span>₱${fmt(r.holPay)}</span></div>
+    ${(r.holDays&&r.holDays.length)?`<div style="margin:-2px 0 6px 12px;font-size:11px;color:var(--muted);line-height:1.6;">${r.holDays.map(h=>`${h.date} · ${h.name} <strong>(${h.type})</strong> — ₱${fmt(h.amount)}`).join('<br>')}</div>`:''}
     ${r.incentiveAmt>0?`<div class="payslip-row" style="color:var(--green);"><span>${r.incentiveType||'Sales Incentive'}</span><span>₱${fmt(r.incentiveAmt)}</span></div>`:''}
     <div class="payslip-row" style="font-weight:700;font-size:14px;background:#f0faf4;padding:6px 0;"><span>GROSS PAY</span><span style="color:var(--green);">₱${fmt(r.gross)}</span></div>
     <div class="payslip-section">Deductions</div>
@@ -4060,7 +4312,7 @@ Basic Pay     : P${fmt(r.basic)}
 OT Pay (${t.ot||0}h): P${fmt(r.otPay)}
 Night Diff Pay: P${fmt(r.ndPay)}
 Holiday Pay   : P${fmt(r.holPay)}
-${r.incentiveAmt>0?`${(r.incentiveType||'Sales Incentive').padEnd(14)}: P${fmt(r.incentiveAmt)}`:''}
+${(r.holDays&&r.holDays.length)?r.holDays.map(h=>'  '+h.date+' '+h.name+' ('+h.type+') P'+fmt(h.amount)).join('\n')+'\n':''}${r.incentiveAmt>0?`${(r.incentiveType||'Sales Incentive').padEnd(14)}: P${fmt(r.incentiveAmt)}`:''}
 GROSS PAY     : P${fmt(r.gross)}
 
 -------- DEDUCTIONS --------
