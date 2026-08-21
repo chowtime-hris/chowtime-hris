@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260820-183000 -->
+<!-- BUILD:20260820-190000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -760,6 +760,7 @@ function buildEscPos(ord,bName,cs,paperSize){
   }
   function row(l,r){return T(pad(l,W-String(r).length,true)+r+"\n");}
   function ln(t){return T(t+"\n");}
+  function lnw(t){var w=escposWrap(t,W);return T((w.length?w.join("\n"):"")+"\n");}
   function dash(){return T("-".repeat(W)+"\n");}
 
   var parts=[];
@@ -768,14 +769,14 @@ function buildEscPos(ord,bName,cs,paperSize){
   a([ESC,0x40]);         // INIT
   a([ESC,0x61,0x01]);    // CENTER
   a([ESC,0x21,0x30]);    // DOUBLE SIZE
-  a(ln(cs.name||"CHOWTIME"));
+  a(lnw(cs.name||"CHOWTIME"));
   a([ESC,0x21,0x00]);    // NORMAL
   a([ESC,0x45,0x01]);    // BOLD ON
-  a(ln(bName));
+  a(lnw(bName));
   a([ESC,0x45,0x00]);    // BOLD OFF
-  if(cs.address)a(ln(cs.address));
+  if(cs.address)a(lnw(cs.address));
   if(cs.phone)a(ln("Tel: "+cs.phone));
-  if(isVAT&&!zerovat)a(ln("TIN: "+(cs.tin||"000-000-000-000")));
+  if(isVAT&&!zerovat)a(lnw("TIN: "+(cs.tin||"000-000-000-000")));
   a(dash());
   a([ESC,0x61,0x00]);    // LEFT
   a(row("Order #:",(ord.id||"—")));
@@ -889,6 +890,7 @@ function buildEscPosKOT(ord,bName,cs,paperSize){
   var T=function(x){return enc.encode(x);};
   var B=function(arr){return new Uint8Array(arr);};
   function ln(t){return T(t+"\n");}
+  function lnw(t){var w=escposWrap(t,W);return T((w.length?w.join("\n"):"")+"\n");}
   function dash(){return T("-".repeat(W)+"\n");}
 
   var parts=[], a=function(v){parts.push(v instanceof Uint8Array?v:B(v));};
@@ -904,7 +906,7 @@ function buildEscPosKOT(ord,bName,cs,paperSize){
   a([ESC,0x45,0x01]);
   a(ln("Order: "+(ord.id||"-")+"   "+(ord.time||"")));
   a([ESC,0x45,0x00]);
-  a(ln(bName+"   "+(ord.date||"")));
+  a(lnw(bName+"   "+(ord.date||"")));
   if(ord.mixedType){
     a([ESC,0x45,0x01]);
     a(ln("Type: MIXED — check each  item"));
@@ -944,7 +946,7 @@ function buildEscPosKOT(ord,bName,cs,paperSize){
   a(dash());
   if(ord.note){a([ESC,0x45,0x01]);a(ln("NOTE: "+ord.note));a([ESC,0x45,0x00]);a(dash());}
   a([ESC,0x61,0x01]);
-  a(ln("Printed: "+new Date().toLocaleTimeString("en-PH")));
+  a(lnw("Printed: "+new Date().toLocaleTimeString("en-PH")));
   a(B([NL,NL,NL]));
   a([GS,0x56,0x41,0x10]); // PARTIAL CUT
 
@@ -1007,6 +1009,34 @@ function setPaperFor(v){
 
 function escposKick(pin){
   return new Uint8Array([0x1B,0x70,(pin===5?0x01:0x00),0x19,0xFA]);
+}
+
+// Break free text on word boundaries before it reaches the printer.
+//
+// The printer does not wrap — it cuts at exactly W characters, mid-word,
+// which is how the branch address came off the roll as "...Zara" on one line
+// and "gosa" on the next. Label/amount rows are safe because they are padded
+// to fit; it is the long single strings (address, company + branch name,
+// item names on a kitchen ticket) that need this.
+//
+// A word longer than the whole paper still has to be broken, but at least it
+// is broken deliberately and only after everything else has been tried.
+function escposWrap(t,W){
+  var s=String(t==null?"":t).replace(/\s+/g," ").trim();
+  if(!s) return [];
+  var out=[], line="";
+  s.split(" ").forEach(function(word){
+    while(word.length>W){
+      if(line){out.push(line);line="";}
+      out.push(word.slice(0,W));
+      word=word.slice(W);
+    }
+    if(!line){line=word;}
+    else if(line.length+1+word.length<=W){line+=" "+word;}
+    else{out.push(line);line=word;}
+  });
+  if(line)out.push(line);
+  return out;
 }
 
 function _cat(){
@@ -1335,6 +1365,7 @@ function buildEscPosZ(zd,branchName,cashier,cs,paperSize,isZ){
   var T=function(x){return enc.encode(x);};
   var B=function(a){return new Uint8Array(a);};
   function ln(t){return T(t+"\n");}
+  function lnw(t){var w=escposWrap(t,W);return T((w.length?w.join("\n"):"")+"\n");}
   function dash(){return T("-".repeat(W)+"\n");}
   function row(l,r){
     var pad=W-l.length-r.length;
@@ -1352,14 +1383,14 @@ function buildEscPosZ(zd,branchName,cashier,cs,paperSize,isZ){
   a(ln(isZ?"Z-READING":"X-READING"));
   a([ESC,0x21,0x00]);
   a([ESC,0x45,0x01]);
-  a(ln((cs.name||"CHOWTIME")+" - "+branchName));
+  a(lnw((cs.name||"CHOWTIME")+" - "+branchName));
   a([ESC,0x45,0x00]);
-  if(cs.address)a(ln(cs.address));
-  if(cs.tin)a(ln("TIN: "+cs.tin));
+  if(cs.address)a(lnw(cs.address));
+  if(cs.tin)a(lnw("TIN: "+cs.tin));
   // The reported day, not the day the paper came out.
   a(ln(new Date(((zd&&zd.date)||localDate())+"T00:00:00")
     .toLocaleDateString("en-PH",{year:"numeric",month:"long",day:"numeric"})));
-  a(ln("Cashier: "+cashier));
+  a(lnw("Cashier: "+cashier));
   a([ESC,0x61,0x00]);
   a(dash());
 
@@ -1454,7 +1485,7 @@ function buildEscPosZ(zd,branchName,cashier,cs,paperSize,isZ){
 
   a([ESC,0x61,0x01]);
   a(ln("Business date: "+((zd&&zd.date)||localDate())));
-  a(ln("Printed: "+new Date().toLocaleString("en-PH")));
+  a(lnw("Printed: "+new Date().toLocaleString("en-PH")));
   a([ESC,0x45,0x01]);
   a(ln(isZ?"FINAL Z-READING FOR THE DAY":"X-READING (NOT FINAL)"));
   a([ESC,0x45,0x00]);
@@ -7817,7 +7848,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260820-183000";
+const BUILD = "20260820-190000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
