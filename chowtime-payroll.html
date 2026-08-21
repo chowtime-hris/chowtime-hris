@@ -670,6 +670,8 @@ tbody td{padding:9px 11px;}
         <input type="date" id="sched-view-week" onchange="renderWeeklySchedule()">
       </div>
       <button class="btn btn-secondary" onclick="renderWeeklySchedule()">🔄 Refresh</button>
+      <button class="btn btn-secondary" onclick="copyWeekToMonth()">📋 Kopyahin sa buong buwan</button>
+      <button class="btn btn-secondary" onclick="printMonthSchedule()">🖨️ Print buong buwan</button>
       <button class="btn btn-primary" onclick="printSchedule()">🖨️ Print</button>
     </div>
     <div id="weekly-schedule-wrap"></div>
@@ -2035,27 +2037,68 @@ function getEmpShiftForDay(empId,dow,dateStr) {
   return null;
 }
 
+// Picks black or white text for a badge from the badge's own colour. The
+// badges were hardcoded to black on whatever the shift colour was, so a dark
+// purple or dark green shift became unreadable.
+function badgeInk(hex){
+  const h = String(hex||'').replace('#','');
+  if(h.length !== 6) return '#111111';
+  const r = parseInt(h.slice(0,2),16), g = parseInt(h.slice(2,4),16), b = parseInt(h.slice(4,6),16);
+  // Perceived brightness — green counts for far more than blue.
+  return (0.299*r + 0.587*g + 0.114*b) > 150 ? '#111111' : '#FFFFFF';
+}
+
 function renderShiftAssignment() {
   const tbody=document.getElementById('shift-assign-tbody'); if(!tbody) return;
+  // This picker existed but was never filled and never read, so changing it
+  // did nothing at all.
+  const brSel=document.getElementById('shift-assign-branch');
+  if(brSel){
+    const keep=brSel.value, names=branchNamesSafe();
+    brSel.innerHTML='<option value="">All Branches</option>'
+      + '<option value="__none">⚠️ Walang branch</option>'
+      + names.map(n=>'<option value="'+n.replace(/"/g,'&quot;')+'">'+n+'</option>').join('');
+    if(names.includes(keep)||keep==='__none') brSel.value=keep;
+  }
+  const bFilter = brSel ? brSel.value : '';
+  const rows = bFilter==='__none' ? employees.filter(e=>e&&!e.branch)
+             : (bFilter ? employees.filter(e=>e&&e.branch===bFilter) : employees);
   if(!employees.length){tbody.innerHTML='<tr><td colspan="12" style="text-align:center;padding:16px;color:var(--muted);">No employees.</td></tr>';return;}
+  if(!rows.length){tbody.innerHTML='<tr><td colspan="12" style="text-align:center;padding:16px;color:var(--muted);">'
+    +(bFilter==='__none'?'Lahat ng crew ay may branch na. 👍':'Walang crew sa <strong>'+bFilter+'</strong>.')+'</td></tr>';return;}
   const weekInput=document.getElementById('shift-week');
   const weekStart=weekInput?.value?new Date(weekInput.value+'T00:00:00'):getMonday(new Date());
   const weekDates=Array.from({length:7},(_,i)=>{const d=new Date(weekStart);d.setDate(d.getDate()+i);return d;});
-  tbody.innerHTML=employees.map(emp=>{
+  tbody.innerHTML=rows.map(emp=>{
     const a=empShifts[emp.id]||{};
     const shift=a.shiftId?getShiftDefs().find(s=>s.id===a.shiftId):null;
+    // What this person actually works this week, so the column stops reading
+    // "Not assigned" for a rotating crew member whose week is clearly full.
+    const weekShifts={};
+    weekDates.forEach(date=>{
+      const s=getEmpShiftForDay(emp.id,date.getDay(),toLocalDateStr(date));
+      if(s&&s!=='REST'&&s!=='OFF'&&s.id) weekShifts[s.id]=s;
+    });
+    const usedList=Object.values(weekShifts);
     const days=weekDates.map(date=>{
       const s=getEmpShiftForDay(emp.id,date.getDay(),toLocalDateStr(date));
       if(!s) return '<td style="text-align:center;color:var(--muted);">—</td>';
-      if(s==='REST') return '<td style="text-align:center;"><span style="background:#f0f0f0;color:#5A5A5A;padding:2px 6px;border-radius:8px;font-size:11px;">🛌</span></td>';
+      if(s==='REST') return '<td style="text-align:center;"><span style="background:#ECECEC;color:#444;padding:2px 7px;border-radius:8px;font-size:11px;font-weight:600;">🛌 REST</span></td>';
       if(s==='OFF')  return '<td style="text-align:center;"><span style="background:#fdd;color:#c00;padding:2px 6px;border-radius:8px;font-size:11px;">OFF</span></td>';
-      return `<td style="text-align:center;"><span style="background:${s.color};color:#111111;padding:2px 6px;border-radius:8px;font-size:11px;font-weight:600;">${s.label||s.name}</span></td>`;
+      return `<td style="text-align:center;"><span style="background:${s.color};color:${badgeInk(s.color)};padding:3px 7px;border-radius:8px;font-size:11px;font-weight:700;white-space:nowrap;">${s.label||s.name}</span><div style="font-size:9px;color:var(--muted);margin-top:2px;">${s.start}–${s.end}</div></td>`;
     }).join('');
     return `<tr>
-      <td><strong>${emp.name}</strong></td>
+      <td><strong>${emp.name}</strong><div style="font-size:10px;color:var(--muted);">${emp.branch||'<span style="color:#B26A00">walang branch</span>'}</div></td>
       <td style="font-size:11px;color:var(--muted);">${emp.pos||''}</td>
       <td><span style="font-size:11px;">${a.type==='fixed'?'🔒 Fixed':a.type==='rotation'?'🔄 Rotating':'—'}</span></td>
-      <td>${shift?`<span style="background:${shift.color};color:#111111;padding:2px 8px;border-radius:10px;font-size:11px;">${shift.label||''} ${shift.name}</span>`:'<span style="color:var(--muted);font-size:11px;">Not assigned</span>'}</td>
+      <td>${
+        shift
+          ? `<span style="background:${shift.color};color:${badgeInk(shift.color)};padding:3px 9px;border-radius:10px;font-size:11px;font-weight:700;">${shift.label||''} ${shift.name}</span>`
+          : (usedList.length
+              ? usedList.map(s=>`<span style="background:${s.color};color:${badgeInk(s.color)};padding:2px 7px;border-radius:9px;font-size:10px;font-weight:700;margin:1px 2px 1px 0;display:inline-block;">${s.label||s.name}</span>`).join('')
+                + '<div style="font-size:9px;color:var(--muted);">ginagamit ngayong linggo</div>'
+              : '<span style="color:var(--muted);font-size:11px;">Not assigned</span>')
+      }</td>
       ${days}
       <td>
         <button class="btn btn-sm btn-primary" onclick="openEmpShiftModal('${emp.id}')">✏️ Edit</button>
@@ -2186,6 +2229,138 @@ function quickEditShift(empId, dateStr, value, empName) {
   renderWeeklySchedule();
 }
 window.quickEditShift = quickEditShift;
+
+// Takes the week currently on screen and lays it over the rest of that
+// calendar month. Leave is handled by hand and there are no crew leave
+// requests, so a straight overwrite is what Norman asked for — but it still
+// confirms first and reports exactly how many cells changed, because this
+// writes across every crew member at once.
+function copyWeekToMonth(){
+  const weekInput=document.getElementById('sched-view-week')||document.getElementById('shift-week');
+  const base = weekInput && weekInput.value
+    ? new Date(weekInput.value+'T00:00:00') : getMonday(new Date());
+  const start = getMonday(base);
+  const srcDates = Array.from({length:7},(_,i)=>{const d=new Date(start);d.setDate(d.getDate()+i);return d;});
+
+  const brSel=document.getElementById('sched-view-branch');
+  const bFilter = brSel ? brSel.value : '';
+  const crew = bFilter==='__none' ? employees.filter(e=>e&&!e.branch)
+             : (bFilter ? employees.filter(e=>e&&e.branch===bFilter) : employees.filter(e=>e&&e.id));
+  if(!crew.length){ alert('Walang crew sa view na ito.'); return; }
+
+  // The month is taken from the Monday of the shown week, so a week that
+  // straddles month-end fills the month it mostly belongs to.
+  const year=start.getFullYear(), month=start.getMonth();
+  const lastDay=new Date(year,month+1,0).getDate();
+
+  // What the source week says for each weekday, per crew member.
+  const pattern={};
+  crew.forEach(e=>{
+    pattern[e.id]={};
+    srcDates.forEach(d=>{
+      const s=getEmpShiftForDay(e.id,d.getDay(),toLocalDateStr(d));
+      pattern[e.id][d.getDay()] = (s==='REST') ? 'REST' : (s&&s.id ? s.id : '');
+    });
+  });
+
+  const targets=[];
+  for(let day=1; day<=lastDay; day++){
+    const d=new Date(year,month,day);
+    if(d < start) continue;                 // never rewrite the past
+    if(srcDates.some(sd=>sd.getTime()===d.getTime())) continue; // skip the source week
+    targets.push(d);
+  }
+  if(!targets.length){ alert('Walang natitirang araw sa buwan pagkatapos ng linggong ito.'); return; }
+
+  const label=start.toLocaleDateString('en-PH',{month:'long',year:'numeric'});
+  if(!confirm('Kopyahin ang linggo ng '+toLocalDateStr(start)+' sa natitirang '
+      +targets.length+' araw ng '+label+'?\n\n'
+      +crew.length+' crew'+(bFilter&&bFilter!=='__none'?' sa '+bFilter:'')+'.\n\n'
+      +'Papalitan nito ang naka-set na sa mga araw na iyon. Hindi gagalawin ang nakaraan.')) return;
+
+  let n=0;
+  crew.forEach(e=>{
+    if(!empShifts[e.id]) empShifts[e.id]={type:'rotation',rotation:{},restDay:null,dates:{}};
+    if(!empShifts[e.id].dates) empShifts[e.id].dates={};
+    targets.forEach(d=>{
+      empShifts[e.id].dates[toLocalDateStr(d)] = pattern[e.id][d.getDay()];
+      n++;
+    });
+  });
+  save('empShifts',empShifts);
+  syncShiftsToFirebase();
+  showToastAdmin && showToastAdmin('✅ Na-copy sa '+targets.length+' araw · '+n+' cells');
+  renderShiftAssignment(); renderWeeklySchedule();
+}
+window.copyWeekToMonth = copyWeekToMonth;
+
+// Month view on paper. The existing print dumped the weekly grid including its
+// dropdowns, which is unreadable once printed.
+function printMonthSchedule(){
+  const weekInput=document.getElementById('sched-view-week')||document.getElementById('shift-week');
+  const base = weekInput && weekInput.value
+    ? new Date(weekInput.value+'T00:00:00') : new Date();
+  const year=base.getFullYear(), month=base.getMonth();
+  const lastDay=new Date(year,month+1,0).getDate();
+  const days=Array.from({length:lastDay},(_,i)=>new Date(year,month,i+1));
+
+  const brSel=document.getElementById('sched-view-branch');
+  const bFilter = brSel ? brSel.value : '';
+  const crew = bFilter==='__none' ? employees.filter(e=>e&&!e.branch)
+             : (bFilter ? employees.filter(e=>e&&e.branch===bFilter) : employees.filter(e=>e&&e.id));
+  if(!crew.length){ alert('Walang crew sa view na ito.'); return; }
+
+  const DOW=['Su','Mo','Tu','We','Th','Fr','Sa'];
+  const head='<tr><th class="nm">Crew</th>'
+    + days.map(d=>`<th class="${d.getDay()===0?'sun':''}"><div>${d.getDate()}</div><div class="dw">${DOW[d.getDay()]}</div></th>`).join('')
+    + '</tr>';
+  const body=crew.map(e=>{
+    const cells=days.map(d=>{
+      const s=getEmpShiftForDay(e.id,d.getDay(),toLocalDateStr(d));
+      if(s==='REST') return '<td class="rest">R</td>';
+      if(!s||s==='OFF') return '<td class="off">—</td>';
+      return `<td style="background:${s.color};color:${badgeInk(s.color)};">${(s.label||s.name||'').slice(0,4)}</td>`;
+    }).join('');
+    return `<tr><td class="nm"><strong>${e.name}</strong><div class="sub">${e.pos||''}</div></td>${cells}</tr>`;
+  }).join('');
+
+  // Legend, so the four-letter codes on paper mean something.
+  const used={};
+  crew.forEach(e=>days.forEach(d=>{
+    const s=getEmpShiftForDay(e.id,d.getDay(),toLocalDateStr(d));
+    if(s&&s!=='REST'&&s!=='OFF'&&s.id) used[s.id]=s;
+  }));
+  const legend=Object.values(used).map(s=>
+    `<span class="lg" style="background:${s.color};color:${badgeInk(s.color)};">${s.label||s.name}</span>`
+    + `<span class="lgt">${s.name} ${s.start}–${s.end}</span>`).join('');
+
+  const w=window.open('');
+  w.document.write(`<!DOCTYPE html><html><head><title>Monthly Schedule</title><style>
+    @page{size:landscape;margin:10mm;}
+    body{font-family:Arial,sans-serif;padding:0;margin:0;}
+    h2{margin:0 0 2px;font-size:16px;} .hdr{font-size:11px;color:#555;margin-bottom:8px;}
+    table{border-collapse:collapse;width:100%;table-layout:fixed;}
+    th,td{border:1px solid #bbb;padding:2px;font-size:8px;text-align:center;}
+    th{background:#333;color:#fff;} th.sun{background:#7a1f1f;}
+    .dw{font-size:7px;opacity:.8;font-weight:normal;}
+    td.nm,th.nm{width:104px;text-align:left;padding:3px 5px;font-size:9px;}
+    td.nm{background:#f7f7f7;} .sub{font-size:7px;color:#666;font-weight:normal;}
+    td.rest{background:#ECECEC;color:#555;font-weight:bold;} td.off{color:#bbb;}
+    .legend{margin-top:10px;font-size:9px;}
+    .lg{padding:1px 6px;border-radius:8px;font-weight:bold;margin-left:8px;}
+    .lgt{margin-left:4px;color:#444;}
+  </style></head><body>
+    <h2>🍽️ Chowtime — Monthly Shift Schedule</h2>
+    <div class="hdr">${base.toLocaleDateString('en-PH',{month:'long',year:'numeric'})}
+      · ${bFilter==='__none'?'Walang branch':(bFilter||'All Branches')}
+      · ${crew.length} crew · naka-print ${new Date().toLocaleString('en-PH')}</div>
+    <table><thead>${head}</thead><tbody>${body}</tbody></table>
+    <div class="legend"><strong>Legend:</strong>${legend}
+      <span class="lg" style="background:#ECECEC;color:#555;">R</span><span class="lgt">Rest day</span></div>
+  </body></html>`);
+  w.document.close(); setTimeout(()=>w.print(),600);
+}
+window.printMonthSchedule = printMonthSchedule;
 
 function printSchedule() {
   const content=document.getElementById('weekly-schedule-wrap').innerHTML;
