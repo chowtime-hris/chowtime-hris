@@ -670,8 +670,8 @@ tbody td{padding:9px 11px;}
         <input type="date" id="sched-view-week" onchange="renderWeeklySchedule()">
       </div>
       <button class="btn btn-secondary" onclick="renderWeeklySchedule()">🔄 Refresh</button>
-      <button class="btn btn-secondary" onclick="copyWeekToMonth()">📋 Kopyahin sa buong buwan</button>
-      <button class="btn btn-secondary" onclick="printMonthSchedule()">🖨️ Print buong buwan</button>
+      <button class="btn btn-secondary" onclick="copyWeekToMonth()">📋 Copy week to month</button>
+      <button class="btn btn-secondary" onclick="printMonthSchedule()">🖨️ Print month</button>
       <button class="btn btn-primary" onclick="printSchedule()">🖨️ Print</button>
     </div>
     <div id="weekly-schedule-wrap"></div>
@@ -686,11 +686,11 @@ tbody td{padding:9px 11px;}
     <input type="hidden" id="shift-id">
     <div class="form-grid">
       <div class="form-group"><label>Shift Name</label><input id="shift-name" placeholder="e.g. Morning, Closing, Mid"></div>
-      <div class="form-group"><label>Para saang branch?</label>
-        <select id="shift-branch"><option value="">🌐 Lahat ng branch</option></select>
+      <div class="form-group"><label>Which branch?</label>
+        <select id="shift-branch"><option value="">🌐 All branches</option></select>
         <div style="font-size:11px;color:var(--muted);margin-top:4px;">
-          Iwanang "Lahat" kung pareho ang oras sa lahat. Pumili ng branch kung
-          para lang sa kanya — hindi na siya lalabas sa ibang branch.</div>
+          Leave as "All branches" if the hours are the same everywhere. Pick a branch
+          to scope it there only — it will not appear for other branches.</div>
       </div>
       <div class="form-group"><label>Short Label</label><input id="shift-label" placeholder="e.g. 🌅 AM, 🌆 PM, 🌙 GY" maxlength="10"></div>
       <div class="form-group"><label>Start Time</label><input type="time" id="shift-start" value="07:00"></div>
@@ -854,7 +854,7 @@ tbody td{padding:9px 11px;}
         <input id="e-pos-custom" placeholder="Or type a custom position…" oninput="syncCustomPos()">
       </div>
       <div class="form-group"><label>Branch</label>
-        <select id="e-branch"><option value="">— Pumili ng branch —</option></select>
+        <select id="e-branch"><option value="">— Select branch —</option></select>
       </div>
       <div class="form-group"><label>Employment Type</label>
         <select id="e-type"><option>Regular</option><option>Probationary</option><option>Part-time</option><option>Contractual</option></select>
@@ -1887,7 +1887,7 @@ function openShiftModal(idx) {
   if(sbr){
     const names = branchNamesSafe();
     if(s.branch && !names.includes(s.branch)) names.push(s.branch);
-    sbr.innerHTML = '<option value="">\uD83C\uDF10 Lahat ng branch</option>'
+    sbr.innerHTML = '<option value="">\uD83C\uDF10 All branches</option>'
       + names.map(n=>'<option value="'+n.replace(/"/g,'&quot;')+'">'+n+'</option>').join('');
     sbr.value = s.branch || '';
   }
@@ -2056,7 +2056,7 @@ function renderShiftAssignment() {
   if(brSel){
     const keep=brSel.value, names=branchNamesSafe();
     brSel.innerHTML='<option value="">All Branches</option>'
-      + '<option value="__none">⚠️ Walang branch</option>'
+      + '<option value="__none">⚠️ No branch set</option>'
       + names.map(n=>'<option value="'+n.replace(/"/g,'&quot;')+'">'+n+'</option>').join('');
     if(names.includes(keep)||keep==='__none') brSel.value=keep;
   }
@@ -2065,7 +2065,7 @@ function renderShiftAssignment() {
              : (bFilter ? employees.filter(e=>e&&e.branch===bFilter) : employees);
   if(!employees.length){tbody.innerHTML='<tr><td colspan="12" style="text-align:center;padding:16px;color:var(--muted);">No employees.</td></tr>';return;}
   if(!rows.length){tbody.innerHTML='<tr><td colspan="12" style="text-align:center;padding:16px;color:var(--muted);">'
-    +(bFilter==='__none'?'Lahat ng crew ay may branch na. 👍':'Walang crew sa <strong>'+bFilter+'</strong>.')+'</td></tr>';return;}
+    +(bFilter==='__none'?'All crew have a branch. 👍':'No crew in <strong>'+bFilter+'</strong>.')+'</td></tr>';return;}
   const weekInput=document.getElementById('shift-week');
   const weekStart=weekInput?.value?new Date(weekInput.value+'T00:00:00'):getMonday(new Date());
   const weekDates=Array.from({length:7},(_,i)=>{const d=new Date(weekStart);d.setDate(d.getDate()+i);return d;});
@@ -2088,7 +2088,7 @@ function renderShiftAssignment() {
       return `<td style="text-align:center;"><span style="background:${s.color};color:${badgeInk(s.color)};padding:3px 7px;border-radius:8px;font-size:11px;font-weight:700;white-space:nowrap;">${s.label||s.name}</span><div style="font-size:9px;color:var(--muted);margin-top:2px;">${s.start}–${s.end}</div></td>`;
     }).join('');
     return `<tr>
-      <td><strong>${emp.name}</strong><div style="font-size:10px;color:var(--muted);">${emp.branch||'<span style="color:#B26A00">walang branch</span>'}</div></td>
+      <td><strong>${emp.name}</strong><div style="font-size:10px;color:var(--muted);">${emp.branch||'<span style="color:#B26A00">no branch</span>'}</div></td>
       <td style="font-size:11px;color:var(--muted);">${emp.pos||''}</td>
       <td><span style="font-size:11px;">${a.type==='fixed'?'🔒 Fixed':a.type==='rotation'?'🔄 Rotating':'—'}</span></td>
       <td>${
@@ -2096,7 +2096,7 @@ function renderShiftAssignment() {
           ? `<span style="background:${shift.color};color:${badgeInk(shift.color)};padding:3px 9px;border-radius:10px;font-size:11px;font-weight:700;">${shift.label||''} ${shift.name}</span>`
           : (usedList.length
               ? usedList.map(s=>`<span style="background:${s.color};color:${badgeInk(s.color)};padding:2px 7px;border-radius:9px;font-size:10px;font-weight:700;margin:1px 2px 1px 0;display:inline-block;">${s.label||s.name}</span>`).join('')
-                + '<div style="font-size:9px;color:var(--muted);">ginagamit ngayong linggo</div>'
+                + '<div style="font-size:9px;color:var(--muted);">used this week</div>'
               : '<span style="color:var(--muted);font-size:11px;">Not assigned</span>')
       }</td>
       ${days}
@@ -2125,7 +2125,7 @@ function renderWeeklySchedule() {
     const keep = brSel0.value;
     const names = branchNamesSafe();
     brSel0.innerHTML = '<option value="">All Branches</option>'
-      + '<option value="__none">⚠️ Walang branch</option>'
+      + '<option value="__none">⚠️ No branch set</option>'
       + names.map(n=>'<option value="'+n.replace(/"/g,'&quot;')+'">'+n+'</option>').join('');
     if(names.includes(keep) || keep === '__none') brSel0.value = keep;
   }
@@ -2170,16 +2170,16 @@ function renderWeeklySchedule() {
   if(selectedBranch && !filteredEmps.length){
     html += `<tr><td colspan="${weekDates.length+1}" style="padding:18px;text-align:center;color:var(--muted);font-size:13px;">
       ${selectedBranch==='__none'
-        ? 'Lahat ng crew ay may branch na. 👍'
-        : `Walang crew na naka-assign sa <strong>${selectedBranch}</strong>.<br>
-           Buksan ang Employees tab at itakda ang Branch ng bawat crew.`}</td></tr>`;
+        ? 'All crew have a branch. 👍'
+        : `No crew assigned to <strong>${selectedBranch}</strong>.<br>
+           Open the Employees tab and set each crew member's Branch.`}</td></tr>`;
   }
 
   filteredEmps.forEach((emp,i)=>{
     html+=`<tr style="background:${i%2===0?'#fff':'#fdf8f5'};">
       <td style="padding:9px 14px;border-bottom:1px solid var(--border);">
         <div style="font-weight:600;font-size:13px;">${emp.name}</div>
-        <div style="font-size:11px;color:var(--muted);">${emp.pos||''}${emp.branch?' \u00b7 '+emp.branch:' \u00b7 <span style="color:#B26A00">walang branch</span>'}</div>
+        <div style="font-size:11px;color:var(--muted);">${emp.pos||''}${emp.branch?' \u00b7 '+emp.branch:' \u00b7 <span style="color:#B26A00">no branch</span>'}</div>
       </td>`;
     weekDates.forEach(date=>{
       const dow = date.getDay();
@@ -2230,66 +2230,88 @@ function quickEditShift(empId, dateStr, value, empName) {
 }
 window.quickEditShift = quickEditShift;
 
-// Takes the week currently on screen and lays it over the rest of that
-// calendar month. Leave is handled by hand and there are no crew leave
-// requests, so a straight overwrite is what Norman asked for — but it still
-// confirms first and reports exactly how many cells changed, because this
-// writes across every crew member at once.
+// Copies the week on screen across the whole calendar month.
+//
+// Two bugs the first version had, both destructive:
+//
+//  * A blank day in the source week was written as '' — and in
+//    getEmpShiftForDay an explicit '' does not mean "nothing set", it means
+//    "definitely no shift", which SUPPRESSES the rotation pattern that was
+//    filling that day before. So copying a week with any gap in it silently
+//    erased schedules. Blank days are now DELETED from the dates map instead,
+//    which restores the fallback — and re-running the copy repairs days the
+//    old version damaged.
+//
+//  * getMonday() does not zero the clock, so with an empty week box the start
+//    carried the current time of day. Date comparisons were then off by hours,
+//    the source week never matched the target list, and the range came out
+//    wrong. Every date is normalised to local midnight now.
+function midnight(d){ const x=new Date(d); x.setHours(0,0,0,0); return x; }
+
 function copyWeekToMonth(){
   const weekInput=document.getElementById('sched-view-week')||document.getElementById('shift-week');
   const base = weekInput && weekInput.value
-    ? new Date(weekInput.value+'T00:00:00') : getMonday(new Date());
-  const start = getMonday(base);
-  const srcDates = Array.from({length:7},(_,i)=>{const d=new Date(start);d.setDate(d.getDate()+i);return d;});
+    ? new Date(weekInput.value+'T00:00:00') : new Date();
+  const start = midnight(getMonday(base));
+  const srcDates = Array.from({length:7},(_,i)=>{const d=new Date(start);d.setDate(d.getDate()+i);return midnight(d);});
+  const srcKeys = new Set(srcDates.map(toLocalDateStr));
 
   const brSel=document.getElementById('sched-view-branch');
   const bFilter = brSel ? brSel.value : '';
   const crew = bFilter==='__none' ? employees.filter(e=>e&&!e.branch)
              : (bFilter ? employees.filter(e=>e&&e.branch===bFilter) : employees.filter(e=>e&&e.id));
-  if(!crew.length){ alert('Walang crew sa view na ito.'); return; }
+  if(!crew.length){ alert('No crew in this view.'); return; }
 
-  // The month is taken from the Monday of the shown week, so a week that
-  // straddles month-end fills the month it mostly belongs to.
+  // The month is taken from the Monday of the shown week.
   const year=start.getFullYear(), month=start.getMonth();
   const lastDay=new Date(year,month+1,0).getDate();
+  const today=midnight(new Date());
 
-  // What the source week says for each weekday, per crew member.
+  // The source week's weekday pattern, per crew member. `null` means the day
+  // was blank and must be left alone rather than blanked out.
   const pattern={};
   crew.forEach(e=>{
     pattern[e.id]={};
     srcDates.forEach(d=>{
       const s=getEmpShiftForDay(e.id,d.getDay(),toLocalDateStr(d));
-      pattern[e.id][d.getDay()] = (s==='REST') ? 'REST' : (s&&s.id ? s.id : '');
+      pattern[e.id][d.getDay()] = (s==='REST') ? 'REST' : (s&&s.id ? s.id : null);
     });
   });
 
+  // Whole month, minus the source week itself and minus anything already past.
+  // Days that have been and gone are history and are never rewritten.
   const targets=[];
   for(let day=1; day<=lastDay; day++){
-    const d=new Date(year,month,day);
-    if(d < start) continue;                 // never rewrite the past
-    if(srcDates.some(sd=>sd.getTime()===d.getTime())) continue; // skip the source week
+    const d=midnight(new Date(year,month,day));
+    if(d < today) continue;
+    if(srcKeys.has(toLocalDateStr(d))) continue;
     targets.push(d);
   }
-  if(!targets.length){ alert('Walang natitirang araw sa buwan pagkatapos ng linggong ito.'); return; }
+  if(!targets.length){ alert('No upcoming days left in this month outside the selected week.'); return; }
 
   const label=start.toLocaleDateString('en-PH',{month:'long',year:'numeric'});
-  if(!confirm('Kopyahin ang linggo ng '+toLocalDateStr(start)+' sa natitirang '
-      +targets.length+' araw ng '+label+'?\n\n'
-      +crew.length+' crew'+(bFilter&&bFilter!=='__none'?' sa '+bFilter:'')+'.\n\n'
-      +'Papalitan nito ang naka-set na sa mga araw na iyon. Hindi gagalawin ang nakaraan.')) return;
+  if(!confirm('Copy the week of '+toLocalDateStr(start)+' across '+label+'?\n\n'
+      +'Crew: '+crew.length+(bFilter&&bFilter!=='__none'?' in '+bFilter:'')+'\n'
+      +'Days to fill: '+targets.length+' ('+toLocalDateStr(targets[0])+' to '+toLocalDateStr(targets[targets.length-1])+')\n\n'
+      +'This replaces what is currently set on those days.\n'
+      +'Past days are never touched.')) return;
 
-  let n=0;
+  let written=0, cleared=0;
   crew.forEach(e=>{
     if(!empShifts[e.id]) empShifts[e.id]={type:'rotation',rotation:{},restDay:null,dates:{}};
     if(!empShifts[e.id].dates) empShifts[e.id].dates={};
+    const dates=empShifts[e.id].dates;
     targets.forEach(d=>{
-      empShifts[e.id].dates[toLocalDateStr(d)] = pattern[e.id][d.getDay()];
-      n++;
+      const key=toLocalDateStr(d);
+      const val=pattern[e.id][d.getDay()];
+      if(val===null){ if(dates[key]!==undefined){ delete dates[key]; cleared++; } }
+      else { dates[key]=val; written++; }
     });
   });
   save('empShifts',empShifts);
   syncShiftsToFirebase();
-  showToastAdmin && showToastAdmin('✅ Na-copy sa '+targets.length+' araw · '+n+' cells');
+  showToastAdmin && showToastAdmin('✅ Copied to '+targets.length+' days · '+written+' set'
+    +(cleared?', '+cleared+' reset to pattern':''));
   renderShiftAssignment(); renderWeeklySchedule();
 }
 window.copyWeekToMonth = copyWeekToMonth;
@@ -2308,7 +2330,7 @@ function printMonthSchedule(){
   const bFilter = brSel ? brSel.value : '';
   const crew = bFilter==='__none' ? employees.filter(e=>e&&!e.branch)
              : (bFilter ? employees.filter(e=>e&&e.branch===bFilter) : employees.filter(e=>e&&e.id));
-  if(!crew.length){ alert('Walang crew sa view na ito.'); return; }
+  if(!crew.length){ alert('No crew in this view.'); return; }
 
   const DOW=['Su','Mo','Tu','We','Th','Fr','Sa'];
   const head='<tr><th class="nm">Crew</th>'
@@ -2352,7 +2374,7 @@ function printMonthSchedule(){
   </style></head><body>
     <h2>🍽️ Chowtime — Monthly Shift Schedule</h2>
     <div class="hdr">${base.toLocaleDateString('en-PH',{month:'long',year:'numeric'})}
-      · ${bFilter==='__none'?'Walang branch':(bFilter||'All Branches')}
+      · ${bFilter==='__none'?'No branch':(bFilter||'All Branches')}
       · ${crew.length} crew · naka-print ${new Date().toLocaleString('en-PH')}</div>
     <table><thead>${head}</thead><tbody>${body}</tbody></table>
     <div class="legend"><strong>Legend:</strong>${legend}
@@ -2550,7 +2572,7 @@ function openEmpModal(idx){
   if(brSel){
     const names = branchNamesSafe();
     if(e.branch && !names.includes(e.branch)) names.push(e.branch);
-    brSel.innerHTML = '<option value="">— Pumili ng branch —</option>'
+    brSel.innerHTML = '<option value="">— Select branch —</option>'
       + names.map(n=>'<option value="'+n.replace(/"/g,'&quot;')+'">'+n+'</option>').join('');
     brSel.value = e.branch || '';
   }
