@@ -684,6 +684,12 @@ tbody td{padding:9px 11px;}
     <input type="hidden" id="shift-id">
     <div class="form-grid">
       <div class="form-group"><label>Shift Name</label><input id="shift-name" placeholder="e.g. Morning, Closing, Mid"></div>
+      <div class="form-group"><label>Para saang branch?</label>
+        <select id="shift-branch"><option value="">🌐 Lahat ng branch</option></select>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px;">
+          Iwanang "Lahat" kung pareho ang oras sa lahat. Pumili ng branch kung
+          para lang sa kanya — hindi na siya lalabas sa ibang branch.</div>
+      </div>
       <div class="form-group"><label>Short Label</label><input id="shift-label" placeholder="e.g. 🌅 AM, 🌆 PM, 🌙 GY" maxlength="10"></div>
       <div class="form-group"><label>Start Time</label><input type="time" id="shift-start" value="07:00"></div>
       <div class="form-group"><label>End Time</label><input type="time" id="shift-end" value="15:00"></div>
@@ -844,6 +850,9 @@ tbody td{padding:9px 11px;}
       </div>
       <div class="form-group"><label>Custom Position</label>
         <input id="e-pos-custom" placeholder="Or type a custom position…" oninput="syncCustomPos()">
+      </div>
+      <div class="form-group"><label>Branch</label>
+        <select id="e-branch"><option value="">— Pumili ng branch —</option></select>
       </div>
       <div class="form-group"><label>Employment Type</label>
         <select id="e-type"><option>Regular</option><option>Probationary</option><option>Part-time</option><option>Contractual</option></select>
@@ -1189,90 +1198,6 @@ function saveAll(){ save('employees',employees);save('leaves',leaves);save('loan
 // ══════════════════════════════════════════════════════════
 //  DTR HELPERS
 // ══════════════════════════════════════════════════════════
-// ══════════════════════════════════════════════════════════
-//  PHILIPPINE HOLIDAY CALENDAR
-// ══════════════════════════════════════════════════════════
-// Three kinds of Philippine holiday, and only two of them can be known in
-// advance:
-//
-//   fixed     — same date every year (Labor Day, Christmas). Safe forever.
-//   computed  — derived from Easter, or "last Monday of August". Safe forever.
-//   proclaimed— Eid'l Fitr, Eid'l Adha, Chinese New Year, and any holiday-
-//               economics move. These come from a Malacañang proclamation each
-//               year and CANNOT be predicted. They live in PROCLAIMED below and
-//               must be updated annually from the official proclamation.
-//
-// Nothing here writes to the DTR on its own. It only tells the payroll page
-// what today's date means, so a holiday stops being something to remember.
-const HOLIDAY_FIXED = [
-  // [month(1-12), day, type, name]
-  [1, 1,'RH',"New Year's Day"],
-  [4, 9,'RH','Araw ng Kagitingan'],
-  [5, 1,'RH','Labor Day'],
-  [6,12,'RH','Independence Day'],
-  [11,30,'RH','Bonifacio Day'],
-  [12,25,'RH','Christmas Day'],
-  [12,30,'RH','Rizal Day'],
-  [8,21,'SH','Ninoy Aquino Day'],
-  [11, 1,'SH',"All Saints' Day"],
-  [12, 8,'SH','Immaculate Conception'],
-  [12,31,'SH','Last Day of the Year'],
-];
-
-// Proclaimed / movable dates. UPDATE EACH YEAR from the official proclamation.
-// A year that is missing here simply has no entry for these — the fixed and
-// computed holidays still work, so payroll never breaks, it just stops
-// reminding about the lunar and proclaimed ones.
-const HOLIDAY_PROCLAIMED = {
-  // '2026': [['2026-02-17','SH','Chinese New Year'], ...]
-};
-
-// Easter Sunday (Meeus/Jones/Butcher). Maundy Thursday, Good Friday and Black
-// Saturday all hang off it.
-function easterSunday(y){
-  const a=y%19,b=Math.floor(y/100),c=y%100,d=Math.floor(b/4),e=b%4,
-        f=Math.floor((b+8)/25),g=Math.floor((b-f+1)/3),h=(19*a+b-d-g+15)%30,
-        i=Math.floor(c/4),k=c%4,l=(32+2*e+2*i-h-k)%7,
-        m=Math.floor((a+11*h+22*l)/451),
-        mo=Math.floor((h+l-7*m+114)/31),da=((h+l-7*m+114)%31)+1;
-  return new Date(y,mo-1,da);
-}
-function ymd(d){
-  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')
-        +'-'+String(d.getDate()).padStart(2,'0');
-}
-function addDays(d,n){ const x=new Date(d); x.setDate(x.getDate()+n); return x; }
-
-// Every holiday in a given year, as { 'YYYY-MM-DD': {type,name} }.
-const _holCache = {};
-function holidaysForYear(y){
-  if(_holCache[y]) return _holCache[y];
-  const map = {};
-  HOLIDAY_FIXED.forEach(([mo,da,type,name])=>{
-    map[y+'-'+String(mo).padStart(2,'0')+'-'+String(da).padStart(2,'0')] = {type,name};
-  });
-  const e = easterSunday(y);
-  map[ymd(addDays(e,-3))] = {type:'RH', name:'Maundy Thursday'};
-  map[ymd(addDays(e,-2))] = {type:'RH', name:'Good Friday'};
-  map[ymd(addDays(e,-1))] = {type:'SH', name:'Black Saturday'};
-  // National Heroes Day — last Monday of August.
-  const aug = new Date(y,7,31);
-  while(aug.getDay()!==1) aug.setDate(aug.getDate()-1);
-  map[ymd(aug)] = {type:'RH', name:'National Heroes Day'};
-  (HOLIDAY_PROCLAIMED[String(y)]||[]).forEach(([date,type,name])=>{
-    map[date] = {type,name};
-  });
-  _holCache[y] = map;
-  return map;
-}
-
-function holidayOn(dateStr){
-  if(!dateStr) return null;
-  const y = parseInt(String(dateStr).slice(0,4),10);
-  if(!y) return null;
-  return holidaysForYear(y)[dateStr] || null;
-}
-
 function getDTRKey(periodKey, empId) { return periodKey+'__'+empId; }
 
 function getDTREntry(periodKey, empId, dateStr) {
@@ -1386,7 +1311,7 @@ function computeDTRRow(entry, shiftSched) {
 
 function getDTRTotals(periodKey, empId) {
   const p = getPeriodDetails(periodKey);
-  if (!p || !periodKey) return {days:0,ot:0,nd:0,late:0,ut:0,holPay:0,ded:0,breakHrs:0,holDays:[]};
+  if (!p || !periodKey) return {days:0,ot:0,nd:0,late:0,ut:0,holPay:0,ded:0,breakHrs:0};
   const k = getDTRKey(periodKey, empId);
   const emp = employees.find(e=>e.id===empId);
   const rate = emp ? +emp.rate : 0;
@@ -1401,7 +1326,6 @@ function getDTRTotals(periodKey, empId) {
   }
 
   let days=0,ot=0,nd=0,late=0,ut=0,holPay=0,ded=0,breakHrs=0;
-  const holDays=[];   // the RH/SH days behind holPay, for the payslip
   for (let d=p.start; d<=p.end; d++) {
     const dateStr = `${p.year}-${String(p.month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const entry = (periodDTR && periodDTR[dateStr]) || {};
@@ -1425,21 +1349,9 @@ function getDTRTotals(periodKey, empId) {
     breakHrs += c.breakHrs;
     if (entry.holiday==='RH')      holPay += rate * (+settings.rh||2.0);
     else if (entry.holiday==='SH') holPay += rate * (+settings.sh||1.30);
-    // Keep the actual days behind holPay. A lump sum on a payslip invites the
-    // question "bakit ganito?" — naming the dates answers it before it is
-    // asked, and lets the crew see their RH/SH really was paid.
-    if (entry.holiday==='RH' || entry.holiday==='SH'){
-      const hInfo = holidayOn(dateStr);
-      holDays.push({
-        date: dateStr,
-        type: entry.holiday,
-        name: hInfo ? hInfo.name : (entry.holiday==='RH'?'Regular Holiday':'Special Holiday'),
-        amount: rate * (entry.holiday==='RH' ? (+settings.rh||2.0) : (+settings.sh||1.30))
-      });
-    }
     ded += ((c.late + c.ut)/60) * hourlyRate;
   }
-  return {days, ot:+ot.toFixed(2), nd:+nd.toFixed(2), late, ut, holPay:+holPay.toFixed(2), ded:+ded.toFixed(2), breakHrs:+breakHrs.toFixed(2), holDays};
+  return {days, ot:+ot.toFixed(2), nd:+nd.toFixed(2), late, ut, holPay:+holPay.toFixed(2), ded:+ded.toFixed(2), breakHrs:+breakHrs.toFixed(2)};
 }
 
 
@@ -1480,7 +1392,6 @@ function buildPayrollRow(emp, periodKey, opts) {
   const otPay    = +(totals.ot * hourly * (+settings.ot||1.25)).toFixed(2);
   const ndPay    = +(totals.nd * hourly * (+settings.nd||1.10)).toFixed(2);
   const holPay   = totals.holPay || 0;
-  const holDays  = totals.holDays || [];
   // ── Quota Sales Incentive for this period ───────────────
   const incentive = getEmpIncentive ? (getEmpIncentive(emp.id, periodKey) || {}) : {};
   const incentiveAmt = +(incentive.amount || 0);
@@ -1541,7 +1452,7 @@ function buildPayrollRow(emp, periodKey, opts) {
   const loanDed  = +Object.values(loanByCategory).reduce((a,b)=>a+b, 0).toFixed(2);
   const totalDed = gross > 0 ? totals.ded : 0;
   const net      = Math.max(0, gross - sss - phic - pagibig - tax - loanDed - totalDed);
-  return {id:emp.id,name:emp.name,pos:emp.pos,rate,days,hasDTR,basic,otPay,ndPay,holPay,holDays,incentiveAmt,incentiveType,gross,sss,phic,pagibig,tax,loanDed,loanByCategory,loanLines,loanPending,periodReleased,totalDed,net,ot:totals.ot,nd:totals.nd,late:totals.late};
+  return {id:emp.id,name:emp.name,pos:emp.pos,rate,days,hasDTR,basic,otPay,ndPay,holPay,incentiveAmt,incentiveType,gross,sss,phic,pagibig,tax,loanDed,loanByCategory,loanLines,loanPending,periodReleased,totalDed,net,ot:totals.ot,nd:totals.nd,late:totals.late};
 }
 
 // ══════════════════════════════════════════════════════════
@@ -1824,71 +1735,6 @@ function setupDTREditor() {
   if (empSel.value) loadDTREditor();
 }
 
-// Renders the holiday banner above whichever DTR table is passed in. There are
-// two DTR screens in this app — the auto-compute page and the admin editor —
-// and the reminder is useless if it only appears on the one you are not on.
-// Both DTR screens may be built; refresh whichever is actually populated so
-// the banner and the rows agree after an apply or undo.
-function refreshDTRScreens(){
-  try{ if(document.getElementById('dtr-emp') && document.getElementById('dtr-emp').value) loadDTR(); }catch(e){}
-  try{ if(document.getElementById('editor-emp') && document.getElementById('editor-emp').value) loadDTREditor(); }catch(e){}
-}
-
-function renderHolidayBanner(tableId, boxId, periodKey, empId){
-  const tb = document.getElementById(tableId);
-  if(!tb) return;
-  let holBox = document.getElementById(boxId);
-  if(!holBox){
-    holBox = document.createElement('div');
-    holBox.id = boxId;
-    const tbl = tb.closest('table');
-    if(tbl && tbl.parentNode) tbl.parentNode.insertBefore(holBox, tbl);
-    else return;
-  }
-  const p = getPeriodDetails(periodKey);
-  if(!p || !periodKey){ holBox.style.cssText='display:none'; holBox.innerHTML=''; return; }
-
-  const missing = [];
-  for (let d = p.start; d <= p.end; d++) {
-    const ds = `${p.year}-${String(p.month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-    const h = holidayOn(ds);
-    if(h) missing.push([ds,h, empId ? getDTREntry(periodKey, empId, ds).holiday === h.type : false]);
-  }
-  const gaps = holidayGapsForPeriod(periodKey);
-  const gapPeople = new Set(gaps.map(g=>g.emp.id)).size;
-  const autoCount = (ds)=> (employees||[]).filter(e=>{
-    if(!e || !e.id) return false;
-    const en = getDTREntry(periodKey, e.id, ds);
-    return en.holAuto === true && en.holiday;
-  }).length;
-
-  if(!missing.length){ holBox.style.cssText='display:none'; holBox.innerHTML=''; return; }
-
-  holBox.style.cssText = 'margin:0 0 12px;padding:10px 14px;background:'
-    + (gaps.length?'#FFF7E6':'#F1F8E9') + ';border:1px solid '
-    + (gaps.length?'#FFD591':'#C5E1A5') + ';border-radius:8px;font-size:13px;';
-  holBox.innerHTML = '<strong>'+(gaps.length?'⚠️':'✓')+' Holiday sa period na ito:</strong><br>'
-    + missing.map(([ds,h,setForThis])=>{
-        const n = autoCount(ds);
-        return '• '+ds+' — '+h.name+' <strong>('+h.type+')</strong>'
-          + (setForThis?' <span style="color:var(--green)">✓</span>':'')
-          + (n?' <span style="color:var(--muted)">· naka-set sa '+n+' crew</span>'
-              + ' <button onclick="undoHolidayForDate(\''+ds+'\',\''+periodKey+'\')" style="padding:2px 8px;'
-              + 'font-size:11px;border:1px solid var(--border);border-radius:5px;'
-              + 'background:#fff;cursor:pointer;margin-left:4px;">Ibalik</button>':'');
-      }).join('<br>')
-    + (gaps.length
-        ? '<br><strong style="color:#B26A00">Kulang pa sa '+gapPeople+' crew.</strong>'
-          + '<br><button onclick="applyHolidaysForEditor(\''+periodKey+'\')" style="margin-top:8px;padding:6px 14px;'
-          + 'border:0;border-radius:6px;background:var(--green,#2E7D32);color:#fff;font-weight:700;'
-          + 'cursor:pointer;">I-apply sa LAHAT ng crew (' + gapPeople + ')</button>'
-        : '<br><span style="color:var(--green);font-weight:700">Naka-set na sa lahat ng crew.</span>')
-    + '<div style="font-size:11px;color:var(--muted);margin-top:6px;">'
-    + 'Ang Holiday column lang ang ginagalaw — hindi ang time in/out. '
-    + '"Ibalik" ay para sa petsang iyon lang, at hindi nito buburahin ang manu-mano mong nilagay. '
-    + 'Hindi ito umaabot sa franchise payroll — sila mismo ang mag-se-set para sa crew nila.</div>';
-}
-
 function loadDTREditor() {
   const empId = document.getElementById('editor-emp').value;
   const periodKey = document.getElementById('editor-period').value;
@@ -1913,16 +1759,10 @@ function loadDTREditor() {
     const entry = getDTREntry(periodKey, empId, dateStr);
     const c = computeDTRRow(entry, schedule);
     const isAuto = entry.auto;
-    const hol = holidayOn(dateStr);
-    // A holiday the calendar knows about but the DTR has not been set to. This
-    // is the whole point of the feature: the row says so, rather than the
-    // holiday being remembered or not.
-    const holMissing = hol && entry.holiday !== hol.type;
-    const rowBg = holMissing ? 'background:#FFF7E6;'
-                : (hol ? 'background:#F1F8E9;' : (isSun ? 'background:#fff0ec;' : ''));
+    const rowBg = isSun ? 'background:#fff0ec;' : '';
 
     rows += `<tr style="${rowBg}">
-      <td>${dateStr}${hol?`<div style="font-size:10px;font-weight:700;color:${holMissing?'#B26A00':'var(--green)'};">${holMissing?'\u26A0\uFE0F ':'\u2713 '}${hol.name} (${hol.type})</div>`:''}</td>
+      <td>${dateStr}</td>
       <td style="${isSun?'color:var(--red);font-weight:700;':''}">${dayName}</td>
       <td><input class="dtr-input" type="time" value="${entry.in||''}"
           onchange="adminEditDTR('${dateStr}','in',this.value,'${empId}','${periodKey}')"
@@ -1956,8 +1796,6 @@ function loadDTREditor() {
 
   document.getElementById('editor-tbody').innerHTML = rows;
 
-  renderHolidayBanner('editor-tbody','editor-holiday-note',periodKey,empId);
-
   // Summary
   const t = getDTRTotals(periodKey, empId);
   document.getElementById('editor-summary').innerHTML = `
@@ -1969,104 +1807,7 @@ function loadDTREditor() {
   `;
 }
 
-// Sets the Holiday column for every calendar holiday in the open period, for
-// EVERY employee — a holiday is a fact about the date, not about one person,
-// so setting it one crew member at a time was just an invitation to miss
-// somebody. Deliberately does NOT touch time in/out: whether a person actually
-// worked the holiday is a separate fact that only the DTR knows.
-//
-// Scope stops at this database. Company-owned branches share this payroll
-// project, but each franchise runs its own — their holidays are theirs to set.
-function holidayGapsForPeriod(periodKey){
-  const p = getPeriodDetails(periodKey);
-  const gaps = [];
-  if(!p) return gaps;
-  for (let d = p.start; d <= p.end; d++) {
-    const ds = `${p.year}-${String(p.month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-    const h = holidayOn(ds);
-    if(!h) continue;
-    (employees||[]).forEach(e=>{
-      if(!e || !e.id) return;
-      const en = getDTREntry(periodKey, e.id, ds);
-      // Fill blanks, and correct a value this same button wrote earlier (say
-      // the proclamation list changed an SH to an RH). Never overwrite a
-      // holiday you set by hand — a rest day you granted on a holiday is a
-      // decision, and the calendar has no business undoing it.
-      const isBlank = !en.holiday;
-      const isStaleAuto = en.holAuto === true && en.holiday !== h.type;
-      if(isBlank || isStaleAuto) gaps.push({date:ds, hol:h, emp:e});
-    });
-  }
-  return gaps;
-}
-
-function applyHolidaysForEditor(periodKey){
-  // The period may come from either DTR screen, so it is passed in rather than
-  // read off one screen's selector.
-  periodKey = periodKey
-    || (document.getElementById('dtr-period-sel')||{}).value
-    || (document.getElementById('editor-period')||{}).value;
-  if(!periodKey) return;
-  const gaps = holidayGapsForPeriod(periodKey);
-  if(!gaps.length){ if(typeof toast==='function') toast('Wala nang holiday na kailangang i-set'); return; }
-  const people = new Set(gaps.map(g=>g.emp.id)).size;
-  const dates  = [...new Set(gaps.map(g=>g.date))].sort();
-  if(!confirm('I-set ang holiday para sa '+people+' crew?\n\n'
-      + dates.map(d=>'• '+d+' — '+holidayOn(d).name+' ('+holidayOn(d).type+')').join('\n')
-      + '\n\nAng Holiday column lang ang mababago. Hindi gagalawin ang time in/out.')) return;
-  gaps.forEach(g=>{
-    adminEditDTR(g.date, 'holiday', g.hol.type, g.emp.id, periodKey);
-    // Marks this row as the calendar's doing, not yours. The per-date undo
-    // removes only marked rows, so a holiday you set by hand — a local fiesta,
-    // a one-off rest day — survives an undo of the same date. Editing the row
-    // afterwards clears the mark, because it is then your value, not the
-    // calendar's.
-    adminEditDTR(g.date, 'holAuto', true, g.emp.id, periodKey);
-  });
-  if(typeof toast === 'function') toast('Na-set ang holiday para sa '+people+' crew');
-  refreshDTRScreens();
-}
-
-// Undoes ONE date. Deliberately not an "undo everything" — the other holidays
-// in the period stay exactly as they are. Only rows still carrying the
-// calendar's mark are cleared, so anything set or changed by hand is left
-// alone.
-function undoHolidayForDate(dateStr, periodKey){
-  periodKey = periodKey
-    || (document.getElementById('dtr-period-sel')||{}).value
-    || (document.getElementById('editor-period')||{}).value;
-  if(!periodKey || !dateStr) return;
-  const marked = (employees||[]).filter(e=>{
-    if(!e || !e.id) return false;
-    const en = getDTREntry(periodKey, e.id, dateStr);
-    return en.holAuto === true && en.holiday;
-  });
-  if(!marked.length){
-    if(typeof toast==='function') toast('Walang maibabalik sa '+dateStr+' — manu-mano lahat o wala pang naka-set');
-    return;
-  }
-  const h = holidayOn(dateStr);
-  if(!confirm('Ibalik sa blangko ang holiday ng '+marked.length+' crew para sa '+dateStr
-      + (h?' ('+h.name+')':'') + '?\n\n'
-      + 'Ang petsang ito lang — hindi maaapektuhan ang ibang araw.\n'
-      + 'Ang manu-mano mong nilagay ay hindi gagalawin.')) return;
-  marked.forEach(e=> adminEditDTR(dateStr, 'holiday', '', e.id, periodKey));
-  if(typeof toast === 'function') toast('Naibalik ang '+dateStr+' para sa '+marked.length+' crew');
-  refreshDTRScreens();
-}
-
 function adminEditDTR(dateStr, field, value, empId, periodKey) {
-  // A hand-edit of the holiday cell takes ownership of it: clear the calendar
-  // mark so the per-date undo leaves this row alone. Guarded against the
-  // 'holAuto' write itself, which would otherwise immediately erase its own
-  // mark.
-  if (field === 'holiday') {
-    setDTREntry(periodKey, empId, dateStr, 'holAuto', null);
-    if (window._fbDB && window._fbFns) {
-      window._fbFns.remove(window._fbFns.ref(window._fbDB,
-        `dtrData/${periodKey}__${empId}/${dateStr}/holAuto`)).catch(e=>console.warn(e));
-    }
-  }
   // Set entry locally
   setDTREntry(periodKey, empId, dateStr, field, value);
   // Clear auto flag when admin manually edits
@@ -2137,6 +1878,17 @@ function openShiftModal(idx) {
   document.getElementById('shift-grace').value  = s.grace  || 5;
   document.getElementById('shift-prep').value   = s.prep   || 0;
   document.getElementById('shift-color').value  = s.color  || '#2D7D3A';
+  // Scope. A shift with no branch is chain-wide; one with a branch only ever
+  // appears for that branch, so the assignment dropdown stops offering another
+  // store's hours.
+  const sbr = document.getElementById('shift-branch');
+  if(sbr){
+    const names = branchNamesSafe();
+    if(s.branch && !names.includes(s.branch)) names.push(s.branch);
+    sbr.innerHTML = '<option value="">\uD83C\uDF10 Lahat ng branch</option>'
+      + names.map(n=>'<option value="'+n.replace(/"/g,'&quot;')+'">'+n+'</option>').join('');
+    sbr.value = s.branch || '';
+  }
   modal.style.display='flex';
 }
 window.openShiftModal = openShiftModal; // expose immediately
@@ -2154,6 +1906,7 @@ function saveShiftDef() {
     grace: +document.getElementById('shift-grace').value||5,
     prep:  +document.getElementById('shift-prep').value ||0,
     color: document.getElementById('shift-color').value,
+    branch:(document.getElementById('shift-branch')||{}).value || '',
   };
   if(!s.name) return alert('Shift name is required.');
   if(editingShiftIdx>=0) shiftDefs[editingShiftIdx]=s; else shiftDefs.push(s);
@@ -2312,7 +2065,27 @@ function renderShiftAssignment() {
   }).join('');
 }
 
+// branchList() reads several `let` bindings declared much further down this
+// script. If anything ever calls one of these pickers during load — before
+// those lines have run — the temporal dead zone would throw and take the page
+// with it. Falling back to an empty list keeps the screen alive; the picker
+// simply repopulates on the next render.
+function branchNamesSafe(){
+  try { return branchList() || []; } catch(e){ return []; }
+}
+
 function renderWeeklySchedule() {
+  // The picker shipped with only "All Branches" in it, so there was never
+  // anything to select — half of why the branch filter "did not work".
+  const brSel0 = document.getElementById('sched-view-branch');
+  if(brSel0){
+    const keep = brSel0.value;
+    const names = branchNamesSafe();
+    brSel0.innerHTML = '<option value="">All Branches</option>'
+      + '<option value="__none">⚠️ Walang branch</option>'
+      + names.map(n=>'<option value="'+n.replace(/"/g,'&quot;')+'">'+n+'</option>').join('');
+    if(names.includes(keep) || keep === '__none') brSel0.value = keep;
+  }
   const wrap=document.getElementById('weekly-schedule-wrap'); if(!wrap) return;
   const weekInput=document.getElementById('sched-view-week');
   const weekStart=weekInput?.value?new Date(weekInput.value+'T00:00:00'):getMonday(new Date());
@@ -2328,35 +2101,42 @@ function renderWeeklySchedule() {
       </th>`).join('')}
     </tr></thead><tbody>`;
   const defs = getShiftDefs();
-  const shiftOptsHtml = '<option value="">— Off —</option><option value="REST">🛌 Rest Day</option>' +
-    defs.map(s=>`<option value="${s.id}">${s.label||''} ${s.name} (${s.start}–${s.end})</option>`).join('');
-
   const selectedBranch = document.getElementById('sched-view-branch')?.value || '';
 
-  // Filter employees by branch if selected
-  const filteredEmps = selectedBranch
-    ? employees.filter(emp => {
-        // Check if employee has any shift assigned at the selected branch
-        const a = empShifts[emp.id];
-        if (!a) return false;
-        // Check date-specific or rotation for this week
-        return weekDates.some(date => {
-          const dateStr = toLocalDateStr(date);
-          const s = getEmpShiftForDay(emp.id, date.getDay(), dateStr);
-          if (!s || s === 'REST' || s === 'OFF') return false;
-          // Match by branch name in shift label or name
-          const shiftName = ((s.label||'') + (s.name||'')).toUpperCase();
-          return shiftName.includes(selectedBranch.toUpperCase()) ||
-                 (s.branch && s.branch === selectedBranch);
-        });
-      })
-    : employees;
+  // Shifts offered for a given branch: the chain-wide ones plus that branch's
+  // own. Picking a branch used to leave the dropdown listing every store's
+  // hours, so a Capas crew member could be put on Paniqui's closing shift.
+  const shiftsFor = (branch)=> defs.filter(s=>!s.branch || !branch || s.branch===branch);
+  const optsFor = (branch)=>
+    '<option value="">— Off —</option><option value="REST">🛌 Rest Day</option>'
+    + shiftsFor(branch).map(s=>`<option value="${s.id}">${s.label||''} ${s.name}`
+        + ` (${s.start}–${s.end})${s.branch?' · '+s.branch:''}</option>`).join('');
+  const shiftOptsHtml = optsFor(selectedBranch);
+
+  // Who belongs to this branch. The old filter inferred it from the shift
+  // NAME, which meant a crew member with no shift yet could never be shown —
+  // and so could never be given one. Branch now lives on the employee record,
+  // so an unscheduled new hire appears immediately, which is the whole point
+  // of opening this screen.
+  const filteredEmps = selectedBranch === '__none'
+    ? employees.filter(emp => emp && !emp.branch)
+    : (selectedBranch
+        ? employees.filter(emp => emp && emp.branch === selectedBranch)
+        : employees);
+
+  if(selectedBranch && !filteredEmps.length){
+    html += `<tr><td colspan="${weekDates.length+1}" style="padding:18px;text-align:center;color:var(--muted);font-size:13px;">
+      ${selectedBranch==='__none'
+        ? 'Lahat ng crew ay may branch na. 👍'
+        : `Walang crew na naka-assign sa <strong>${selectedBranch}</strong>.<br>
+           Buksan ang Employees tab at itakda ang Branch ng bawat crew.`}</td></tr>`;
+  }
 
   filteredEmps.forEach((emp,i)=>{
     html+=`<tr style="background:${i%2===0?'#fff':'#fdf8f5'};">
       <td style="padding:9px 14px;border-bottom:1px solid var(--border);">
         <div style="font-weight:600;font-size:13px;">${emp.name}</div>
-        <div style="font-size:11px;color:var(--muted);">${emp.pos||''}</div>
+        <div style="font-size:11px;color:var(--muted);">${emp.pos||''}${emp.branch?' \u00b7 '+emp.branch:' \u00b7 <span style="color:#B26A00">walang branch</span>'}</div>
       </td>`;
     weekDates.forEach(date=>{
       const dow = date.getDay();
@@ -2378,7 +2158,7 @@ function renderWeeklySchedule() {
           style="width:100%;padding:4px 5px;border:1px solid ${s&&s.color?s.color:'#ddd'};
           border-radius:6px;font-size:11px;font-family:inherit;background:${cellBg||'#fff'};
           color:${s&&s.color?s.color:'#666'};font-weight:600;cursor:pointer;">
-          ${shiftOptsHtml.replace(`value="${curVal}"`,`value="${curVal}" selected`)}
+          ${(selectedBranch?shiftOptsHtml:optsFor(emp.branch||'')).replace(`value="${curVal}"`,`value="${curVal}" selected`)}
         </select>
         ${s && s !== 'REST' && s.start ? `<div style="font-size:10px;color:var(--muted);text-align:center;margin-top:2px;">${s.start}–${s.end}</div>` : ''}
       `;
@@ -2587,6 +2367,18 @@ let editingEmpIdx=-1;
 function openEmpModal(idx){
   editingEmpIdx=idx!==undefined?idx:-1;
   const e=idx!==undefined?employees[idx]:{};
+  // Branch list is rebuilt each time the modal opens so a branch added since
+  // the page loaded is selectable without a refresh. An employee already
+  // holding a branch that is no longer in the list keeps it rather than
+  // silently losing it.
+  const brSel = document.getElementById('e-branch');
+  if(brSel){
+    const names = branchNamesSafe();
+    if(e.branch && !names.includes(e.branch)) names.push(e.branch);
+    brSel.innerHTML = '<option value="">— Pumili ng branch —</option>'
+      + names.map(n=>'<option value="'+n.replace(/"/g,'&quot;')+'">'+n+'</option>').join('');
+    brSel.value = e.branch || '';
+  }
   ['id','name','type','rate','hired','sss','phic','pagibig','tin','email','contact','emergency'].forEach(f=>{
     const el=document.getElementById('e-'+f);
     if(el) el.value=e[f]||'';
@@ -2623,6 +2415,7 @@ function saveEmployee(){
   const pos = customPos || document.getElementById('e-pos').value;
   if (!pos) return alert('Please select or enter a position.');
   const e={id:v('e-id'),name:v('e-name'),pos,type:v('e-type'),rate:+v('e-rate'),
+    branch: (document.getElementById('e-branch')||{}).value || '',
     hired:v('e-hired'),sss:v('e-sss'),phic:v('e-phic'),pagibig:v('e-pagibig'),
     tin:v('e-tin'), email:v('e-email')||'',
     gcash:v('e-gcash')||'', bank:v('e-bank')||'',
@@ -2783,7 +2576,6 @@ function loadDTR() { // loadDTR — loads DTR for selected employee and period
     </tr>`;
   }
   document.getElementById('dtr-tbody').innerHTML=rows;
-  renderHolidayBanner('dtr-tbody','dtr-holiday-note',periodKey,empId);
   const rowCount = rows.split('<tr').length - 1;
   const errDiv = document.getElementById('dtr-error');
   if (errDiv) {
@@ -2806,16 +2598,6 @@ function loadDTR() { // loadDTR — loads DTR for selected employee and period
 }
 
 function saveDTRField(dateStr, field, value, empId, periodKey) {
-  // Same rule as the admin editor: a hand-edit of the holiday cell takes
-  // ownership of it, so the calendar's mark comes off and a per-date undo
-  // will leave this row alone.
-  if (field === 'holiday') {
-    setDTREntry(periodKey, empId, dateStr, 'holAuto', null);
-    if (window._fbDB && window._fbFns) {
-      window._fbFns.remove(window._fbFns.ref(window._fbDB,
-        `dtrData/${periodKey}__${empId}/${dateStr}/holAuto`)).catch(e=>console.warn(e));
-    }
-  }
   setDTREntry(periodKey, empId, dateStr, field, value);
   // Sync to Firebase
   if (window._fbDB && window._fbFns) {
@@ -2943,7 +2725,6 @@ function generatePayslip() {
     <div class="payslip-row"><span>Overtime Pay (${r.ot}h)</span><span>₱${fmt(r.otPay)}</span></div>
     <div class="payslip-row"><span>Night Differential (${r.nd}h)</span><span>₱${fmt(r.ndPay)}</span></div>
     <div class="payslip-row"><span>Holiday Pay</span><span>₱${fmt(r.holPay)}</span></div>
-    ${(r.holDays&&r.holDays.length)?`<div style="margin:-2px 0 6px 12px;font-size:11px;color:var(--muted);line-height:1.6;">${r.holDays.map(h=>`${h.date} · ${h.name} <strong>(${h.type})</strong> — ₱${fmt(h.amount)}`).join('<br>')}</div>`:''}
     ${r.incentiveAmt>0?`<div class="payslip-row" style="color:var(--green);"><span>${r.incentiveType||'Sales Incentive'}</span><span>₱${fmt(r.incentiveAmt)}</span></div>`:''}
     <div class="payslip-row" style="font-weight:700;font-size:14px;background:#f0faf4;padding:6px 0;"><span>GROSS PAY</span><span style="color:var(--green);">₱${fmt(r.gross)}</span></div>
     <div class="payslip-section">Deductions</div>
@@ -4191,7 +3972,7 @@ function renderClockMonitor() {
   // Load geofence settings into form
   const pick = document.getElementById('geo-branch-pick');
   if(pick){
-    const names = branchList();
+    const names = branchNamesSafe();
     const cur = pick.value || branchCfg.name || names[0] || '';
     pick.innerHTML = names.map(n=>
       `<option value="${n}"${n===cur?' selected':''}>${n}</option>`).join('')
@@ -4340,7 +4121,7 @@ Basic Pay     : P${fmt(r.basic)}
 OT Pay (${t.ot||0}h): P${fmt(r.otPay)}
 Night Diff Pay: P${fmt(r.ndPay)}
 Holiday Pay   : P${fmt(r.holPay)}
-${(r.holDays&&r.holDays.length)?r.holDays.map(h=>'  '+h.date+' '+h.name+' ('+h.type+') P'+fmt(h.amount)).join('\n')+'\n':''}${r.incentiveAmt>0?`${(r.incentiveType||'Sales Incentive').padEnd(14)}: P${fmt(r.incentiveAmt)}`:''}
+${r.incentiveAmt>0?`${(r.incentiveType||'Sales Incentive').padEnd(14)}: P${fmt(r.incentiveAmt)}`:''}
 GROSS PAY     : P${fmt(r.gross)}
 
 -------- DEDUCTIONS --------
