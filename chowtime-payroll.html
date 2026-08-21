@@ -1824,6 +1824,71 @@ function setupDTREditor() {
   if (empSel.value) loadDTREditor();
 }
 
+// Renders the holiday banner above whichever DTR table is passed in. There are
+// two DTR screens in this app — the auto-compute page and the admin editor —
+// and the reminder is useless if it only appears on the one you are not on.
+// Both DTR screens may be built; refresh whichever is actually populated so
+// the banner and the rows agree after an apply or undo.
+function refreshDTRScreens(){
+  try{ if(document.getElementById('dtr-emp') && document.getElementById('dtr-emp').value) loadDTR(); }catch(e){}
+  try{ if(document.getElementById('editor-emp') && document.getElementById('editor-emp').value) loadDTREditor(); }catch(e){}
+}
+
+function renderHolidayBanner(tableId, boxId, periodKey, empId){
+  const tb = document.getElementById(tableId);
+  if(!tb) return;
+  let holBox = document.getElementById(boxId);
+  if(!holBox){
+    holBox = document.createElement('div');
+    holBox.id = boxId;
+    const tbl = tb.closest('table');
+    if(tbl && tbl.parentNode) tbl.parentNode.insertBefore(holBox, tbl);
+    else return;
+  }
+  const p = getPeriodDetails(periodKey);
+  if(!p || !periodKey){ holBox.style.cssText='display:none'; holBox.innerHTML=''; return; }
+
+  const missing = [];
+  for (let d = p.start; d <= p.end; d++) {
+    const ds = `${p.year}-${String(p.month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const h = holidayOn(ds);
+    if(h) missing.push([ds,h, empId ? getDTREntry(periodKey, empId, ds).holiday === h.type : false]);
+  }
+  const gaps = holidayGapsForPeriod(periodKey);
+  const gapPeople = new Set(gaps.map(g=>g.emp.id)).size;
+  const autoCount = (ds)=> (employees||[]).filter(e=>{
+    if(!e || !e.id) return false;
+    const en = getDTREntry(periodKey, e.id, ds);
+    return en.holAuto === true && en.holiday;
+  }).length;
+
+  if(!missing.length){ holBox.style.cssText='display:none'; holBox.innerHTML=''; return; }
+
+  holBox.style.cssText = 'margin:0 0 12px;padding:10px 14px;background:'
+    + (gaps.length?'#FFF7E6':'#F1F8E9') + ';border:1px solid '
+    + (gaps.length?'#FFD591':'#C5E1A5') + ';border-radius:8px;font-size:13px;';
+  holBox.innerHTML = '<strong>'+(gaps.length?'⚠️':'✓')+' Holiday sa period na ito:</strong><br>'
+    + missing.map(([ds,h,setForThis])=>{
+        const n = autoCount(ds);
+        return '• '+ds+' — '+h.name+' <strong>('+h.type+')</strong>'
+          + (setForThis?' <span style="color:var(--green)">✓</span>':'')
+          + (n?' <span style="color:var(--muted)">· naka-set sa '+n+' crew</span>'
+              + ' <button onclick="undoHolidayForDate(\''+ds+'\',\''+periodKey+'\')" style="padding:2px 8px;'
+              + 'font-size:11px;border:1px solid var(--border);border-radius:5px;'
+              + 'background:#fff;cursor:pointer;margin-left:4px;">Ibalik</button>':'');
+      }).join('<br>')
+    + (gaps.length
+        ? '<br><strong style="color:#B26A00">Kulang pa sa '+gapPeople+' crew.</strong>'
+          + '<br><button onclick="applyHolidaysForEditor(\''+periodKey+'\')" style="margin-top:8px;padding:6px 14px;'
+          + 'border:0;border-radius:6px;background:var(--green,#2E7D32);color:#fff;font-weight:700;'
+          + 'cursor:pointer;">I-apply sa LAHAT ng crew (' + gapPeople + ')</button>'
+        : '<br><span style="color:var(--green);font-weight:700">Naka-set na sa lahat ng crew.</span>')
+    + '<div style="font-size:11px;color:var(--muted);margin-top:6px;">'
+    + 'Ang Holiday column lang ang ginagalaw — hindi ang time in/out. '
+    + '"Ibalik" ay para sa petsang iyon lang, at hindi nito buburahin ang manu-mano mong nilagay. '
+    + 'Hindi ito umaabot sa franchise payroll — sila mismo ang mag-se-set para sa crew nila.</div>';
+}
+
 function loadDTREditor() {
   const empId = document.getElementById('editor-emp').value;
   const periodKey = document.getElementById('editor-period').value;
@@ -1891,61 +1956,7 @@ function loadDTREditor() {
 
   document.getElementById('editor-tbody').innerHTML = rows;
 
-  // Holiday reminder. Nothing has been written — this only reports which days
-  // in this period are holidays that the DTR does not yet reflect, and offers
-  // one deliberate press to set them.
-  let holBox = document.getElementById('editor-holiday-note');
-  if(!holBox){
-    holBox = document.createElement('div');
-    holBox.id = 'editor-holiday-note';
-    const tb = document.getElementById('editor-tbody');
-    const tbl = tb.closest('table');
-    if(tbl && tbl.parentNode) tbl.parentNode.insertBefore(holBox, tbl);
-  }
-  const missing = [];
-  for (let d = p.start; d <= p.end; d++) {
-    const ds = `${p.year}-${String(p.month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-    const h = holidayOn(ds);
-    if(h) missing.push([ds,h,getDTREntry(periodKey, empId, ds).holiday === h.type]);
-  }
-  const gaps = holidayGapsForPeriod(periodKey);
-  const gapPeople = new Set(gaps.map(g=>g.emp.id)).size;
-  // How many crew each date was applied to by the calendar — that is what an
-  // undo of that date would clear.
-  const autoCount = (ds)=> (employees||[]).filter(e=>{
-    if(!e || !e.id) return false;
-    const en = getDTREntry(periodKey, e.id, ds);
-    return en.holAuto === true && en.holiday;
-  }).length;
-
-  if(missing.length){
-    holBox.style.cssText = 'margin:0 0 12px;padding:10px 14px;background:'
-      + (gaps.length?'#FFF7E6':'#F1F8E9') + ';border:1px solid '
-      + (gaps.length?'#FFD591':'#C5E1A5') + ';border-radius:8px;font-size:13px;';
-    holBox.innerHTML = '<strong>'+(gaps.length?'⚠️':'✓')+' Holiday sa period na ito:</strong><br>'
-      + missing.map(([ds,h,setForThis])=>{
-          const n = autoCount(ds);
-          return '• '+ds+' — '+h.name+' <strong>('+h.type+')</strong>'
-            + (setForThis?' <span style="color:var(--green)">✓</span>':'')
-            + (n?' <span style="color:var(--muted)">· naka-set sa '+n+' crew</span>'
-                + ' <button onclick="undoHolidayForDate(\''+ds+'\')" style="padding:2px 8px;'
-                + 'font-size:11px;border:1px solid var(--border);border-radius:5px;'
-                + 'background:#fff;cursor:pointer;margin-left:4px;">Ibalik</button>':'');
-        }).join('<br>')
-      + (gaps.length
-          ? '<br><strong style="color:#B26A00">Kulang pa sa '+gapPeople+' crew.</strong>'
-            + '<br><button onclick="applyHolidaysForEditor()" style="margin-top:8px;padding:6px 14px;'
-            + 'border:0;border-radius:6px;background:var(--green,#2E7D32);color:#fff;font-weight:700;'
-            + 'cursor:pointer;">I-apply sa LAHAT ng crew (' + gapPeople + ')</button>'
-          : '<br><span style="color:var(--green);font-weight:700">Naka-set na sa lahat ng crew.</span>')
-      + '<div style="font-size:11px;color:var(--muted);margin-top:6px;">'
-      + 'Ang Holiday column lang ang ginagalaw — hindi ang time in/out. '
-      + '"Ibalik" ay para sa petsang iyon lang, at hindi nito buburahin ang manu-mano mong nilagay. '
-      + 'Hindi ito umaabot sa franchise payroll — sila mismo ang mag-se-set para sa crew nila.</div>';
-  }else{
-    holBox.style.cssText = 'display:none';
-    holBox.innerHTML = '';
-  }
+  renderHolidayBanner('editor-tbody','editor-holiday-note',periodKey,empId);
 
   // Summary
   const t = getDTRTotals(periodKey, empId);
@@ -1989,8 +2000,12 @@ function holidayGapsForPeriod(periodKey){
   return gaps;
 }
 
-function applyHolidaysForEditor(){
-  const periodKey = document.getElementById('editor-period').value;
+function applyHolidaysForEditor(periodKey){
+  // The period may come from either DTR screen, so it is passed in rather than
+  // read off one screen's selector.
+  periodKey = periodKey
+    || (document.getElementById('dtr-period-sel')||{}).value
+    || (document.getElementById('editor-period')||{}).value;
   if(!periodKey) return;
   const gaps = holidayGapsForPeriod(periodKey);
   if(!gaps.length){ if(typeof toast==='function') toast('Wala nang holiday na kailangang i-set'); return; }
@@ -2009,15 +2024,17 @@ function applyHolidaysForEditor(){
     adminEditDTR(g.date, 'holAuto', true, g.emp.id, periodKey);
   });
   if(typeof toast === 'function') toast('Na-set ang holiday para sa '+people+' crew');
-  loadDTREditor();
+  refreshDTRScreens();
 }
 
 // Undoes ONE date. Deliberately not an "undo everything" — the other holidays
 // in the period stay exactly as they are. Only rows still carrying the
 // calendar's mark are cleared, so anything set or changed by hand is left
 // alone.
-function undoHolidayForDate(dateStr){
-  const periodKey = document.getElementById('editor-period').value;
+function undoHolidayForDate(dateStr, periodKey){
+  periodKey = periodKey
+    || (document.getElementById('dtr-period-sel')||{}).value
+    || (document.getElementById('editor-period')||{}).value;
   if(!periodKey || !dateStr) return;
   const marked = (employees||[]).filter(e=>{
     if(!e || !e.id) return false;
@@ -2035,7 +2052,7 @@ function undoHolidayForDate(dateStr){
       + 'Ang manu-mano mong nilagay ay hindi gagalawin.')) return;
   marked.forEach(e=> adminEditDTR(dateStr, 'holiday', '', e.id, periodKey));
   if(typeof toast === 'function') toast('Naibalik ang '+dateStr+' para sa '+marked.length+' crew');
-  loadDTREditor();
+  refreshDTRScreens();
 }
 
 function adminEditDTR(dateStr, field, value, empId, periodKey) {
@@ -2766,6 +2783,7 @@ function loadDTR() { // loadDTR — loads DTR for selected employee and period
     </tr>`;
   }
   document.getElementById('dtr-tbody').innerHTML=rows;
+  renderHolidayBanner('dtr-tbody','dtr-holiday-note',periodKey,empId);
   const rowCount = rows.split('<tr').length - 1;
   const errDiv = document.getElementById('dtr-error');
   if (errDiv) {
@@ -2788,6 +2806,16 @@ function loadDTR() { // loadDTR — loads DTR for selected employee and period
 }
 
 function saveDTRField(dateStr, field, value, empId, periodKey) {
+  // Same rule as the admin editor: a hand-edit of the holiday cell takes
+  // ownership of it, so the calendar's mark comes off and a per-date undo
+  // will leave this row alone.
+  if (field === 'holiday') {
+    setDTREntry(periodKey, empId, dateStr, 'holAuto', null);
+    if (window._fbDB && window._fbFns) {
+      window._fbFns.remove(window._fbFns.ref(window._fbDB,
+        `dtrData/${periodKey}__${empId}/${dateStr}/holAuto`)).catch(e=>console.warn(e));
+    }
+  }
   setDTREntry(periodKey, empId, dateStr, field, value);
   // Sync to Firebase
   if (window._fbDB && window._fbFns) {
