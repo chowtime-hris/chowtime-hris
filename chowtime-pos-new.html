@@ -255,9 +255,9 @@ const BRANCHES = [
 
 const ROLES = {
   owner:     {label:"Owner / Admin",    emoji:"\u{1F451}", color:"#6A1B9A",
-    nav:["dashboard","branches","subs","pos","orders","void_requests","all_orders","analytics","z_reading","reports","cash_count","cash_in","expenses","cash_monitor","discount_mgmt","inventory","inv_log","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","settings","printer","ext_payroll","ext_kiosk","hris_dash","ext_production","ext_stock","branch_pl"]},
+    nav:["dashboard","branches","subs","pos","orders","void_requests","all_orders","analytics","z_reading","reports","feedback","cash_count","cash_in","expenses","cash_monitor","discount_mgmt","inventory","inv_log","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","settings","printer","ext_payroll","ext_kiosk","hris_dash","ext_production","ext_stock","branch_pl"]},
   manager:   {label:"Branch Manager",   emoji:"\u{1F3EA}", color:"#007AFF",
-    nav:["branch_dash","pos","orders","analytics","z_reading","reports","cash_count","cash_in","expenses","ext_payroll","inventory","inv_log","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","hris_dash","bom_mgmt","branch_settings","printer","ext_kiosk","ext_stock","branch_pl"]},
+    nav:["branch_dash","pos","orders","analytics","z_reading","reports","feedback","cash_count","cash_in","expenses","ext_payroll","inventory","inv_log","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","hris_dash","bom_mgmt","branch_settings","printer","ext_kiosk","ext_stock","branch_pl"]},
   cashier:   {label:"Cashier",          emoji:"\u{1F4B3}", color:"#34C759",
     nav:["pos","orders","x_reading","printer","z_reading","cash_count","cash_in","expenses","inventory","ca_request","loan_request","void_request","ext_kiosk","ext_stock"]},
   crew:      {label:"Crew / Kitchen",   emoji:"\u{1F9D1}\u{200D}\u{1F373}", color:"#FF9500",
@@ -274,7 +274,7 @@ const NAV_GROUPS = [
   {id:"sales", icon:"\u{1F6D2}", label:"POS & Sales",
    pages:["pos","orders","all_orders","kitchen","void_request","void_requests",
           "cash_count","cash_monitor","cash_in_out","z_reading","x_reading",
-          "reports","sales_report","analytics","branch_pl"]},
+          "reports","sales_report","analytics","branch_pl","feedback"]},
   {id:"stock", icon:"\u{1F4E6}", label:"Inventory",
    pages:["inventory","inv_log","stock_order","stock_receive","po_monitor",
           "bom_mgmt","commissary","comm_inv","comm_orders","comm_dr","ext_production","ext_stock"]},
@@ -297,6 +297,7 @@ const NAV_META = {
   sales_report:{icon:"💰",label:"Sales Report"},
   z_reading:   {icon:"📄",label:"Z-Reading"},
   reports:     {icon:"🗂️",label:"Reports"},
+  feedback:    {icon:"⭐",label:"Customer Feedback"},
   subs:        {icon:"💳",label:"Subscriptions"},
   ext_payroll: {icon:"💵",label:"Payroll System ↗"},
   ext_kiosk:   {icon:"⏰",label:"Time Clock ↗"},
@@ -1171,6 +1172,13 @@ function printReceipt(ord, branchName, companySettings, paperSize){
   const fsb = paperSize==="58mm"?"13px":"16px";
   const fsh = paperSize==="58mm"?"16px":"20px";
 
+  // Same URL the thermal QR carries, rendered as an image because a print
+  // window has no ESC/POS. Kept comfortably inside the paper width so it is
+  // never clipped: 58mm paper is about 220px, 80mm about 302px.
+  const qrPx  = paperSize==="58mm" ? 120 : 150;
+  const qrSrc = "https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=0&data="
+              + encodeURIComponent(feedbackURL(branchName));
+
   pw.document.write("<!DOCTYPE html><html><head><title>Receipt "+ord.id+"</title>"+
   "<style>"+
   "*{margin:0;padding:0;box-sizing:border-box;}"+
@@ -1253,17 +1261,46 @@ function printReceipt(ord, branchName, companySettings, paperSize){
     "VATable: \u20b1"+vatable.toFixed(2)+" | VAT: \u20b1"+vatAmt.toFixed(2)+"</div>":
     "<div class='c sub'>This serves as your Official Receipt</div>")+
   "<div class='c sub' style='margin-top:4px'>"+(companySettings.receiptFooter||"Thank you for dining with us!")+"</div>"+
+  // Feedback QR. The thermal receipt draws this with a native ESC/POS command,
+  // which a browser cannot do, so here it is an image of the same URL — the
+  // branch is baked in exactly the same way, and the same Settings toggle
+  // governs both. The link is printed underneath as words too: if the image
+  // fails to load the receipt still tells the customer where to go.
+  (companySettings.feedbackQR!==false
+    ? "<div class='hr'></div>"+
+      "<div class='c b' style='margin-top:6px'>How did we do?</div>"+
+      "<div class='c' style='margin-top:5px'>"+
+        "<img id='fbqr' alt='' width='"+qrPx+"' height='"+qrPx+"' src='"+qrSrc+"'>"+
+      "</div>"+
+      "<div class='c sub' style='margin-top:3px'>Scan to rate "+
+        (branchName||"this store")+"</div>"
+    : "")+
   "<div class='c b' style='margin-top:8px;font-size:14px'>*** "+
   (isVAT&&!zerovat?"VAT RECEIPT":zerovat?"ZERO-RATED RECEIPT":"NON-VAT RECEIPT")+" ***</div>"+
   "<br><br></body></html>");
   pw.document.close();
-  setTimeout(function(){
+
+  // The QR is fetched over the network. Printing on the old fixed 400ms timer
+  // could fire before it arrived and put a blank square on the receipt, so the
+  // print waits for the image — but never longer than 2.5s, and not at all
+  // when there is no image to wait for.
+  var _printed=false;
+  var _go=function(){
+    if(_printed)return; _printed=true;
     pw.print();
     // Auto-close after print on mobile
     setTimeout(function(){
       try{pw.close();}catch(e){}
     },1000);
-  },400);
+  };
+  var _qr=null;
+  try{ _qr=pw.document.getElementById("fbqr"); }catch(e){}
+  if(_qr && !_qr.complete){
+    _qr.onload=_go; _qr.onerror=_go;
+    setTimeout(_go,2500);
+  } else {
+    setTimeout(_go,400);
+  }
 }
 
 function printKOT(ord, branchName, companySettings, paperSize){
@@ -12030,6 +12067,145 @@ function InvCatsTab({db,showT}){
 }
 
 
+
+/* ═══════════════════ CUSTOMER FEEDBACK ═══════════════════
+   Ratings come from the QR on the receipt. The customer's phone writes them to
+   the HRIS Realtime Database under "feedback" — the same node the public form
+   uses — so nothing new had to be created to collect them.
+
+   Each record carries `store`, which the QR fills in from the branch printed
+   on that receipt. That string is the branch's FULL name ("Chowtime WPAN"),
+   which is what curBranch.full holds, so the two line up without a lookup.
+
+   Who sees what: an owner sees every branch. Everyone else sees exactly one —
+   their own — and the filter is applied to the data, not to the dropdown, so
+   there is no arrangement of the screen that shows a manager another branch.
+   A franchise manager is a manager like any other and follows the same rule. */
+function FeedbackPage({user,curBranch,hrisDB,branches,showT}){
+  const [rows,setRows]     = useState([]);
+  const [loading,setLoad]  = useState(true);
+  const [err,setErr]       = useState("");
+  const [storeSel,setSel]  = useState("");
+  const [days,setDays]     = useState(30);
+
+  const isOwner = (user.role==="owner"||user.branch==="all");
+  const myStore = (curBranch&&curBranch.full)||"";
+
+  useEffect(()=>{
+    if(!hrisDB){ setErr("Not connected to the HRIS database."); setLoad(false); return; }
+    const un = onValue(ref(hrisDB,"feedback"), snap=>{
+      const v = snap.val()||{};
+      const list = Object.keys(v).map(k=>Object.assign({_key:k}, v[k]||{}))
+        .filter(r=>r&&r.createdAt)
+        .sort((a,b)=> String(b.createdAt).localeCompare(String(a.createdAt)));
+      setRows(list); setLoad(false); setErr("");
+    }, e=>{ setErr("Could not read feedback: "+(e&&e.message||"")); setLoad(false); });
+    return ()=>{ try{un();}catch(e){} };
+  },[hrisDB]);
+
+  // A manager's branch is pinned here, before anything reaches the screen.
+  const scoped = rows.filter(r=> isOwner ? true : (r.store===myStore));
+
+  const cutoff = (()=>{ const d=new Date(); d.setDate(d.getDate()-days); return d.toISOString(); })();
+  const inRange = scoped.filter(r=> days===0 ? true : String(r.createdAt) >= cutoff);
+  const shown   = inRange.filter(r=> (isOwner&&storeSel) ? r.store===storeSel : true);
+
+  const avg = (key)=>{
+    const n = shown.filter(r=>Number(r[key])>0);
+    if(!n.length) return 0;
+    return Math.round((n.reduce((a,r)=>a+Number(r[key]),0)/n.length)*10)/10;
+  };
+  const overall = shown.length
+    ? Math.round((shown.reduce((a,r)=>a+(Number(r.avg)||0),0)/shown.length)*10)/10 : 0;
+
+  const stars = (n)=>{
+    const v = Math.round(Number(n)||0);
+    return "\u2605".repeat(Math.max(0,Math.min(5,v))) + "\u2606".repeat(Math.max(0,5-v));
+  };
+  const colFor = (n)=> n>=4.5?"#2E7D32" : n>=3.5?"#F9A825" : n>0?"#C62828" : C.muted;
+
+  const storeList = Array.from(new Set(rows.map(r=>r.store).filter(Boolean))).sort();
+  const withComment = shown.filter(r=>(r.comment||"").trim());
+
+  return h("div",null,
+    h(SectionHeader,{title:"\u2B50 Customer Feedback"+(isOwner?"":" \u2014 "+(curBranch&&curBranch.name||""))}),
+
+    !isOwner && h("div",{style:{fontSize:12,color:C.muted,marginBottom:12}},
+      "Showing this branch only."),
+
+    h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14,alignItems:"center"}},
+      h("select",{value:days,onChange:e=>setDays(Number(e.target.value)),
+        style:{padding:"8px 10px",borderRadius:8,border:"1px solid "+C.border,fontSize:13}},
+        h("option",{value:7},"Last 7 days"),
+        h("option",{value:30},"Last 30 days"),
+        h("option",{value:90},"Last 90 days"),
+        h("option",{value:0},"All time")),
+      isOwner && h("select",{value:storeSel,onChange:e=>setSel(e.target.value),
+        style:{padding:"8px 10px",borderRadius:8,border:"1px solid "+C.border,fontSize:13}},
+        h("option",{value:""},"All branches"),
+        storeList.map(st=>h("option",{key:st,value:st},st)))
+    ),
+
+    err && h("div",{style:{background:"#FBE6E7",color:"#C62828",padding:"10px 14px",
+      borderRadius:8,fontSize:13,marginBottom:14}}, err),
+
+    loading && h("div",{style:{color:C.muted,fontSize:13,padding:"20px 0"}},"Loading feedback\u2026"),
+
+    !loading && !shown.length && !err && h("div",{style:{textAlign:"center",padding:"40px 20px",
+      color:C.muted,fontSize:13,border:"1px dashed "+C.border,borderRadius:10}},
+      "No feedback yet for this period. Ratings arrive when customers scan the QR code on their receipt."),
+
+    !loading && !!shown.length && h("div",null,
+      h("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",
+        gap:12,marginBottom:18}},
+        h("div",{style:{background:"#F3E9F7",borderRadius:12,padding:"14px 16px"}},
+          h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,letterSpacing:.5}},"OVERALL"),
+          h("div",{style:{fontSize:30,fontWeight:800,color:colFor(overall),lineHeight:1.1}},
+            overall.toFixed(1)),
+          h("div",{style:{fontSize:16,color:colFor(overall),letterSpacing:2}},stars(overall)),
+          h("div",{style:{fontSize:11,color:C.muted,marginTop:2}},
+            shown.length+" rating"+(shown.length===1?"":"s"))),
+        [["food","Food"],["service","Service"],["clean","Cleanliness"]].map(([k,lbl])=>
+          h("div",{key:k,style:{background:"#FFF",border:"1px solid "+C.border,
+            borderRadius:12,padding:"14px 16px"}},
+            h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,letterSpacing:.5}},
+              lbl.toUpperCase()),
+            h("div",{style:{fontSize:26,fontWeight:800,color:colFor(avg(k)),lineHeight:1.2}},
+              avg(k).toFixed(1)),
+            h("div",{style:{fontSize:14,color:colFor(avg(k)),letterSpacing:2}},stars(avg(k)))))
+      ),
+
+      h("div",{style:{fontSize:13,fontWeight:700,color:C.muted,letterSpacing:.5,marginBottom:8}},
+        "COMMENTS ("+withComment.length+")"),
+
+      !withComment.length && h("div",{style:{color:C.muted,fontSize:13,padding:"12px 0"}},
+        "Ratings came in, but nobody left a written comment in this period."),
+
+      withComment.map(r=>h("div",{key:r._key,
+        style:{border:"1px solid "+C.border,borderLeft:"4px solid "+colFor(r.avg),
+          borderRadius:10,padding:"12px 14px",marginBottom:10,background:"#FFF"}},
+        h("div",{style:{display:"flex",justifyContent:"space-between",gap:10,
+          flexWrap:"wrap",marginBottom:6}},
+          h("div",{style:{fontSize:15,color:colFor(r.avg),letterSpacing:2}},
+            stars(r.avg), h("span",{style:{fontSize:12,color:C.muted,letterSpacing:0,
+              marginLeft:6}},(Number(r.avg)||0).toFixed(1))),
+          h("div",{style:{fontSize:11,color:C.muted}},
+            (isOwner&&r.store?r.store+" \u00b7 ":"")+
+            new Date(r.createdAt).toLocaleDateString("en-PH",
+              {month:"short",day:"numeric",year:"numeric"}))),
+        h("div",{style:{fontSize:13.5,color:C.text,lineHeight:1.5,whiteSpace:"pre-wrap"}},
+          r.comment),
+        // Only shown when the customer chose to leave it, so someone can follow up.
+        (r.contact||"").trim() && h("div",{style:{fontSize:11.5,color:C.muted,marginTop:7,
+          paddingTop:7,borderTop:"1px dashed "+C.border}},
+          "Contact: "+r.contact),
+        h("div",{style:{fontSize:11,color:C.muted,marginTop:6}},
+          "Food "+(r.food||"-")+" \u00b7 Service "+(r.service||"-")+" \u00b7 Clean "+(r.clean||"-"))
+      ))
+    )
+  );
+}
+
 function SettingsPage({db,user,showT,branches,companySettings,setCompanySettings}){
   // paperFor() reads module state, which React cannot see. Without this the
   // button highlight would not move when tapped and it would look like nothing
@@ -21296,6 +21472,12 @@ function App(){
         // ══ PAYROLL (redirect to HRIS) ══
         page==="payroll"&&h(PayrollPage,{
           db,hrisDB,user,showT,branches,branchId,staff,advances
+        }),
+
+
+        // ══ CUSTOMER FEEDBACK ══
+        page==="feedback"&&h(FeedbackPage,{
+          user,curBranch,hrisDB,branches,showT
         }),
 
 
