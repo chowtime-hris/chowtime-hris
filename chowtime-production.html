@@ -116,9 +116,16 @@ tbody tr:hover{background:#fbf6ea;}
   padding:9px 11px;font-size:12.5px;line-height:1.45;}
 #ctForgot{display:block;text-align:center;margin-top:14px;font-size:12px;color:#6A1B9A;
   background:none;border:none;cursor:pointer;width:100%;text-decoration:underline;}
-#ctSignOut{background:none;border:1px solid rgba(255,255,255,.5);color:#fff;border-radius:6px;
-  padding:5px 10px;font-size:11px;font-weight:600;cursor:pointer;margin-left:8px;white-space:nowrap;}
-#ctWho{font-size:11px;color:rgba(255,255,255,.85);margin-left:8px;white-space:nowrap;}
+/* The header is white, so these two must be dark to be visible at all. */
+#ctSignOut{background:#F3E9F7;border:1px solid #8E24AA;color:#4A148C;border-radius:6px;
+  padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;}
+#ctSignOut:active{background:#8E24AA;color:#fff;}
+#ctWho{font-size:11px;color:#5A5A5A;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:40vw;}
+/* On a narrow tablet or phone the header ran out of room and pushed the button
+   off the edge; the row is allowed to wrap and the brand keeps the full line. */
+header.app{flex-wrap:wrap;gap:8px;}
+header.app .brand{flex:1 1 100%;}
+@media(min-width:700px){header.app .brand{flex:0 1 auto;}}
 @media print{#ctGate,#ctSignOut,#ctWho{display:none!important;}}
 </style>
 <!-- BUILD:20260802-234526 -->
