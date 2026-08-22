@@ -989,22 +989,61 @@ function feedbackURL(branchFull){
     +"?store="+encodeURIComponent(branchFull||"");
 }
 
-// Paper width belongs to the TABLET, not the company.
+// Paper width belongs to the BRANCH. Each branch owns its own value and no
+// branch can change another's.
 //
-// It was stored in settings/company, so every branch shared one value and the
-// last person to touch it decided for all of them. A 58mm printer fed an
-// 80mm layout wraps every line — the label lands on one row and the amount on
-// the next, which is exactly how a Z-Reading came out unreadable while the
-// setting on screen said 58mm.
+// It used to live in settings/company — one field shared by everyone, so the
+// last person to save decided for all eight branches. A 58mm printer handed
+// the 80mm layout wraps every line: the label lands on one row and the amount
+// on the next, which is exactly how WPAN's Z-Reading came out unreadable.
+//
+// A half-fix later added a per-tablet localStorage value, and paperFor() did
+// read it first — but the buttons still wrote paperSize into companySettings,
+// so the shared field kept being overwritten and any tablet that had never
+// tapped the picker still inherited whoever saved last. The shared field is
+// gone from this path entirely now.
+//
+// Order of preference:
+//   1. branch_settings/{branchId}.paperSize  — the branch's own value
+//   2. localStorage copy of the same         — so it survives being offline
+//   3. "80mm"                                — only when nothing is set yet
+//
+// branch_settings is a separate collection on purpose. settings/branches holds
+// the branch list itself and has been overwritten by a bad save before; this
+// never touches that document.
+var CT_BRANCH_ID    = null;
+var CT_BRANCH_PAPER = null;
+
+function paperKey(bid){ return "ct_paperSize_" + (bid || "unknown"); }
+
 function paperFor(cs){
+  if(CT_BRANCH_PAPER==="58mm"||CT_BRANCH_PAPER==="80mm") return CT_BRANCH_PAPER;
   try{
-    const dev=localStorage.getItem("ct_paperSize");
-    if(dev==="58mm"||dev==="80mm") return dev;
+    const mine = localStorage.getItem(paperKey(CT_BRANCH_ID));
+    if(mine==="58mm"||mine==="80mm") return mine;
+    // One-time carry-over from the older per-tablet key so a tablet that was
+    // already set correctly does not revert on the day this ships.
+    const legacy = localStorage.getItem("ct_paperSize");
+    if(legacy==="58mm"||legacy==="80mm") return legacy;
   }catch(e){}
-  return (cs&&cs.paperSize)||"80mm";
+  return "80mm";
 }
+
 function setPaperFor(v){
-  try{ localStorage.setItem("ct_paperSize",v); }catch(e){}
+  if(v!=="58mm"&&v!=="80mm") return;
+  CT_BRANCH_PAPER = v;
+  // Saved on the device first, so the printer is right on the very next receipt
+  // even if the network is down. Firestore catches up when it can.
+  try{
+    localStorage.setItem(paperKey(CT_BRANCH_ID), v);
+    localStorage.setItem("ct_paperSize", v);
+  }catch(e){}
+  if(CT_BRANCH_ID){
+    try{
+      setDoc(doc(db,"branch_settings",CT_BRANCH_ID),
+        {branch:CT_BRANCH_ID, paperSize:v},{merge:true});
+    }catch(e){}
+  }
 }
 
 function escposKick(pin){
@@ -11992,6 +12031,10 @@ function InvCatsTab({db,showT}){
 
 
 function SettingsPage({db,user,showT,branches,companySettings,setCompanySettings}){
+  // paperFor() reads module state, which React cannot see. Without this the
+  // button highlight would not move when tapped and it would look like nothing
+  // was saved.
+  const [,_paperBump]=useState(0);
   const [tab,setTab]=useState("print");
   const T=(id,lbl)=>h("button",{key:id,onClick:()=>setTab(id),
     style:{padding:"9px 18px",border:"none",background:"none",cursor:"pointer",
@@ -12184,7 +12227,7 @@ function SettingsPage({db,user,showT,branches,companySettings,setCompanySettings
             +"which is what makes a Z-Reading unreadable."),
           h("div",{style:{display:"flex",gap:6,marginBottom:12}},
             ["80mm","58mm"].map(s=>h("button",{key:s,
-              onClick:()=>{ setPaperFor(s); setCompanySettings(p=>({...p,paperSize:s})); },
+              onClick:()=>{ setPaperFor(s); _paperBump(x=>x+1); },
               style:{flex:1,padding:"9px",borderRadius:8,border:"none",cursor:"pointer",
                 fontWeight:700,fontSize:14,
                 background:paperFor(companySettings)===s?C.primary:"#eee",
@@ -12255,6 +12298,7 @@ function SettingsPage({db,user,showT,branches,companySettings,setCompanySettings
 
 // ─── PRINTER PAGE ─────────────────────────────────────────
 function PrinterPage({db,user,showT,companySettings,setCompanySettings,curBranch}){
+  const [,_paperBump]=useState(0);
   // The USB handle lives outside React, and a reload drops it — which is
   // exactly when printing quietly falls back to Bluetooth.
   const [usbOn,setUsbOn]=useState(usbReady());
@@ -12319,7 +12363,7 @@ function PrinterPage({db,user,showT,companySettings,setCompanySettings,curBranch
           h("div",{style:{fontSize:13,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:8}},"PAPER SIZE"),
           h("div",{style:{display:"flex",gap:8}},
             ["80mm","58mm"].map(s=>h("button",{key:s,
-              onClick:()=>{ setPaperFor(s); setCompanySettings(p=>({...p,paperSize:s})); },
+              onClick:()=>{ setPaperFor(s); _paperBump(x=>x+1); },
               style:{flex:1,padding:"12px 8px",borderRadius:9,border:"none",
                 cursor:"pointer",fontWeight:700,fontSize:13,
                 background:paperFor(companySettings)===s?C.primary:"#eee",
@@ -14178,6 +14222,31 @@ function App(){
   const isFranchiseAcct=!!(_myBranchRec&&_myBranchRec.ownership==="franchise");
   const caRoster=isFranchiseAcct?franchiseEmps:hrisEmps.concat(prodEmps);
   const curBranch=branches.find(b=>b.id===branchId)||BRANCHES[0];
+
+  // This branch's paper width, and only this branch's. Kept in module state so
+  // the ESC/POS builders — which are plain functions outside React — can read
+  // it, and mirrored into React state so a change repaints the picker.
+  const [,_paperSync]=useState(0);
+  useEffect(()=>{
+    if(!branchId) return;
+    CT_BRANCH_ID = branchId;
+    try{
+      const cached = localStorage.getItem(paperKey(branchId));
+      if(cached==="58mm"||cached==="80mm") CT_BRANCH_PAPER = cached;
+      else CT_BRANCH_PAPER = null;
+    }catch(e){ CT_BRANCH_PAPER = null; }
+    _paperSync(x=>x+1);
+
+    const un = onSnapshot(doc(db,"branch_settings",branchId), snap=>{
+      const v = snap.exists() ? (snap.data()||{}).paperSize : null;
+      if(v==="58mm"||v==="80mm"){
+        CT_BRANCH_PAPER = v;
+        try{ localStorage.setItem(paperKey(branchId), v); }catch(e){}
+        _paperSync(x=>x+1);
+      }
+    }, ()=>{});   // offline or denied: the cached value above still stands
+    return ()=>un();
+  },[branchId]);
   // One rule for every stock collection, driven by the SAME branch the order
   // is filed under. Previously this keyed off role, so an owner's sale was
   // tagged WSFP but deducted from Main.
