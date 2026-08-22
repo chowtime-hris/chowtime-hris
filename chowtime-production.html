@@ -7,6 +7,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
 <style>
 :root{
   --maroon:#6A1B9A;
@@ -92,6 +93,34 @@ tbody tr:hover{background:#fbf6ea;}
 .cal-cell .cal-mark{font-size:9px;color:var(--maroon);font-weight:700;text-align:center;line-height:1.2;}
 @media(max-width:640px){.cal-cell{min-height:40px;}.cal-cell .cal-mark{font-size:8px;}}
 </style>
+<style>
+/* ===== LOGIN GATE ===== */
+#ctGate{position:fixed;inset:0;z-index:9999;background:linear-gradient(160deg,#4A148C 0%,#6A1B9A 100%);
+  display:flex;align-items:center;justify-content:center;padding:20px;}
+#ctGate.hidden{display:none;}
+#ctGateBox{background:#FFFFFF;border-radius:14px;padding:26px 22px;width:100%;max-width:360px;
+  box-shadow:0 18px 50px rgba(0,0,0,.35);}
+#ctGateBox .gmark{width:52px;height:52px;border-radius:12px;background:#6A1B9A;color:#fff;
+  display:flex;align-items:center;justify-content:center;font-weight:800;font-size:19px;margin:0 auto 14px;}
+#ctGateBox h2{margin:0 0 4px;text-align:center;font-size:18px;color:#111;}
+#ctGateBox .gsub{text-align:center;font-size:12.5px;color:#5A5A5A;margin-bottom:18px;}
+#ctGateBox label{display:block;font-size:11px;font-weight:700;letter-spacing:.4px;color:#5A5A5A;margin:12px 0 5px;}
+#ctGateBox input{width:100%;padding:11px 12px;border:1px solid #DDD;border-radius:8px;font-size:15px;box-sizing:border-box;}
+#ctGateBox input:focus{outline:none;border-color:#8E24AA;}
+#ctGateBtn{width:100%;margin-top:18px;padding:12px;border:none;border-radius:8px;background:#8E24AA;
+  color:#fff;font-size:15px;font-weight:700;cursor:pointer;}
+#ctGateBtn:disabled{opacity:.6;cursor:default;}
+#ctGateErr{display:none;margin-top:12px;background:#FDECEA;color:#B3261E;border-radius:7px;
+  padding:9px 11px;font-size:12.5px;line-height:1.45;}
+#ctGateMsg{display:none;margin-top:12px;background:#E8F5E9;color:#2E7D32;border-radius:7px;
+  padding:9px 11px;font-size:12.5px;line-height:1.45;}
+#ctForgot{display:block;text-align:center;margin-top:14px;font-size:12px;color:#6A1B9A;
+  background:none;border:none;cursor:pointer;width:100%;text-decoration:underline;}
+#ctSignOut{background:none;border:1px solid rgba(255,255,255,.5);color:#fff;border-radius:6px;
+  padding:5px 10px;font-size:11px;font-weight:600;cursor:pointer;margin-left:8px;white-space:nowrap;}
+#ctWho{font-size:11px;color:rgba(255,255,255,.85);margin-left:8px;white-space:nowrap;}
+@media print{#ctGate,#ctSignOut,#ctWho{display:none!important;}}
+</style>
 <!-- BUILD:20260802-234526 -->
 </head>
 <body>
@@ -105,13 +134,35 @@ tbody tr:hover{background:#fbf6ea;}
     </div>
   </div>
   <span id="connBadge" class="badge-conn off">Offline (local)</span>
+  <span id="ctWho"></span>
+  <button id="ctSignOut" type="button">Sign out</button>
 </header>
+
+<div id="ctGate">
+  <div id="ctGateBox">
+    <div class="gmark">CT</div>
+    <h2>Chowtime Production</h2>
+    <div class="gsub">Sign in to continue</div>
+    <label for="ctEmail">EMAIL</label>
+    <input id="ctEmail" type="email" autocomplete="username" autocapitalize="none" spellcheck="false">
+    <label for="ctPass">PASSWORD</label>
+    <input id="ctPass" type="password" autocomplete="current-password">
+    <button id="ctGateBtn" type="button">Sign in</button>
+    <div id="ctGateErr"></div>
+    <div id="ctGateMsg"></div>
+    <button id="ctForgot" type="button">Forgot password?</button>
+  </div>
+</div>
 
 <nav class="tabs" id="tabs"></nav>
 
 <main id="main"></main>
 
 <script>
+/* The whole application now lives inside bootApp(). It is called only after
+   Firebase Authentication confirms who is signed in, so no screen and no data
+   is ever built before the role is known. */
+function bootApp(){
 /* ================= DATA LAYER ================= */
 const DEFAULT_PRODUCTS = [
   {code:'NGT', label:'C. Nuggets'},
@@ -405,9 +456,17 @@ function saveStateMulti(updates){
 function initFirebase(cfgStr, fromSaved){
   try{
     const cfg = JSON.parse(cfgStr);
-    if(firebase.apps.length) firebase.app().delete();
-    firebase.initializeApp(cfg);
-    DB = firebase.database();
+    // The sign-in gate already started the default Firebase app and the session
+    // lives inside it. Tearing it down here would sign the user out mid-use, so
+    // the existing app is reused whenever it points at the same project, and is
+    // only replaced when Settings genuinely switches to a different one.
+    let app = null;
+    try{ app = firebase.app(); }catch(e){ app = null; }
+    if(app && app.options && app.options.projectId !== cfg.projectId){
+      app.delete(); app = null;
+    }
+    if(!app) app = firebase.initializeApp(cfg);
+    DB = firebase.database(app);
     USE_FIREBASE = true;
     try{ localStorage.setItem(LS_CFG_KEY, cfgStr); }catch(e){}
 
@@ -550,7 +609,10 @@ function allCutoffKeysWithData(){
 }
 
 /* ================= RENDER ================= */
-const SUPERVISOR_MODE = new URLSearchParams(window.location.search).get('mode') === 'supervisor';
+/* The role is no longer taken from the URL — it comes from the signed-in
+   Firebase account, checked against the owner UID list in the gate below.
+   Deleting something from the address bar can no longer change it. */
+const SUPERVISOR_MODE = (window.CT_ROLE !== 'owner');
 if(SUPERVISOR_MODE){
   const hs = document.getElementById('headerSub');
   if(hs) hs.textContent = 'Supervisor view — production entry only';
@@ -565,7 +627,7 @@ const ALL_TABS = [
   {tab:'payslip', label:'Payslip'},
   {tab:'settings', label:'Settings'}
 ];
-const SUPERVISOR_ALLOWED_TABS = ['entry','materials','log'];
+const SUPERVISOR_ALLOWED_TABS = ['entry','log'];
 const VISIBLE_TABS = SUPERVISOR_MODE ? ALL_TABS.filter(t=>SUPERVISOR_ALLOWED_TABS.includes(t.tab)) : ALL_TABS;
 let activeTab = SUPERVISOR_MODE ? 'entry' : 'dashboard';
 function renderNav(){
@@ -1871,7 +1933,6 @@ function pushToHrisFeed(staffId, cutoffKey, payload){
 function renderSettings(main){
   let savedCfg = '';
   try{ savedCfg = localStorage.getItem(LS_CFG_KEY) || ''; }catch(e){}
-  const supervisorUrl = window.location.origin + window.location.pathname + '?mode=supervisor';
   // Pull MAIN's catalogue so the mapping is a picker, not a typed id.
   setTimeout(async()=>{
     const box = document.getElementById('posMapBox');
@@ -1972,11 +2033,13 @@ function renderSettings(main){
     <div class="foot-actions"><button class="btn gold" id="savePosMapBtn">Save links</button></div>
   </div>
   <div class="card">
-    <h2>Link for your production supervisor</h2>
-    <div class="msg info">This is a restricted view — it only shows Production Entry and Materials (batch quantities and attendance), with all ₱ figures, rates, Staff & Rates, Deductions, Payslip, and Settings hidden and inaccessible from the menu. Send this link instead of your own.</div>
-    <input readonly value="${supervisorUrl}" style="font-family:monospace;font-size:12px" onclick="this.select()">
-    <div class="foot-actions"><button class="btn gold" id="copySupBtn">Copy link</button></div>
-    <div class="msg warn" style="margin-top:10px">Honest note: this hides those screens from someone using the app normally — it is not the same as a real login system. Your Firebase database rules are currently open ("test mode"), so anyone who obtained your actual Firebase config directly (not just this link) could still read or write data by other means. If you want this properly locked down with real accounts and permissions, that's a separate setup — ask me and I'll walk you through it.</div>
+    <h2>Accounts and access</h2>
+    <div class="msg info">Everyone now uses the <b>same link</b>. What each person sees is decided by the account they sign in with, not by the address they open.
+      <br><br><b>Owner</b> — every tab.
+      <br><b>Everyone else</b> — Production Entry and Production Log only. Materials, rates, ₱ figures, Staff &amp; Rates, Deductions, Payslip and Settings are hidden and cannot be reached from the menu.
+      <br><br>Signed in now: <b>${(window.CT_USER_EMAIL||'—')}</b> (${SUPERVISOR_MODE?'supervisor':'owner'}).</div>
+    <div class="msg info" style="margin-top:10px">To add or remove people, go to <b>Firebase Console → chowtime-production → Authentication → Users</b>. Deleting someone there locks them out immediately, on every device. A new account is a supervisor by default — nobody becomes owner unless their UID is added to the owner list in this file.</div>
+    <div class="msg warn" style="margin-top:10px">Known limit, stated plainly: the tabs above are hidden from the screen, but the cutoff's deduction and ledger figures still travel to the device as part of the one data feed this app subscribes to. Someone who knows how to open browser developer tools could still read them there. Closing that gap needs the data feed split per section — a separate change, not done here.</div>
   </div>
   <div class="card">
     <h2>Sync with Firebase</h2>
@@ -2016,13 +2079,6 @@ function renderSettings(main){
     That's as far as this app goes on its own. When — and only when — you're comfortable, you (or I, in a separate future session working directly on <code>chowtime-payroll.html</code>) can add a small, additive, read-only lookup there that displays these numbers next to the manual entry fields, as a reference or a one-click "copy in" — without replacing any of the existing payroll formulas. Until that step is taken, this feed just sits there unused and 100% risk-free to your current payroll.</p>
   </div>
   `;
-  document.getElementById('copySupBtn').onclick = ()=>{
-    navigator.clipboard.writeText(supervisorUrl).then(()=>{
-      alert('Link copied. Paste it into a message to your supervisor.');
-    }).catch(()=>{
-      alert('Could not auto-copy — tap the link box above, select all, and copy manually.');
-    });
-  };
   document.getElementById('connectBtn').onclick = ()=>{
     const v = document.getElementById('cfgInput').value.trim();
     if(!v){ alert('Paste a config first if you want to switch databases, or leave this alone — you\'re already connected to the default one.'); return; }
@@ -2073,7 +2129,26 @@ function downloadBlob(content, filename, type){
 // (real protection comes from Firebase security rules, not from hiding this). Baking it in
 // means every device that opens this page — including a supervisor's — connects automatically,
 // with no Settings step required.
-const BUILTIN_FIREBASE_CONFIG = {
+// Defined once in the sign-in gate at the bottom of this file, because the gate
+// needs it before the app starts. Same object, single source of truth.
+const BUILTIN_FIREBASE_CONFIG = window.CT_FIREBASE_CONFIG;
+
+loadLocalState();
+render();
+try{
+  const savedCfg = localStorage.getItem(LS_CFG_KEY);
+  initFirebase(savedCfg || JSON.stringify(BUILTIN_FIREBASE_CONFIG), true);
+}catch(e){}
+} /* ===== end bootApp() ===== */
+</script>
+
+<script>
+/* ============================================================================
+   SIGN-IN GATE
+   Nothing in bootApp() runs until Firebase Authentication answers. The account
+   decides the role; the URL no longer has any say in it.
+   ========================================================================== */
+window.CT_FIREBASE_CONFIG = {
   "apiKey": "AIzaSyAsWieHXURlP3k8AfZ4Wsb8Sp_1fathXvk",
   "authDomain": "chowtime-production.firebaseapp.com",
   "databaseURL": "https://chowtime-production-default-rtdb.asia-southeast1.firebasedatabase.app",
@@ -2083,12 +2158,118 @@ const BUILTIN_FIREBASE_CONFIG = {
   "appId": "1:418692832705:web:d38d297de3282191ebe340"
 };
 
-loadLocalState();
-render();
-try{
-  const savedCfg = localStorage.getItem(LS_CFG_KEY);
-  initFirebase(savedCfg || JSON.stringify(BUILTIN_FIREBASE_CONFIG), true);
-}catch(e){}
+/* Owner accounts. Anyone signed in whose UID is NOT on this list is a
+   supervisor — that direction is deliberate, so a newly created account can
+   never come out as owner by accident. To add a second owner later, paste
+   their User UID from Firebase Console > Authentication > Users as another
+   line in this list, and add the same UID to the database rules. */
+window.CT_OWNER_UIDS = [
+  "nfxiNWpneTQDjgBwZ6nAIOaQVUI2"   // Norman — owner
+];
+
+(function(){
+  var gate    = document.getElementById('ctGate');
+  var emailEl = document.getElementById('ctEmail');
+  var passEl  = document.getElementById('ctPass');
+  var btn     = document.getElementById('ctGateBtn');
+  var errEl   = document.getElementById('ctGateErr');
+  var msgEl   = document.getElementById('ctGateMsg');
+  var forgot  = document.getElementById('ctForgot');
+  var whoEl   = document.getElementById('ctWho');
+  var outBtn  = document.getElementById('ctSignOut');
+  var booted  = false;
+
+  function showErr(t){ errEl.textContent = t; errEl.style.display='block'; msgEl.style.display='none'; }
+  function showMsg(t){ msgEl.textContent = t; msgEl.style.display='block'; errEl.style.display='none'; }
+  function clearNotes(){ errEl.style.display='none'; msgEl.style.display='none'; }
+
+  // Plain-language versions of Firebase's error codes.
+  function friendly(code, fallback){
+    switch(code){
+      case 'auth/invalid-email':        return 'That email address is not written correctly.';
+      case 'auth/user-disabled':        return 'This account has been disabled. Ask the owner.';
+      case 'auth/user-not-found':       return 'No account uses that email.';
+      case 'auth/wrong-password':       return 'Wrong password.';
+      case 'auth/invalid-credential':   return 'Wrong email or password.';
+      case 'auth/invalid-login-credentials': return 'Wrong email or password.';
+      case 'auth/too-many-requests':    return 'Too many failed tries. Wait a few minutes, then try again.';
+      case 'auth/network-request-failed': return 'No internet connection. Sign-in needs to reach the internet at least once.';
+      case 'auth/operation-not-allowed': return 'Email/Password sign-in is not switched on yet in the Firebase Console.';
+      default: return fallback || 'Could not sign in. Please try again.';
+    }
+  }
+
+  var auth;
+  try{
+    firebase.initializeApp(window.CT_FIREBASE_CONFIG);
+    auth = firebase.auth();
+  }catch(e){
+    showErr('Could not start Firebase: ' + e.message);
+    return;
+  }
+
+  // Sessions are kept on the device, so the tablet is not asked to sign in every
+  // morning — but signing out, or the owner deleting the account, ends it.
+  try{ auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL); }catch(e){}
+
+  auth.onAuthStateChanged(function(user){
+    if(user){
+      var isOwner = window.CT_OWNER_UIDS.indexOf(user.uid) !== -1;
+      window.CT_ROLE = isOwner ? 'owner' : 'supervisor';
+      window.CT_USER_EMAIL = user.email || '';
+      window.CT_USER_UID = user.uid;
+
+      whoEl.textContent = (user.email || '') + ' · ' + (isOwner ? 'Owner' : 'Supervisor');
+      gate.classList.add('hidden');
+
+      // bootApp() builds the whole interface for one role and is not designed to
+      // be re-run in place, so a change of account reloads the page instead.
+      if(!booted){ booted = true; bootApp(); }
+    } else {
+      if(booted){ window.location.reload(); return; }
+      gate.classList.remove('hidden');
+      btn.disabled = false;
+      btn.textContent = 'Sign in';
+      setTimeout(function(){ emailEl.focus(); }, 80);
+    }
+  });
+
+  function signIn(){
+    var em = (emailEl.value || '').trim();
+    var pw = passEl.value || '';
+    if(!em || !pw){ showErr('Enter both your email and your password.'); return; }
+    clearNotes();
+    btn.disabled = true;
+    btn.textContent = 'Signing in…';
+    auth.signInWithEmailAndPassword(em, pw)
+      .catch(function(e){
+        showErr(friendly(e.code, e.message));
+        btn.disabled = false;
+        btn.textContent = 'Sign in';
+        passEl.value = '';
+        passEl.focus();
+      });
+  }
+
+  btn.addEventListener('click', signIn);
+  [emailEl, passEl].forEach(function(el){
+    el.addEventListener('keydown', function(e){ if(e.key === 'Enter') signIn(); });
+  });
+
+  forgot.addEventListener('click', function(){
+    var em = (emailEl.value || '').trim();
+    if(!em){ showErr('Type your email address in the box above first, then tap this again.'); return; }
+    clearNotes();
+    auth.sendPasswordResetEmail(em)
+      .then(function(){ showMsg('A reset link was sent to ' + em + '. Check the inbox, and the spam folder.'); })
+      .catch(function(e){ showErr(friendly(e.code, e.message)); });
+  });
+
+  outBtn.addEventListener('click', function(){
+    if(!confirm('Sign out of this device?')) return;
+    auth.signOut();
+  });
+})();
 </script>
 <div id="buildStamp" style="text-align:center;padding:14px 8px;font-size:11px;color:#5A5A5A">Chowtime Production · 20260802-234526</div>
 </body>
