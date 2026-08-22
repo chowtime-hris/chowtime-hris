@@ -79,9 +79,13 @@ tbody tr:hover{background:#fbf6ea;}
   main{padding:0;max-width:100%;}
   .card{box-shadow:none;border:none;}
 }
-.badge-conn{font-size:10px;padding:3px 8px;border-radius:12px;font-weight:700;}
-.badge-conn.on{background:#2E7D3233;color:#c9e8d3;}
-.badge-conn.off{background:#C6282833;color:#f5c6ca;}
+/* These were coloured for a dark header. The header is white now, so the pale
+   text was invisible against it — the badge is the one thing that has to be
+   readable at a glance before trusting that a save reached the cloud. */
+.badge-conn{font-size:10px;padding:4px 9px;border-radius:12px;font-weight:800;
+  letter-spacing:.2px;white-space:nowrap;}
+.badge-conn.on{background:#E4F3E8;color:#1B5E20;border:1px solid #2E7D32;}
+.badge-conn.off{background:#FBE6E7;color:#B3261E;border:1px solid #C62828;}
 .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;}
 .cal-dow{text-align:center;font-size:10px;font-weight:700;color:#5A5A5A;text-transform:uppercase;padding:4px 0;}
 .cal-cell{min-height:52px;border:1px solid var(--line);border-radius:6px;padding:4px;cursor:pointer;background:#fffdf9;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:2px;}
