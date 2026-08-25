@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260822-090000 -->
+<!-- BUILD:20260825-110000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -2537,77 +2537,6 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
         drNotes,
         issuedBy:user.name, issuedAt:serverTimestamp()
       });
-
-      // Short-shipped lines used to vanish. The DR recorded a discrepancy and
-      // the PO closed at whatever left the building, so nothing anywhere said
-      // the branch was still owed the balance — and re-issuing a DR later
-      // would overwrite deliveredItems, erasing the first shipment along with
-      // its DR number and margin.
-      //
-      // Any line that shipped short now rolls into a NEW purchase order for
-      // the remainder, linked both ways. Over-delivery is not a backorder, so
-      // only genuine shortfalls count.
-      const shortLines = (po.items||[])
-        .map(i=>{
-          const sent = Number(actualQtys[i.id]??i.qty)||0;
-          const want = Number(i.qty)||0;
-          return want > sent ? {...i, qty: want - sent} : null;
-        })
-        .filter(Boolean);
-
-      if(shortLines.length){
-        const boNum = (po.poNum||"PO") + "-BO"
-          + (Number(po.backorderSeq||0) + 1);
-        const shortTotal = shortLines.reduce((s,i)=>
-          s + (Number(i.qty)||0)*(Number(i.price)||0), 0);
-        const summary = shortLines.map(i=>i.name+" ×"+i.qty).join(", ");
-        if(confirm(
-            shortLines.length+" item/s shipped short:\n\n"
-            + shortLines.map(i=>"• "+i.name+" — "+i.qty+" "+(i.unit||"")+" still owed").join("\n")
-            + "\n\nCreate backorder "+boNum+" for the balance?\n\n"
-            + "Cancel if the shortfall is final and the branch is not getting the rest.")){
-          try{
-            await addDoc(collection(db,"advances"),stripUndef({
-              _type:"po", poNum:boNum,
-              branch:po.branch, branchName:po.branchName,
-              items:shortLines.map(i=>({id:i.id,name:i.name,unit:i.unit,qty:i.qty,
-                note:i.note||"", price:Number(i.price)||0, cost:Number(i.cost)||0,
-                packUnit:i.packUnit||"", packSize:Number(i.packSize)||0})),
-              date: today,
-              deliveryRequested:"",
-              notes:"Backorder from "+po.poNum+" ("+drNum+"). Balance: "+summary,
-              discount:0,
-              totalAmount:shortTotal,
-              // Already with Main — the branch asked for this once already and
-              // should not have to re-order it.
-              status:"received_by_main",
-              paymentStatus:"Unpaid",
-              deliveryStatus:"Pending",
-              vatType:po.vatType||"nonvat",
-              backorderOf: po.poNum,
-              backorderOfId: po._docId,
-              requestedBy: po.requestedBy||user.name,
-              timestamp:serverTimestamp()
-            }));
-            // Mark the parent so a second short shipment numbers -BO2, and so
-            // the PO Monitor can show where the balance went.
-            await updateDoc(doc(db,"advances",po._docId),{
-              backorderSeq:(Number(po.backorderSeq||0)+1),
-              backorderNum:boNum
-            });
-            await notify(db,{to:po.branch,type:"info",
-              title:"Backorder created — "+boNum,
-              message:"Balance from "+po.poNum+": "+summary,
-              page:"stock_order",ref:boNum,by:user.name});
-            showT("Backorder "+boNum+" created ✓");
-          }catch(e){
-            // The DR itself already saved, so a failure here must not look
-            // like the dispatch failed.
-            showT("DR saved, but backorder failed — create it manually","err");
-            console.error(e);
-          }
-        }
-      }
 
       // Only the branch's own submit was announced; every step after it was
       // silent, so nobody learned anything without opening the page and
@@ -7919,7 +7848,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260822-090000";
+const BUILD = "20260825-110000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -21695,11 +21624,7 @@ function App(){
                     ),
                     h("div",{style:{fontSize:12,color:C.muted,marginTop:3}},
                       po.date+(po.deliveryDate?" · DR Date: "+po.deliveryDate:"")+
-                      (po.vatType?" · "+po.vatType.toUpperCase():"")
-                      // Where the balance went, and where this one came
-                      // from — a backorder is meaningless without the link.
-                      +(po.backorderNum?" · balance → "+po.backorderNum:"")
-                      +(po.backorderOf?" · backorder of "+po.backorderOf:""))
+                      (po.vatType?" · "+po.vatType.toUpperCase():""))
                   ),
                   h("div",{style:{display:"flex",alignItems:"center",gap:10}},
                     // Editable only while Main has not issued the DR. After
@@ -22077,11 +22002,7 @@ function App(){
                     ),
                     h("div",{style:{fontSize:12,color:C.muted,marginTop:2}},
                       (po.branchName||po.branch)+" · "+po.date+
-                      (po.vatType?" · "+po.vatType.toUpperCase():"")
-                      // Where the balance went, and where this one came
-                      // from — a backorder is meaningless without the link.
-                      +(po.backorderNum?" · balance → "+po.backorderNum:"")
-                      +(po.backorderOf?" · backorder of "+po.backorderOf:""))
+                      (po.vatType?" · "+po.vatType.toUpperCase():""))
                   ),
                   h("div",{style:{textAlign:"right"}},
                     h("div",{style:{fontSize:15,fontWeight:900,color:stColor}},
