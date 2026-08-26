@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260827-003000 -->
+<!-- BUILD:20260827-004500 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -7875,7 +7875,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260827-003000";
+const BUILD = "20260827-004500";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -15022,31 +15022,48 @@ function App(){
   // collection instead of one per branch.
   useEffect(()=>{
     if(!user)return;
-    const d=zSel;
-    if(!d){ setZDay(null); return; }
+    // TODAY is fetched too, not just history. The owner's shared listeners are
+    // capped — cash_counts is limit(200) over 60 days across every branch with
+    // no orderBy, so Firestore hands back an arbitrary 200 and a branch's count
+    // for today simply may not be among them. That is why the same WMBL day
+    // read ₱12,290 counted / ₱11,500 remitted on the branch tablet and "no cash
+    // count" on the overseeing account, with the ₱430 opening fund missing too.
+    const today=localDate();
+    const d=zSel||today;
+    const isToday=(d===today);
     let dead=false;
-    setZDay({date:d,loading:true});
+    setZDay({date:d,loading:true,isToday:isToday});
     (async()=>{
       try{
-        const [oS,cS,eS,kS]=await Promise.all([
-          getDocs(query(collection(db,"orders"),where("date","==",d))),
+        // The opening fund falls back to the PREVIOUS day's closing balance,
+        // and that row is not in this date's results — so it is asked for.
+        const _p=new Date(d+"T00:00:00"); _p.setDate(_p.getDate()-1);
+        const prev=localDate(_p);
+        const [oS,cS,eS,kS,pS]=await Promise.all([
+          // Today's orders already arrive complete and live on their own
+          // listener, so only history needs fetching here.
+          isToday?Promise.resolve(null)
+                 :getDocs(query(collection(db,"orders"),where("date","==",d))),
           getDocs(query(collection(db,"cash_log"),where("date","==",d))),
           getDocs(query(collection(db,"expenses"),where("date","==",d))),
-          getDocs(query(collection(db,"cash_counts"),where("date","==",d)))
+          getDocs(query(collection(db,"cash_counts"),where("date","==",d))),
+          getDocs(query(collection(db,"cash_counts"),where("date","==",prev)))
         ]);
         if(dead)return;
         const rows=(s)=>s.docs.map(x=>({...x.data(),_docId:x.id}));
-        setZDay({date:d,loading:false,orders:rows(oS),cashLog:rows(cS),
-          expenses:rows(eS),cashCounts:rows(kS)});
+        setZDay({date:d,loading:false,isToday:isToday,
+          orders:oS?rows(oS):null,cashLog:rows(cS),
+          expenses:rows(eS),cashCounts:rows(kS).concat(rows(pS))});
       }catch(e){
         if(dead)return;
         // Silence here would look exactly like a day with no trade, which is
         // the failure this whole fix exists to remove.
-        setZDay({date:d,loading:false,err:String((e&&e.message)||e)});
+        setZDay({date:d,loading:false,isToday:isToday,
+          err:String((e&&e.message)||e)});
       }
     })();
     return ()=>{dead=true;};
-  },[zSel,user]);
+  },[zSel,user,zBr]);
 
   // ── Z-READING DATA ───────────────────────────────────────
   // `src` is the fetched day above. When it is absent the live arrays are
@@ -18370,10 +18387,11 @@ function App(){
           // mixed reading — today's expenses under an older day's zero sales.
           // Zeros with a "loading" line are honest; a blended total is not.
           const zBlank={orders:[],cashLog:[],expenses:[],cashCounts:[]};
-          const zHit=(zDay&&zDay.date===zSel)?zDay:null;
-          const zLoading=!!zSel&&(!zHit||zHit.loading);
+          const zHit=(zDay&&zDay.date===(zSel||localDate()))?zDay:null;
+          const zReady=!!(zHit&&!zHit.loading&&!zHit.err);
+          const zLoading=!!zSel&&!zReady&&!(zHit&&zHit.err);
           const zErr=zHit?zHit.err:null;
-          const zSrc=!zSel?null:((zHit&&!zHit.loading&&!zHit.err)?zHit:zBlank);
+          const zSrc=zReady?zHit:(zSel?zBlank:null);
           const live=buildZ(zBr,zSel||localDate(),zSrc);
           const saved=zSel
             ? (canPickBranch?zHistAll:zHist).find(x=>x.date===zSel&&x.branch===zBr)
