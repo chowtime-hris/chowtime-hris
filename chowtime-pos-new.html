@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260827-000000 -->
+<!-- BUILD:20260827-003000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -7875,7 +7875,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260827-000000";
+const BUILD = "20260827-003000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -18364,6 +18364,7 @@ function App(){
           const canPickBranch=(user.role==="owner"||user.role==="commissary");
           const zBr=(canPickBranch&&zBranch)?zBranch:branchId;
           const zBrName=((branches||[]).find(b=>b.id===zBr)||curBranch||{});
+          const zBrFull=(zBrName.full||zBrName.name||curBranch.full||zBr);
           // While the day is still in flight, an EMPTY source is passed on
           // purpose. Falling back to the live arrays is what produced the
           // mixed reading — today's expenses under an older day's zero sales.
@@ -18449,7 +18450,12 @@ function App(){
             h("div",{style:{background:`linear-gradient(135deg,${C.primary},${C.dark})`,borderRadius:13,padding:"16px 18px",marginBottom:13,display:"flex",justifyContent:"space-between",alignItems:"center"}},
               h("div",null,
                 h("div",{style:{color:C.accent,fontSize:11,fontWeight:700,letterSpacing:2}},isZ?"Z-READING":"X-READING"),
-                h("div",{style:{color:"#fff",fontSize:15,fontWeight:900,marginTop:2}},curBranch.full),
+                // curBranch is whoever is SIGNED IN. On the overseeing
+                // account that is always Main, so every branch's reading —
+                // screen and printout alike — carried Main's name over
+                // another branch's figures.
+                h("div",{style:{color:"#fff",fontSize:15,fontWeight:900,marginTop:2}},
+                  zBrFull),
                 h("div",{style:{color:"rgba(255,255,255,.75)",fontSize:12,marginTop:1}},
                   isSaved
                     ? ("Saved · "+saved.date+" · ni "+(saved.closedBy||"?"))
@@ -18538,15 +18544,21 @@ function App(){
                       :(zd.shortOver>0?C.info:C.danger)}},
                     (zd.shortOver>=0?"+":"")+"₱"+peso(zd.shortOver))),
 
-                // Settled after the count, exactly like the receipt
-                (zd.remittance>0||zd.countedCash!=null)&&h("div",{
+                // Settled after the count, exactly like the receipt. Always
+                // rendered: a hidden section reads as "no remittance" whether
+                // the branch has not remitted yet or the figure was simply
+                // never carried into the record.
+                h("div",{
                   style:{marginTop:9,paddingTop:8,
                     borderTop:"1px solid "+C.border}},
                   h("div",{style:{display:"flex",justifyContent:"space-between",
                     padding:"4px 0"}},
                     h("span",{style:{fontSize:13,color:C.muted}},"Remitted"),
-                    h("span",{style:{fontSize:14,fontWeight:800}},
-                      "₱"+peso(zd.remittance||0))),
+                    (zd.countedCash==null&&!(zd.remittance>0))
+                      ? h("span",{style:{fontSize:12,color:C.muted,
+                          fontStyle:"italic"}},"— not counted yet —")
+                      : h("span",{style:{fontSize:14,fontWeight:800}},
+                          "₱"+peso(zd.remittance||0))),
                   h("div",{style:{display:"flex",justifyContent:"space-between",
                     padding:"4px 0"}},
                     h("span",{style:{fontSize:13,fontWeight:800}},
@@ -18608,17 +18620,17 @@ function App(){
                 onClick:async()=>{
                   const ps=paperFor(companySettings);
                   showT("Sending to printer...","ok");
-                  const ok=await printEscPosZ(zd,curBranch.full,user.name,companySettings,ps,isZ);
+                  const ok=await printEscPosZ(zd,zBrFull,user.name,companySettings,ps,isZ);
                   if(ok)showT((isZ?"Z":"X")+"-Reading printed ✓");
                   else{
                     showT("BT failed — printing via browser","warn");
-                    printZ(zd,curBranch.full,user.name);
+                    printZ(zd,zBrFull,user.name);
                   }
                 },
                 style:{padding:"10px 22px",background:"#1565C0",border:"none",borderRadius:9,
                   color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer"}},
                 "📡 BT Print "+(isZ?"Z":"X")+"-Reading"),
-              h("button",{onClick:()=>printZ(zd,curBranch.full,user.name),style:{padding:"10px 22px",background:"#fff",border:"1px solid "+C.border,borderRadius:9,color:C.text,fontWeight:600,fontSize:14,cursor:"pointer"}},"🖨️ Browser"),
+              h("button",{onClick:()=>printZ(zd,zBrFull,user.name),style:{padding:"10px 22px",background:"#fff",border:"1px solid "+C.border,borderRadius:9,color:C.text,fontWeight:600,fontSize:14,cursor:"pointer"}},"🖨️ Browser"),
               // Close Day used to only show a toast — nothing was ever written,
               // so yesterday's Z-Reading became unrecoverable once the orders
               // subscription scrolled past it.
@@ -20474,6 +20486,14 @@ function App(){
             });
             const bSales=Math.round(bOrders.reduce(function(a,o){
               return a+(Number(o.total)||0);},0)*100)/100;
+            // `total` is what was COLLECTED — discounts already taken off. The
+            // Z-Reading's "Gross Sales" line is `subtotal`, before them. Adding
+            // up daily Z-Readings by hand and comparing to this column was
+            // never comparing the same thing, so both are stated now.
+            const bGross=Math.round(bOrders.reduce(function(a,o){
+              return a+(Number(o.subtotal)||Number(o.total)||0);},0)*100)/100;
+            const bDisc=Math.round(bOrders.reduce(function(a,o){
+              return a+(Number(o.discAmt)||0);},0)*100)/100;
             // Advances AND loans are both branch money going out — the
             // advance from the drawer, the loan from remitted funds, which is
             // the same branch's cash one step later. Counted on the day it was
@@ -20506,11 +20526,24 @@ function App(){
               .reduce(function(a,po){return a+poValue(po);},0)*100)/100;
             const st=(_sKey&&_sKey.by)?_sKey.by[bid]:null;
             const mc=manualSrc?manualCogsFor(bOrders):null;
-            return {b:b,sales:bSales,exp:bExp,ca:bCA,po:bPO,txns:bOrders.length,
+            return {b:b,sales:bSales,gross:bGross,disc:bDisc,
+              exp:bExp,ca:bCA,po:bPO,txns:bOrders.length,
               cogs:manualSrc?mc.cogs:(st?st.cogs:null),
               uncosted:manualSrc?mc.missing:(st?st.uncosted:0),
               value:st?st.value:null};
           }).sort(function(x,y){return y.sales-x.sales;});
+
+          const _known={}; (branches||[]).forEach(function(b){_known[b.id]=1;});
+          const _orphans=plOrders.filter(function(o){
+            return inRange(o,R)&&!_known[o.branch];
+          });
+          const _orphanBy={};
+          _orphans.forEach(function(o){
+            const k=o.branch||"(blank)";
+            _orphanBy[k]=(_orphanBy[k]||0)+(Number(o.total)||0);
+          });
+          const _orphanTotal=Math.round(_orphans
+            .reduce(function(a,o){return a+(Number(o.total)||0);},0)*100)/100;
 
           const wTot=wideRows.reduce(function(a,r){
             a.sales+=r.sales; a.exp+=r.exp; a.po+=r.po; a.txns+=r.txns;
@@ -20564,8 +20597,11 @@ function App(){
                     r.b.name||r.b.full||r.b.id),
                   h("div",{style:{fontSize:11,color:C.muted}},
                     r.txns+" order"+(r.txns===1?"":"s"))),
-                cell(money(r.sales),{fontWeight:800,
-                  color:r.sales>0?C.primary:C.muted}),
+                h("div",{style:{textAlign:"right"}},
+                  h("div",{style:{fontSize:13,fontWeight:800,
+                    color:r.sales>0?C.primary:C.muted}},money(r.sales)),
+                  r.disc>0?h("div",{style:{fontSize:10,color:C.muted}},
+                    "gross "+money(r.gross)+" · disc "+money(r.disc)):null),
                 // Never invented. A dash means the figure has not been read;
                 // ₱0.00 means it was read and there was nothing to cost.
                 h("div",{style:{textAlign:"right"}},
@@ -20596,9 +20632,27 @@ function App(){
               cell(money(wTot.exp),{fontWeight:800}),
               cell(wTot.anyValue?money(wTot.value):"—",
                 {fontWeight:800,color:C.info})),
+            _orphans.length?h("div",{style:{padding:"10px 14px",
+              background:C.warning+"14",borderTop:"1px solid "+C.warning,
+              fontSize:12,lineHeight:1.6}},
+              h("b",{style:{color:C.warning}},
+                _orphans.length+" order"+(_orphans.length===1?"":"s")
+                +" worth "+money(_orphanTotal)+" belong to no branch on file"),
+              h("div",{style:{color:C.muted,marginTop:2}},
+                "They are in none of the rows above and in no total. Branch "
+                +"code" +(Object.keys(_orphanBy).length===1?"":"s")+": "
+                +Object.keys(_orphanBy).map(function(k){
+                    return k+" ("+money(Math.round(_orphanBy[k]*100)/100)+")";
+                  }).join(", ")
+                +" — either the branch record was renamed or these tablets are "
+                +"writing a code that no longer exists.")):null,
+
             h("div",{style:{padding:"9px 14px",fontSize:11,color:C.muted,
               lineHeight:1.6,borderTop:"1px solid "+C.border}},
-              "Sales, purchases and expenses follow the period above. "
+              "SALES is what was collected, after discounts; the grey line "
+              +"under it is gross and the discount taken off, which is what a "
+              +"Z-Reading calls Gross Sales. Purchases and expenses follow the "
+              +"period above. "
               +"EXPENSES includes cash advances and cash loans released to "
               +"crew, counted on the day they were released. COST OF GOODS is "
               +(manualSrc
