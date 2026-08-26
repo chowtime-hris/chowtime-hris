@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260825-110000 -->
+<!-- BUILD:20260826-103000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -7848,7 +7848,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260825-110000";
+const BUILD = "20260826-103000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -13344,6 +13344,8 @@ function App(){
   const [cmTo,setCmTo]=useState(localDate());
   const [poFrom,setPoFrom]=useState("");                 // PO monitor range
   const [poTo,setPoTo]=useState("");
+  // Branch filter for the PO Monitor. "" means every branch.
+  const [poBranch,setPoBranch]=useState("");
   const [brStatus,setBrStatus]=useState({});             // per-branch heartbeat
   const [brFrom,setBrFrom]=useState(localDate());        // branches overview range
   const [brTo,setBrTo]=useState(localDate());
@@ -21814,6 +21816,28 @@ function App(){
             note:(poFrom&&poTo)?("ordered "+poFrom+" \u2192 "+poTo)
               :"all POs, any date"}),
 
+          // Branch filter. The KPI counts, the list and the totals row all read
+          // the same two filters, so a branch view shows that branch's numbers
+          // rather than the chain's — otherwise the count above the table
+          // describes a different set of POs than the table below it.
+          h("div",{style:{display:"flex",alignItems:"center",gap:8,
+            marginBottom:12,flexWrap:"wrap"}},
+            h("span",{style:{fontSize:12,fontWeight:700,color:C.muted,
+              letterSpacing:1}},"BRANCH"),
+            h("select",{value:poBranch,
+              onChange:e=>setPoBranch(e.target.value),
+              style:{padding:"7px 11px",borderRadius:8,
+                border:"1px solid "+C.border,fontSize:13,
+                background:"#fff",color:C.text,minWidth:190,
+                fontWeight:poBranch?700:400}},
+              h("option",{value:""},"All branches"),
+              branches.map(b=>h("option",{key:b.id,value:b.id},
+                b.full||b.name||b.id))),
+            poBranch&&h("button",{onClick:()=>setPoBranch(""),
+              style:{padding:"6px 12px",borderRadius:8,
+                border:"1px solid "+C.border,background:"#fff",
+                fontSize:12,cursor:"pointer",color:C.muted}},"\u2715 Clear")),
+
           // KPI Stats
           h("div",{style:{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:8,marginBottom:14}},
             // The counts and the tabs below were the same five states shown
@@ -21824,7 +21848,7 @@ function App(){
              ["For Payment","forpay","💰",C.info],
              ["Discrepancy","discrepancy","⚠️",C.danger],
              ["Completed","completed","✅",C.success]].map(function(k){
-              const n=advances.filter(a=>a._type==="po"&&poInRange(a,poFrom,poTo)
+              const n=advances.filter(a=>a._type==="po"&&poInRange(a,poFrom,poTo)&&(!poBranch||a.branch===poBranch)
                 &&(k[1]==="forpay"
                     ? (a.status==="processing"&&a.paymentStatus!=="Paid")
                     : a.status===k[1])).length;
@@ -21854,7 +21878,7 @@ function App(){
           // force a scroll per row and hide exactly that comparison.
           (function(){
             const rows=advances
-              .filter(a=>a._type==="po"&&poInRange(a,poFrom,poTo)
+              .filter(a=>a._type==="po"&&poInRange(a,poFrom,poTo)&&(!poBranch||a.branch===poBranch)
                 &&(poFilter==="all"||a.status===poFilter))
               .sort((a,b)=>(b.timestamp?.seconds||0)-(a.timestamp?.seconds||0));
             const COLS="150px 128px 100px 100px 96px 112px 116px 96px 96px 46px";
@@ -22355,13 +22379,19 @@ function App(){
                       // again. One PO went in five times that way.
                       const _live=await getDoc(doc(db,"advances",po._docId));
                       const _d=_live.exists()?(_live.data()||{}):{};
-                      if(_d.stockPosted===true||_d.discrepancyStatus==="approved"
-                         ||_d.status==="completed"){
-                        showT(po.poNum+" is already settled — stock was posted "
-                          +"on "+(_d.discrepancyApprovedAt&&_d.discrepancyApprovedAt.toDate
-                              ?_d.discrepancyApprovedAt.toDate().toLocaleString("en-PH")
-                              :"an earlier attempt")
-                          +". Nothing was added.","warn");
+                      // Stock already in, paperwork not finished.
+                      //
+                      // The stock loop runs before the status write, so a
+                      // failure in between leaves the goods posted and the PO
+                      // still reading `discrepancy`. Returning here made that
+                      // state permanent: the stock guard blocked every retry,
+                      // so the PO could never be settled and never leave the
+                      // Discrepancy tab. It now finishes the paperwork and
+                      // SKIPS the stock loop, which is the one part already
+                      // done.
+                      const alreadyPosted = (_d.stockPosted===true);
+                      if(_d.discrepancyStatus==="approved"||_d.status==="completed"){
+                        showT(po.poNum+" is already settled — nothing to do.","warn");
                         return;
                       }
                       const lines=(po.receivedItems||po.deliveredItems||po.items||[]);
@@ -22403,8 +22433,11 @@ function App(){
                         +(short.length>6?"\n  …and "+(short.length-6)+" more":"")
                         +"\n\nBill: ₱"+peso(oldTotal)+" → ₱"+peso(newTotal)
                         +(credit>0?"  (₱"+peso(credit)+" less)":"")
-                        +"\n\nThe corrected quantities then enter "
-                        +(po.branchName||po.branch)+"'s stock."))return;
+                        +(alreadyPosted
+                            ? "\n\nStock was already added on the earlier attempt — "
+                              +"this only finishes the paperwork."
+                            : "\n\nThe corrected quantities then enter "
+                              +(po.branchName||po.branch)+"'s stock.")))return;
 
                       // 1. stock, at the quantities everyone has now agreed
                       const invBr=po.branch;
@@ -22412,7 +22445,10 @@ function App(){
                         ?"inventory":"inventory_"+invBr;
                       const isMainDest=(invBr==="ct-main"||invBr==="main");
                       let added=0;
-                      for(const it of corrected){
+                      // Skipped entirely when a previous attempt already
+                      // posted these goods — re-running it is how one PO went
+                      // into stock five times.
+                      for(const it of (alreadyPosted?[]:corrected)){
                         const qty=Number(it.qty)||0;
                         if(!it.id||qty<=0)continue;
                         try{
@@ -22479,11 +22515,13 @@ function App(){
                         title:"Shortage approved — "+po.poNum,
                         message:"Bill corrected to ₱"+peso(newTotal)
                           +(credit>0?" (₱"+peso(credit)+" less)":"")
-                          +". "+added+" item(s) added to your stock.",
+                          +(alreadyPosted?"." :". "+added+" item(s) added to your stock."),
                         page:"stock_order",ref:po.poNum,by:user.name});
 
                       showT(po.poNum+" settled — bill ₱"+peso(newTotal)
-                        +", "+added+" item(s) in stock");
+                        +(alreadyPosted
+                            ? " (stock was already posted earlier)"
+                            : ", "+added+" item(s) in stock"));
                      }catch(err){
                        console.error("approve discrepancy:",err);
                        showT("Approve failed: "
