@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260826-120000 -->
+<!-- BUILD:20260826-220000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -7875,7 +7875,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260826-120000";
+const BUILD = "20260826-220000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -13235,7 +13235,11 @@ function App(){
     });
     return out;
   },[ordersLive,ordersExtra]);
-  const [ordersWindowFrom,setOrdersWindowFrom]=useState("");
+  // Ranges already pulled from Firestore, so a screen that re-renders does not
+  // re-read the same month. Dashboard and Branch P&L call the fetcher DURING
+  // render, so without this a month view would re-query on every keystroke,
+  // every toast, every listener tick — thousands of paid reads on Blaze.
+  const ordersFetched=useRef([]);   // [{from,to}] ranges already pulled
   const [expenses,setExpenses]=useState([]);
   const [cashLog,setCashLog]=useState([]);
   const [advances,setAdvances]=useState([]);
@@ -13403,6 +13407,12 @@ function App(){
   const [repSrch,setRepSrch]=useState("");
   const [repMonth,setRepMonth]=useState("");
   const [zSel,setZSel]=useState("");                     // "" = live reading
+  // A past date is not in the live arrays. The orders listener runs a 7-day
+  // window while expenses and cash_log run an unwindowed limit(100), so an
+  // older day arrived with its expenses present and its sales missing — which
+  // is how CT-WMBL on 2026-08-07 read ₱0 gross against ₱2,893 of expenses and
+  // produced a negative Expected Cash. The chosen day is now fetched whole.
+  const [zDay,setZDay]=useState(null);   // {date,loading,orders,cashLog,expenses,cashCounts,err}
   const [notifs,setNotifs]=useState([]);                 // addressed to this branch
   const [showNotifs,setShowNotifs]=useState(false);
   const [openNav,setOpenNav]=useState({});               // which sidebar groups are expanded
@@ -13510,13 +13520,16 @@ function App(){
       // month, which fetches on demand anyway.
       const _wf=new Date(); _wf.setDate(_wf.getDate()-7);
       const winFrom=localDate(_wf);
+      // NOTE: winFrom is a const in THIS scope. The guard below must read it
+      // and not the ordersWindowFrom state that used to live here — setting
+      // state does not change the value already captured by the closure, so
+      // the guard saw "" forever and every older-orders fetch died on entry.
       // Everything below reads a window, not a history. Free-tier Firestore
       // allows 50,000 reads a day; the listeners here were fetching close to
       // 7,000 documents on EVERY app open, across every tablet, all day. That
       // is what exhausted the quota and made the branch list look deleted.
       const _rf=new Date(); _rf.setDate(_rf.getDate()-60);
       const readFrom=localDate(_rf);
-      setOrdersWindowFrom(winFrom);
       const oq=isOwner
         ?query(collection(db,"orders"),where("date",">=",winFrom))
         :query(collection(db,"orders"),where("branch","==",bId),
@@ -13567,16 +13580,34 @@ function App(){
     // small and the merged view stays complete.
     window.__ctEnsureOrders=async(from,to)=>{
       try{
-        if(!from||!ordersWindowFrom||from>=ordersWindowFrom)return;
+        if(!from)return;
+        // The live listener already holds winFrom onwards, so only the part
+        // BELOW it has to be fetched. Asking for the whole month would re-read
+        // the last week we already have and pay for it twice.
+        if(from>=winFrom)return;
+        const hi=(to&&to<winFrom)?to:winFrom;
+        // Already covered by something we pulled before — including a wider
+        // range, which is why this is a containment test and not a key match.
+        const seenRange=ordersFetched.current.some(r=>r.from<=from&&r.to>=hi);
+        if(seenRange)return;
+        // Claimed BEFORE the await: these calls happen during render, so the
+        // next render would fire an identical query before this one returns.
+        ordersFetched.current.push({from:from,to:hi});
         const snap=await getDocs(query(collection(db,"orders"),
-          where("date",">=",from),where("date","<=",to||ordersWindowFrom)));
+          where("date",">=",from),where("date","<=",hi)));
         const rows=snap.docs.map(d=>({...d.data(),_docId:d.id}))
           .filter(o=>isOwner||o.branch===bId);
         setOrdersExtra(prev=>{
           const seen={};prev.forEach(o=>{seen[o._docId]=1;});
           return prev.concat(rows.filter(o=>!seen[o._docId]));
         });
-      }catch(e){ console.warn("older orders:",e); }
+      }catch(e){
+        // Drop the claim so the range can be retried rather than staying
+        // permanently marked as fetched with nothing behind it.
+        ordersFetched.current=ordersFetched.current
+          .filter(r=>!(r.from===from&&r.to===((to&&to<winFrom)?to:winFrom)));
+        console.warn("older orders:",e);
+      }
     };
 
     // Stock movements carrying a FIFO cost — the cost-of-goods side of the
@@ -14890,16 +14921,67 @@ function App(){
     catch(e){showT("Update failed","err");}
   };
 
+  // ── HISTORICAL DAY FETCH ─────────────────────────────────
+  // One equality filter per collection — the same shape rollupDay() already
+  // uses, so no composite index is needed. Every branch's rows for that date
+  // come back together and are filtered in memory, which is one read per
+  // collection instead of one per branch.
+  useEffect(()=>{
+    if(!user)return;
+    const d=zSel;
+    if(!d){ setZDay(null); return; }
+    let dead=false;
+    setZDay({date:d,loading:true});
+    (async()=>{
+      try{
+        const [oS,cS,eS,kS]=await Promise.all([
+          getDocs(query(collection(db,"orders"),where("date","==",d))),
+          getDocs(query(collection(db,"cash_log"),where("date","==",d))),
+          getDocs(query(collection(db,"expenses"),where("date","==",d))),
+          getDocs(query(collection(db,"cash_counts"),where("date","==",d)))
+        ]);
+        if(dead)return;
+        const rows=(s)=>s.docs.map(x=>({...x.data(),_docId:x.id}));
+        setZDay({date:d,loading:false,orders:rows(oS),cashLog:rows(cS),
+          expenses:rows(eS),cashCounts:rows(kS)});
+      }catch(e){
+        if(dead)return;
+        // Silence here would look exactly like a day with no trade, which is
+        // the failure this whole fix exists to remove.
+        setZDay({date:d,loading:false,err:String((e&&e.message)||e)});
+      }
+    })();
+    return ()=>{dead=true;};
+  },[zSel,user]);
+
   // ── Z-READING DATA ───────────────────────────────────────
-  const buildZ=(bid,forDate)=>{
+  // `src` is the fetched day above. When it is absent the live arrays are
+  // used, which is correct for today and wrong for anything older — so the
+  // page must pass it whenever a date is picked.
+  const buildZ=(bid,forDate,src)=>{
     const d=forDate||localDate();
+    const _orders   = (src&&src.orders)   ? src.orders   : orders;
+    const _cashLog  = (src&&src.cashLog)  ? src.cashLog  : cashLog;
+    const _expenses = (src&&src.expenses) ? src.expenses : expenses;
+    // Counts are merged, not replaced: the opening fund falls back to the
+    // PREVIOUS day's closing balance, and that row is not in the fetch.
+    const _cashCounts = (src&&src.cashCounts)
+      ? (function(){
+          const seen={}; const out=[];
+          src.cashCounts.concat(cashCounts||[]).forEach(function(x){
+            const k=(x.branch||"")+"_"+(x.date||"");
+            if(seen[k])return; seen[k]=1; out.push(x);
+          });
+          return out;
+        })()
+      : cashCounts;
     const sameDay=(x)=>{
       if(x.date)return x.date===d;
       const t=x.timestamp&&x.timestamp.toDate?x.timestamp.toDate():null;
       return t?localDate(t)===d:false;
     };
-    const bo=orders.filter(o=>o.branch===bid&&sameDay(o));
-    const bc=cashLog.filter(c=>c.branch===bid&&sameDay(c));
+    const bo=_orders.filter(o=>o.branch===bid&&sameDay(o));
+    const bc=_cashLog.filter(c=>c.branch===bid&&sameDay(c));
     const voided=bo.filter(o=>o.status==="void"||o.status==="partial-void");
     const live=bo.filter(o=>o.status!=="void"&&o.status!=="cancelled");
     const payTotal=(m)=>live.reduce((s2,o)=>s2+payAmtOf(o,m),0);
@@ -14943,7 +15025,7 @@ function App(){
     // that simply carried its float over showed the whole float as an OVER.
     const loggedOpen=bc.filter(c=>c.type==="in"&&(c.desc||"").includes("Opening"))
       .reduce((s,c)=>s+(c.amount||0),0);
-    const prevCount=(cashCounts||[])
+    const prevCount=(_cashCounts||[])
       .filter(x=>x.branch===bid&&x.date<d&&x.closingBalance!==undefined)
       .sort((a,b)=>String(b.date).localeCompare(String(a.date)))[0];
     const carriedOpen=prevCount?(Number(prevCount.closingBalance)||0):0;
@@ -14956,7 +15038,7 @@ function App(){
     // which is used only once a day is closed. Fields added to one and not the
     // other are why the manager's Today view showed blank expenses while the
     // saved reading had them.
-    const expensesOut=(expenses||[])
+    const expensesOut=(_expenses||[])
       .filter(e=>e.branch===bid&&String(e.date||"")===d)
       .reduce((s,e)=>s+(Number(e.amount)||0),0);
     const remitOut=bc.filter(c=>c.type==="out"&&/remit/i.test(c.desc||""))
@@ -14965,7 +15047,7 @@ function App(){
     // The drawer that was actually counted. Reading it here is what lets the
     // live reading state SHORT / OVER instead of waiting for the day to close
     // — and it carries the remittance field, which never touched the cash log.
-    const cn=(cashCounts||[]).find(x=>x.branch===bid&&x.date===d)||null;
+    const cn=(_cashCounts||[]).find(x=>x.branch===bid&&x.date===d)||null;
     const cnRemitField=cn
       ?Number(cn.remittanceField!==undefined?cn.remittanceField:cn.remittance)||0
       :0;
@@ -18188,14 +18270,23 @@ function App(){
           const canPickBranch=(user.role==="owner"||user.role==="commissary");
           const zBr=(canPickBranch&&zBranch)?zBranch:branchId;
           const zBrName=((branches||[]).find(b=>b.id===zBr)||curBranch||{});
-          const live=buildZ(zBr,zSel||localDate());
+          // While the day is still in flight, an EMPTY source is passed on
+          // purpose. Falling back to the live arrays is what produced the
+          // mixed reading — today's expenses under an older day's zero sales.
+          // Zeros with a "loading" line are honest; a blended total is not.
+          const zBlank={orders:[],cashLog:[],expenses:[],cashCounts:[]};
+          const zHit=(zDay&&zDay.date===zSel)?zDay:null;
+          const zLoading=!!zSel&&(!zHit||zHit.loading);
+          const zErr=zHit?zHit.err:null;
+          const zSrc=!zSel?null:((zHit&&!zHit.loading&&!zHit.err)?zHit:zBlank);
+          const live=buildZ(zBr,zSel||localDate(),zSrc);
           const saved=zSel
             ? (canPickBranch?zHistAll:zHist).find(x=>x.date===zSel&&x.branch===zBr)
             : null;
           // a chosen day with no saved rollup is still readable from the live
           // orders if they are within the subscription window; only fall back
           // to an empty state when there is genuinely nothing
-          const noData=!!zSel&&!saved&&(live.txns||0)===0;
+          const noData=!!zSel&&!saved&&!zLoading&&!zErr&&(live.txns||0)===0;
           // A saved rollup stores cashOnHand; buildZ calls the same figure
           // totalCash. Map it so one renderer serves both.
           // buildZ and the rollup name two figures differently. Map them here
@@ -18269,7 +18360,17 @@ function App(){
                   isSaved
                     ? ("Saved · "+saved.date+" · ni "+(saved.closedBy||"?"))
                     : ("Cashier: "+user.name+" · "+new Date().toLocaleDateString("en-PH"))),
-                h("div",{style:{color:"rgba(255,255,255,.75)",fontSize:11,marginTop:2}},dbReady?"✓ From Firebase ("+orders.length+" orders)":"Loading Firebase data...")
+                h("div",{style:{color:zErr?"#FFCDD2":"rgba(255,255,255,.75)",
+                  fontSize:11,marginTop:2}},
+                  // Was orders.length — the whole rolling window, every branch.
+                  // It read "426 orders" above a day that had none loaded.
+                  zSel
+                    ? (zLoading ? "Loading "+zSel+"…"
+                       : zErr ? ("Could not load "+zSel+" — "+String(zErr).slice(0,50))
+                       : ("✓ "+zSel+" · "+(live.txns||0)+" orders for "
+                          +(zBrName.name||zBrName.full||zBr)))
+                    : (dbReady?("✓ From Firebase · today · "+(live.txns||0)+" orders")
+                              :"Loading Firebase data..."))
               ),
               h("div",{style:{textAlign:"right"}},
                 h("div",{style:{color:C.accent,fontSize:11}},"EXPECTED CASH"),
@@ -18427,8 +18528,11 @@ function App(){
               // Close Day used to only show a toast — nothing was ever written,
               // so yesterday's Z-Reading became unrecoverable once the orders
               // subscription scrolled past it.
-              isZ&&!isSaved&&h("button",{
+              isZ&&!isSaved&&!zSel&&h("button",{
                 onClick:async()=>{
+                  // localDate(), never zSel — this button closes TODAY. It is
+                  // hidden while an older date is on screen precisely because
+                  // the two do not match and the label cannot say both.
                   const d=localDate();
                   if(!confirm("Close "+d+" for "+curBranch.name+"?\n"
                     +"The Z-Reading will be saved as a permanent record."))return;
@@ -20547,6 +20651,9 @@ function App(){
           // it. Deliberately terse — the full statement lives in Branch P&L.
           (function(){
             const R=rangeFor("month");
+            // Pull the earlier part of the month in before totalling it — the
+            // live listener only holds the last seven days.
+            if(window.__ctEnsureOrders)window.__ctEnsureOrders(R.from,R.to);
             const mine=orders.filter(o=>o.branch===branchId&&inRange(o,R));
             const sales=mine.reduce((a,o)=>a+(o.total||0),0);
             const cogs=plLogs
