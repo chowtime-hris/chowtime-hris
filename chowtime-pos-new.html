@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260826-220000 -->
+<!-- BUILD:20260826-234500 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -7875,7 +7875,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260826-220000";
+const BUILD = "20260826-234500";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -13314,6 +13314,16 @@ function App(){
   const [plRange,setPlRange]=useState("month");          // P&L period
   const [plFrom,setPlFrom]=useState(localDate());
   const [plTo,setPlTo]=useState(localDate());
+  // Chain-wide P&L. Sales come from `orders`, which the owner already holds
+  // for every branch — but expenses and POs do not: their listeners are a
+  // bare limit(100), which Firestore fills with an ARBITRARY hundred once a
+  // branch passes it. A period table built on that would be wrong and look
+  // right, so the period is queried directly here instead.
+  const [plWide,setPlWide]=useState(null);   // {key,loading,expenses,pos,err}
+  // Cost of goods and stock value are per-branch collections — one query per
+  // branch, every time. Kept behind a button: on Blaze that is eight reads of
+  // a whole inventory, and nobody wants to pay for it on every page open.
+  const [plStock,setPlStock]=useState(null); // {key,loading,by:{bid:{cogs,value}},err}
   const [plLogs,setPlLogs]=useState([]);                 // deducts with FIFO cost
   const [stockSnaps,setStockSnaps]=useState([]);         // dated stock readings
   // The inventory of the branch being LOOKED AT.
@@ -14919,6 +14929,81 @@ function App(){
   const updateStatus=async(docId,status)=>{
     try{await updateDoc(doc(db,"orders",docId),{status});}
     catch(e){showT("Update failed","err");}
+  };
+
+  // ── CHAIN-WIDE P&L: PERIOD FETCH ─────────────────────────
+  // Expenses and POs for the whole chain over the chosen period. One range
+  // filter on one field each, so no composite index — the branch is matched
+  // in memory, which is also what makes a single query serve all eight.
+  useEffect(()=>{
+    if(!user)return;
+    if(!(user.role==="owner"||user.role==="commissary")){ setPlWide(null); return; }
+    const R=rangeFor(plRange,plFrom,plTo);
+    const key=R.from+".."+R.to;
+    let dead=false;
+    setPlWide({key:key,loading:true});
+    (async()=>{
+      try{
+        // A PO is counted on the day it was RECEIVED, but only its order date
+        // is queryable. Reaching back two weeks catches the ones ordered just
+        // before the period and delivered inside it; the exact test still runs
+        // in memory below.
+        const back=new Date(R.from+"T00:00:00");
+        back.setDate(back.getDate()-14);
+        const [eS,aS,cS]=await Promise.all([
+          getDocs(query(collection(db,"expenses"),
+            where("date",">=",R.from),where("date","<=",R.to))),
+          getDocs(query(collection(db,"advances"),
+            where("date",">=",localDate(back)),where("date","<=",R.to))),
+          // Cash advances are money out of the branch drawer, so they count as
+          // an expense. They sit in hris_requests — `advances` holds POs.
+          getDocs(query(collection(db,"hris_requests"),
+            where("date",">=",R.from),where("date","<=",R.to)))
+        ]);
+        if(dead)return;
+        const rows=(x)=>x.docs.map(d=>({...d.data(),_docId:d.id}));
+        setPlWide({key:key,loading:false,expenses:rows(eS),pos:rows(aS),
+          cas:rows(cS)});
+      }catch(e){
+        if(dead)return;
+        setPlWide({key:key,loading:false,err:String((e&&e.message)||e)});
+      }
+    })();
+    return ()=>{dead=true;};
+  },[user,plRange,plFrom,plTo]);
+
+  // Cost of goods + stock value for every branch. Button-driven on purpose.
+  const loadPlStock=async(bids,R,skipCogs)=>{
+    const key=R.from+".."+R.to;
+    setPlStock({key:key,loading:true,by:{}});
+    try{
+      const by={};
+      for(const bid of bids){
+        const out={cogs:0,value:null,costed:0,uncosted:0};
+        // Under manual costing the figure is already on screen, so this
+        // whole read is skipped — eight queries nobody needed.
+        try{
+          if(skipCogs){ out.cogs=null; throw {__skip:1}; }
+          const lg=await getDocs(query(collection(db,logColFor(bid)),
+            where("date",">=",R.from),where("date","<=",R.to)));
+          lg.docs.forEach(d=>{
+            const v=d.data()||{};
+            if(v.type!=="deduct")return;
+            if(v.cogs==null){ out.uncosted++; return; }
+            out.cogs+=Number(v.cogs)||0; out.costed++;
+          });
+          out.cogs=Math.round(out.cogs*100)/100;
+        }catch(e){ if(!(e&&e.__skip))out.cogsErr=String((e&&e.message)||e); }
+        try{
+          const iv=await getDocs(collection(db,invColFor(bid)));
+          out.value=invValueOf(iv.docs.map(d=>d.data()));
+        }catch(e){ out.valueErr=String((e&&e.message)||e); }
+        by[bid]=out;
+      }
+      setPlStock({key:key,loading:false,by:by});
+    }catch(e){
+      setPlStock({key:key,loading:false,by:{},err:String((e&&e.message)||e)});
+    }
   };
 
   // ── HISTORICAL DAY FETCH ─────────────────────────────────
@@ -20340,6 +20425,179 @@ function App(){
                   (value<0?"−₱":"₱")+peso(Math.abs(value)))));
           };
 
+          // ── ALL BRANCHES, ONE TABLE ──────────────────────────
+          // The page used to answer for one branch only — the signed-in one —
+          // so an owner at MAIN got a statement of zeros and no way to reach
+          // the stores that actually trade.
+          const wideOK=(user.role==="owner"||user.role==="commissary");
+          const _wKey=R.from+".."+R.to;
+          const _w=(plWide&&plWide.key===_wKey)?plWide:null;
+          const _wLoading=wideOK&&(!_w||_w.loading);
+          const _sKey=(plStock&&plStock.key===_wKey)?plStock:null;
+
+          // Manual costing needs no query at all: the cost sits on the menu
+          // item and the quantities sit on the order, both already loaded.
+          // Only the BOM source has to read `inventory_log_<branch>`, so only
+          // that one waits for the button.
+          const manualSrc=(src==="manual");
+          const manualCogsFor=function(bOrders){
+            let total=0, missing=0;
+            bOrders.forEach(function(o){
+              (o.items||[]).forEach(function(li){
+                const q=Number(li.qty)||0;
+                if(q<=0)return;
+                const mc=manualOf(li.id||li.itemId,li.variant);
+                if(mc!=null)total+=q*mc; else missing+=q;
+              });
+            });
+            return {cogs:Math.round(total*100)/100,missing:missing};
+          };
+
+          const wideRows=(!wideOK)?[]:(branches||[]).map(function(b){
+            const bid=b.id;
+            const bOrders=orders.filter(function(o){
+              return o.branch===bid&&inRange(o,R);
+            });
+            const bSales=Math.round(bOrders.reduce(function(a,o){
+              return a+(Number(o.total)||0);},0)*100)/100;
+            // Advances AND loans are both branch money going out — the
+            // advance from the drawer, the loan from remitted funds, which is
+            // the same branch's cash one step later. Counted on the day it was
+            // released, not spread over the cutoffs it is recovered in.
+            //
+            // This does not double-count against wages because the payslip
+            // figure recorded as an expense is the NET pay, already short by
+            // whatever was deducted. Net pay plus what was handed out early
+            // comes back to gross. It WOULD double if wages were ever entered
+            // gross — the one thing to keep an eye on.
+            const bCA=Math.round(((_w&&_w.cas)||[])
+              .filter(function(r){
+                return r.branch===bid
+                  &&(r.type==="Cash Advance"||r.type==="Cash Loan")
+                  &&(r.status==="approved"||r.status==="released");
+              })
+              .reduce(function(a,r){return a+(Number(r.amount)||0);},0)*100)/100;
+            const bExp=Math.round((((_w&&_w.expenses)||[])
+              .filter(function(e){return e.branch===bid;})
+              .reduce(function(a,e){return a+(Number(e.amount)||0);},0)+bCA)*100)/100;
+            // Same test the single-branch statement uses, so the two agree.
+            const bPO=Math.round(((_w&&_w.pos)||[])
+              .filter(function(a){
+                if(a._type!=="po"||a.branch!==bid)return false;
+                if(!(a.status==="completed"||a.status==="paid"
+                    ||a.status==="received"||a.status==="discrepancy"))return false;
+                const d=String(a.receivedDate||a.deliveryDate||a.date||"");
+                return d>=R.from&&d<=R.to;
+              })
+              .reduce(function(a,po){return a+poValue(po);},0)*100)/100;
+            const st=(_sKey&&_sKey.by)?_sKey.by[bid]:null;
+            const mc=manualSrc?manualCogsFor(bOrders):null;
+            return {b:b,sales:bSales,exp:bExp,ca:bCA,po:bPO,txns:bOrders.length,
+              cogs:manualSrc?mc.cogs:(st?st.cogs:null),
+              uncosted:manualSrc?mc.missing:(st?st.uncosted:0),
+              value:st?st.value:null};
+          }).sort(function(x,y){return y.sales-x.sales;});
+
+          const wTot=wideRows.reduce(function(a,r){
+            a.sales+=r.sales; a.exp+=r.exp; a.po+=r.po; a.txns+=r.txns;
+            if(r.cogs!=null){a.cogs+=r.cogs; a.anyCogs=true;}
+            if(r.value!=null){a.value+=r.value; a.anyValue=true;}
+            return a;
+          },{sales:0,exp:0,po:0,txns:0,cogs:0,value:0,anyCogs:false,anyValue:false});
+
+          const COLW="1fr 106px 100px 100px 100px 104px";
+          const cell=(v,style)=>h("div",{style:Object.assign(
+            {fontSize:13,textAlign:"right"},style||{})},v);
+          const money=(v)=>"₱"+peso(v);
+
+          const wideTable=!wideOK?null:h("div",{style:{background:"#fff",
+            border:"1px solid "+C.border,borderRadius:12,overflow:"hidden",
+            marginBottom:14}},
+            h("div",{style:{padding:"11px 14px",borderBottom:"1px solid "+C.border,
+              display:"flex",justifyContent:"space-between",alignItems:"center",
+              flexWrap:"wrap",gap:8}},
+              h("div",null,
+                h("div",{style:{fontSize:13,fontWeight:800}},"🏪 All branches"),
+                h("div",{style:{fontSize:11,color:C.muted,marginTop:1}},
+                  (R.from===R.to?R.from:(R.from+" → "+R.to))
+                  +(_wLoading?"  ·  loading…":""))),
+              h("button",{
+                onClick:()=>loadPlStock((branches||[]).map(b=>b.id),R,manualSrc),
+                disabled:!!(_sKey&&_sKey.loading),
+                style:{padding:"7px 13px",borderRadius:8,fontSize:12,
+                  fontWeight:700,cursor:(_sKey&&_sKey.loading)?"wait":"pointer",
+                  border:"1px solid "+C.border,
+                  background:(_sKey&&_sKey.loading)?"#eee":"#fff",
+                  color:C.text}},
+                (_sKey&&_sKey.loading)?"Reading…"
+                  :(_sKey?"↻ Refresh stock value"
+                    :(manualSrc?"📦 Load stock value"
+                              :"📦 Load cost of goods & stock value")))),
+            // Header
+            h("div",{style:{display:"grid",gridTemplateColumns:COLW,gap:8,
+              padding:"8px 14px",background:"#fafafa",
+              borderBottom:"1px solid "+C.border}},
+              ["BRANCH","SALES","COST OF GOODS","PURCHASED","EXPENSES","ITEM VALUE"]
+                .map((hh,i)=>h("div",{key:hh,style:{fontSize:10,fontWeight:700,
+                  color:C.muted,letterSpacing:1,
+                  textAlign:i?"right":"left"}},hh))),
+            wideRows.map(function(r){
+              return h("div",{key:r.b.id,style:{display:"grid",
+                gridTemplateColumns:COLW,gap:8,padding:"9px 14px",
+                borderBottom:"1px solid #f5f5f5",alignItems:"center"}},
+                h("div",null,
+                  h("div",{style:{fontSize:13,fontWeight:700}},
+                    r.b.name||r.b.full||r.b.id),
+                  h("div",{style:{fontSize:11,color:C.muted}},
+                    r.txns+" order"+(r.txns===1?"":"s"))),
+                cell(money(r.sales),{fontWeight:800,
+                  color:r.sales>0?C.primary:C.muted}),
+                // Never invented. A dash means the figure has not been read;
+                // ₱0.00 means it was read and there was nothing to cost.
+                h("div",{style:{textAlign:"right"}},
+                  h("div",{style:{fontSize:13,
+                    color:r.cogs==null?C.muted:C.text}},
+                    r.cogs==null?"—":money(r.cogs)),
+                  (r.cogs!=null&&r.uncosted>0)
+                    ? h("div",{style:{fontSize:10,color:C.warning}},
+                        r.uncosted+" uncosted")
+                    : null),
+                cell(money(r.po),{color:r.po>0?C.text:C.muted}),
+                h("div",{style:{textAlign:"right"}},
+                  h("div",{style:{fontSize:13,
+                    color:r.exp>0?C.text:C.muted}},money(r.exp)),
+                  r.ca>0?h("div",{style:{fontSize:10,color:C.muted}},
+                    "incl. CA/loan "+money(r.ca)):null),
+                cell(r.value==null?"—":money(r.value),
+                  {color:r.value==null?C.muted:C.info})
+              );
+            }),
+            h("div",{style:{display:"grid",gridTemplateColumns:COLW,gap:8,
+              padding:"10px 14px",background:"#fafafa",
+              borderTop:"1px solid "+C.border,alignItems:"center"}},
+              h("div",{style:{fontSize:13,fontWeight:900}},"TOTAL"),
+              cell(money(wTot.sales),{fontWeight:900,color:C.primary}),
+              cell(wTot.anyCogs?money(wTot.cogs):"—",{fontWeight:800}),
+              cell(money(wTot.po),{fontWeight:800}),
+              cell(money(wTot.exp),{fontWeight:800}),
+              cell(wTot.anyValue?money(wTot.value):"—",
+                {fontWeight:800,color:C.info})),
+            h("div",{style:{padding:"9px 14px",fontSize:11,color:C.muted,
+              lineHeight:1.6,borderTop:"1px solid "+C.border}},
+              "Sales, purchases and expenses follow the period above. "
+              +"EXPENSES includes cash advances and cash loans released to "
+              +"crew, counted on the day they were released. COST OF GOODS is "
+              +(manualSrc
+                 ? "the cost set on each menu item, so it needs no loading."
+                 : "read from the BOM at FIFO prices, one collection per "
+                   +"branch, so it waits for the button.")
+              +" ITEM VALUE is the stock on the shelf right now — a reading "
+              +"of today, not of the period, whichever dates are chosen.",
+              _w&&_w.err?h("div",{style:{color:C.danger,marginTop:4}},
+                "Could not load expenses and POs — "+String(_w.err).slice(0,80)):null,
+              _sKey&&_sKey.err?h("div",{style:{color:C.danger,marginTop:4}},
+                "Cost and stock read failed — "+String(_sKey.err).slice(0,80)):null));
+
           return h("div",null,
             h(SectionHeader,{title:"📊 Branch P&L — "+curBranch.name}),
 
@@ -20368,6 +20626,14 @@ function App(){
               h("div",{style:{fontSize:11,color:C.muted,marginTop:7}},
                 (R.from===R.to?R.from:(R.from+" → "+R.to))
                 +"  ·  "+txns+" transaction"+(txns===1?"":"s"))),
+
+            wideTable,
+
+            // The statement below is for the SIGNED-IN branch only. For an
+            // owner at MAIN that is MAIN — which is why the table above exists.
+            wideOK&&h("div",{style:{fontSize:12,fontWeight:800,color:C.muted,
+              letterSpacing:1,margin:"4px 0 8px"}},
+              "STATEMENT — "+(curBranch.name||curBranch.full||branchId)),
 
             h("div",{style:{fontSize:11,color:C.muted,marginBottom:10}},
               "Cost of goods from "
