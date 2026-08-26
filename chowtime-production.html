@@ -35,6 +35,12 @@ main{max-width:1100px;margin:0 auto;padding:16px;padding-bottom:60px;}
 .card{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,.04);}
 .card h2{margin:0 0 12px;font-size:15px;color:var(--maroon);border-bottom:2px solid var(--gold-light);padding-bottom:8px;}
 .grid{display:grid;gap:10px;}
+.ratetools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 12px;padding:9px 12px;background:#FAF7F2;border:1px solid rgba(0,0,0,.10);border-radius:10px;}
+.ratetools .rt-lb{font-size:12px;font-weight:700;opacity:.75;margin:0;}
+.ratetools select,.ratetools input{padding:6px 9px;font-size:13px;border:1px solid rgba(0,0,0,.18);border-radius:7px;background:#fff;}
+.ratetools .btn{padding:6px 13px;font-size:12px;}
+.ratetools .rt-sep{width:1px;height:22px;background:rgba(0,0,0,.14);margin:0 4px;}
+.ratetools .rt-msg{font-size:12px;font-weight:600;flex:1;min-width:150px;}
 .grid.cols-2{grid-template-columns:1fr 1fr;}
 .grid.cols-3{grid-template-columns:repeat(3,1fr);}
 .grid.cols-4{grid-template-columns:repeat(4,1fr);}
@@ -1257,6 +1263,29 @@ function renderStaff(main){
       <div><label>Email (for payslips)</label><input id="nEmail" type="email" placeholder="name@example.com" value="${editing?(editing.email||''):''}"></div>
     </div>
     <h2 style="margin-top:16px">Piece rates (₱ per unit)</h2>
+    <!-- Filling seventeen boxes by hand for every new hire is the whole
+         complaint. Copy lifts another staff member's rates; Set all writes one
+         figure across the grid. Neither saves anything — they only fill the
+         form, so the numbers are still visible and editable before Add staff. -->
+    <div class="ratetools">
+      <label class="rt-lb">Copy rates from</label>
+      <select id="copyRatesFrom">
+        <option value="">— select staff —</option>
+        ${Object.keys(state.staff||{})
+            .filter(id=>id!==editingStaffId)
+            .map(id=>({id,st:state.staff[id]}))
+            .filter(x=>x.st&&x.st.name)
+            .sort((a,b)=>String(a.st.name).localeCompare(String(b.st.name)))
+            .map(x=>`<option value="${x.id}">${x.st.name}${x.st.jobTitle?' · '+x.st.jobTitle:''}</option>`)
+            .join('')}
+      </select>
+      <button class="btn ghost" id="copyRatesBtn" type="button">Copy</button>
+      <span class="rt-sep"></span>
+      <label class="rt-lb">Set all to ₱</label>
+      <input id="setAllRate" type="number" step="any" min="0" placeholder="0.60" style="width:90px">
+      <button class="btn ghost" id="setAllBtn" type="button">Apply</button>
+      <span id="rateToolMsg" class="rt-msg"></span>
+    </div>
     <div class="grid cols-4">
       ${state.products.map(p=>`<div><label>${p.label} (${p.code})</label><input id="rate-${p.code}" type="number" step="any" min="0" value="${editing?((editing.rates&&editing.rates[p.code])!=null?editing.rates[p.code]:0):0.60}"></div>`).join('')}
     </div>
@@ -1301,6 +1330,54 @@ function renderStaff(main){
     <div class="msg warn" style="margin-top:10px">Removing a product does not delete past production records for it, but it will no longer appear in entry forms.</div>
   </div>
   `;
+
+  // ── RATE TOOLS ───────────────────────────────────────────
+  // Both of these only WRITE INTO THE FORM. Nothing is saved until Add staff /
+  // Save changes is pressed, so a wrong pick is undone by picking again or
+  // leaving the page.
+  const rateMsg = (t,ok)=>{
+    const el=document.getElementById('rateToolMsg');
+    if(!el) return;
+    el.textContent=t;
+    el.style.color = ok ? 'var(--green,#2E7D32)' : 'var(--maroon,#B3261E)';
+    setTimeout(()=>{ if(el.textContent===t) el.textContent=''; }, 4000);
+  };
+  const setRateInputs = (fn)=>{
+    let n=0;
+    state.products.forEach(p=>{
+      const el=document.getElementById('rate-'+p.code);
+      if(!el) return;
+      const v=fn(p);
+      if(v==null) return;
+      el.value=v; n++;
+    });
+    return n;
+  };
+
+  const copyBtn=document.getElementById('copyRatesBtn');
+  if(copyBtn) copyBtn.onclick=()=>{
+    const id=document.getElementById('copyRatesFrom').value;
+    if(!id){ rateMsg('Pick a staff member first.',false); return; }
+    const src=state.staff[id];
+    if(!src){ rateMsg('That staff record is gone.',false); return; }
+    const r=src.rates||{};
+    // A product the source has no rate for is left ALONE rather than zeroed —
+    // silently writing 0 would look like a real rate and pay nothing.
+    const missing=state.products.filter(p=>r[p.code]==null).map(p=>p.code);
+    const n=setRateInputs(p=> r[p.code]!=null ? r[p.code] : null);
+    rateMsg('Copied '+n+' rate'+(n===1?'':'s')+' from '+src.name
+      +(missing.length?' · '+missing.length+' left unchanged ('+missing.join(', ')+')':''), true);
+  };
+
+  const setAllBtn=document.getElementById('setAllBtn');
+  if(setAllBtn) setAllBtn.onclick=()=>{
+    const raw=document.getElementById('setAllRate').value;
+    if(raw===''){ rateMsg('Enter an amount first.',false); return; }
+    const v=Number(raw);
+    if(!isFinite(v)||v<0){ rateMsg('Enter a valid amount.',false); return; }
+    const n=setRateInputs(()=>v);
+    rateMsg('Set '+n+' rate'+(n===1?'':'s')+' to \u20b1'+v, true);
+  };
 
   document.getElementById('addStaffBtn').onclick = ()=>{
     const name = document.getElementById('nName').value.trim();
