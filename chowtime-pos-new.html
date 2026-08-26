@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260826-103000 -->
+<!-- BUILD:20260826-120000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -192,9 +192,31 @@ const prodConfig = {
   appId:             "1:418692832705:web:d38d297de3282191ebe340"
 };
 let prodDB = null;
+// The production database now requires `auth != null`, so initialising the app
+// is no longer enough — without a sign-in every read comes back
+// permission_denied and the production crew silently vanish from the CA/Loan
+// name picker.
+//
+// This is a DEDICATED bridge account, not the owner or supervisor login. Its
+// password sits in this file, which is public on GitHub Pages, so the password
+// is not the protection — the database rules are. That UID is scoped to read
+// `chowtimeProduction/staff` and write `chowtimeProduction/ledger` and nothing
+// else, so anyone who reads it out of the source still cannot see wages or
+// deductions.
+const PROD_BRIDGE_EMAIL = "cffc.payroll@gmail.com";
+const PROD_BRIDGE_PASS  = "PASTE_BRIDGE_PASSWORD_HERE";
+let prodReady = null;   // resolves once the bridge is signed in
 try {
   const prodApp = initializeApp(prodConfig, "chowtime-production");
   prodDB = getDatabase(prodApp);
+  const prodAuth = getAuth(prodApp);
+  prodReady = signInWithEmailAndPassword(prodAuth, PROD_BRIDGE_EMAIL, PROD_BRIDGE_PASS)
+    .catch(e => {
+      // Left visible rather than swallowed: a failure here looks exactly like
+      // "there are no production crew", which is what sent us hunting last time.
+      console.warn("Production bridge sign-in failed:", e && e.code, e && e.message);
+      throw e;
+    });
 } catch(e) { console.warn("Production DB:", e.message); }
 
 // A franchise runs its own HRIS project, so an approval for their crew has to
@@ -4231,6 +4253,11 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
           note:(req.reason||"")+" · POS request approved by "+user.name
         };
         let already=false;
+        // The write goes through the same bridge account, so it must not run
+        // before the sign-in has landed — otherwise an approval fails on
+        // permission, the money has already left the drawer, and the payslip
+        // never learns about it.
+        await Promise.resolve(prodReady);
         const res=await runTransaction(
           ref(prodDB,"chowtimeProduction/ledger/"+req.hrisEmpId),(cur)=>{
             const list=cur?(Array.isArray(cur)?cur.slice():Object.values(cur)):[];
@@ -7848,7 +7875,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260826-103000";
+const BUILD = "20260826-120000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -14146,7 +14173,13 @@ function App(){
   useEffect(()=>{
     try{
       if(!prodDB){ setProdStatus("no connection to Production"); return; }
-      onValue(ref(prodDB,"chowtimeProduction/staff"),snap=>{
+      // Attaching before the bridge has signed in races the auth rule and
+      // fails with permission_denied even though the credentials are fine.
+      let stop=false;
+      setProdStatus("signing in…");
+      Promise.resolve(prodReady).then(()=>{
+        if(stop) return;
+        onValue(ref(prodDB,"chowtimeProduction/staff"),snap=>{
         const data=snap.val()||{};
         setProdStatus("connected · "+Object.keys(data).length+" crew");
         setProdEmps(Object.keys(data).map(k=>({
@@ -14158,6 +14191,11 @@ function App(){
         setProdStatus("read blocked \u2014 "
           +String((err&&err.message)||err).slice(0,70));
       });
+      }).catch(e=>{
+        setProdStatus("sign-in failed \u2014 "
+          +String((e&&e.code)||(e&&e.message)||e).slice(0,70));
+      });
+      return ()=>{stop=true;};
     }catch(e){
       setProdStatus("connect failed \u2014 "
         +String((e&&e.message)||e).slice(0,70));
