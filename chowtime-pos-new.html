@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260826-234500 -->
+<!-- BUILD:20260827-000000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -7875,7 +7875,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260826-234500";
+const BUILD = "20260827-000000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -14937,6 +14937,9 @@ function App(){
   // in memory, which is also what makes a single query serve all eight.
   useEffect(()=>{
     if(!user)return;
+    // Only while the page is actually open — a month of orders is the single
+    // biggest read in the app and nobody on the POS screen needs it.
+    if(page!=="branch_pl"){ return; }
     if(!(user.role==="owner"||user.role==="commissary")){ setPlWide(null); return; }
     const R=rangeFor(plRange,plFrom,plTo);
     const key=R.from+".."+R.to;
@@ -14950,7 +14953,13 @@ function App(){
         // in memory below.
         const back=new Date(R.from+"T00:00:00");
         back.setDate(back.getDate()-14);
-        const [eS,aS,cS]=await Promise.all([
+        const [oS,eS,aS,cS]=await Promise.all([
+          // Sales, straight from Firestore for exactly this period. The shared
+          // `orders` array is a rolling seven-day window topped up by a
+          // background backfill, and when that backfill does not land the
+          // month silently reads as a week. This page no longer depends on it.
+          getDocs(query(collection(db,"orders"),
+            where("date",">=",R.from),where("date","<=",R.to))),
           getDocs(query(collection(db,"expenses"),
             where("date",">=",R.from),where("date","<=",R.to))),
           getDocs(query(collection(db,"advances"),
@@ -14962,15 +14971,15 @@ function App(){
         ]);
         if(dead)return;
         const rows=(x)=>x.docs.map(d=>({...d.data(),_docId:d.id}));
-        setPlWide({key:key,loading:false,expenses:rows(eS),pos:rows(aS),
-          cas:rows(cS)});
+        setPlWide({key:key,loading:false,orders:rows(oS),expenses:rows(eS),
+          pos:rows(aS),cas:rows(cS)});
       }catch(e){
         if(dead)return;
         setPlWide({key:key,loading:false,err:String((e&&e.message)||e)});
       }
     })();
     return ()=>{dead=true;};
-  },[user,plRange,plFrom,plTo]);
+  },[user,page,plRange,plFrom,plTo]);
 
   // Cost of goods + stock value for every branch. Button-driven on purpose.
   const loadPlStock=async(bids,R,skipCogs)=>{
@@ -20299,9 +20308,15 @@ function App(){
         // information, it is just a number to argue about.
         page==="branch_pl"&&(function(){
           const R=rangeFor(plRange,plFrom,plTo);
-          // Pull in any days older than the live window before reading totals.
-          if(window.__ctEnsureOrders)window.__ctEnsureOrders(R.from,R.to);
-          const mine=orders.filter(o=>o.branch===branchId&&inRange(o,R));
+          const _wKey=R.from+".."+R.to;
+          const _w=(plWide&&plWide.key===_wKey&&!plWide.loading&&!plWide.err)
+                   ?plWide:null;
+          // The period's own orders when they have arrived; the shared array
+          // only while they are still on the way. Everything on this page —
+          // the table AND the statement below it — reads this one source, so
+          // the two can never disagree.
+          const plOrders=(_w&&_w.orders)?_w.orders:orders;
+          const mine=plOrders.filter(o=>o.branch===branchId&&inRange(o,R));
           const sales=mine.reduce((a,o)=>a+(o.total||0),0);
           const disc =mine.reduce((a,o)=>a+(o.discAmt||0),0);
           const txns=mine.length;
@@ -20430,9 +20445,8 @@ function App(){
           // so an owner at MAIN got a statement of zeros and no way to reach
           // the stores that actually trade.
           const wideOK=(user.role==="owner"||user.role==="commissary");
-          const _wKey=R.from+".."+R.to;
-          const _w=(plWide&&plWide.key===_wKey)?plWide:null;
-          const _wLoading=wideOK&&(!_w||_w.loading);
+          const _wLoading=wideOK&&!_w;
+          const _wErr=(plWide&&plWide.key===_wKey)?plWide.err:null;
           const _sKey=(plStock&&plStock.key===_wKey)?plStock:null;
 
           // Manual costing needs no query at all: the cost sits on the menu
@@ -20455,7 +20469,7 @@ function App(){
 
           const wideRows=(!wideOK)?[]:(branches||[]).map(function(b){
             const bid=b.id;
-            const bOrders=orders.filter(function(o){
+            const bOrders=plOrders.filter(function(o){
               return o.branch===bid&&inRange(o,R);
             });
             const bSales=Math.round(bOrders.reduce(function(a,o){
@@ -20593,8 +20607,8 @@ function App(){
                    +"branch, so it waits for the button.")
               +" ITEM VALUE is the stock on the shelf right now — a reading "
               +"of today, not of the period, whichever dates are chosen.",
-              _w&&_w.err?h("div",{style:{color:C.danger,marginTop:4}},
-                "Could not load expenses and POs — "+String(_w.err).slice(0,80)):null,
+              _wErr?h("div",{style:{color:C.danger,marginTop:4}},
+                "Could not load this period — "+String(_wErr).slice(0,90)):null,
               _sKey&&_sKey.err?h("div",{style:{color:C.danger,marginTop:4}},
                 "Cost and stock read failed — "+String(_sKey.err).slice(0,80)):null));
 
