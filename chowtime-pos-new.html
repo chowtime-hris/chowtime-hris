@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260827-016500 -->
+<!-- BUILD:20260827-017000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -4313,6 +4313,10 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
       approvedBy: user.name,
       approvedAt: serverTimestamp(),
       balance: req.amount,
+      // Cleared on every fresh attempt. It was left behind before, so a
+      // failure from an hour ago sat on the row looking exactly like one from
+      // a second ago — there was no way to tell whether a fix had worked.
+      syncError:"", syncFailedAt:null,
     });
 
     // 2. Push the deduction into whichever payroll actually pays this person.
@@ -4710,7 +4714,12 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
             h("div",{style:{fontSize:13,color:C.muted}},req.reason||"—"),
             req.syncError?h("div",{style:{fontSize:11,color:C.danger,
               fontWeight:700,marginTop:3,lineHeight:1.5}},
-              "⚠ Payroll rejected this: "+req.syncError):null),
+              "⚠ Payroll rejected this: "+req.syncError
+              +(req.syncFailedAt&&req.syncFailedAt.seconds
+                 ?("  ·  "+new Date(req.syncFailedAt.seconds*1000)
+                     .toLocaleString("en-PH",{month:"short",day:"numeric",
+                       hour:"numeric",minute:"2-digit"}))
+                 :"")):null),
           h("div",{style:{fontSize:14,fontWeight:800,color:C.primary}},"₱"+peso(req.amount)),
           h("div",null,
             h("div",{style:{fontSize:13,fontWeight:700,color:"#1565C0"}},"₱"+peso(req.cutoffDeduct)),
@@ -7994,7 +8003,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260827-016500";
+const BUILD = "20260827-017000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
