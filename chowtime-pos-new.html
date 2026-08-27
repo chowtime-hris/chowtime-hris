@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260827-005000 -->
+<!-- BUILD:20260827-011500 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -3045,7 +3045,7 @@ const DENOMS = [
   {label:"25¢",  value:0.25,type:"coin",color:"#78909C"},
 ];
 
-function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT}){
+function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT,companySettings={}}){
   const today = localDate();
   const [counts,setCounts]   = useState(DENOMS.reduce((a,d)=>({...a,[d.value]:0}),{}));
   const [remit,setRemit]     = useState("");
@@ -3535,9 +3535,23 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
               if(cur===null)return;
               const amt=Number(String(cur).replace(/[^0-9.\-]/g,""));
               if(!(amt>=0)){showT("Enter a valid amount","warn");return;}
-              const why=prompt("Reason (kept on the record):",
+              // The carried figure is arithmetic off yesterday's record; this
+              // one is what somebody says they saw. Replacing the first with
+              // the second without a reason on file leaves nothing to check.
+              const _gap=amt-carriedOpening;
+              const why=prompt(
+                (Math.abs(_gap)>=0.01
+                  ? ("This is \u20b1"+peso(Math.abs(_gap))+" "
+                     +(_gap>0?"MORE":"LESS")+" than the \u20b1"
+                     +peso(carriedOpening)+" carried from yesterday.\n\n")
+                  : "")
+                +"Reason (required, kept on the record):",
                 carriedOpening<0?"Previous day counted after remittance":"");
               if(why===null)return;
+              if(!String(why).trim()){
+                showT("A reason is required to change the opening fund","warn");
+                return;
+              }
               try{
                 await addDoc(collection(db,"cash_log"),{
                   branch:branchId,branchName:curBranch.full,
@@ -3545,9 +3559,21 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
                   desc:"Opening Fund \u2014 counted",
                   note:why.trim(),
                   correctedFrom:carriedOpening,
+                  openingVariance:Math.round(_gap*100)/100,
                   by:user.name,date:today,
                   timestamp:serverTimestamp(),at:serverTimestamp()
                 });
+                // Head office hears about it the same morning instead of
+                // finding it in a Z-Reading the next day.
+                const _lim=Number((companySettings&&companySettings.openingAlert)||200);
+                if(Math.abs(_gap)>=_lim){
+                  await notify(db,{to:"ct-main",type:"warning",
+                    title:"Opening fund changed \u2014 "+(curBranch.name||branchId),
+                    message:"Carried \u20b1"+peso(carriedOpening)+", counted \u20b1"
+                      +peso(amt)+" ("+(_gap>0?"+":"")+"\u20b1"+peso(_gap)
+                      +"). Reason: "+why.trim(),
+                    page:"cash_monitor",ref:branchId+"_"+today,by:user.name});
+                }
                 showT("Opening Fund set to \u20b1"+peso(amt)
                   +" \u2014 today starts from the drawer","ok");
               }catch(e){
@@ -4540,7 +4566,10 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
     h("div",{style:{background:hrisDB?"#E8F5E9":"#FFF8E1",border:"1px solid "+(hrisDB?"#A5D6A7":"#FFE082"),borderRadius:10,padding:"10px 14px",marginBottom:14,fontSize:13,color:hrisDB?"#1B5E20":"#795548"}},
       (hrisDB&&hrisLabel)
         ?("✅ Connected to "+hrisLabel
-          +" — approved CAs will auto-sync to payroll deductions")
+          +" — approved CAs will auto-sync to payroll deductions"
+          +(requests.some(r=>r.syncError)
+             ? "  ·  ⚠ but a recent approval was refused — see the red note on the row"
+             : ""))
         :(_myBr&&_myBr.ownership==="franchise"&&!_myBr.hrisUrl
             ? "⚠️ No payroll database set for this branch — approvals will save to POS only. Ask Main to add the HRIS URL in Branch settings."
             : "⚠️ HRIS connection unavailable — approvals will save to POS only")
@@ -4591,7 +4620,11 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
               ?h("div",{style:{fontSize:11,color:C.success,fontWeight:600}},"🔗 HRIS linked")
               :h("div",{style:{fontSize:11,color:C.warning,fontWeight:600}},"⚠️ No HRIS link")
           ),
-          h("div",{style:{fontSize:13,color:C.muted}},req.reason||"—"),
+          h("div",null,
+            h("div",{style:{fontSize:13,color:C.muted}},req.reason||"—"),
+            req.syncError?h("div",{style:{fontSize:11,color:C.danger,
+              fontWeight:700,marginTop:3,lineHeight:1.5}},
+              "⚠ Payroll rejected this: "+req.syncError):null),
           h("div",{style:{fontSize:14,fontWeight:800,color:C.primary}},"₱"+peso(req.amount)),
           h("div",null,
             h("div",{style:{fontSize:13,fontWeight:700,color:"#1565C0"}},"₱"+peso(req.cutoffDeduct)),
@@ -7875,7 +7908,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260827-005000";
+const BUILD = "20260827-011500";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -12100,6 +12133,35 @@ function SettingsPage({db,user,showT,branches,companySettings,setCompanySettings
           "left blank counts as zero under the manual setting, so cost every "+
           "size you sell or the gross profit will read high."),
 
+        // How far the morning count may sit from the carried figure before
+        // head office is told. Not a block — the branch still opens.
+        h("div",{style:{marginTop:14,paddingTop:12,
+          borderTop:"1px solid "+C.border}},
+          h("div",{style:{fontSize:13,fontWeight:800,marginBottom:3}},
+            "Opening fund alert"),
+          h("div",{style:{fontSize:11,color:C.muted,marginBottom:8,
+            lineHeight:1.6}},
+            "Notify Main when a branch's counted opening fund differs from "
+            +"what was carried over by more than this. The branch is never "
+            +"stopped — the reason is required either way and the difference "
+            +"is always shown on the Z-Reading."),
+          h("div",{style:{display:"flex",gap:8,alignItems:"center"}},
+            h("span",{style:{fontSize:14,fontWeight:800}},"₱"),
+            h("input",{type:"number",min:"0",
+              value:(companySettings.openingAlert!==undefined
+                ?companySettings.openingAlert:200),
+              onChange:e=>setCompanySettings(p=>Object.assign({},p,
+                {openingAlert:e.target.value})),
+              onBlur:e=>{
+                const v=Math.max(0,Number(e.target.value)||0);
+                setCompanySettings(p=>Object.assign({},p,{openingAlert:v}));
+                save("Opening fund alert set to ₱"+peso(v),{openingAlert:v});
+              },
+              style:{width:110,padding:"8px 11px",fontSize:14,
+                border:"1px solid "+C.border,borderRadius:8,outline:"none"}}),
+            h("span",{style:{fontSize:11,color:C.muted}},
+              "0 = tell me about every change"))),
+
         h("div",{style:{display:"flex",gap:9,alignItems:"center",marginTop:12,
           paddingTop:12,borderTop:"1px solid "+C.border}},
           h("button",{
@@ -15146,6 +15208,13 @@ function App(){
     const carriedOpen=prevCount?(Number(prevCount.closingBalance)||0):0;
     const opening=loggedOpen>0?loggedOpen:carriedOpen;
     const openingSource=loggedOpen>0?"logged":(prevCount?"carried":"none");
+    // Who overrode it, why, and by how much. All of this was already being
+    // written on the cash_log row — it was simply never shown anywhere, so an
+    // opening fund could move by ₱730 overnight and read as a plain figure.
+    const openRow=bc.filter(c=>c.type==="in"&&(c.desc||"").includes("Opening"))
+      .sort((a,b)=>((b.at&&b.at.seconds)||0)-((a.at&&a.at.seconds)||0))[0]||null;
+    const openingCount=bc.filter(c=>c.type==="in"
+      &&(c.desc||"").includes("Opening")).length;
     const cashIn=bc.filter(c=>c.type==="in"&&!(c.desc||"").includes("Opening")).reduce((s,c)=>s+(c.amount||0),0);
     const cashOut=bc.filter(c=>c.type==="out"&&!isExpenseCopy(c))
       .reduce((s,c)=>s+(c.amount||0),0);
@@ -15172,6 +15241,11 @@ function App(){
       const k=i.name||i.id||"?"; skuTally[k]=(skuTally[k]||0)+(Number(i.qty)||0);
     }));
     return{gross,discounts,net,voidAmt,voidCount,opening,cashIn,cashOut,
+      openingCarried:carriedOpen,openingLogged:loggedOpen,
+      openingVariance:(loggedOpen>0?Math.round((loggedOpen-carriedOpen)*100)/100:0),
+      openingBy:openRow?(openRow.by||""):"",
+      openingNote:openRow?(openRow.note||""):"",
+      openingEntries:openingCount,
       expenses:expensesOut,
       openingSource,
       openingFrom:prevCount?prevCount.date:"",
@@ -18558,6 +18632,42 @@ function App(){
                   borderBottom:"1px solid #f5f5f5"}},
                   h("span",{style:{fontSize:13,color:C.muted}},l),
                   h("span",{style:{fontSize:14,fontWeight:800,color:C.text}},v))),
+
+                // The opening fund was one number whether it was carried from
+                // last night's close or typed over it this morning. Those are
+                // not the same claim and the reading now says which.
+                (zd.openingLogged>0)&&h("div",{style:{margin:"6px 0 2px",
+                  padding:"8px 10px",borderRadius:8,
+                  background:Math.abs(zd.openingVariance||0)>=0.01
+                    ?C.warning+"14":"#FAFAFA",
+                  border:"1px solid "+(Math.abs(zd.openingVariance||0)>=0.01
+                    ?C.warning+"55":C.border)}},
+                  [["carried from yesterday","₱"+peso(zd.openingCarried||0)],
+                   ["counted this morning","₱"+peso(zd.openingLogged||0)]]
+                    .map(([l,v])=>h("div",{key:l,style:{display:"flex",
+                      justifyContent:"space-between",padding:"2px 0"}},
+                      h("span",{style:{fontSize:12,color:C.muted}},l),
+                      h("span",{style:{fontSize:12,color:C.muted}},v))),
+                  Math.abs(zd.openingVariance||0)>=0.01&&h("div",{
+                    style:{display:"flex",justifyContent:"space-between",
+                      padding:"3px 0 0",borderTop:"1px dashed "+C.warning+"66",
+                      marginTop:3}},
+                    h("span",{style:{fontSize:12,fontWeight:800,
+                      color:C.warning}},"⚠ difference"),
+                    h("span",{style:{fontSize:13,fontWeight:900,
+                      color:C.warning}},
+                      (zd.openingVariance>0?"+":"")+"₱"+peso(zd.openingVariance))),
+                  (zd.openingBy||zd.openingNote)&&h("div",{
+                    style:{fontSize:11,color:C.muted,marginTop:4,
+                      fontStyle:"italic"}},
+                    (zd.openingBy?("ni "+zd.openingBy):"")
+                    +(zd.openingNote?(" · \u201c"+zd.openingNote+"\u201d")
+                                    :" \u00b7 walang dahilan")),
+                  (zd.openingEntries>1)&&h("div",{style:{fontSize:11,
+                    color:C.danger,marginTop:3,fontWeight:700}},
+                    zd.openingEntries+" separate Opening Fund entries today "
+                    +"— they are added together, so this is likely a duplicate")),
+
                 zd.shortOver!=null&&h("div",{style:{display:"flex",
                   justifyContent:"space-between",padding:"8px 0 0"}},
                   h("span",{style:{fontSize:13,fontWeight:800}},"SHORT / OVER"),
@@ -19265,6 +19375,57 @@ function App(){
             note:(cmFrom&&cmTo)
               ? (cmFrom===cmTo?cmFrom:(cmFrom+" \u2192 "+cmTo))
               : "everything currently loaded"}),
+          // One override is an accident. The same branch three mornings in a
+          // month is a pattern, and nobody will find it by opening Z-Readings
+          // one at a time.
+          (function(){
+            const _in2=(r)=>!cmFrom||!cmTo
+              ||((r.date||"")>=cmFrom&&(r.date||"")<=cmTo);
+            const ovr=cashLog.filter(c=>c.type==="in"
+              &&(c.desc||"").includes("Opening")
+              &&c.correctedFrom!==undefined
+              &&Math.abs((Number(c.amount)||0)-(Number(c.correctedFrom)||0))>=0.01
+              &&_in2(c));
+            if(!ovr.length)return null;
+            const by={};
+            ovr.forEach(c=>{
+              const k=c.branch||"?";
+              if(!by[k])by[k]={n:0,sum:0,rows:[]};
+              const g=(Number(c.amount)||0)-(Number(c.correctedFrom)||0);
+              by[k].n++; by[k].sum+=g; by[k].rows.push({d:c.date,g:g,
+                by:c.by||"",note:c.note||""});
+            });
+            const keys=Object.keys(by).sort((a,b2)=>by[b2].n-by[a].n);
+            return h("div",{style:{background:"#fff",borderRadius:12,
+              border:"1px solid "+C.warning+"66",marginBottom:12,
+              overflow:"hidden"}},
+              h("div",{style:{padding:"10px 13px",background:C.warning+"14",
+                borderBottom:"1px solid "+C.warning+"44"}},
+                h("b",{style:{fontSize:13}},"⚠ Opening fund overridden — "
+                  +ovr.length+" time"+(ovr.length===1?"":"s")),
+                h("div",{style:{fontSize:11,color:C.muted,marginTop:2}},
+                  "The drawer was counted at a different figure than the one "
+                  +"carried from the previous close.")),
+              keys.map(k=>{
+                const r=by[k];
+                const bn=(branches.find(x=>x.id===k)||{});
+                return h("div",{key:k,style:{padding:"9px 13px",
+                  borderBottom:"1px solid #f5f5f5"}},
+                  h("div",{style:{display:"flex",
+                    justifyContent:"space-between",alignItems:"center"}},
+                    h("b",{style:{fontSize:13}},bn.name||bn.full||k),
+                    h("span",{style:{fontSize:13,fontWeight:900,
+                      color:C.warning}},
+                      r.n+"× · "+(r.sum>0?"+":"")+"₱"+peso(Math.round(r.sum*100)/100))),
+                  r.rows.sort((a,b2)=>String(b2.d).localeCompare(String(a.d)))
+                    .slice(0,6).map((x,i)=>h("div",{key:i,
+                      style:{fontSize:11,color:C.muted,marginTop:2}},
+                      x.d+" · "+(x.g>0?"+":"")+"₱"+peso(Math.round(x.g*100)/100)
+                      +(x.by?(" · "+x.by):"")
+                      +(x.note?(" · \u201c"+x.note+"\u201d"):" · walang dahilan"))));
+              }));
+          })(),
+
           h("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:10}},
             branches.map(b=>{
               const _dOf=(r)=>r.date||"";
@@ -20996,6 +21157,7 @@ function App(){
 
         page==="cash_count"&&h(CashCountPage,{
           branchId,curBranch,user,db,orders,cashLog,expenses,showT,
+          companySettings,
           key:branchId
         }),
 
