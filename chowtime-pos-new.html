@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260827-021000 -->
+<!-- BUILD:20260827-022000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -4424,7 +4424,35 @@ function HealthPage({user,db,hrisDB,prodDB,branches:BRANCHES,frKeys={},
       "\"denied\" on write means the database rules refuse this app — almost "
       +"always an expired test-mode rule or a bridge account that is not named "
       +"in the rules. \"denied\" on read too means the whole database is closed. "
-      +"A red POS row is the serious one — everything depends on it."));
+      +"A red POS row is the serious one — everything depends on it."),
+
+    // Recent silent failures caught anywhere in the app. These used to vanish
+    // into empty handlers; now the last few are here, so an outage that has
+    // already happened is visible without waiting for the next probe.
+    (function(){
+      const log=(typeof _healthLog!=="undefined")?_healthLog:[];
+      if(!log.length)return null;
+      return h("div",{style:{marginTop:18}},
+        h("div",{style:{fontSize:13,fontWeight:800,marginBottom:6}},
+          "Recent errors caught in the background"),
+        h("div",{style:{fontSize:11,color:C.muted,marginBottom:8}},
+          "Live data streams that failed since the app loaded. If a figure "
+          +"looks wrong, check here first."),
+        h("div",{style:{background:"#fff",border:"1px solid "+C.border,
+          borderRadius:12,overflow:"hidden"}},
+          log.slice(0,12).map((r,i)=>h("div",{key:i,style:{display:"flex",
+            justifyContent:"space-between",gap:10,padding:"8px 13px",
+            borderBottom:"1px solid #f5f5f5",alignItems:"baseline"}},
+            h("div",null,
+              h("span",{style:{fontSize:12,fontWeight:700}},r.where),
+              h("span",{style:{fontSize:11,color:C.danger,marginLeft:8}},
+                r.code||""),
+              r.msg?h("div",{style:{fontSize:11,color:C.muted,marginTop:1,
+                lineHeight:1.5}},r.msg):null),
+            h("span",{style:{fontSize:11,color:C.muted,whiteSpace:"nowrap"}},
+              new Date(r.when).toLocaleTimeString("en-PH",
+                {hour:"numeric",minute:"2-digit"}))))));
+    })());
 }
 
 
@@ -8184,7 +8212,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260827-021000";
+const BUILD = "20260827-022000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -9194,6 +9222,27 @@ function daysBefore(toISO,count){
 // ─── NOTIFICATIONS ────────────────────────────────────────
 // One row per event, addressed to a single branch id via `to`. Everything is
 // best-effort: a failed notify must never block the action that caused it.
+// ─── SILENT-FAILURE SINK ─────────────────────────────────
+// Every listener and write that used to fail into an empty handler now reports
+// here instead. Nothing pops a dialog — that is what made people abandon the
+// screen — but the last failures are kept in memory and shown on System Health,
+// so a database that has quietly stopped answering is visible in one place
+// rather than discovered a day later when a number looks wrong.
+const _healthLog = [];   // {when, where, code, msg}
+function reportFailure(where, err){
+  try{
+    const code = (err && (err.code || err.name)) || "";
+    const msg  = String((err && err.message) || err || "").slice(0, 140);
+    _healthLog.unshift({ when: Date.now(), where: where, code: code, msg: msg });
+    if(_healthLog.length > 40) _healthLog.length = 40;   // keep it small
+    // Still goes to the console for anyone with devtools open.
+    console.warn("[health]", where, code, msg);
+  }catch(e){}
+}
+// A drop-in error handler for onSnapshot: names the source, records it, and
+// never throws. Replaces the bare ()=>{} that hid outages.
+function onErr(where){ return function(e){ reportFailure(where, e); }; }
+
 async function notify(db,n){
   try{
     await addDoc(collection(db,"notifications"),{
@@ -13108,7 +13157,7 @@ function PayrollPage({db,hrisDB,user,showT,branches,branchId,staff,advances}){
       const unsub=onSnapshot(
         query(collection(db,"hris_requests"),orderBy("timestamp","desc"),limit(500)),
         snap=>setRequests(snap.docs.map(d=>({...d.data(),_docId:d.id}))),
-        ()=>{}
+        onErr("hris_requests")
       );
       return()=>unsub();
     }catch(e){}
@@ -13890,6 +13939,7 @@ function App(){
         setDbReady(true);
       },err=>{
         console.warn("Orders:",err.message);
+        reportFailure("orders",err);
         setDbReady(true);
         // Almost always the missing composite index (branch + date). The
         // console error carries a one-click link to create it. Until then,
@@ -14001,7 +14051,7 @@ function App(){
       const eq=isOwner
         ?query(collection(db,"expenses"),orderBy("timestamp","desc"),limit(100))
         :query(collection(db,"expenses"),where("branch","==",bId),limit(200));
-      unsubs.push(onSnapshot(eq,snap=>setExpenses(snap.docs.map(d=>({...d.data(),_docId:d.id}))),()=>{}));
+      unsubs.push(onSnapshot(eq,snap=>setExpenses(snap.docs.map(d=>({...d.data(),_docId:d.id}))),onErr("expenses")));
     }catch(e){}
 
     // Cash log
@@ -14009,7 +14059,7 @@ function App(){
       const cq=isOwner
         ?query(collection(db,"cash_log"),orderBy("timestamp","desc"),limit(100))
         :query(collection(db,"cash_log"),where("branch","==",bId),limit(200));
-      unsubs.push(onSnapshot(cq,snap=>setCashLog(snap.docs.map(d=>({...d.data(),_docId:d.id}))),()=>{}));
+      unsubs.push(onSnapshot(cq,snap=>setCashLog(snap.docs.map(d=>({...d.data(),_docId:d.id}))),onErr("cash_log")));
     }catch(e){}
 
     // Subscriptions. Everyone loads the full set: it is eight small documents,
@@ -14028,7 +14078,7 @@ function App(){
           : query(collection(db,"cash_counts"),
               where("branch","==",branchId),limit(120)),
         snap=>setCashCounts(snap.docs.map(d=>({...d.data(),_docId:d.id}))),
-        ()=>{}));
+        onErr("cash_counts")));
     }catch(e){}
 
     // Discounts are defined at Main and switched on per branch. Everyone
