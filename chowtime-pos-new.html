@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260827-014000 -->
+<!-- BUILD:20260827-016500 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -173,7 +173,7 @@ const hrisConfig = {
 let hrisDB = null;
 // ── HRIS BRIDGE ACCOUNT ──────────────────────────────────────────────────
 // Created in Firebase Console → chowtime-hris → Authentication → Users.
-// UID SLvkEg2jRAhtxtTSeHpvrIhOPlP2 — the Realtime Database rules name that UID
+// UID lLc79KL1fURMNuJUKfBVt4pfWvI2 — the Realtime Database rules name that UID
 // as the only writer of `loans`, which is what makes this safe. The password
 // is NOT the protection: this file is served publicly from GitHub Pages and
 // anyone can read the two lines below. If the rules are ever loosened, this
@@ -211,6 +211,13 @@ try {
         console.warn("HRIS bridge sign-in failed:", e && e.code, e && e.message);
         throw e;
       });
+    // The promise above is only awaited when someone approves a request, so
+    // until then its rejection has no handler and the browser raises it as an
+    // uncaught error — a full-screen dialog at every load over something the
+    // banner already reports quietly. This second handler marks it as seen;
+    // the approval path still receives the rejection and still refuses to
+    // write, which is the part that matters.
+    hrisReadyP.catch(()=>{});
   }
 } catch(e) { console.warn("HRIS DB:", e.message); }
 
@@ -261,6 +268,12 @@ try {
 // be written there — not into Main's. One app instance per franchise, made
 // once and kept.
 const _franchiseDBs = {};
+// Each franchise project needs its own bridge sign-in, exactly like Main's.
+// These are NOT hardcoded: every franchise is a separate Firebase project with
+// its own accounts, so the pair lives on the branch record and is entered in
+// Branches. Blank means no sign-in is attempted — same behaviour as before.
+const _franchiseReady = {};   // branch id → sign-in promise
+const _franchiseState = {};   // branch id → "off" | "ok" | error code
 function franchiseHrisDB(branch){
   if(!branch||!branch.hrisUrl) return null;
   const key=branch.id||branch.hrisUrl;
@@ -273,6 +286,19 @@ function franchiseHrisDB(branch){
     };
     const app=initializeApp(cfg,"hris-"+key);
     _franchiseDBs[key]=getDatabase(app);
+    _franchiseState[key]="off";
+    if(branch.hrisBridgeEmail&&branch.hrisBridgePass){
+      _franchiseState[key]="signing in\u2026";
+      _franchiseReady[key]=signInWithEmailAndPassword(getAuth(app),
+        branch.hrisBridgeEmail,branch.hrisBridgePass)
+        .then(r=>{ _franchiseState[key]="ok"; return r; })
+        .catch(e=>{
+          _franchiseState[key]=String((e&&e.code)||(e&&e.message)||e);
+          console.warn("franchise HRIS bridge sign-in failed:",key,e&&e.code);
+          throw e;
+        });
+      _franchiseReady[key].catch(()=>{});   // same reason as Main's
+    }
     return _franchiseDBs[key];
   }catch(e){
     console.warn("franchise HRIS:",key,e.message);
@@ -4393,7 +4419,10 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
         // Wait for the bridge, exactly as the production path does. Without
         // this, an approval made in the first second after load races the
         // sign-in and is refused — the money has already left the drawer.
-        if(!isFranchiseReq&&hrisReadyP)await Promise.resolve(hrisReadyP);
+        const _wait=isFranchiseReq
+          ?_franchiseReady[reqBranch.id||""]
+          :hrisReadyP;
+        if(_wait)await Promise.resolve(_wait);
         const res=await runTransaction(ref(targetDB,"loans"),(cur)=>{
           const list = cur
             ? (Array.isArray(cur)?cur.slice():Object.values(cur))
@@ -7965,7 +7994,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260827-014000";
+const BUILD = "20260827-016500";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -17397,7 +17426,13 @@ function App(){
                  ["hrisUrl","THEIR PAYROLL DATABASE URL",
                   "https://…-default-rtdb.asia-southeast1.firebasedatabase.app"],
                  ["hrisApiKey","THEIR FIREBASE API KEY","AIza…"],
-                 ["hrisProjectId","THEIR PROJECT ID","cffc-wcap"]
+                 ["hrisProjectId","THEIR PROJECT ID","cffc-wcap"],
+                 // Reading their payroll works unauthenticated; writing a
+                 // deduction does not. Main hit exactly this and every
+                 // approval came back permission_denied.
+                 ["hrisBridgeEmail","THEIR BRIDGE ACCOUNT EMAIL",
+                  "cffc.wcap.bridge@gmail.com"],
+                 ["hrisBridgePass","THEIR BRIDGE ACCOUNT PASSWORD",""]
                 ].map(([k,lbl,ph])=>h("div",{key:k,style:{marginBottom:8}},
                   h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,
                     letterSpacing:1,marginBottom:3}},lbl),
@@ -17414,7 +17449,18 @@ function App(){
                   "apps. With the database URL set, an approved cash advance "+
                   "lands in their payroll the same way it does for a "+
                   "company-owned branch. Leave it blank and approvals stop, "+
-                  "rather than falling into yours.")),
+                  "rather than falling into yours."),
+                h("div",{style:{fontSize:11,color:C.muted,marginTop:8,
+                  lineHeight:1.6,background:"#FFF8E1",
+                  border:"1px solid #FFE082",borderRadius:9,
+                  padding:"10px 12px"}},
+                  h("b",{style:{color:"#795548"}},"The bridge account: "),
+                  "create it in THEIR Firebase project → Authentication → "+
+                  "Users, then in their Realtime Database rules allow only "+
+                  "that UID to write `loans`. Without it their approvals fail "+
+                  "the moment their rules stop being open — the same way "+
+                  "Main's did. Left blank, nothing is attempted and approvals "+
+                  "behave as they do today.")),
 
               // Editing an existing branch showed no sign of who signs into
               // it — the login was only ever visible at the moment of
@@ -17601,7 +17647,11 @@ function App(){
                       const _fk={
                         hrisUrl:b.hrisUrl||"",
                         hrisApiKey:b.hrisApiKey||"",
-                        hrisProjectId:b.hrisProjectId||""
+                        hrisProjectId:b.hrisProjectId||"",
+                        // Left out of this list, the two would be typed in,
+                        // look saved, and be gone on the next reload.
+                        hrisBridgeEmail:b.hrisBridgeEmail||"",
+                        hrisBridgePass:b.hrisBridgePass||""
                       };
                       await setDoc(doc(db,"settings","franchise_keys"),
                         {[b.id]:_fk},{merge:true});
