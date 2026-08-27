@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260827-018000 -->
+<!-- BUILD:20260827-020000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -349,7 +349,7 @@ const BRANCHES = [
 
 const ROLES = {
   owner:     {label:"Owner / Admin",    emoji:"\u{1F451}", color:"#6A1B9A",
-    nav:["dashboard","branches","subs","pos","orders","void_requests","all_orders","analytics","z_reading","reports","cash_count","cash_in","expenses","cash_monitor","discount_mgmt","inventory","inv_log","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","settings","printer","ext_payroll","ext_kiosk","hris_dash","ext_production","ext_stock","branch_pl"]},
+    nav:["dashboard","branches","subs","pos","orders","void_requests","all_orders","analytics","z_reading","reports","cash_count","cash_in","expenses","cash_monitor","discount_mgmt","inventory","inv_log","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","settings","health","printer","ext_payroll","ext_kiosk","hris_dash","ext_production","ext_stock","branch_pl"]},
   manager:   {label:"Branch Manager",   emoji:"\u{1F3EA}", color:"#007AFF",
     nav:["branch_dash","pos","orders","analytics","z_reading","reports","cash_count","cash_in","expenses","ext_payroll","inventory","inv_log","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","hris_dash","bom_mgmt","branch_settings","printer","ext_kiosk","ext_stock","branch_pl"]},
   cashier:   {label:"Cashier",          emoji:"\u{1F4B3}", color:"#34C759",
@@ -400,6 +400,7 @@ const NAV_META = {
   x_reading:   {icon:"📃",label:"X-Reading"},
   expenses:    {icon:"💸",label:"Expenses"},
   cash_monitor:{icon:"💵",label:"Cash Monitor"},
+  health:      {icon:"🩺",label:"System Health"},
   discount_mgmt:{icon:"🏷️",label:"Discounts"},
   cash_in_out: {icon:"🔄",label:"Cash In/Out"},
   inventory:   {icon:"📦",label:"Inventory"},
@@ -4260,6 +4261,161 @@ function CALoanPage({user,branchId,curBranch,db,hrisDB,showT,mode,hrisEmps=[],pr
 }
 
 // ─── HRIS: ADMIN APPROVAL DASHBOARD ──────────────────────
+// ─── SYSTEM HEALTH ────────────────────────────────────────
+// One screen that answers "what is broken right now?" — because every failure
+// this app has had looks the same from the outside: a silent permission_denied
+// that reads as empty data. Each database is probed for real (read AND write to
+// a throwaway key) so an expired test-mode rule shows up here in the morning
+// instead of when a crew cannot clock in. Nothing here writes real data: the
+// write probe sets a value under /_healthcheck and deletes it again.
+function HealthPage({user,db,hrisDB,prodDB,branches:BRANCHES,frKeys={},
+    hrisBridge,companySettings={}}){
+  const [rows,setRows]=useState([]);
+  const [running,setRunning]=useState(false);
+  const [ranAt,setRanAt]=useState(null);
+
+  // readPath: a node the app genuinely reads.  writePath: the SAME node the
+  // approval writes to, plus a throwaway key — probing a made-up node would be
+  // refused by rules that (correctly) only open the real one, turning a healthy
+  // database red. The probe key is deleted right after.
+  const probeRTDB=async(name,database,readPath,writePath)=>{
+    const out={name:name,kind:"Realtime DB",read:"—",write:"—",ok:false};
+    if(!database){ out.read="no connection"; out.note="app not initialised";
+      return out; }
+    try{
+      await get(ref(database,readPath));
+      out.read="ok";
+    }catch(e){ out.read=String((e&&e.code)||(e&&e.message)||e).replace("PERMISSION_DENIED","denied"); }
+    if(writePath){
+      const key="_hc_"+Date.now();
+      const probe=ref(database,writePath+"/"+key);
+      try{
+        await set(probe,{t:Date.now(),by:"healthcheck"});
+        out.write="ok";
+        try{ await set(probe,null); }catch(e){}   // remove the probe key
+      }catch(e){ out.write=String((e&&e.code)||(e&&e.message)||e).replace("PERMISSION_DENIED","denied"); }
+    } else { out.write="n/a"; }
+    out.ok=(out.read==="ok")&&(!writePath||out.write==="ok");
+    return out;
+  };
+
+  const run=async()=>{
+    setRunning(true);
+    const result=[];
+
+    // 1. POS Firestore — the core. A read is enough; if this is down nothing works.
+    try{
+      await getDocs(query(collection(db,"branches"),limit(1)));
+      result.push({name:"POS database",kind:"Firestore",read:"ok",write:"n/a",ok:true});
+    }catch(e){
+      result.push({name:"POS database",kind:"Firestore",
+        read:String((e&&e.code)||(e&&e.message)||e),write:"—",ok:false,
+        note:"the core database — if this is red, sign-in and orders are affected"});
+    }
+
+    // 2. HRIS — payroll deductions land here. Bridge sign-in status comes from
+    //    the module-level flag; the write probe confirms the rules too.
+    const h=await probeRTDB("HRIS payroll",hrisDB,"loans","loans");
+    h.bridge=hrisBridge||"off";
+    if(hrisBridge&&hrisBridge!=="ok"&&hrisBridge!=="off")
+      h.note="bridge sign-in: "+hrisBridge;
+    result.push(h);
+
+    // 3. Production — production crew CA/loans land here.
+    const pr=await probeRTDB("Production payroll",prodDB,
+      "chowtimeProduction/staff","chowtimeProduction/ledger");
+    result.push(pr);
+
+    // 4. Each franchise HRIS that has a URL configured.
+    (BRANCHES||[]).filter(b=>b&&b.ownership==="franchise").forEach(()=>{});
+    for(const b of (BRANCHES||[]).filter(x=>x&&x.ownership==="franchise")){
+      const merged=Object.assign({},b,frKeys[b.id]||{});
+      if(!merged.hrisUrl){
+        result.push({name:(b.name||b.id)+" payroll",kind:"Franchise HRIS",
+          read:"not set up",write:"—",ok:true,
+          note:"no payroll database configured — CA approvals for this branch stop, by design"});
+        continue;
+      }
+      const fdb=franchiseHrisDB(merged);
+      const fr=await probeRTDB((b.name||b.id)+" payroll",fdb,"loans","loans");
+      result.push(fr);
+    }
+
+    setRows(result);
+    setRanAt(new Date());
+    setRunning(false);
+  };
+
+  useEffect(()=>{ run(); /* eslint-disable-next-line */ },[]);
+
+  const badCount=rows.filter(r=>!r.ok).length;
+  const pill=(v)=>{
+    const good=v==="ok", na=(v==="n/a"||v==="—"||v==="not set up");
+    return h("span",{style:{fontSize:12,fontWeight:800,padding:"2px 9px",
+      borderRadius:20,whiteSpace:"nowrap",
+      background:good?"#E8F5E9":na?"#F5F5F5":"#FFEBEE",
+      color:good?C.success:na?C.muted:C.danger}},v);
+  };
+
+  return h("div",null,
+    h(SectionHeader,{title:"🩺 System Health"}),
+    h("div",{style:{fontSize:12,color:C.muted,marginBottom:12,lineHeight:1.6,
+      maxWidth:760}},
+      "Each payroll database is checked for a real read and write. Firebase "
+      +"test-mode rules expire on a fixed date and then silently block "
+      +"everything — this page is where that shows up first, instead of when "
+      +"a crew cannot get an advance. Nothing real is written: the write test "
+      +"puts a value under /_healthcheck and removes it."),
+
+    h("div",{style:{display:"flex",gap:10,alignItems:"center",marginBottom:14}},
+      h("button",{onClick:run,disabled:running,
+        style:{padding:"9px 18px",borderRadius:9,border:"none",fontWeight:800,
+          fontSize:13,cursor:running?"wait":"pointer",
+          background:running?"#ccc":C.primary,color:"#fff"}},
+        running?"Checking…":"↻ Re-check now"),
+      ranAt&&h("span",{style:{fontSize:12,color:C.muted}},
+        "Last checked "+ranAt.toLocaleTimeString("en-PH",
+          {hour:"numeric",minute:"2-digit"})),
+      !running&&h("span",{style:{fontSize:13,fontWeight:800,
+        color:badCount?C.danger:C.success}},
+        badCount?("⚠ "+badCount+" need"+(badCount===1?"s":"")+" attention")
+                :"✓ all clear")),
+
+    h("div",{style:{background:"#fff",border:"1px solid "+C.border,
+      borderRadius:12,overflow:"hidden"}},
+      h("div",{style:{display:"grid",
+        gridTemplateColumns:"1fr 120px 120px 120px",gap:8,padding:"9px 14px",
+        background:"#fafafa",borderBottom:"1px solid "+C.border}},
+        ["SERVICE","READ","WRITE",""].map((hh,i)=>h("div",{key:i,
+          style:{fontSize:10,fontWeight:700,color:C.muted,letterSpacing:1,
+            textAlign:i&&i<3?"center":"left"}},hh))),
+      rows.length===0
+        ? h("div",{style:{padding:"20px",textAlign:"center",color:C.muted,
+            fontSize:13}},running?"Checking…":"No results")
+        : rows.map((r,i)=>h("div",{key:i,style:{display:"grid",
+            gridTemplateColumns:"1fr 120px 120px 120px",gap:8,padding:"11px 14px",
+            borderBottom:"1px solid #f5f5f5",alignItems:"center"}},
+            h("div",null,
+              h("div",{style:{fontSize:13,fontWeight:700}},r.name),
+              h("div",{style:{fontSize:11,color:C.muted}},r.kind
+                +(r.bridge&&r.bridge!=="ok"?(" · bridge "+r.bridge):"")),
+              r.note?h("div",{style:{fontSize:11,color:r.ok?C.muted:C.danger,
+                marginTop:2,lineHeight:1.5}},r.note):null),
+            h("div",{style:{textAlign:"center"}},pill(r.read)),
+            h("div",{style:{textAlign:"center"}},pill(r.write)),
+            h("div",{style:{textAlign:"center",fontSize:18}},
+              r.ok?"✅":"❌")))),
+
+    h("div",{style:{fontSize:11,color:C.muted,marginTop:12,lineHeight:1.7,
+      maxWidth:760}},
+      h("b",{style:{color:C.text}},"Reading a red row: "),
+      "\"denied\" on write means the database rules refuse this app — almost "
+      +"always an expired test-mode rule or a bridge account that is not named "
+      +"in the rules. \"denied\" on read too means the whole database is closed. "
+      +"A red POS row is the serious one — everything depends on it."));
+}
+
+
 function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
   const [requests, setRequests] = useState([]);
   const [filterStatus, setFilter] = useState("pending");
@@ -8016,7 +8172,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260827-018000";
+const BUILD = "20260827-020000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -19494,6 +19650,10 @@ function App(){
         ),
 
         // ══ CASH MONITOR ══
+        page==="health"&&h(HealthPage,{user,db,hrisDB,prodDB,
+          branches:branches,frKeys:frKeys,hrisBridge:hrisBridge,
+          companySettings:companySettings}),
+
         page==="cash_monitor"&&h("div",null,
           h(SectionHeader,{title:"Cash Monitoring — All Branches"}),
           // Every figure here was the whole loaded window with no way to ask
