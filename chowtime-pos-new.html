@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260827-011500 -->
+<!-- BUILD:20260827-014000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -171,9 +171,47 @@ const hrisConfig = {
   databaseURL: "https://chowtime-hris-default-rtdb.asia-southeast1.firebasedatabase.app",
 };
 let hrisDB = null;
+// ── HRIS BRIDGE ACCOUNT ──────────────────────────────────────────────────
+// Created in Firebase Console → chowtime-hris → Authentication → Users.
+// UID SLvkEg2jRAhtxtTSeHpvrIhOPlP2 — the Realtime Database rules name that UID
+// as the only writer of `loans`, which is what makes this safe. The password
+// is NOT the protection: this file is served publicly from GitHub Pages and
+// anyone can read the two lines below. If the rules are ever loosened, this
+// account stops being scoped and becomes a real key.
+const HRIS_BRIDGE_EMAIL = "cffc.hris.bridge@gmail.com";
+const HRIS_BRIDGE_PASS  = "123456";
+let hrisReadyP = null;          // resolves once the bridge is signed in
+// "off" = no credentials filled in, "ok" = signed in, otherwise the error code.
+let hrisBridge = "off";
 try {
   const hrisApp = initializeApp(hrisConfig, "chowtime-hris");
   hrisDB = getDatabase(hrisApp);
+
+  // READS from this database work unauthenticated, which is why the employee
+  // list loads and every request shows "HRIS linked". WRITES to `loans` do
+  // not — approving a CA came back permission_denied, the approval rolled
+  // itself back, and the row sat at PENDING with nothing to explain it.
+  //
+  // Production hit this same wall and was given a dedicated bridge account.
+  // HRIS never was. Fill the two constants below with a user created in the
+  // chowtime-hris project's own Authentication — accounts do NOT carry across
+  // Firebase projects, so the production bridge account will not work here.
+  //
+  // Left blank, nothing changes: no sign-in is attempted and the app behaves
+  // exactly as it does now.
+  if (HRIS_BRIDGE_EMAIL && HRIS_BRIDGE_PASS) {
+    const hrisAuth = getAuth(hrisApp);
+    hrisBridge = "signing in\u2026";
+    hrisReadyP = signInWithEmailAndPassword(hrisAuth, HRIS_BRIDGE_EMAIL, HRIS_BRIDGE_PASS)
+      .then(r => { hrisBridge = "ok"; return r; })
+      .catch(e => {
+        hrisBridge = String((e && e.code) || (e && e.message) || e);
+        // Loud on purpose. A silent failure here is indistinguishable from
+        // "payroll refused the write", which is the hunt we just finished.
+        console.warn("HRIS bridge sign-in failed:", e && e.code, e && e.message);
+        throw e;
+      });
+  }
 } catch(e) { console.warn("HRIS DB:", e.message); }
 
 // Production runs a separate payroll — its own staff, rates and payslip — in
@@ -4352,6 +4390,10 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
         // posReqId also makes this idempotent: a retry after a dropped
         // connection finds its own row and adds nothing.
         let already=false;
+        // Wait for the bridge, exactly as the production path does. Without
+        // this, an approval made in the first second after load races the
+        // sign-in and is refused — the money has already left the drawer.
+        if(!isFranchiseReq&&hrisReadyP)await Promise.resolve(hrisReadyP);
         const res=await runTransaction(ref(targetDB,"loans"),(cur)=>{
           const list = cur
             ? (Array.isArray(cur)?cur.slice():Object.values(cur))
@@ -4565,11 +4607,26 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
     // HRIS link status
     h("div",{style:{background:hrisDB?"#E8F5E9":"#FFF8E1",border:"1px solid "+(hrisDB?"#A5D6A7":"#FFE082"),borderRadius:10,padding:"10px 14px",marginBottom:14,fontSize:13,color:hrisDB?"#1B5E20":"#795548"}},
       (hrisDB&&hrisLabel)
-        ?("✅ Connected to "+hrisLabel
-          +" — approved CAs will auto-sync to payroll deductions"
-          +(requests.some(r=>r.syncError)
-             ? "  ·  ⚠ but a recent approval was refused — see the red note on the row"
-             : ""))
+        ?h("div",null,
+          h("div",null,"✅ Connected to "+hrisLabel
+            +" — approved CAs will auto-sync to payroll deductions"),
+          // Reading and writing are different permissions on this database.
+          // The line above only ever meant "the connection exists"; this one
+          // says whether an approval can actually be written.
+          h("div",{style:{fontSize:11,marginTop:4,fontWeight:700,
+            color:hrisBridge==="ok"?"#1B5E20":C.danger}},
+            hrisBridge==="ok"
+              ? "🔑 Payroll bridge signed in — writes allowed"
+              : hrisBridge==="off"
+                ? "🔑 No payroll bridge account set. Reads work without one; "
+                  +"writing a deduction does not, so an approval will roll "
+                  +"itself back."
+                : ("🔑 Payroll bridge sign-in failed: "+hrisBridge
+                   +" — check the account exists in chowtime-hris")),
+          requests.some(r=>r.syncError)
+            ? h("div",{style:{fontSize:11,marginTop:3,color:C.danger}},
+                "⚠ A recent approval was refused — see the red note on the row")
+            : null)
         :(_myBr&&_myBr.ownership==="franchise"&&!_myBr.hrisUrl
             ? "⚠️ No payroll database set for this branch — approvals will save to POS only. Ask Main to add the HRIS URL in Branch settings."
             : "⚠️ HRIS connection unavailable — approvals will save to POS only")
@@ -7908,7 +7965,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260827-011500";
+const BUILD = "20260827-014000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
