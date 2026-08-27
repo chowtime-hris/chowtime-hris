@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260827-017000 -->
+<!-- BUILD:20260827-017500 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -183,6 +183,10 @@ const HRIS_BRIDGE_PASS  = "123456";
 let hrisReadyP = null;          // resolves once the bridge is signed in
 // "off" = no credentials filled in, "ok" = signed in, otherwise the error code.
 let hrisBridge = "off";
+// The UID the bridge actually signed in AS. The rules name one UID; if this
+// is not that UID the write is refused, and nothing on screen has ever said
+// which one it is — so the two could never be compared.
+let hrisBridgeUid = "";
 try {
   const hrisApp = initializeApp(hrisConfig, "chowtime-hris");
   hrisDB = getDatabase(hrisApp);
@@ -203,7 +207,11 @@ try {
     const hrisAuth = getAuth(hrisApp);
     hrisBridge = "signing in\u2026";
     hrisReadyP = signInWithEmailAndPassword(hrisAuth, HRIS_BRIDGE_EMAIL, HRIS_BRIDGE_PASS)
-      .then(r => { hrisBridge = "ok"; return r; })
+      .then(r => {
+        hrisBridge = "ok";
+        hrisBridgeUid = (r && r.user && r.user.uid) || "";
+        return r;
+      })
       .catch(e => {
         hrisBridge = String((e && e.code) || (e && e.message) || e);
         // Loud on purpose. A silent failure here is indistinguishable from
@@ -4649,7 +4657,8 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
           h("div",{style:{fontSize:11,marginTop:4,fontWeight:700,
             color:hrisBridge==="ok"?"#1B5E20":C.danger}},
             hrisBridge==="ok"
-              ? "🔑 Payroll bridge signed in — writes allowed"
+              ? ("🔑 Payroll bridge signed in as UID "+(hrisBridgeUid||"?")
+                 +" — this must be the UID named in the database rules")
               : hrisBridge==="off"
                 ? "🔑 No payroll bridge account set. Reads work without one; "
                   +"writing a deduction does not, so an approval will roll "
@@ -8003,7 +8012,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260827-017000";
+const BUILD = "20260827-017500";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
