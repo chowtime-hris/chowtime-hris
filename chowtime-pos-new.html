@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260827-022000 -->
+<!-- BUILD:20260827-024000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -349,9 +349,9 @@ const BRANCHES = [
 
 const ROLES = {
   owner:     {label:"Owner / Admin",    emoji:"\u{1F451}", color:"#6A1B9A",
-    nav:["dashboard","branches","subs","pos","orders","void_requests","all_orders","analytics","z_reading","reports","cash_count","cash_in","expenses","cash_monitor","discount_mgmt","inventory","inv_log","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","settings","health","printer","ext_payroll","ext_kiosk","hris_dash","ext_production","ext_stock","branch_pl"]},
+    nav:["dashboard","branches","subs","pos","orders","void_requests","all_orders","analytics","z_reading","reports","feedback","cash_count","cash_in","expenses","cash_monitor","discount_mgmt","inventory","inv_log","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","settings","health","printer","ext_payroll","ext_kiosk","hris_dash","ext_production","ext_stock","branch_pl"]},
   manager:   {label:"Branch Manager",   emoji:"\u{1F3EA}", color:"#007AFF",
-    nav:["branch_dash","pos","orders","analytics","z_reading","reports","cash_count","cash_in","expenses","ext_payroll","inventory","inv_log","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","hris_dash","bom_mgmt","branch_settings","printer","ext_kiosk","ext_stock","branch_pl"]},
+    nav:["branch_dash","pos","orders","analytics","z_reading","reports","feedback","cash_count","cash_in","expenses","ext_payroll","inventory","inv_log","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","hris_dash","bom_mgmt","branch_settings","printer","ext_kiosk","ext_stock","branch_pl"]},
   cashier:   {label:"Cashier",          emoji:"\u{1F4B3}", color:"#34C759",
     nav:["pos","orders","x_reading","printer","z_reading","cash_count","cash_in","expenses","inventory","ca_request","loan_request","void_request","ext_kiosk","ext_stock"]},
   crew:      {label:"Crew / Kitchen",   emoji:"\u{1F9D1}\u{200D}\u{1F373}", color:"#FF9500",
@@ -400,6 +400,7 @@ const NAV_META = {
   x_reading:   {icon:"📃",label:"X-Reading"},
   expenses:    {icon:"💸",label:"Expenses"},
   cash_monitor:{icon:"💵",label:"Cash Monitor"},
+  feedback:    {icon:"⭐",label:"Customer Feedback"},
   health:      {icon:"🩺",label:"System Health"},
   discount_mgmt:{icon:"🏷️",label:"Discounts"},
   cash_in_out: {icon:"🔄",label:"Cash In/Out"},
@@ -1227,6 +1228,12 @@ function printReceipt(ord, branchName, companySettings, paperSize){
   const fsb = paperSize==="58mm"?"13px":"16px";
   const fsh = paperSize==="58mm"?"16px":"20px";
 
+  // Same URL the thermal QR carries, rendered as an image because a print
+  // window has no ESC/POS. Kept inside the paper width so it is never clipped.
+  const qrPx  = paperSize==="58mm" ? 120 : 150;
+  const qrSrc = "https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=0&data="
+              + encodeURIComponent(feedbackURL(branchName));
+
   pw.document.write("<!DOCTYPE html><html><head><title>Receipt "+ord.id+"</title>"+
   "<style>"+
   "*{margin:0;padding:0;box-sizing:border-box;}"+
@@ -1309,17 +1316,44 @@ function printReceipt(ord, branchName, companySettings, paperSize){
     "VATable: \u20b1"+vatable.toFixed(2)+" | VAT: \u20b1"+vatAmt.toFixed(2)+"</div>":
     "<div class='c sub'>This serves as your Official Receipt</div>")+
   "<div class='c sub' style='margin-top:4px'>"+(companySettings.receiptFooter||"Thank you for dining with us!")+"</div>"+
+  // Feedback QR — image of the same URL the thermal receipt draws natively.
+  // Governed by the same Settings toggle; the link is printed as words too so
+  // the receipt still points somewhere if the image fails to load.
+  (companySettings.feedbackQR!==false
+    ? "<div class='hr'></div>"+
+      "<div class='c b' style='margin-top:6px'>How did we do?</div>"+
+      "<div class='c' style='margin-top:5px'>"+
+        "<img id='fbqr' alt='' width='"+qrPx+"' height='"+qrPx+"' src='"+qrSrc+"'>"+
+      "</div>"+
+      "<div class='c sub' style='margin-top:3px'>Scan to rate "+
+        (branchName||"this store")+"</div>"
+    : "")+
   "<div class='c b' style='margin-top:8px;font-size:14px'>*** "+
   (isVAT&&!zerovat?"VAT RECEIPT":zerovat?"ZERO-RATED RECEIPT":"NON-VAT RECEIPT")+" ***</div>"+
   "<br><br></body></html>");
   pw.document.close();
-  setTimeout(function(){
+
+  // The QR is fetched over the network. Printing on a fixed 400ms timer could
+  // fire before it arrived and put a blank square on the receipt, so the print
+  // waits for the image — but never longer than 2.5s, and not at all when
+  // there is no image to wait for.
+  var _printed=false;
+  var _go=function(){
+    if(_printed)return; _printed=true;
     pw.print();
     // Auto-close after print on mobile
     setTimeout(function(){
       try{pw.close();}catch(e){}
     },1000);
-  },400);
+  };
+  var _qr=null;
+  try{ _qr=pw.document.getElementById("fbqr"); }catch(e){}
+  if(_qr && !_qr.complete){
+    _qr.onload=_go; _qr.onerror=_go;
+    setTimeout(_go,2500);
+  } else {
+    setTimeout(_go,400);
+  }
 }
 
 function printKOT(ord, branchName, companySettings, paperSize){
@@ -4261,6 +4295,184 @@ function CALoanPage({user,branchId,curBranch,db,hrisDB,showT,mode,hrisEmps=[],pr
 }
 
 // ─── HRIS: ADMIN APPROVAL DASHBOARD ──────────────────────
+/* ═══════════════════ CUSTOMER FEEDBACK ═══════════════════
+   Ratings come from the QR on the receipt. The customer's phone writes them to
+   the HRIS Realtime Database under "feedback" — the same node the public form
+   uses — so nothing new had to be created to collect them.
+
+   Each record carries `store`, which the QR fills in from the branch printed
+   on that receipt. That string is the branch's FULL name ("Chowtime WPAN"),
+   which is what curBranch.full holds, so the two line up without a lookup.
+
+   Who sees what: an owner sees every branch. Everyone else sees exactly one —
+   their own — and the filter is applied to the data, not to the dropdown, so
+   there is no arrangement of the screen that shows a manager another branch.
+   A franchise manager is a manager like any other and follows the same rule. */
+function FeedbackPage({user,curBranch,hrisDB,branches,showT}){
+  const [rows,setRows]     = useState([]);
+  const [loading,setLoad]  = useState(true);
+  const [err,setErr]       = useState("");
+  const [storeSel,setSel]  = useState("");
+  const [days,setDays]     = useState(30);
+
+  const isOwner = (user.role==="owner"||user.branch==="all");
+
+  /* A feedback record stores whatever the sender put in `store`, and the two
+     senders disagree. The QR on a receipt writes the full name ("Chowtime
+     Dau"); the dropdown on the public form writes the short name ("WMBL");
+     older rows may hold the id ("ct-wmbl"). Matching on the full name alone
+     meant a manager saw an empty screen while the owner saw their rows.
+
+     Nothing is rewritten in the database to fix this. Old records are left
+     exactly as they are and the comparison is widened instead — a rewrite of
+     live customer data to satisfy a filter is not worth the risk. */
+  const norm = (v)=> String(v||"").trim().toLowerCase();
+  const aliasesFor = (b)=>{
+    if(!b) return [];
+    const out = [b.full, b.name, b.id];
+    // "CT-WMBL" is also written "WMBL" — accept the code with the prefix gone.
+    if(b.name) out.push(String(b.name).replace(/^ct-/i,""));
+    if(b.id)   out.push(String(b.id).replace(/^ct-/i,""));
+    return out.filter(Boolean).map(norm);
+  };
+  const recordIsBranch = (r,b)=>{
+    if(!r||!b) return false;
+    return aliasesFor(b).indexOf(norm(r.store)) !== -1;
+  };
+
+  useEffect(()=>{
+    if(!hrisDB){ setErr("Not connected to the HRIS database."); setLoad(false); return; }
+    const un = onValue(ref(hrisDB,"feedback"), snap=>{
+      const v = snap.val()||{};
+      const list = Object.keys(v).map(k=>Object.assign({_key:k}, v[k]||{}))
+        .filter(r=>r&&r.createdAt)
+        .sort((a,b)=> String(b.createdAt).localeCompare(String(a.createdAt)));
+      setRows(list); setLoad(false); setErr("");
+    }, e=>{ setErr("Could not read feedback: "+(e&&e.message||"")); setLoad(false); });
+    return ()=>{ try{un();}catch(e){} };
+  },[hrisDB]);
+
+  // A manager's branch is pinned here, before anything reaches the screen.
+  const scoped = rows.filter(r=> isOwner ? true : recordIsBranch(r,curBranch));
+
+  const cutoff = (()=>{ const d=new Date(); d.setDate(d.getDate()-days); return d.toISOString(); })();
+  const inRange = scoped.filter(r=> days===0 ? true : String(r.createdAt) >= cutoff);
+  const selBranch = (branches||[]).find(b=>b&&b.id===storeSel);
+  const shown = inRange.filter(r=>
+    (isOwner&&storeSel) ? recordIsBranch(r,selBranch) : true);
+
+  const avg = (key)=>{
+    const n = shown.filter(r=>Number(r[key])>0);
+    if(!n.length) return 0;
+    return Math.round((n.reduce((a,r)=>a+Number(r[key]),0)/n.length)*10)/10;
+  };
+  const overall = shown.length
+    ? Math.round((shown.reduce((a,r)=>a+(Number(r.avg)||0),0)/shown.length)*10)/10 : 0;
+
+  const stars = (n)=>{
+    const v = Math.round(Number(n)||0);
+    return "\u2605".repeat(Math.max(0,Math.min(5,v))) + "\u2606".repeat(Math.max(0,5-v));
+  };
+  const colFor = (n)=> n>=4.5?"#2E7D32" : n>=3.5?"#F9A825" : n>0?"#C62828" : C.muted;
+
+  /* Built from the branch list, not from the rows that happen to have feedback.
+     Deriving it from the data showed only the two branches with ratings so far,
+     and showed them under whichever spelling the sender used. */
+  const storeList = (branches||[]).slice()
+    .sort((a,b)=>String(a.full||a.name||"").localeCompare(String(b.full||b.name||"")));
+
+  // A record whose `store` matches no branch at all would otherwise be
+  // invisible to the owner once a branch is picked, and never counted.
+  const unmatched = rows.filter(r=>
+    !(branches||[]).some(b=>recordIsBranch(r,b))).length;
+  const withComment = shown.filter(r=>(r.comment||"").trim());
+
+  return h("div",null,
+    h(SectionHeader,{title:"\u2B50 Customer Feedback"+(isOwner?"":" \u2014 "+(curBranch&&curBranch.name||""))}),
+
+    !isOwner && h("div",{style:{fontSize:12,color:C.muted,marginBottom:12}},
+      "Showing this branch only."),
+
+    h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14,alignItems:"center"}},
+      h("select",{value:days,onChange:e=>setDays(Number(e.target.value)),
+        style:{padding:"8px 10px",borderRadius:8,border:"1px solid "+C.border,fontSize:13}},
+        h("option",{value:7},"Last 7 days"),
+        h("option",{value:30},"Last 30 days"),
+        h("option",{value:90},"Last 90 days"),
+        h("option",{value:0},"All time")),
+      isOwner && h("select",{value:storeSel,onChange:e=>setSel(e.target.value),
+        style:{padding:"8px 10px",borderRadius:8,border:"1px solid "+C.border,fontSize:13}},
+        h("option",{value:""},"All branches"),
+        storeList.map(b=>h("option",{key:b.id,value:b.id},
+          (b.full||b.name||b.id))))
+    ),
+
+    err && h("div",{style:{background:"#FBE6E7",color:"#C62828",padding:"10px 14px",
+      borderRadius:8,fontSize:13,marginBottom:14}}, err),
+
+    isOwner && !!unmatched && h("div",{style:{background:"#FDF3D8",color:"#8A6A10",
+      padding:"9px 13px",borderRadius:8,fontSize:12.5,marginBottom:14}},
+      unmatched+" rating"+(unmatched===1?"":"s")+" carry a store name that matches no "
+      +"branch on file. They are counted under All branches but will not appear "
+      +"when a single branch is selected."),
+
+    loading && h("div",{style:{color:C.muted,fontSize:13,padding:"20px 0"}},"Loading feedback\u2026"),
+
+    !loading && !shown.length && !err && h("div",{style:{textAlign:"center",padding:"40px 20px",
+      color:C.muted,fontSize:13,border:"1px dashed "+C.border,borderRadius:10}},
+      "No feedback yet for this period. Ratings arrive when customers scan the QR code on their receipt."),
+
+    !loading && !!shown.length && h("div",null,
+      h("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",
+        gap:12,marginBottom:18}},
+        h("div",{style:{background:"#F3E9F7",borderRadius:12,padding:"14px 16px"}},
+          h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,letterSpacing:.5}},"OVERALL"),
+          h("div",{style:{fontSize:30,fontWeight:800,color:colFor(overall),lineHeight:1.1}},
+            overall.toFixed(1)),
+          h("div",{style:{fontSize:16,color:colFor(overall),letterSpacing:2}},stars(overall)),
+          h("div",{style:{fontSize:11,color:C.muted,marginTop:2}},
+            shown.length+" rating"+(shown.length===1?"":"s"))),
+        [["food","Food"],["service","Service"],["clean","Cleanliness"]].map(([k,lbl])=>
+          h("div",{key:k,style:{background:"#FFF",border:"1px solid "+C.border,
+            borderRadius:12,padding:"14px 16px"}},
+            h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,letterSpacing:.5}},
+              lbl.toUpperCase()),
+            h("div",{style:{fontSize:26,fontWeight:800,color:colFor(avg(k)),lineHeight:1.2}},
+              avg(k).toFixed(1)),
+            h("div",{style:{fontSize:14,color:colFor(avg(k)),letterSpacing:2}},stars(avg(k)))))
+      ),
+
+      h("div",{style:{fontSize:13,fontWeight:700,color:C.muted,letterSpacing:.5,marginBottom:8}},
+        "COMMENTS ("+withComment.length+")"),
+
+      !withComment.length && h("div",{style:{color:C.muted,fontSize:13,padding:"12px 0"}},
+        "Ratings came in, but nobody left a written comment in this period."),
+
+      withComment.map(r=>h("div",{key:r._key,
+        style:{border:"1px solid "+C.border,borderLeft:"4px solid "+colFor(r.avg),
+          borderRadius:10,padding:"12px 14px",marginBottom:10,background:"#FFF"}},
+        h("div",{style:{display:"flex",justifyContent:"space-between",gap:10,
+          flexWrap:"wrap",marginBottom:6}},
+          h("div",{style:{fontSize:15,color:colFor(r.avg),letterSpacing:2}},
+            stars(r.avg), h("span",{style:{fontSize:12,color:C.muted,letterSpacing:0,
+              marginLeft:6}},(Number(r.avg)||0).toFixed(1))),
+          h("div",{style:{fontSize:11,color:C.muted}},
+            (isOwner&&r.store?r.store+" \u00b7 ":"")+
+            new Date(r.createdAt).toLocaleDateString("en-PH",
+              {month:"short",day:"numeric",year:"numeric"}))),
+        h("div",{style:{fontSize:13.5,color:C.text,lineHeight:1.5,whiteSpace:"pre-wrap"}},
+          r.comment),
+        // Only shown when the customer chose to leave it, so someone can follow up.
+        (r.contact||"").trim() && h("div",{style:{fontSize:11.5,color:C.muted,marginTop:7,
+          paddingTop:7,borderTop:"1px dashed "+C.border}},
+          "Contact: "+r.contact),
+        h("div",{style:{fontSize:11,color:C.muted,marginTop:6}},
+          "Food "+(r.food||"-")+" \u00b7 Service "+(r.service||"-")+" \u00b7 Clean "+(r.clean||"-"))
+      ))
+    )
+  );
+}
+
 // ─── SYSTEM HEALTH ────────────────────────────────────────
 // One screen that answers "what is broken right now?" — because every failure
 // this app has had looks the same from the outside: a silent permission_denied
@@ -8212,7 +8424,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260827-022000";
+const BUILD = "20260827-024000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -19715,6 +19927,11 @@ function App(){
         page==="health"&&h(HealthPage,{user,db,hrisDB,prodDB,
           branches:branches,frKeys:frKeys,hrisBridge:hrisBridge,
           companySettings:companySettings}),
+
+        // ══ CUSTOMER FEEDBACK ══
+        page==="feedback"&&h(FeedbackPage,{
+          user,curBranch,hrisDB,branches,showT
+        }),
 
         page==="cash_monitor"&&h("div",null,
           h(SectionHeader,{title:"Cash Monitoring — All Branches"}),
