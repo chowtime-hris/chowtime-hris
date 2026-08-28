@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260828-010000 -->
+<!-- BUILD:20260828-012000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -111,7 +111,7 @@ import {
   getFirestore, collection, doc,
   onSnapshot, addDoc, updateDoc, setDoc, deleteDoc,
   getDocs, getDoc, query, orderBy, where, serverTimestamp,
-  writeBatch, limit, increment, arrayUnion
+  writeBatch, limit, increment, arrayUnion, deleteField
 } from "firebase/firestore";
 import {
   getAuth,
@@ -1088,15 +1088,48 @@ function feedbackURL(branchFull){
 // 80mm layout wraps every line — the label lands on one row and the amount on
 // the next, which is exactly how a Z-Reading came out unreadable while the
 // setting on screen said 58mm.
+// Paper size is PER BRANCH, stored in its own branch_settings/{branchId} doc —
+// never in companySettings. The shared field is what made one branch's choice
+// follow every other branch; this path does not touch it.
+//   1. branch_settings/{branchId}.paperSize  — the branch's own value
+//   2. localStorage copy of the same          — so it survives being offline
+//   3. "80mm"                                — only when nothing is set yet
+// branch_settings is a separate collection on purpose: settings/branches holds
+// the branch list and has been clobbered by a bad save before; this never
+// touches that document.
+var CT_BRANCH_ID    = null;
+var CT_BRANCH_PAPER = null;
+
+function paperKey(bid){ return "ct_paperSize_" + (bid || "unknown"); }
+
 function paperFor(cs){
+  if(CT_BRANCH_PAPER==="58mm"||CT_BRANCH_PAPER==="80mm") return CT_BRANCH_PAPER;
   try{
-    const dev=localStorage.getItem("ct_paperSize");
-    if(dev==="58mm"||dev==="80mm") return dev;
+    const mine = localStorage.getItem(paperKey(CT_BRANCH_ID));
+    if(mine==="58mm"||mine==="80mm") return mine;
+    // One-time carry-over from the older per-tablet key so a tablet already set
+    // correctly does not revert on the day this ships.
+    const legacy = localStorage.getItem("ct_paperSize");
+    if(legacy==="58mm"||legacy==="80mm") return legacy;
   }catch(e){}
-  return (cs&&cs.paperSize)||"80mm";
+  return "80mm";
 }
+
 function setPaperFor(v){
-  try{ localStorage.setItem("ct_paperSize",v); }catch(e){}
+  if(v!=="58mm"&&v!=="80mm") return;
+  CT_BRANCH_PAPER = v;
+  // Saved on the device first, so the printer is right on the very next receipt
+  // even if the network is down. Firestore catches up when it can.
+  try{
+    localStorage.setItem(paperKey(CT_BRANCH_ID), v);
+    localStorage.setItem("ct_paperSize", v);
+  }catch(e){}
+  if(CT_BRANCH_ID){
+    try{
+      setDoc(doc(db,"branch_settings",CT_BRANCH_ID),
+        {branch:CT_BRANCH_ID, paperSize:v},{merge:true});
+    }catch(e){}
+  }
 }
 
 function escposKick(pin){
@@ -8412,7 +8445,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260828-010000";
+const BUILD = "20260828-012000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -12887,7 +12920,13 @@ function PrinterPage({db,user,showT,companySettings,setCompanySettings,curBranch
   },[]);
   const save=async()=>{
     try{
-      await setDoc(doc(db,"settings","company"),companySettings,{merge:true});
+      // paperSize is per-device (localStorage), never company-wide. Writing it
+      // here is what dragged every branch onto one size, so it is removed from
+      // the payload AND deleted from the shared doc if an old build left it there.
+      const _cs=Object.assign({},companySettings);
+      delete _cs.paperSize;
+      await setDoc(doc(db,"settings","company"),
+        Object.assign({},_cs,{paperSize:deleteField()}),{merge:true});
       showT("Print settings saved ✓");
     }catch(e){showT("Error","err");}
   };
@@ -14853,6 +14892,29 @@ function App(){
   const isOwnerAll=(user?.branch==="all");
   const isCommAcct=(user?.branch==="comm");
   const branchId=(isOwnerAll||isCommAcct)?"ct-main":(user?.branch||"ct-wsfp");
+  // Per-branch paper size: point the module-level CT_BRANCH_ID at this branch,
+  // seed CT_BRANCH_PAPER from the device cache, then track branch_settings so a
+  // change on one tablet reaches the branch's other tablets — but never other
+  // branches, because each reads its own doc.
+  const [,_paperSync]=useState(0);
+  useEffect(()=>{
+    if(!branchId) return;
+    CT_BRANCH_ID = branchId;
+    try{
+      const cached = localStorage.getItem(paperKey(branchId));
+      CT_BRANCH_PAPER = (cached==="58mm"||cached==="80mm") ? cached : null;
+    }catch(e){ CT_BRANCH_PAPER = null; }
+    _paperSync(x=>x+1);
+    const un = onSnapshot(doc(db,"branch_settings",branchId), snap=>{
+      const v = snap.exists() ? (snap.data()||{}).paperSize : null;
+      if(v==="58mm"||v==="80mm"){
+        CT_BRANCH_PAPER = v;
+        try{ localStorage.setItem(paperKey(branchId), v); }catch(e){}
+        _paperSync(x=>x+1);
+      }
+    }, ()=>{});   // offline or denied: the cached value above still stands
+    return ()=>un();
+  },[branchId]);
   const _myBranchRec=(branches||[]).find(b=>b&&b.id===branchId);
   const isFranchiseAcct=!!(_myBranchRec&&_myBranchRec.ownership==="franchise");
   const caRoster=isFranchiseAcct?franchiseEmps:hrisEmps.concat(prodEmps);
