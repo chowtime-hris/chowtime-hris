@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260827-024000 -->
+<!-- BUILD:20260828-010000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -905,12 +905,7 @@ function buildEscPos(ord,bName,cs,paperSize){
       "- P"+da.toFixed(2)));
     if(ord.discScope===" items")a(ln("* discounted  item"));
   }
-  if(isVAT&&!zerovat){
-    a(row("VATable Sales","P"+peso(vatable)));
-    a(row("VAT-Exempt Sales","P0.00"));
-    a(row("Zero-Rated Sales","P0.00"));
-    a(row("VAT 12%","P"+peso(vatAmt)));
-  }
+
   if(!isVAT&&!zerovat){
     a(ln("NON-VAT REGISTERED"));
     a(row("VAT-Exempt Sales","P"+peso(net)));
@@ -965,7 +960,8 @@ function buildEscPos(ord,bName,cs,paperSize){
 
   a(B([NL]));
   a([ESC,0x45,0x01]);
-  a(ln(isVAT&&!zerovat?"*** VAT RECEIPT ***":zerovat?"*** ZERO-RATED ***":"*** NON-VAT RECEIPT ***"));
+  a(ln("This receipt is not applicable"));
+  a(ln("to claim input tax"));
   a([ESC,0x45,0x00]);
   a(B([NL,NL,NL]));
   a([GS,0x56,0x41,0x10]); // PARTIAL CUT
@@ -1292,9 +1288,6 @@ function printReceipt(ord, branchName, companySettings, paperSize){
       (ord.discRate?" "+Math.round(ord.discRate*100)+"%":"")+
       (ord.discScope===" items"?", "+((ord.discItems||[]).length||0)+"  item/s":"")+
       ")</span><span>-\u20b1"+da.toFixed(2)+"</span></div>":"") +
-  (isVAT&&!zerovat?
-    "<div class='row sub'><span>VATable Sales</span><span>\u20b1"+vatable.toFixed(2)+"</span></div>"+
-    "<div class='row sub'><span>VAT Amount (12%)</span><span>\u20b1"+vatAmt.toFixed(2)+"</span></div>":"")+
   (zerovat?"<div class='row sub'><span>Zero-Rated Sales</span><span>\u20b1"+net.toFixed(2)+"</span></div>":"")+
   (!isVAT?"<div class='row sub'><span>Non-VAT</span><span></span></div>":"")+
   "<div class='row total'><span>TOTAL</span><span>\u20b1"+net.toFixed(2)+"</span></div>"+
@@ -1311,10 +1304,6 @@ function printReceipt(ord, branchName, companySettings, paperSize){
   (ord.change>0?"<div class='row b'><span>CHANGE</span><span>\u20b1"+ord.change.toFixed(2)+"</span></div>":"")+
   "<div class='hr'></div>"+
   // FOOTER
-  (isVAT&&!zerovat?
-    "<div class='c sub'>This serves as your Official Receipt<br>"+
-    "VATable: \u20b1"+vatable.toFixed(2)+" | VAT: \u20b1"+vatAmt.toFixed(2)+"</div>":
-    "<div class='c sub'>This serves as your Official Receipt</div>")+
   "<div class='c sub' style='margin-top:4px'>"+(companySettings.receiptFooter||"Thank you for dining with us!")+"</div>"+
   // Feedback QR — image of the same URL the thermal receipt draws natively.
   // Governed by the same Settings toggle; the link is printed as words too so
@@ -1328,8 +1317,7 @@ function printReceipt(ord, branchName, companySettings, paperSize){
       "<div class='c sub' style='margin-top:3px'>Scan to rate "+
         (branchName||"this store")+"</div>"
     : "")+
-  "<div class='c b' style='margin-top:8px;font-size:14px'>*** "+
-  (isVAT&&!zerovat?"VAT RECEIPT":zerovat?"ZERO-RATED RECEIPT":"NON-VAT RECEIPT")+" ***</div>"+
+  "<div class='c sub' style='margin-top:8px'>This receipt is not applicable to claim input tax</div>"+
   "<br><br></body></html>");
   pw.document.close();
 
@@ -8424,7 +8412,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260827-024000";
+const BUILD = "20260828-010000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -12590,6 +12578,9 @@ function InvCatsTab({db,showT}){
 
 function SettingsPage({db,user,showT,branches,companySettings,setCompanySettings}){
   const [tab,setTab]=useState("print");
+  // Bumps only to re-render the paper-size highlight; the value itself lives in
+  // this tablet's localStorage (see paperFor/setPaperFor), never in company settings.
+  const [_paperTick,_setPaperTick]=useState(0);
   const T=(id,lbl)=>h("button",{key:id,onClick:()=>setTab(id),
     style:{padding:"9px 18px",border:"none",background:"none",cursor:"pointer",
       fontSize:14,fontWeight:tab===id?800:400,
@@ -12810,7 +12801,11 @@ function SettingsPage({db,user,showT,branches,companySettings,setCompanySettings
             +"which is what makes a Z-Reading unreadable."),
           h("div",{style:{display:"flex",gap:6,marginBottom:12}},
             ["80mm","58mm"].map(s=>h("button",{key:s,
-              onClick:()=>{ setPaperFor(s); setCompanySettings(p=>({...p,paperSize:s})); },
+              // Per DEVICE only. Writing paperSize into companySettings is what
+              // made one branch's choice follow every other branch — it is a
+              // single shared field. setPaperFor stores it in this tablet's
+              // localStorage; _paperTick just re-renders so the highlight moves.
+              onClick:()=>{ setPaperFor(s); _setPaperTick(x=>x+1); },
               style:{flex:1,padding:"9px",borderRadius:8,border:"none",cursor:"pointer",
                 fontWeight:700,fontSize:14,
                 background:paperFor(companySettings)===s?C.primary:"#eee",
@@ -12881,6 +12876,7 @@ function SettingsPage({db,user,showT,branches,companySettings,setCompanySettings
 
 // ─── PRINTER PAGE ─────────────────────────────────────────
 function PrinterPage({db,user,showT,companySettings,setCompanySettings,curBranch}){
+  const [_paperTick2,_setPaperTick2]=useState(0);   // re-render only; value is per-device
   // The USB handle lives outside React, and a reload drops it — which is
   // exactly when printing quietly falls back to Bluetooth.
   const [usbOn,setUsbOn]=useState(usbReady());
@@ -12945,7 +12941,9 @@ function PrinterPage({db,user,showT,companySettings,setCompanySettings,curBranch
           h("div",{style:{fontSize:13,fontWeight:700,color:C.muted,letterSpacing:1,marginBottom:8}},"PAPER SIZE"),
           h("div",{style:{display:"flex",gap:8}},
             ["80mm","58mm"].map(s=>h("button",{key:s,
-              onClick:()=>{ setPaperFor(s); setCompanySettings(p=>({...p,paperSize:s})); },
+              // Per device only — never companySettings (that shared field is
+              // what made one branch's size follow the others).
+              onClick:()=>{ setPaperFor(s); _setPaperTick2(x=>x+1); },
               style:{flex:1,padding:"12px 8px",borderRadius:9,border:"none",
                 cursor:"pointer",fontWeight:700,fontSize:13,
                 background:paperFor(companySettings)===s?C.primary:"#eee",
