@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260828-012000 -->
+<!-- BUILD:20260828-013000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -8445,7 +8445,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260828-012000";
+const BUILD = "20260828-013000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -8874,6 +8874,45 @@ function DiscountPage({db,user,branches,discounts,menuItems,showT}){
 function CashInPage({branchId,curBranch,user,db,cashLog,showT}){
   const today=localDate();
   const [cashEntry,setCashEntry]=useState({type:"in",desc:"",amount:""});
+  // Correcting a mistyped entry is a manager/owner action, not a crew one — a
+  // cash figure feeds the Z-Reading, so who changed it and from what is kept on
+  // the record rather than silently overwritten.
+  const canEditCash=(user.role==="owner"||user.role==="commissary"
+    ||user.role==="manager");
+  const [editing,setEditing]=useState(null);   // _docId being edited
+  const [editAmt,setEditAmt]=useState("");
+  const saveEdit=async(c)=>{
+    const amt=parseFloat(editAmt);
+    if(!(amt>0)){showT("Enter a valid amount","warn");return;}
+    if(!c._docId){showT("Cannot edit this entry","err");return;}
+    try{
+      await updateDoc(doc(db,"cash_log",c._docId),{
+        amount:amt,
+        correctedFrom:(Number(c.amount)||0),
+        correctedBy:user.name,correctedAt:serverTimestamp()});
+      setEditing(null); setEditAmt("");
+      showT("Amount corrected to \u20b1"+peso(amt)
+        +" (was \u20b1"+peso(Number(c.amount)||0)+")");
+    }catch(e){showT("Failed: "+String(e&&e.message||e).slice(0,60),"err");}
+  };
+  const deleteEntry=async(c)=>{
+    if(!c._docId){showT("Cannot delete this entry","err");return;}
+    if(!window.confirm(
+      "Delete this cash-in entry?\n\n"
+      +(c.desc||"")+" \u2014 \u20b1"+peso(Number(c.amount)||0)+"\n\n"
+      +"This removes it from today's total and the Z-Reading.")) return;
+    try{
+      // A hard delete leaves no trace on a BIR-facing record. Instead the entry
+      // is voided: amount zeroed so totals are correct, but the row and who
+      // voided it remain visible.
+      await updateDoc(doc(db,"cash_log",c._docId),{
+        amount:0,
+        desc:"(deleted) "+(c.desc||""),
+        deletedBy:user.name,deletedAt:serverTimestamp(),
+        deletedAmount:(Number(c.amount)||0)});
+      showT("Entry deleted");
+    }catch(e){showT("Failed: "+String(e&&e.message||e).slice(0,60),"err");}
+  };
   // Same rule the cash count uses: prefer the stored local date, fall back to
   // the timestamp. An older entry written before `date` existed still lands
   // on the right day.
@@ -8984,13 +9023,45 @@ function CashInPage({branchId,curBranch,user,db,cashLog,showT}){
             fontSize:13}},"Nothing recorded yet today.")
         : todayCash.filter(c=>c.type==="in").map((c,ci)=>
             h("div",{key:c._docId||ci,style:{display:"flex",
-              justifyContent:"space-between",padding:"9px 14px",
+              justifyContent:"space-between",alignItems:"center",gap:8,
+              padding:"9px 14px",
               borderBottom:"1px solid #f5f5f5",fontSize:13}},
-              h("span",{style:{color:C.muted}},
+              h("span",{style:{color:C.muted,flex:1}},
                 (c.time?c.time+" · ":"")+(c.desc||"")+
-                (c.by?"  ·  "+c.by:"")),
-              h("b",{style:{color:C.success}},
-                "+₱"+peso(Number(c.amount)||0))))
+                (c.by?"  ·  "+c.by:"")+
+                (c.correctedFrom!=null?"  ·  ✎ was ₱"+peso(c.correctedFrom):"")),
+              editing===c._docId
+                ? h("span",{style:{display:"flex",gap:6,alignItems:"center"}},
+                    h("input",{type:"number",value:editAmt,autoFocus:true,
+                      onFocus:e=>e.target.select(),
+                      onChange:e=>setEditAmt(e.target.value),
+                      style:{width:90,padding:"5px 8px",fontSize:13,fontWeight:700,
+                        textAlign:"right",border:"1px solid "+C.border,
+                        borderRadius:6,outline:"none"}}),
+                    h("button",{onClick:()=>saveEdit(c),
+                      style:{padding:"5px 11px",background:C.success,border:"none",
+                        borderRadius:6,color:"#fff",fontWeight:700,fontSize:12,
+                        cursor:"pointer"}},"Save"),
+                    h("button",{onClick:()=>{setEditing(null);setEditAmt("");},
+                      style:{padding:"5px 9px",background:"#eee",border:"none",
+                        borderRadius:6,color:C.muted,fontSize:12,
+                        cursor:"pointer"}},"Cancel"))
+                : h("span",{style:{display:"flex",gap:8,alignItems:"center"}},
+                    h("b",{style:{color:C.success}},
+                      "+₱"+peso(Number(c.amount)||0)),
+                    canEditCash&&c._docId&&h("button",{
+                      onClick:()=>{setEditing(c._docId);
+                        setEditAmt(String(Number(c.amount)||0));},
+                      title:"Edit amount",
+                      style:{padding:"3px 7px",background:"none",
+                        border:"1px solid "+C.border,borderRadius:6,
+                        fontSize:12,cursor:"pointer",color:C.muted}},"✎"),
+                    canEditCash&&c._docId&&h("button",{
+                      onClick:()=>deleteEntry(c),
+                      title:"Delete entry",
+                      style:{padding:"3px 7px",background:"none",
+                        border:"1px solid "+C.danger+"55",borderRadius:6,
+                        fontSize:12,cursor:"pointer",color:C.danger}},"🗑"))))
     )
   );
 }
