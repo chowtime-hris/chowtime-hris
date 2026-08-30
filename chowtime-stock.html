@@ -140,7 +140,7 @@
   .cutoff-foot .save-btn{width:auto;padding:8px 16px;font-size:12.5px;}
   .cutoff-foot .cp-status{font-size:11.5px;color:var(--muted);}
 </style>
-<!-- BUILD:20260804-130057 -->
+<!-- BUILD:20260830-110000 -->
 </head>
 <body>
 
@@ -243,6 +243,8 @@
   <div class="card">
     <h2>Auditor Count</h2>
     <p class="sub" id="auditorDateLabel"></p>
+    <label for="auditDatePicker">Audit date</label>
+    <input type="date" id="auditDatePicker" onchange="onAuditDateChange()" style="margin-bottom:12px;">
     <label>Auditor name</label>
     <input id="auditorNameInput" placeholder="Your name">
   </div>
@@ -665,6 +667,23 @@ let POS_READY = false;
 // POS puts every one of those sales back on the shelf.
 let AUDIT_POS_AT_LOAD = {};
 let AUDIT_LOADED_AT = 0;
+// The date the audit is FOR. Defaults to today; the auditor may pick a past day
+// so a physical count taken but not entered on the day is recorded correctly.
+// Every place that used todayStr() for the audit now reads this instead.
+let AUDIT_DATE = null;
+function auditDateStr(){ return AUDIT_DATE || todayStr(); }
+function onAuditDateChange(){
+  const el = document.getElementById('auditDatePicker');
+  AUDIT_DATE = (el && el.value) ? el.value : todayStr();
+  // Reflect it in the label, and re-pull the crew-close comparison for that day.
+  const lbl = document.getElementById('auditorDateLabel');
+  if(lbl){
+    const d = new Date(auditDateStr()+'T00:00:00');
+    lbl.textContent = d.toLocaleDateString('en-PH',
+      {weekday:'long',year:'numeric',month:'long',day:'numeric'});
+  }
+  renderAuditorItemsList();
+}
 // One entry into Auditor Count allows one submitted audit. Re-submitting the
 // same screen was applying a correction on top of a correction.
 let AUDIT_LOCKED = false;
@@ -965,6 +984,10 @@ function checkAuditorPin(){
 }
 async function enterAuditor(){
   showMain('mainAuditor');
+  // Default the audit to today; the picker lets the auditor move it back.
+  AUDIT_DATE = todayStr();
+  const _dp = document.getElementById('auditDatePicker');
+  if(_dp){ _dp.value = AUDIT_DATE; _dp.max = todayStr(); }  // no future dates
   document.getElementById('auditorDateLabel').textContent = new Date().toLocaleDateString('en-PH',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
   document.getElementById('auditorNameInput').value = '';
   document.getElementById('auditorResultCard').style.display = 'none';
@@ -1001,7 +1024,7 @@ function renderAuditorItemsList(){
   // against, and one tap to adopt it when it agrees. The audit stays an
   // audit: nothing is prefilled, so a blank field is still a blank field.
   Promise.all([bref('varianceBaseline').once('value'),
-               bref('counts/'+todayStr()+'/close').once('value')]).then(([snap, crewSnap])=>{
+               bref('counts/'+auditDateStr()+'/close').once('value')]).then(([snap, crewSnap])=>{
     const crewClose = (crewSnap.val()||{});
     const crewItems = crewClose.items || {};
     const crewWho   = crewClose.countedByName
@@ -1013,7 +1036,7 @@ function renderAuditorItemsList(){
         banner.style.display = 'block';
         banner.style.cssText = 'display:block;margin-bottom:12px;padding:9px 12px;'
           + 'background:#F5F3FF;border:1px solid #DDD6FE;border-radius:8px;font-size:12px';
-        banner.innerHTML = '👥 May closing count ang crew para ngayong araw — '
+        banner.innerHTML = '👥 May closing count ang crew para sa '+(auditDateStr()===todayStr()?'ngayong araw':auditDateStr())+' — '
           + n + ' item' + (n===1?'':'s')
           + (crewWho ? ', binilang ni <strong>'+escapeHtml(crewWho)+'</strong>' : '')
           + (crewClose.timestamp ? ' ('+new Date(crewClose.timestamp).toLocaleTimeString()+')' : '')
@@ -1022,7 +1045,7 @@ function renderAuditorItemsList(){
         banner.style.display = 'block';
         banner.style.cssText = 'display:block;margin-bottom:12px;padding:9px 12px;'
           + 'background:#FFF7ED;border:1px solid #FED7AA;border-radius:8px;font-size:12px';
-        banner.innerHTML = '⚠️ Walang closing count ang crew para ngayong araw — walang maihahambing sa bilang mo.';
+        banner.innerHTML = '⚠️ Walang closing count ang crew para sa '+(auditDateStr()===todayStr()?'ngayong araw':auditDateStr())+' — walang maihahambing sa bilang mo.';
       }
     }
     const baselines = snap.val() || {};
@@ -1328,7 +1351,7 @@ function finalizeAudit(values, auditorName, plan){
         desc: 'Freezer audit',
         source: 'AUDIT', ref: 'audit-'+auditTimestamp,
         branch: POS_BRANCH, by: auditorName,
-        date: todayStr(),
+        date: auditDateStr(),
         timestamp: firebase.firestore.FieldValue.serverTimestamp(),
         at: firebase.firestore.FieldValue.serverTimestamp()
       });
@@ -1371,7 +1394,7 @@ function finalizeAudit(values, auditorName, plan){
                       posBranch: POS_BRANCH, posPushed: Object.keys(pushed).length,
                       posFailed: Object.keys(failed).length };
     return Promise.all([
-      bref('audits/'+todayStr()+'/'+auditTimestamp).set(payload),
+      bref('audits/'+auditDateStr()+'/'+auditTimestamp).set(payload),
       ...resettable.map(id => writeBaselineIfNewer(id, 0, auditTimestamp))
     ]).then(()=>auditItems);
   }).then(auditItems=>{
