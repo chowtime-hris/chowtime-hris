@@ -99,7 +99,7 @@ tbody td{padding:9px 11px;}
 .modal-box h2{font-family:'Syne',sans-serif;font-size:18px;margin-bottom:16px;}
 @media(max-width:600px){nav.tabs{padding:5px 10px;}.kpi-value{font-size:20px;}.panel{padding:14px;}}
 </style>
-<!-- BUILD:20260819-140000 -->
+<!-- BUILD:20260901-050000 -->
 </head>
 <body>
 
@@ -785,6 +785,7 @@ tbody td{padding:9px 11px;}
           <option value="">All Employees</option>
         </select>
       </div>
+      <button class="btn btn-primary btn-sm" style="align-self:flex-end;" onclick="syncKioskToDTR()">🔄 Sync missing to DTR</button>
       <button class="btn btn-danger btn-sm" style="align-self:flex-end;" onclick="clearKioskLog()">🗑 Clear Log</button>
     </div>
     <div class="table-wrap">
@@ -4124,6 +4125,51 @@ function clearKioskLog() {
   if(confirm('Clear all kiosk log entries?')) {
     lsSet('kioskLog',[]); kioskLog=[]; renderClockMonitor();
   }
+}
+
+// Copy kiosk punches into the DTR. Needed because a punch made while geofence
+// enforcement was ON (and the crew read as "outside" on placeholder coords) was
+// written to kioskLog but NOT to dtrData — so time in/out went missing from
+// payroll. This walks every kiosk punch and fills the matching DTR field ONLY
+// when it is blank, so it never overwrites a time already entered by hand.
+function syncKioskToDTR() {
+  const logs = load('kioskLog') || [];
+  if(!logs.length){ toast('No kiosk entries to sync.'); return; }
+  const fmap = {in:'in', out:'out', bstart:'bstart', bend:'bend'};
+  let filled = 0, skipped = 0, noPeriod = 0;
+  const touched = [];
+  logs.forEach(e=>{
+    if(!e || !e.empId || !e.date) return;
+    const field = fmap[e.action];
+    const time  = e.timeStr || (e.ts
+      ? new Date(e.ts).toTimeString().slice(0,5) : '');
+    if(!field || !time) return;
+    const pKey = getPeriodKey(e.date);
+    if(!pKey){ noPeriod++; return; }
+    const dKey = pKey + '__' + e.empId;
+    const cur = (dtrData[dKey] && dtrData[dKey][e.date]
+      && dtrData[dKey][e.date][field]);
+    if(cur){ skipped++; return; }   // already has a value — never overwrite
+    // Write via the same path saveDTRField uses (local + Firebase).
+    setDTREntry(pKey, e.empId, e.date, field, time);
+    if(window._fbDB && window._fbFns){
+      window._fbFns.set(
+        window._fbFns.ref(window._fbDB, `dtrData/${dKey}/${e.date}/${field}`),
+        time).catch(err=>console.warn('sync write',err));
+    }
+    filled++;
+    touched.push(dKey);
+  });
+  // Recompute payroll and refresh the DTR if it's open.
+  if(typeof computeAllPayroll === 'function') computeAllPayroll();
+  const active = document.querySelector('.page.active');
+  if(active && active.id === 'page-dtr'){
+    const empId = document.getElementById('dtr-emp') && document.getElementById('dtr-emp').value;
+    if(empId) loadDTR();
+  }
+  toast('✓ Synced '+filled+' punch(es) into DTR'
+    + (skipped? ' · '+skipped+' already had a time' : '')
+    + (noPeriod? ' · '+noPeriod+' had no payroll period' : ''));
 }
 
 function renderClockMonitor() {
