@@ -141,7 +141,7 @@ body{font-family:'Inter',sans-serif;background:#FFFFFF;color:#111111;min-height:
 /* face loading */
 .model-loading{background:rgba(26,111,168,.1);border:1px solid rgba(26,111,168,.25);border-radius:10px;padding:10px 14px;font-size:12px;color:#6A1B9A;display:none;}
 </style>
-<!-- BUILD:20260820-120000 -->
+<!-- BUILD:20260901-070000 -->
 </head>
 <body>
 
@@ -1437,22 +1437,50 @@ if(!fbCfg?.apiKey||!fbCfg?.databaseURL){
       const data=snap.val();
       if(!data||data.enabled===false) return;
       const now=new Date();
-      const [ah,am]=(data.time||'22:00').split(':').map(Number);
-      const autoTime=new Date(now.getFullYear(),now.getMonth(),now.getDate(),ah,am,0);
-      if(now<autoTime) return; // not yet time
+      const globalTime = data.time||'22:00';
       const todayStr=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
       const pKey=getPeriodKey(todayStr);
       if(!pKey) return;
+      const nowMins = now.getHours()*60 + now.getMinutes();
+      const dow = now.getDay();
+
+      // Resolve a crew member's shift end for today — date override first, then
+      // fixed/rotation pattern — matching how payroll picks the shift. Returns
+      // the global closing time only when no real shift is assigned.
+      function shiftEndFor(empId){
+        const a = empShifts ? empShifts[empId] : null;
+        if(!a) return globalTime;
+        const defs = Array.isArray(shiftDefs) ? shiftDefs : Object.values(shiftDefs||{});
+        let sid = null;
+        if(a.dates && a.dates[todayStr] !== undefined){
+          const v = a.dates[todayStr];
+          if(v === 'REST' || v === '') return null;   // not working — do not auto-out
+          sid = v;
+        } else if(a.type === 'fixed'){
+          sid = a.shiftId;
+        } else if(a.type === 'rotation' && a.rotation){
+          sid = a.rotation[String(dow)];
+        }
+        const sh = sid ? defs.find(s=>s.id===sid) : null;
+        return (sh && sh.end) ? sh.end : globalTime;
+      }
+
       const allEmps=JSON.parse(localStorage.getItem('ct_employees')||'[]');
       const dtrD=JSON.parse(localStorage.getItem('ct_dtrData')||'{}');
       allEmps.forEach(emp=>{
+        // Only this branch's crew — the kiosk belongs to one branch.
+        if(emp.branch && BRANCH && emp.branch !== BRANCH) return;
         const dKey=pKey+'__'+emp.id;
         if(!dtrD[dKey]||!dtrD[dKey][todayStr]) return;
         const entry=dtrD[dKey][todayStr];
-        if(entry.in&&!entry.out){
-          set(ref(db,`dtrData/${dKey}/${todayStr}/out`),data.time||'22:00').catch(()=>{});
-          set(ref(db,`dtrData/${dKey}/${todayStr}/auto`),true).catch(()=>{});
-        }
+        if(!(entry.in && !entry.out)) return;
+
+        const endTime = shiftEndFor(emp.id);
+        if(!endTime) return;                        // rest day — skip
+        const endMins = timeToMins(endTime);
+        if(nowMins < endMins) return;               // their shift hasn't ended yet
+        set(ref(db,`dtrData/${dKey}/${todayStr}/out`),endTime).catch(()=>{});
+        set(ref(db,`dtrData/${dKey}/${todayStr}/auto`),true).catch(()=>{});
       });
     });
 
@@ -1552,7 +1580,7 @@ if(!fbCfg?.apiKey||!fbCfg?.databaseURL){
     // — which build, which database, which branch it thinks it is, how many
     // people it can see — was only answerable by standing in front of it.
     const BRANCH=fbCfg.branch||'Kiosk';
-    const KIOSK_BUILD='20260820-120000';
+    const KIOSK_BUILD = '20260901-070000';
     const hb=()=>set(ref(db,`devices/${BRANCH.replace(/[^a-zA-Z0-9]/g,'_')}`),{
       name:BRANCH, lastSeen:Date.now(), type:'kiosk', online:true,
       build:KIOSK_BUILD,

@@ -99,7 +99,7 @@ tbody td{padding:9px 11px;}
 .modal-box h2{font-family:'Syne',sans-serif;font-size:18px;margin-bottom:16px;}
 @media(max-width:600px){nav.tabs{padding:5px 10px;}.kpi-value{font-size:20px;}.panel{padding:14px;}}
 </style>
-<!-- BUILD:20260901-063000 -->
+<!-- BUILD:20260901-073000 -->
 </head>
 <body>
 
@@ -1240,9 +1240,9 @@ function computeDTRRow(entry, shiftSched) {
   // Check by shift name OR by missing break fields
   const shiftName   = (s.name || s.label || '').toUpperCase();
   const isStraight  = shiftName.includes('STRAIGHT') || shiftName.includes('NONSTOP') || shiftName.includes('NO BREAK');
-  const shiftBstart = s.bstart || '';
-  const shiftBend   = s.bend   || '';
-  const hasBrk    = !isStraight && shiftBstart && shiftBend && shiftBstart !== shiftBend && shiftBstart !== '00:00';
+  // Non-straight shifts always carry a 1-hour unpaid break, whether or not the
+  // shift record has explicit break fields — opening and closing both include it.
+  const hasBrk    = !isStraight;
   const breakMins = hasBrk ? 60 : 0;
   const breakHrsDisplay = hasBrk ? '1h auto' : '0h straight';
 
@@ -1764,7 +1764,6 @@ function loadDTREditor() {
   if (!p || !emp) return;
 
   const days_abbr = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-  const schedule = getBranchSchedule(emp.pos); // use position as proxy or default
   let rows = '';
 
   for (let d = p.start; d <= p.end; d++) {
@@ -1773,6 +1772,11 @@ function loadDTREditor() {
     const dayName = days_abbr[dt.getDay()];
     const isSun = dt.getDay() === 0;
     const entry = getDTREntry(periodKey, empId, dateStr);
+    // Use the SAME per-day assigned shift as the DTR view — not one generic
+    // branch schedule. Otherwise the two screens disagree on late/hours/OT.
+    const assignedShift = getEmpShiftForDay(empId, dt.getDay(), dateStr);
+    const schedule = (assignedShift && assignedShift !== 'REST' && assignedShift !== 'OFF')
+      ? assignedShift : null;
     const c = computeDTRRow(entry, schedule);
     const isAuto = entry.auto;
     const rowBg = isSun ? 'background:#fff0ec;' : '';
@@ -2760,10 +2764,6 @@ function loadDTR() { // loadDTR — loads DTR for selected employee and period
 
     const entry=getDTREntry(periodKey, empId, dateStr);
     const c=computeDTRRow(entry, shiftSched);
-    // Temporary debug: show shift end time in console
-    if(entry.in && entry.out) {
-      console.log(`${dateStr}: shiftSched=${JSON.stringify(shiftSched)}, hrs=${c.hrs}, ot=${c.ot}`);
-    }
     const rowBg=isSun?'background:#fff0ec;':'';
 
     // Show shift label in row
