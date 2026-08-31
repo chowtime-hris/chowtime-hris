@@ -99,7 +99,7 @@ tbody td{padding:9px 11px;}
 .modal-box h2{font-family:'Syne',sans-serif;font-size:18px;margin-bottom:16px;}
 @media(max-width:600px){nav.tabs{padding:5px 10px;}.kpi-value{font-size:20px;}.panel{padding:14px;}}
 </style>
-<!-- BUILD:20260901-053000 -->
+<!-- BUILD:20260901-055000 -->
 </head>
 <body>
 
@@ -4158,22 +4158,30 @@ function syncKioskToDTR() {
 }
 
 function _applyKioskSync(logs){
-  if(!logs || !logs.length){ alert('No kiosk punches found to sync.'); return; }
+  if(!logs || !logs.length){ alert('No kiosk punches found to sync. (The kioskLog tree in Firebase is empty or unreadable.)'); return; }
   const fmap = {in:'in', out:'out', bstart:'bstart', bend:'bend'};
-  let filled = 0, skipped = 0, noPeriod = 0;
+  let filled = 0, skipped = 0, noPeriod = 0, badShape = 0;
   const touched = [];
+  const total = logs.length;
+  let sample = null;
   logs.forEach(e=>{
-    if(!e || !e.empId || !e.date) return;
+    if(!sample) sample = e;
+    if(!e || !e.empId || !e.date){ badShape++; return; }
     const field = fmap[e.action];
     const time  = e.timeStr || (e.ts
       ? new Date(e.ts).toTimeString().slice(0,5) : '');
-    if(!field || !time) return;
+    if(!field || !time){ badShape++; return; }
     const pKey = getPeriodKey(e.date);
     if(!pKey){ noPeriod++; return; }
     const dKey = pKey + '__' + e.empId;
     const cur = (dtrData[dKey] && dtrData[dKey][e.date]
       && dtrData[dKey][e.date][field]);
-    if(cur){ skipped++; return; }   // already has a value — never overwrite
+    if(cur){
+      skipped++;
+      if(!window._syncSkipSample) window._syncSkipSample =
+        {empId:e.empId, date:e.date, field:field, existing:cur, dKey:dKey};
+      return;   // already has a value — never overwrite
+    }
     // Write via the same path saveDTRField uses (local + Firebase).
     setDTREntry(pKey, e.empId, e.date, field, time);
     if(window._fbDB && window._fbFns){
@@ -4191,10 +4199,30 @@ function _applyKioskSync(logs){
     const empId = document.getElementById('dtr-emp') && document.getElementById('dtr-emp').value;
     if(empId) loadDTR();
   }
-  alert('✓ Synced '+filled+' punch(es) into DTR'
+  let msg = '✓ Synced '+filled+' punch(es) into DTR'
+    + '\n\nRead '+total+' kiosk entr(ies) total.'
     + (skipped? '\n· '+skipped+' already had a time (left as is)' : '')
     + (noPeriod? '\n· '+noPeriod+' had no matching payroll period' : '')
-    + (filled? '\n\nOpen the DTR to see them — payroll has been recomputed.' : ''));
+    + (badShape? '\n· '+badShape+' had missing empId/date/action/time' : '');
+  if(!filled && sample){
+    msg += '\n\nSample entry read:\n'
+      + 'empId: '+(sample.empId||'(none)')
+      + '\naction: '+(sample.action||'(none)')
+      + '\ndate: '+(sample.date||'(none)')
+      + '\ntimeStr: '+(sample.timeStr||'(none)');
+  }
+  if(!filled && window._syncSkipSample){
+    var sk = window._syncSkipSample;
+    msg += '\n\nA skipped punch landed here:\n'
+      + 'DTR key: '+sk.dKey
+      + '\ndate: '+sk.date+'  field: '+sk.field
+      + '\nexisting value: '+sk.existing
+      + '\n\nIf this empId/period is NOT the one you are viewing,'
+      + ' the punches went to a different employee record.';
+    window._syncSkipSample = null;
+  }
+  if(filled) msg += '\n\nOpen the DTR to see them — payroll has been recomputed.';
+  alert(msg);
 }
 
 function renderClockMonitor() {
