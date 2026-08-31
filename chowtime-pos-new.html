@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260828-013000 -->
+<!-- BUILD:20260831-110000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -5662,6 +5662,23 @@ function MenuEditor({menuItems,setMenuItems,db,user,showT}){
                   position:"absolute",top:3,transition:"all .2s",
                   left: item.avail?"calc(100% - 20px)":"3px",boxShadow:"0 1px 3px rgba(0,0,0,.3)"}})
               )
+            ),
+
+            // Main-only toggle — for stock the company sells at Main (wholesale
+            // to franchisees, retail to walk-ins). When on, the item shows on
+            // the Main POS but is hidden from every franchisee's POS.
+            h("div",{style:{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 12px",background:C.bg,borderRadius:8,marginTop:8}},
+              h("div",null,
+                h("div",{style:{fontSize:13,fontWeight:700}},"Main store only"),
+                h("div",{style:{fontSize:12,color:C.muted}},"Hide from franchisee POS — sold at Main only")
+              ),
+              h("button",{onClick:()=>setField("mainOnly",! item.mainOnly),
+                style:{width:42,height:23,borderRadius:12,border:"none",
+                  background: item.mainOnly?C.primary:"#ccc",cursor:"pointer",position:"relative"}},
+                h("div",{style:{width:17,height:17,borderRadius:"50%",background:"#fff",
+                  position:"absolute",top:3,transition:"all .2s",
+                  left: item.mainOnly?"calc(100% - 20px)":"3px",boxShadow:"0 1px 3px rgba(0,0,0,.3)"}})
+              )
             )
           ),
 
@@ -8445,7 +8462,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260828-013000";
+const BUILD = "20260831-110000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -15091,7 +15108,12 @@ function App(){
       options:[],promos:[]
     }))
   ];
-  const filtMenu=menuWithOverrides.filter(i=>(menuCat==="All"||i.cat===menuCat)&&i.name.toLowerCase().includes(menuSrch.toLowerCase())&&i.avail);
+  const filtMenu=menuWithOverrides.filter(i=>
+    // Main-only items (wholesale/retail stock Main sells) never appear on a
+    // franchisee's POS — they are not the franchisee's to sell.
+    (!isFranchiseAcct || !i.mainOnly)
+    &&(menuCat==="All"||i.cat===menuCat)
+    &&i.name.toLowerCase().includes(menuSrch.toLowerCase())&&i.avail);
   const sBg={pending:"#FFF8E1",preparing:"#E3F2FD",served:"#E8F5E9",cancelled:"#FFEBEE"};
   const sCol={pending:C.warning,preparing:C.info,served:C.success,cancelled:C.danger};
 
@@ -23940,17 +23962,77 @@ function App(){
                             _plan.push({item: item,qty:qty,prev:prev,lots:_plots});
                           }
                         }
+                        // Main is short on some items. Rather than block the
+                        // whole PO (the branch already paid), deduct what CAN
+                        // be covered now and move the shortage into a NEW
+                        // follow-up PO marked "Main owes branch". Confirm first,
+                        // because this splits a paid PO into two.
+                        let _shortPO=null;
                         if(_short.length){
-                          // Keep it on the PO. The toast is gone in seconds and
-                          // this is the only place the shortage is recorded.
+                          const _names=_short.map(x=>x.name+" (short "
+                            +x.shortBy+")").join(", ");
+                          if(!confirm("Main is short on "+_short.length
+                            +" item(s):\n\n"+_names+"\n\n"
+                            +"Deduct and deliver the items Main CAN cover now, "
+                            +"and create a NEW follow-up PO for the shortage "
+                            +"(marked \"Main owes "+(po.branchName||po.branch)
+                            +"\")?\n\nThe branch already paid, so the new PO "
+                            +"carries no new charge.")){
+                            return;
+                          }
+                          // Build the shortage PO's line items from what was short.
+                          const _shortItems=_short.map(function(sh){
+                            const src=(_rows||[]).find(function(r){return r&&r.id===sh.id;})||{};
+                            return {id:sh.id,name:sh.name,unit:sh.unit||src.unit||"",
+                              qty:sh.shortBy,
+                              price:Number(src.price)||0,cost:Number(src.cost)||0,
+                              packUnit:src.packUnit||"",packSize:Number(src.packSize)||0};
+                          });
+                          // Next PO number for this branch.
+                          let _hi=0;
                           try{
-                            await updateDoc(doc(db,"advances",po._docId),
-                              {stockShort:noUndef(_short),
-                               stockShortAt:serverTimestamp()});
+                            const _snap=await getDocs(query(collection(db,"advances"),
+                              where("branch","==",po.branch)));
+                            _snap.docs.forEach(function(d){
+                              const a=d.data();
+                              if(a._type!=="po")return;
+                              const mm=/-PO-(\d+)$/.exec(String(a.poNum||""));
+                              if(mm)_hi=Math.max(_hi,parseInt(mm[1],10)||0);
+                            });
                           }catch(e){}
-                          showT("Nothing deducted — Main is short on "
-                            +_short.length+" item(s). See the list on the PO.","err");
-                          return;
+                          const _brCode=(po.branch||"").toUpperCase().replace(/^CT-/,"").replace(/^CFFC-/,"");
+                          const _newNum=_brCode+"-PO-"+String(_hi+1).padStart(4,"0");
+                          try{
+                            const _ref=await addDoc(collection(db,"advances"),{
+                              _type:"po", poNum:_newNum,
+                              branch:po.branch, branchName:po.branchName||po.branch,
+                              items:noUndef(_shortItems),
+                              deliveredItems:noUndef(_shortItems.map(function(i){
+                                return Object.assign({},i,{actualQty:i.qty,
+                                  total:(Number(i.qty)||0)*(Number(i.price)||0),
+                                  discrepancy:0});})),
+                              date:localDate(),
+                              notes:"Follow-up for shortage on "+po.poNum
+                                +" — Main was short at deduction.",
+                              // Already paid on the parent PO; this is a delivery
+                              // obligation, not a new bill.
+                              totalAmount:0,
+                              status:"processing",
+                              paymentStatus:"Paid",
+                              deliveryStatus:"Pending",
+                              owedBy:"main",            // MAIN owes the BRANCH
+                              owedReason:"shortage",
+                              parentPO:po.poNum||"",
+                              vatType:po.vatType||"novat",
+                              requestedBy:user.name,
+                              createdFrom:"main_short_deduct",
+                              timestamp:serverTimestamp()
+                            });
+                            _shortPO=_newNum;
+                          }catch(e){
+                            showT("Could not create the follow-up PO — nothing deducted.","err");
+                            return;
+                          }
                         }
                         for(const _p of _plan){
                           const  item=_p.item, qty=_p.qty, prev=_p.prev, _plots=_p.lots;
@@ -23979,10 +24061,29 @@ function App(){
                         }
                         await updateDoc(doc(db,"advances",po._docId),{
                           mainDeducted:true,stockIssued:true,stockShort:[],
+                          // Parent PO is done — its remaining obligation, if any,
+                          // now lives entirely in the follow-up PO.
+                          status:"completed",
+                          partialFilled:!!_shortPO,
+                          followUpPO:_shortPO||null,
                           mainDeductedBy:user.name,
                           mainDeductedAt:serverTimestamp()
                         });
-                        showT("Main inventory deducted ✓","ok");
+                        if(_shortPO){
+                          // Tell the branch what shipped and what is still owed.
+                          try{
+                            await notify(db,{to:po.branch,type:"po_partial",
+                              title:"Partial delivery — "+po.poNum,
+                              message:"Main shipped what it could and owes you "
+                                +"the rest on new PO "+_shortPO
+                                +" (already paid — for follow-up only).",
+                              page:"stock_order",ref:_shortPO,by:user.name});
+                          }catch(e){}
+                          showT("Deducted what Main had ✓ — follow-up PO "
+                            +_shortPO+" created for the shortage","ok");
+                        }else{
+                          showT("Main inventory deducted ✓","ok");
+                        }
                       }catch(e){showT("Error","err");}
                     },
                     style:{padding:"7px 14px",
