@@ -99,7 +99,7 @@ tbody td{padding:9px 11px;}
 .modal-box h2{font-family:'Syne',sans-serif;font-size:18px;margin-bottom:16px;}
 @media(max-width:600px){nav.tabs{padding:5px 10px;}.kpi-value{font-size:20px;}.panel{padding:14px;}}
 </style>
-<!-- BUILD:20260901-055000 -->
+<!-- BUILD:20260901-060000 -->
 </head>
 <body>
 
@@ -1328,12 +1328,27 @@ function getDTRTotals(periodKey, empId) {
     periodDTR = stored[k];
   }
 
+  // EXTRA holiday pay over basic (DOLE). settings.rh/sh are TOTAL multipliers
+  // (RH 2.0, SH 1.3); the extra is that minus the 1.0 basic already paid for a
+  // worked day, and the full rate for an unworked regular holiday.
+  function holidayExtra(type, worked){
+    const rh = (+settings.rh || 2.0);   // total for worked RH
+    const sh = (+settings.sh || 1.30);  // total for worked SH
+    if(type==='RH') return worked ? rate*(rh-1) : rate*1.0; // worked: extra over basic; unworked: 100%
+    if(type==='SH') return worked ? rate*(sh-1) : 0;        // worked: extra over basic; unworked: no pay
+    return 0;
+  }
   let days=0,ot=0,nd=0,late=0,ut=0,holPay=0,ded=0,breakHrs=0;
   for (let d=p.start; d<=p.end; d++) {
     const dateStr = `${p.year}-${String(p.month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const entry = (periodDTR && periodDTR[dateStr]) || {};
     const hasIn  = entry.in  && String(entry.in).includes(':');
     const hasOut = entry.out && String(entry.out).includes(':');
+    const _worked = hasIn && hasOut;
+    // Holiday pay is a fact about the DATE, not about whether they punched, so
+    // it is added even on an unworked holiday — BEFORE the no-punch skip below.
+    if (entry.holiday==='RH')      holPay += holidayExtra('RH', _worked);
+    else if (entry.holiday==='SH') holPay += holidayExtra('SH', _worked);
     if (!hasIn && !hasOut) continue;
 
     // Get employee's assigned shift for this day
@@ -1350,8 +1365,6 @@ function getDTRTotals(periodKey, empId) {
     late     += c.late;
     ut       += c.ut;
     breakHrs += c.breakHrs;
-    if (entry.holiday==='RH')      holPay += rate * (+settings.rh||2.0);
-    else if (entry.holiday==='SH') holPay += rate * (+settings.sh||1.30);
     ded += ((c.late + c.ut)/60) * hourlyRate;
   }
   return {days, ot:+ot.toFixed(2), nd:+nd.toFixed(2), late, ut, holPay:+holPay.toFixed(2), ded:+ded.toFixed(2), breakHrs:+breakHrs.toFixed(2)};
@@ -2769,7 +2782,15 @@ function loadDTR() { // loadDTR — loads DTR for selected employee and period
         <option value="SH" ${entry.holiday==='SH'?'selected':''}>Special Holiday</option>
         <option value="RD" ${entry.holiday==='RD'?'selected':''}>Rest Day</option>
       </select></td>
-      <td style="font-size:12px;">${entry.holiday?'₱'+fmt(entry.holiday==='RH'?(emp?.rate||0)*(+settings.rh||2):(emp?.rate||0)*(+settings.sh||1.3)):'—'}</td>
+      <td style="font-size:12px;">${(function(){
+        if(!entry.holiday||(entry.holiday!=='RH'&&entry.holiday!=='SH')) return '—';
+        const r=emp?.rate||0;
+        const worked=(entry.in&&String(entry.in).includes(':')&&entry.out&&String(entry.out).includes(':'));
+        let extra=0;
+        if(entry.holiday==='RH') extra = worked ? r*((+settings.rh||2)-1) : r*1.0;
+        else if(entry.holiday==='SH') extra = worked ? r*((+settings.sh||1.3)-1) : 0;
+        return '₱'+fmt(extra);
+      })()}</td>
       <td style="color:var(--red);font-size:12px;">${c.late>0||c.ut>0?'₱'+fmt(((c.late+c.ut)/60)*((emp?.rate||0)/(+settings.hours||8))):'—'}</td>
     </tr>`;
   }
