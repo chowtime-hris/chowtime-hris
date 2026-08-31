@@ -99,7 +99,7 @@ tbody td{padding:9px 11px;}
 .modal-box h2{font-family:'Syne',sans-serif;font-size:18px;margin-bottom:16px;}
 @media(max-width:600px){nav.tabs{padding:5px 10px;}.kpi-value{font-size:20px;}.panel{padding:14px;}}
 </style>
-<!-- BUILD:20260901-060000 -->
+<!-- BUILD:20260901-063000 -->
 </head>
 <body>
 
@@ -267,7 +267,7 @@ tbody td{padding:9px 11px;}
         <thead><tr>
           <th>Date</th><th>Day</th>
           <th>Time In</th><th>Break Start</th><th>Break End</th><th>Time Out</th>
-          <th>Hours</th><th>Late (min)</th><th>OT (hrs)</th><th>Holiday</th><th>Status</th>
+          <th>Hours</th><th>Late (min)</th><th>OT (hrs)</th><th>Holiday</th><th>Shift</th><th>Status</th>
         </tr></thead>
         <tbody id="editor-tbody"></tbody>
       </table>
@@ -1806,6 +1806,23 @@ function loadDTREditor() {
         <option value="SH" ${entry.holiday==='SH'?'selected':''}>Special Holiday</option>
         <option value="RD" ${entry.holiday==='RD'?'selected':''}>Rest Day</option>
       </select></td>
+      <td>${(function(){
+        const defs = Array.isArray(shiftDefs) ? shiftDefs : Object.values(shiftDefs||{});
+        // What is assigned for THIS date (date override, else pattern).
+        const assigned = getEmpShiftForDay(empId, dt.getDay(), dateStr);
+        const curId = (assigned==='REST') ? 'REST'
+          : (assigned && assigned.id) ? assigned.id : '';
+        let opts = '<option value="">— follow schedule —</option>'
+          + '<option value="REST"'+(curId==='REST'?' selected':'')+'>😴 Rest Day</option>';
+        defs.forEach(function(sd){
+          if(!sd || !sd.id) return;
+          opts += '<option value="'+sd.id+'"'+(curId===sd.id?' selected':'')+'>'
+            + (sd.name||sd.id) + (sd.start&&sd.end?(' ('+sd.start+'–'+sd.end+')'):'') + '</option>';
+        });
+        return '<select class="dtr-select" style="padding:3px;border:1px solid var(--border);border-radius:5px;font-size:11px;" '
+          + 'onchange="quickEditShift(\''+empId+'\',\''+dateStr+'\',this.value,\''
+          + ((emp&&emp.name)||'').replace(/'/g,"") + '\')">' + opts + '</select>';
+      })()}</td>
       <td>${isAuto?'<span class="tag tag-orange">⚡ Auto</span>':entry.in?'<span class="tag tag-green">✓ Manual</span>':'<span style="color:var(--muted);font-size:11px;">No entry</span>'}</td>
     </tr>`;
   }
@@ -2239,8 +2256,12 @@ function quickEditShift(empId, dateStr, value, empName) {
   save('empShifts', empShifts);
   syncShiftsToFirebase();
   showToastAdmin && showToastAdmin(`✅ ${empName} schedule updated for ${dateStr}!`);
-  // Re-render weekly schedule to reflect change
-  renderWeeklySchedule();
+  // Re-render whichever screen is open so the change shows at once.
+  try{ renderWeeklySchedule(); }catch(e){}
+  const active = document.querySelector('.page.active');
+  if(active && active.id==='page-dtr-editor' && typeof loadDTREditor==='function') loadDTREditor();
+  if(active && active.id==='page-dtr' && typeof loadDTR==='function') loadDTR();
+  if(typeof computeAllPayroll==='function') computeAllPayroll();
 }
 window.quickEditShift = quickEditShift;
 
