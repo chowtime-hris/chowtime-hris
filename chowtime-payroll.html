@@ -99,7 +99,7 @@ tbody td{padding:9px 11px;}
 .modal-box h2{font-family:'Syne',sans-serif;font-size:18px;margin-bottom:16px;}
 @media(max-width:600px){nav.tabs{padding:5px 10px;}.kpi-value{font-size:20px;}.panel{padding:14px;}}
 </style>
-<!-- BUILD:20260901-050000 -->
+<!-- BUILD:20260901-053000 -->
 </head>
 <body>
 
@@ -4133,8 +4133,32 @@ function clearKioskLog() {
 // payroll. This walks every kiosk punch and fills the matching DTR field ONLY
 // when it is blank, so it never overwrites a time already entered by hand.
 function syncKioskToDTR() {
-  const logs = load('kioskLog') || [];
-  if(!logs.length){ toast('No kiosk entries to sync.'); return; }
+  if(!(window._fbDB && window._fbFns)){ alert('Not connected to the database yet — wait a moment and try again.'); return; }
+  // Read the ENTIRE kioskLog tree (every day bucket), not just today's local
+  // copy — the missing punches are on past days that are not in localStorage.
+  const {ref,get} = window._fbFns;
+  const dbref = ref(window._fbDB, 'kioskLog');
+  const finish = (logs)=>_applyKioskSync(logs);
+  if(get){
+    get(dbref).then(snap=>{
+      const tree = snap.val() || {};
+      const all = [];
+      Object.keys(tree).forEach(day=>{
+        const bucket = tree[day];
+        if(bucket && typeof bucket==='object'){
+          Object.values(bucket).forEach(e=>{ if(e) all.push(e); });
+        }
+      });
+      finish(all);
+    }).catch(e=>alert('Could not read the kiosk log: '+e.message));
+  } else {
+    // Fallback: older SDK without get() — use the today-only local copy.
+    finish(load('kioskLog') || []);
+  }
+}
+
+function _applyKioskSync(logs){
+  if(!logs || !logs.length){ alert('No kiosk punches found to sync.'); return; }
   const fmap = {in:'in', out:'out', bstart:'bstart', bend:'bend'};
   let filled = 0, skipped = 0, noPeriod = 0;
   const touched = [];
@@ -4167,9 +4191,10 @@ function syncKioskToDTR() {
     const empId = document.getElementById('dtr-emp') && document.getElementById('dtr-emp').value;
     if(empId) loadDTR();
   }
-  toast('✓ Synced '+filled+' punch(es) into DTR'
-    + (skipped? ' · '+skipped+' already had a time' : '')
-    + (noPeriod? ' · '+noPeriod+' had no payroll period' : ''));
+  alert('✓ Synced '+filled+' punch(es) into DTR'
+    + (skipped? '\n· '+skipped+' already had a time (left as is)' : '')
+    + (noPeriod? '\n· '+noPeriod+' had no matching payroll period' : '')
+    + (filled? '\n\nOpen the DTR to see them — payroll has been recomputed.' : ''));
 }
 
 function renderClockMonitor() {
@@ -4395,7 +4420,7 @@ window.emailPayslip = emailPayslip;
 <!-- Firebase multi-branch sync for HRIS admin -->
 <script type="module">
 import{initializeApp}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
-import{getDatabase,ref,set,onValue,remove}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js';
+import{getDatabase,ref,set,onValue,remove,get}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js';
 
 // ── Firebase config — hardcoded so it never needs localStorage ──
 // ─── TENANTS ─────────────────────────────────────────────
@@ -4647,7 +4672,7 @@ try {
   }
   const db = getDatabase(app);
   window._fbDB  = db;
-  window._fbFns = { ref, set, remove };
+  window._fbFns = { ref, set, remove, get };
   window._fbConnected = true;
   updateFirebaseBadge(true);
   setTimeout(()=>updateFirebaseBadge(true), 1000);
