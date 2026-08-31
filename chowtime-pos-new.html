@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260831-130000 -->
+<!-- BUILD:20260831-143000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -8462,7 +8462,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260831-130000";
+const BUILD = "20260831-143000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -14074,7 +14074,9 @@ function App(){
     const t=setTimeout(()=>{
       try{
         const el=document.getElementById("po-detail-panel");
-        if(el)el.scrollIntoView({behavior:"smooth",block:"start"});
+        // "nearest" only nudges when the panel is off-screen and never pushes
+        // the page to the top — "start" was shoving the header out of view.
+        if(el)el.scrollIntoView({behavior:"smooth",block:"nearest"});
       }catch(e){}
     },80);
     return ()=>clearTimeout(t);
@@ -23968,11 +23970,80 @@ function App(){
                         discrepancyApprovedAt:serverTimestamp()
                       });
 
+                      // OVERAGE: any line where the branch received MORE than
+                      // was issued. The extra is already in their stock (posted
+                      // above at receivedQty), so it is NOT free — a new PO bills
+                      // them for it: "branch owes Main", the mirror of a shortage.
+                      const _over=lines.filter(function(i){
+                        const exp=(i.expectedQty!=null)?i.expectedQty
+                          :(i.actualQty!=null?i.actualQty:(i.qty||0));
+                        return (Number(i.receivedQty)||0) > Number(exp);
+                      });
+                      let _overPO=null;
+                      if(_over.length){
+                        const _overItems=_over.map(function(i){
+                          const exp=(i.expectedQty!=null)?i.expectedQty
+                            :(i.actualQty!=null?i.actualQty:(i.qty||0));
+                          const extra=(Number(i.receivedQty)||0)-Number(exp);
+                          return {id:i.id,name:i.name,unit:i.unit||"",
+                            qty:extra,price:Number(i.price)||0,cost:Number(i.cost)||0,
+                            packUnit:i.packUnit||"",packSize:Number(i.packSize)||0};
+                        });
+                        const _overTotal=_overItems.reduce(function(a,i){
+                          return a+((Number(i.qty)||0)*(Number(i.price)||0));},0);
+                        let _hi=0;
+                        try{
+                          const _sn=await getDocs(query(collection(db,"advances"),
+                            where("branch","==",po.branch)));
+                          _sn.docs.forEach(function(d){
+                            const a=d.data();
+                            if(a._type!=="po")return;
+                            const mm=/-PO-(\d+)$/.exec(String(a.poNum||""));
+                            if(mm)_hi=Math.max(_hi,parseInt(mm[1],10)||0);
+                          });
+                        }catch(e){}
+                        const _bc=(po.branch||"").toUpperCase().replace(/^CT-/,"").replace(/^CFFC-/,"");
+                        const _num=_bc+"-PO-"+String(_hi+1).padStart(4,"0");
+                        try{
+                          await addDoc(collection(db,"advances"),{
+                            _type:"po", poNum:_num,
+                            branch:po.branch, branchName:po.branchName||po.branch,
+                            items:noUndef(_overItems),
+                            deliveredItems:noUndef(_overItems.map(function(i){
+                              return Object.assign({},i,{actualQty:i.qty,
+                                total:(Number(i.qty)||0)*(Number(i.price)||0),
+                                discrepancy:0});})),
+                            date:localDate(),
+                            notes:"Overage on "+po.poNum
+                              +" — branch received more than issued and kept it.",
+                            totalAmount:_overTotal,
+                            status:"paid",            // goods delivered already
+                            deliveryStatus:"Delivered",
+                            mainDeducted:true, stockIssued:true,  // stock already moved on the parent
+                            paymentStatus:"Unpaid",   // branch OWES this
+                            owedBy:"branch",          // BRANCH owes MAIN
+                            owedReason:"overage",
+                            parentPO:po.poNum||"",
+                            vatType:po.vatType||"novat",
+                            requestedBy:user.name,
+                            createdFrom:"overage_approve",
+                            timestamp:serverTimestamp()
+                          });
+                          _overPO=_num;
+                        }catch(e){ console.warn("overage PO failed",e); }
+                      }
+
                       await notify(db,{to:po.branch,type:"success",
-                        title:"Shortage approved — "+po.poNum,
+                        title:"Discrepancy settled — "+po.poNum,
                         message:"Bill corrected to ₱"+peso(newTotal)
                           +(credit>0?" (₱"+peso(credit)+" less)":"")
-                          +(alreadyPosted?"." :". "+added+" item(s) added to your stock."),
+                          +(alreadyPosted?"." :". "+added+" item(s) added to your stock.")
+                          +(_overPO?" You received extra — new PO "+_overPO
+                             +" bills you ₱"+peso(_over.reduce(function(a,i){
+                               const exp=(i.expectedQty!=null)?i.expectedQty
+                                 :(i.actualQty!=null?i.actualQty:(i.qty||0));
+                               return a+(((Number(i.receivedQty)||0)-Number(exp))*(Number(i.price)||0));},0))
+                             +" for it.":""),
                         page:"stock_order",ref:po.poNum,by:user.name});
 
                       showT(po.poNum+" settled — bill ₱"+peso(newTotal)
