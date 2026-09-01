@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260901-180000 -->
+<!-- BUILD:20260901-190000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -8489,7 +8489,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260901-180000";
+const BUILD = "20260901-190000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -23619,7 +23619,35 @@ function App(){
                       ),
                       open&&po.discrepancyNotes&&h("div",{style:{fontSize:12,
                         color:C.muted,marginTop:6,fontStyle:"italic"}},
-                        "Note: "+po.discrepancyNotes)
+                        "Note: "+po.discrepancyNotes),
+                      // Settlement computation: worth received vs DR worth.
+                      open&&(function(){
+                        let dr=0,rc=0;
+                        rows.forEach(function(r){
+                          const price=Number(r.price)||0;
+                          const exp=(r.drQty!=null?Number(r.drQty):Number(r.qty)||0);
+                          dr += exp*price;
+                          rc += (Number(r.receivedQty)||0)*price;
+                        });
+                        dr=Math.round(dr*100)/100; rc=Math.round(rc*100)/100;
+                        const net=Math.round((rc-dr)*100)/100;
+                        return h("div",{style:{marginTop:8,padding:"8px 10px",
+                          background:net<0?"#FFEBEE":net>0?"#E3F2FD":"#F1F8E9",
+                          borderRadius:7,fontSize:12.5}},
+                          h("div",{style:{display:"flex",justifyContent:"space-between"}},
+                            h("span",{style:{color:C.muted}},"Worth received"),
+                            h("b",null,"₱"+peso(rc))),
+                          h("div",{style:{display:"flex",justifyContent:"space-between"}},
+                            h("span",{style:{color:C.muted}},"Worth per DR"),
+                            h("b",null,"₱"+peso(dr))),
+                          h("div",{style:{display:"flex",justifyContent:"space-between",
+                            marginTop:3,paddingTop:3,borderTop:"1px solid rgba(0,0,0,.08)",
+                            fontWeight:800,
+                            color:net<0?C.danger:net>0?C.info:C.success}},
+                            h("span",null,net<0?"Refund to branch"
+                              :net>0?"Branch pays Main":"Matched — nothing to settle"),
+                            h("span",null,net===0?"":"₱"+peso(Math.abs(net)))));
+                      })()
                     );
                   })(),
 
@@ -24020,154 +24048,38 @@ function App(){
                         discrepancyApprovedAt:serverTimestamp()
                       });
 
-                      // SHORTAGE: any line where the branch received LESS than
-                      // issued. The branch paid the parent in full but got less,
-                      // so a new PO records what Main still owes them:
-                      // "Main owes branch", the mirror of the overage below.
-                      const _shortLines=lines.filter(function(i){
+                      // Settlement figure (no auto follow-up PO — removed per Norman).
+                      // Compare the WORTH of what was received against the DR/ordered
+                      // worth, so it is clear whether Main owes the branch a refund
+                      // (short) or the branch owes Main (over). Details are already
+                      // shown line by line; this is just the peso bottom line.
+                      let _drWorth=0, _recvWorth=0;
+                      lines.forEach(function(i){
                         const exp=(i.expectedQty!=null)?i.expectedQty
                           :(i.actualQty!=null?i.actualQty:(i.qty||0));
-                        return (Number(i.receivedQty)||0) < Number(exp);
+                        const price=Number(i.price)||0;
+                        _drWorth   += Number(exp)*price;
+                        _recvWorth += (Number(i.receivedQty)||0)*price;
                       });
-                      let _shortPO=null;
-                      // Guard against a double-press making a second follow-up:
-                      // if this PO already spawned one, do not make another.
-                      if(_shortLines.length && !_d.shortPO){
-                        const _shortItems=_shortLines.map(function(i){
-                          const exp=(i.expectedQty!=null)?i.expectedQty
-                            :(i.actualQty!=null?i.actualQty:(i.qty||0));
-                          const missing=Number(exp)-(Number(i.receivedQty)||0);
-                          return {id:i.id,name:i.name,unit:i.unit||"",
-                            qty:missing,price:Number(i.price)||0,cost:Number(i.cost)||0,
-                            packUnit:i.packUnit||"",packSize:Number(i.packSize)||0};
-                        });
-                        const _shortTotal=_shortItems.reduce(function(a,i){
-                          return a+((Number(i.qty)||0)*(Number(i.price)||0));},0);
-                        let _hiS=0;
-                        try{
-                          const _snS=await getDocs(query(collection(db,"advances"),
-                            where("branch","==",po.branch)));
-                          _snS.docs.forEach(function(d){
-                            const a=d.data();
-                            if(a._type!=="po")return;
-                            const mm=/-PO-(\d+)$/.exec(String(a.poNum||""));
-                            if(mm)_hiS=Math.max(_hiS,parseInt(mm[1],10)||0);
-                          });
-                        }catch(e){}
-                        const _bcS=(po.branch||"").toUpperCase().replace(/^CT-/,"").replace(/^CFFC-/,"");
-                        const _numS=_bcS+"-PO-"+String(_hiS+1).padStart(4,"0");
-                        try{
-                          await addDoc(collection(db,"advances"),{
-                            _type:"po", poNum:_numS,
-                            branch:po.branch, branchName:po.branchName||po.branch,
-                            items:noUndef(_shortItems),
-                            deliveredItems:noUndef(_shortItems.map(function(i){
-                              return Object.assign({},i,{actualQty:0,
-                                total:0,discrepancy:0});})),  // not yet delivered
-                            date:localDate(),
-                            notes:"Shortage on "+po.poNum
-                              +" — branch paid in full but received less; Main owes the rest.",
-                            totalAmount:0,               // already paid on the parent
-                            status:"processing",         // still to be fulfilled by Main
-                            deliveryStatus:"Pending",
-                            paymentStatus:"Paid",         // no new charge
-                            owedBy:"main",               // MAIN owes the BRANCH
-                            owedReason:"shortage",
-                            parentPO:po.poNum||"",
-                            vatType:po.vatType||"novat",
-                            requestedBy:user.name,
-                            createdFrom:"shortage_approve",
-                            timestamp:serverTimestamp()
-                          });
-                          _shortPO=_numS;
-                          // Stamp the parent so a second approve can't duplicate it.
-                          try{ await updateDoc(doc(db,"advances",po._docId),{shortPO:_numS}); }catch(e){}
-                        }catch(e){ console.warn("shortage PO failed",e); }
-                      }
-
-                      // OVERAGE: any line where the branch received MORE than
-                      // was issued. The extra is already in their stock (posted
-                      // above at receivedQty), so it is NOT free — a new PO bills
-                      // them for it: "branch owes Main", the mirror of a shortage.
-                      const _over=lines.filter(function(i){
-                        const exp=(i.expectedQty!=null)?i.expectedQty
-                          :(i.actualQty!=null?i.actualQty:(i.qty||0));
-                        return (Number(i.receivedQty)||0) > Number(exp);
-                      });
-                      let _overPO=null;
-                      if(_over.length && !_d.overPO){
-                        const _overItems=_over.map(function(i){
-                          const exp=(i.expectedQty!=null)?i.expectedQty
-                            :(i.actualQty!=null?i.actualQty:(i.qty||0));
-                          const extra=(Number(i.receivedQty)||0)-Number(exp);
-                          return {id:i.id,name:i.name,unit:i.unit||"",
-                            qty:extra,price:Number(i.price)||0,cost:Number(i.cost)||0,
-                            packUnit:i.packUnit||"",packSize:Number(i.packSize)||0};
-                        });
-                        const _overTotal=_overItems.reduce(function(a,i){
-                          return a+((Number(i.qty)||0)*(Number(i.price)||0));},0);
-                        let _hi=0;
-                        try{
-                          const _sn=await getDocs(query(collection(db,"advances"),
-                            where("branch","==",po.branch)));
-                          _sn.docs.forEach(function(d){
-                            const a=d.data();
-                            if(a._type!=="po")return;
-                            const mm=/-PO-(\d+)$/.exec(String(a.poNum||""));
-                            if(mm)_hi=Math.max(_hi,parseInt(mm[1],10)||0);
-                          });
-                        }catch(e){}
-                        const _bc=(po.branch||"").toUpperCase().replace(/^CT-/,"").replace(/^CFFC-/,"");
-                        const _num=_bc+"-PO-"+String(_hi+1).padStart(4,"0");
-                        try{
-                          await addDoc(collection(db,"advances"),{
-                            _type:"po", poNum:_num,
-                            branch:po.branch, branchName:po.branchName||po.branch,
-                            items:noUndef(_overItems),
-                            deliveredItems:noUndef(_overItems.map(function(i){
-                              return Object.assign({},i,{actualQty:i.qty,
-                                total:(Number(i.qty)||0)*(Number(i.price)||0),
-                                discrepancy:0});})),
-                            date:localDate(),
-                            notes:"Overage on "+po.poNum
-                              +" — branch received more than issued and kept it.",
-                            totalAmount:_overTotal,
-                            status:"paid",            // goods delivered already
-                            deliveryStatus:"Delivered",
-                            mainDeducted:true, stockIssued:true,  // stock already moved on the parent
-                            paymentStatus:"Unpaid",   // branch OWES this
-                            owedBy:"branch",          // BRANCH owes MAIN
-                            owedReason:"overage",
-                            parentPO:po.poNum||"",
-                            vatType:po.vatType||"novat",
-                            requestedBy:user.name,
-                            createdFrom:"overage_approve",
-                            timestamp:serverTimestamp()
-                          });
-                          _overPO=_num;
-                          try{ await updateDoc(doc(db,"advances",po._docId),{overPO:_num}); }catch(e){}
-                        }catch(e){ console.warn("overage PO failed",e); }
-                      }
+                      _drWorth=Math.round(_drWorth*100)/100;
+                      _recvWorth=Math.round(_recvWorth*100)/100;
+                      const _settle=Math.round((_recvWorth-_drWorth)*100)/100; // <0 short (refund to branch); >0 over (branch pays)
 
                       await notify(db,{to:po.branch,type:"success",
                         title:"Discrepancy settled — "+po.poNum,
-                        message:"Bill corrected to ₱"+peso(newTotal)
-                          +(credit>0?" (₱"+peso(credit)+" less)":"")
-                          +(alreadyPosted?"." :". "+added+" item(s) added to your stock.")
-                          +(_shortPO?" Main owes you the shortage — follow-up PO "
-                             +_shortPO+" (already paid, for delivery).":"")
-                          +(_overPO?" You received extra — new PO "+_overPO
-                             +" bills you ₱"+peso(_over.reduce(function(a,i){
-                               const exp=(i.expectedQty!=null)?i.expectedQty
-                                 :(i.actualQty!=null?i.actualQty:(i.qty||0));
-                               return a+(((Number(i.receivedQty)||0)-Number(exp))*(Number(i.price)||0));},0))
-                             +" for it.":""),
+                        message:"Received worth ₱"+peso(_recvWorth)+" vs DR ₱"+peso(_drWorth)+". "
+                          +(_settle<0
+                              ? "Main owes you a refund of ₱"+peso(-_settle)+" (short delivery)."
+                              : _settle>0
+                                ? "You owe Main ₱"+peso(_settle)+" (received more than the DR)."
+                                : "Fully matched — nothing to settle.")
+                          +(alreadyPosted?"" :" "+added+" item(s) added to your stock."),
                         page:"stock_order",ref:po.poNum,by:user.name});
 
-                      showT(po.poNum+" settled — bill ₱"+peso(newTotal)
-                        +(alreadyPosted
-                            ? " (stock was already posted earlier)"
-                            : ", "+added+" item(s) in stock"));
+                      showT(po.poNum+" settled — received ₱"+peso(_recvWorth)+" vs DR ₱"+peso(_drWorth)
+                        +(_settle<0?" · refund ₱"+peso(-_settle)+" to branch"
+                          :_settle>0?" · branch pays ₱"+peso(_settle)
+                          :" · matched"));
                      }catch(err){
                        console.error("approve discrepancy:",err);
                        showT("Approve failed: "
