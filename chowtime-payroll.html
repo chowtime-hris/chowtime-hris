@@ -99,7 +99,7 @@ tbody td{padding:9px 11px;}
 .modal-box h2{font-family:'Syne',sans-serif;font-size:18px;margin-bottom:16px;}
 @media(max-width:600px){nav.tabs{padding:5px 10px;}.kpi-value{font-size:20px;}.panel{padding:14px;}}
 </style>
-<!-- BUILD:20260901-140000 -->
+<!-- BUILD:20260901-150000 -->
 </head>
 <body>
 
@@ -1295,11 +1295,20 @@ function computeDTRRow(entry, shiftSched) {
   let ot = outM > otStartM ? +((outM - otStartM) / 60).toFixed(2) : 0;
   const nd = outM > 22*60 ? +((outM - 22*60) / 60).toFixed(2) : 0;
 
-  // OT for EVERY shift, straight or not, comes only from clocking out past
-  // shift end + the 1h buffer (the `ot` computed above). A long straight shift
-  // is a long REGULAR shift, not automatic OT — a crew who works their
-  // scheduled Straight 9AM-8PM and leaves at 8PM did no overtime. Overtime
-  // still requires actually staying past shift end + buffer.
+  // STRAIGHT DUTY OT (Sep 1 rule): a straight shift earns OT for the hours
+  // worked beyond the standard day plus the 1h buffer. workedHrs is measured
+  // from SHIFT START (paidStartM), so clocking in early can never inflate it —
+  // that was the earlier bug. No break is deducted on straight, matching the
+  // shift definition. Non-straight shifts keep the clock-out-past-end OT above.
+  if (isStraight) {
+    const stdHrs = (+settings.hours || 8);
+    const capHrs = stdHrs + (otBuffer / 60);   // standard day + 1h buffer
+    if (workedHrs > capHrs) {
+      const straightOT = +(workedHrs - stdHrs).toFixed(2);  // OT counts from the standard day, buffer just delays the trigger
+      ot = +(ot + straightOT).toFixed(2);
+      workedHrs = stdHrs;   // regular capped at the standard day; the rest is OT
+    }
+  }
 
   return {hrs:workedHrs, late, ut, ot, nd, breakHrs:breakMins/60, prepMins:prepMin, paidDutyHrs, status:'complete'};
 }
