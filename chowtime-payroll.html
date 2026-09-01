@@ -99,7 +99,7 @@ tbody td{padding:9px 11px;}
 .modal-box h2{font-family:'Syne',sans-serif;font-size:18px;margin-bottom:16px;}
 @media(max-width:600px){nav.tabs{padding:5px 10px;}.kpi-value{font-size:20px;}.panel{padding:14px;}}
 </style>
-<!-- BUILD:20260901-130000 -->
+<!-- BUILD:20260901-133000 -->
 </head>
 <body>
 
@@ -3203,19 +3203,33 @@ function deleteLoan(i){
   } else { setTimeout(()=>{_loanSaving=false;},8000); renderLoans(); }
 }
 function resetLoanBalance(i){
-  const principal = +(loans[i].amount || 0);
-  const before = loanBalanceOf(loans[i]);
-  loans[i].status='Active'; loans[i].balance=principal;
-  logLedger(loans[i], 'balance-reset', principal - before, before, principal, 'Balance reset to principal');
-  save('loans',loans); _loanSaving=true;
+  const loan = loans[i];
+  const principal = +(loan.amount || 0);
+  const before = loanBalanceOf(loan);
+  if(!confirm('Reset this loan to its full principal (\u20b1'+fmt(principal)+')?\n\n'
+    +'This also CLEARS its recorded cut-off deductions, so it can be deducted '
+    +'again cleanly — use this to fix a loan that shows "Deducted" but whose '
+    +'balance never went down.')) return;
+  loan.status='Active'; loan.balance=principal;
+  // Drop this loan's deduction rows so wasDeductedInPeriod() no longer blocks
+  // a fresh deduction. Keep other loans' history and non-deduction rows.
+  if(loan.id){
+    loanLedger = loanLedger.filter(e =>
+      !(e.loanId === loan.id &&
+        (e.action === 'cutoff-deduction' || e.action === 'manual-deduction')));
+  }
+  logLedger(loan, 'balance-reset', principal - before, before, principal, 'Balance reset to principal; deductions cleared');
+  save('loans',loans); save('loanLedger',loanLedger); _loanSaving=true;
+  const done = ()=>{ setTimeout(()=>{_loanSaving=false;},8000); renderLoans(); showToastAdmin&&showToastAdmin(`✅ Reset to ₱${principal.toFixed(2)}`); };
+  const fail = e=>{ _loanSaving=false; renderLoans();
+    alert('⚠ Reset did NOT save to the database — it will come back on refresh.\n\n'
+      +((e&&e.code)||(e&&e.message)||e)+'\n\nLikely the loans rules block this app.'); };
   if(window._fbDB&&window._fbFns){
-    window._fbFns.set(window._fbFns.ref(window._fbDB,'loans'),loans)
-      .then(()=>{ setTimeout(()=>{_loanSaving=false;},8000); renderLoans(); showToastAdmin&&showToastAdmin(`✅ Reset to ₱${principal.toFixed(2)}`); })
-      .catch(e=>{ _loanSaving=false; renderLoans();
-        alert('⚠ Reset did NOT save to the database — it will come back on '
-          +'refresh.\n\n'+((e&&e.code)||(e&&e.message)||e)
-          +'\n\nLikely the loans rules block this app.'); });
-  } else { setTimeout(()=>{_loanSaving=false;},8000); renderLoans(); showToastAdmin&&showToastAdmin(`✅ Reset to ₱${principal.toFixed(2)}`); }
+    Promise.all([
+      window._fbFns.set(window._fbFns.ref(window._fbDB,'loans'),loans),
+      window._fbFns.set(window._fbFns.ref(window._fbDB,'loanLedger'),loanLedger)
+    ]).then(done).catch(fail);
+  } else { done(); }
 }
 let _deductNowIdx = -1;
 function openDeductNow(i) {
