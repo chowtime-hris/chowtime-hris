@@ -99,7 +99,7 @@ tbody td{padding:9px 11px;}
 .modal-box h2{font-family:'Syne',sans-serif;font-size:18px;margin-bottom:16px;}
 @media(max-width:600px){nav.tabs{padding:5px 10px;}.kpi-value{font-size:20px;}.panel{padding:14px;}}
 </style>
-<!-- BUILD:20260901-153000 -->
+<!-- BUILD:20260901-200000 -->
 </head>
 <body>
 
@@ -339,6 +339,7 @@ tbody td{padding:9px 11px;}
       <button class="btn btn-primary" onclick="computeAllPayroll()">⚡ Compute All</button>
       <button class="btn btn-success" onclick="releasePayroll()">🔒 Release &amp; Log This Cut-off</button>
       <button class="btn btn-secondary" onclick="exportPayroll()">📥 Export CSV</button>
+      <button class="btn btn-primary" style="background:#8E24AA;" onclick="recordSalariesToPOS()">🏪 Record salaries to POS (Expense + Cash In)</button>
     </div>
     <div id="payroll-release-banner"></div>
     <div class="table-wrap">
@@ -3690,6 +3691,80 @@ function releasePayroll(){
 }
 window.releasePayroll = releasePayroll;
 
+// Record each employee's GROSS salary into the POS as (1) an Expense and (2) a
+// Cash In, per branch. Cash In matches the gross because the salary is paid out
+// of the branch's remitted cash — without it the drawer reads short. Loans/CA
+// are NOT taken from the cash box, so both figures use GROSS, not net. Manual:
+// pressed only when the cut-off is final. Guarded so a second press cannot
+// double-post the same period.
+async function recordSalariesToPOS(){
+  if(!(window._posFS && window._posFns)){
+    alert('Not connected to the POS database yet. Wait a moment and try again.'); return;
+  }
+  const p = getPeriod();
+  const pKey = p.key, pLabel = p.label || pKey;
+  const posted = load('salaryPostedToPOS') || {};
+  if(posted[pKey]){
+    if(!confirm('Salaries for '+pLabel+' were already recorded to the POS on '
+      + new Date(posted[pKey].at).toLocaleString()
+      + '.\n\nRecord AGAIN? This will create duplicate expense + cash-in entries.')) return;
+  }
+  // Build gross per employee, skipping anyone with no pay or no branch.
+  const rows = employees
+    .filter(e => e && e.id)
+    .map(e => { try { return {emp:e, r:buildPayrollRow(e, pKey, {preview:true})}; } catch(err){ return null; } })
+    .filter(x => x && (x.r.gross||0) > 0);
+  const noBranch = rows.filter(x => !x.emp.branch);
+  const payable  = rows.filter(x => x.emp.branch);
+  if(!payable.length){
+    alert('No employees with a branch and gross pay for '+pLabel+'.'
+      + (noBranch.length ? '\n\n'+noBranch.length+' have gross pay but NO branch set — assign a branch first.' : ''));
+    return;
+  }
+  const grand = payable.reduce((a,x)=>a+(x.r.gross||0),0);
+  if(!confirm('Record '+payable.length+' salary expense(s) + matching cash-in to the POS for '
+    + pLabel + '?\n\nTotal gross: ₱'+grand.toLocaleString(undefined,{minimumFractionDigits:2})
+    + (noBranch.length ? '\n\n('+noBranch.length+' skipped — no branch set)' : '')
+    + '\n\nCash In is added so the drawer is not short. Loans/CA are not taken from cash, so both use GROSS.')) return;
+
+  const { collection, addDoc, serverTimestamp } = window._posFns;
+  const fs = window._posFS;
+  const todayStr = toLocalDateStr(new Date());
+  let okE = 0, okC = 0, failed = 0;
+  for(const x of payable){
+    const br = x.emp.branch;
+    const gross = Math.round((x.r.gross||0)*100)/100;
+    const name = x.emp.name || x.emp.id;
+    try{
+      await addDoc(collection(fs,'expenses'), {
+        branch: br, cat: 'Salary', desc: 'Salary — '+name+' ('+pLabel+')',
+        amount: gross, date: todayStr, fromDrawer: true, enteredOn: todayStr,
+        by: 'Payroll', status: 'approved',
+        salaryPeriod: pKey, salaryEmpId: x.emp.id, source: 'payroll',
+        timestamp: serverTimestamp()
+      });
+      okE++;
+      await addDoc(collection(fs,'cash_log'), {
+        branch: br, type: 'in', desc: 'Salary payout — '+name+' ('+pLabel+')',
+        amount: gross, date: todayStr,
+        time: new Date().toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit'}),
+        by: 'Payroll', salaryPeriod: pKey, salaryEmpId: x.emp.id, source: 'payroll',
+        timestamp: serverTimestamp(), at: serverTimestamp()
+      });
+      okC++;
+    }catch(e){ failed++; console.warn('POS post failed for', name, e); }
+  }
+  posted[pKey] = { at: Date.now(), count: okE, total: grand, by: 'Payroll' };
+  save('salaryPostedToPOS', posted);
+  alert('Done for '+pLabel+':\n\n'
+    + okE+' salary expense(s) recorded\n'
+    + okC+' cash-in entr(ies) recorded\n'
+    + (failed ? failed+' FAILED — check connection and retry\n' : '')
+    + '\nTotal gross: ₱'+grand.toLocaleString(undefined,{minimumFractionDigits:2}));
+}
+window.recordSalariesToPOS = recordSalariesToPOS;
+
+
 // ── Loan history modal ─────────────────────────────────────
 function openLoanHistory(i){
   const l = loans[i];
@@ -4791,6 +4866,28 @@ try {
   window._fbDB  = db;
   window._fbFns = { ref, set, remove, get };
   window._fbConnected = true;
+
+  // ── POS Firestore (separate project) so payroll can record salary as a POS
+  //    expense + cash-in. Loaded lazily; failure here never blocks payroll.
+  try{
+    const POS_CFG = {
+      apiKey:            "AIzaSyBESg7q6sAapwavECcJLx72OPnc8SxOCJc",
+      authDomain:        "chowtime-pos.firebaseapp.com",
+      projectId:         "chowtime-pos",
+      storageBucket:     "chowtime-pos.firebasestorage.app",
+      messagingSenderId: "446140959237",
+      appId:             "1:446140959237:web:c58f75db697223ef33ea6c"
+    };
+    const { initializeApp:initPos, getApp:getPosApp } =
+      await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js');
+    const { getFirestore, collection, addDoc, getDocs, query, where, serverTimestamp } =
+      await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
+    let posApp;
+    try { posApp = initPos(POS_CFG, 'pos'); }
+    catch(e){ posApp = getPosApp('pos'); }
+    window._posFS  = getFirestore(posApp);
+    window._posFns = { collection, addDoc, getDocs, query, where, serverTimestamp };
+  }catch(e){ console.warn('POS Firestore not connected:', e && e.message); }
   updateFirebaseBadge(true);
   setTimeout(()=>updateFirebaseBadge(true), 1000);
   setTimeout(()=>updateFirebaseBadge(true), 3000);
