@@ -99,7 +99,7 @@ tbody td{padding:9px 11px;}
 .modal-box h2{font-family:'Syne',sans-serif;font-size:18px;margin-bottom:16px;}
 @media(max-width:600px){nav.tabs{padding:5px 10px;}.kpi-value{font-size:20px;}.panel{padding:14px;}}
 </style>
-<!-- BUILD:20260901-133000 -->
+<!-- BUILD:20260901-140000 -->
 </head>
 <body>
 
@@ -3035,10 +3035,17 @@ function renderLoans(){
           <button class="btn btn-sm btn-secondary" style="margin-left:4px;" title="History" onclick="openLoanHistory(${i})">📜</button>
           <button class="btn btn-sm btn-secondary" style="margin-left:3px;" title="Edit" onclick="editLoan(${i})">✏️</button>
           ${l.status==='Paid'
-            ? `<button class="btn btn-sm btn-secondary" style="margin-left:3px;" onclick="resetLoanBalance(${i})">↩️ Reset</button>`
+            ? ``
             : `<button class="btn btn-sm btn-primary" style="margin-left:3px;background:#e67e22;" onclick="openDeductNow(${i})">💳 Deduct</button>
                <button class="btn btn-sm btn-success" style="margin-left:3px;" onclick="markLoanPaid(${i})">✓ Paid</button>`
           }
+          <button class="btn btn-sm btn-secondary" style="margin-left:3px;" title="Reset to full principal and clear this loan's recorded deductions" onclick="resetLoanBalance(${i})">↩️ Reset</button>
+          ${(function(){
+            const n = recordedDeductions(l, p.key).length;
+            return n > 1
+              ? `<span class="tag tag-red" title="This loan was deducted ${n} times this cut-off — Reset then Deduct once to fix" style="margin-left:4px;">⚠ ${n}× deducted</span>`
+              : '';
+          })()}
           <button class="btn btn-sm btn-danger" style="margin-left:3px;" onclick="deleteLoan(${i})">🗑</button>
         </td>
     </tr>`;}).join('')||'<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--muted);">No loans recorded.</td></tr>';
