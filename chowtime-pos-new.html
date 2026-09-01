@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260901-170000 -->
+<!-- BUILD:20260901-180000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -8489,7 +8489,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260901-170000";
+const BUILD = "20260901-180000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -23972,10 +23972,44 @@ function App(){
                         }catch(e2){console.error("approve→stock",it.id,e2);}
                       }
 
+                      // 1b. Reconcile MAIN to the actual delivery, since Main was
+                      // debited the ISSUED qty at Deduct time. Only when this PO
+                      // was deducted from Main and is going to a branch (not a
+                      // Main-to-Main record), and never twice (guarded by
+                      // stockPosted / mainAdjusted).
+                      if(!alreadyPosted && !isMainDest && (_d.mainDeducted||_d.stockIssued) && !_d.mainAdjusted){
+                        for(const it of corrected){
+                          const got=Number(it.qty)||0;
+                          const iss=(it.issuedQty!=null)?Number(it.issuedQty)
+                            :(it.correctedFrom!=null?Number(it.correctedFrom):got);
+                          const delta=iss-got;   // >0 short: give back to Main; <0 over: take more
+                          if(!it.id||!delta)continue;
+                          try{
+                            const mref=doc(db,"inventory",it.id);
+                            const mcur=await getDoc(mref);
+                            if(mcur.exists()){
+                              const mprev=Number(mcur.data().stock)||0;
+                              await updateDoc(mref,{stock:increment(delta),
+                                lastRestocked:serverTimestamp()});
+                              await addDoc(collection(db,"inventory_log"),{
+                                itemId:it.id,itemName:it.name||it.id,unit:it.unit||"",
+                                type:delta>0?"add":"deduct",amount:Math.abs(delta),
+                                prevStock:mprev,newStock:Math.round((mprev+delta)*1000)/1000,
+                                desc:(delta>0?"Returned to Main (short delivery): ":"Taken from Main (over delivery): ")
+                                  +Math.abs(delta)+" "+(it.unit||"")+" · "+po.poNum,
+                                source:"TRANSFER",ref:po.poNum||"",
+                                branch:"ct-main",by:user.name,
+                                date:localDate(),timestamp:serverTimestamp(),at:serverTimestamp()});
+                            }
+                          }catch(eM){console.error("approve→main reconcile",it.id,eM);}
+                        }
+                      }
+
                       // 2. the PO now reads as what was actually delivered
                       await updateDoc(doc(db,"advances",po._docId),{
                         status:"completed",
                         stockPosted:true,
+                        mainAdjusted:true,
                         items:noUndef(corrected),
                         deliveredItems:noUndef(corrected),
                         receivedItems:noUndef(corrected),
