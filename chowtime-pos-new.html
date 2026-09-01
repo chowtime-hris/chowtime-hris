@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260831-143000 -->
+<!-- BUILD:20260901-160000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -3116,25 +3116,52 @@ function DRCheckForm({po,db,branchId,user,showT,INIT_INVENTORY,setAdvances,advan
             h("div",{style:{display:"flex",alignItems:"center",gap:7}},
               h("button",{onClick:()=>setReceivedQtys(p=>({...p,[ item.id]:Math.max(0,(p[ item.id]??drQty)-(Number( item.packSize)||1))})),
                 style:{width:26,height:26,borderRadius:6,border:"1px solid "+C.border,background:"#fff",cursor:"pointer",fontSize:14,fontWeight:900}},"−"),
-              h("div",{style:{minWidth:104,textAlign:"center"}},
+              h("div",{style:{minWidth:hasPack?150:104,textAlign:"center"}},
                 h("div",{style:{fontWeight:900,fontSize:13,
                   color:diff<0?C.danger:diff>0?C.info:C.success}},packs(received)),
-                // The +/- buttons move a whole pack at a time, so a delivery of
-                // 42 packs and 4 loose pieces could not be entered at all — the
-                // crew could reach 42 or 43 and nothing between. What actually
-                // arrived is typed here, in base units, and read back as packs
-                // above.
-                h("input",{type:"number",inputMode:"decimal",
-                  value:received,
-                  onChange:e=>{
-                    const v=e.target.value;
-                    setReceivedQtys(p=>({...p,[ item.id]:v===""?0:(parseFloat(v)||0)}));
-                  },
-                  onFocus:e=>e.target.select(),
-                  style:{width:96,marginTop:3,padding:"4px 6px",textAlign:"center",
-                    border:"1px solid "+C.border,borderRadius:6,fontSize:12,
-                    fontFamily:"inherit",outline:"none"}}),
-                h("div",{style:{fontSize:10,color:"#9A9A9A",marginTop:1}},
+                // Enter what arrived the way it arrives: for packed items, a
+                // PACKS box and a LOOSE box, so nobody has to multiply 42×48 by
+                // hand. The stored value is packs*size + loose in base units, so
+                // stock/lots/BOM are unchanged. Unpacked items keep one box.
+                hasPack
+                  ? (function(){
+                      const sz=packSizeOf( item)||1;
+                      const pk=Math.floor((received||0)/sz);
+                      const ls=+((received||0)-pk*sz).toFixed(2);
+                      const setPL=(nP,nL)=>{
+                        const val=(Number(nP)||0)*sz+(Number(nL)||0);
+                        setReceivedQtys(p=>({...p,[ item.id]:val}));
+                      };
+                      return h("div",{style:{display:"flex",gap:4,justifyContent:"center",marginTop:3}},
+                        h("div",null,
+                          h("input",{type:"number",inputMode:"numeric",value:pk,
+                            onChange:e=>setPL(e.target.value,ls),
+                            onFocus:e=>e.target.select(),
+                            style:{width:52,padding:"4px 4px",textAlign:"center",
+                              border:"1px solid "+C.border,borderRadius:6,fontSize:12,
+                              fontFamily:"inherit",outline:"none"}}),
+                          h("div",{style:{fontSize:9,color:"#9A9A9A"}},packUnitOf( item)||"pack")),
+                        h("div",{style:{alignSelf:"center",fontSize:12,color:C.muted}},"+"),
+                        h("div",null,
+                          h("input",{type:"number",inputMode:"decimal",value:ls,
+                            onChange:e=>setPL(pk,e.target.value),
+                            onFocus:e=>e.target.select(),
+                            style:{width:52,padding:"4px 4px",textAlign:"center",
+                              border:"1px solid "+C.border,borderRadius:6,fontSize:12,
+                              fontFamily:"inherit",outline:"none"}}),
+                          h("div",{style:{fontSize:9,color:"#9A9A9A"}},( item.unit||"pc"))));
+                    })()
+                  : h("input",{type:"number",inputMode:"decimal",
+                      value:received,
+                      onChange:e=>{
+                        const v=e.target.value;
+                        setReceivedQtys(p=>({...p,[ item.id]:v===""?0:(parseFloat(v)||0)}));
+                      },
+                      onFocus:e=>e.target.select(),
+                      style:{width:96,marginTop:3,padding:"4px 6px",textAlign:"center",
+                        border:"1px solid "+C.border,borderRadius:6,fontSize:12,
+                        fontFamily:"inherit",outline:"none"}}),
+                !hasPack&&h("div",{style:{fontSize:10,color:"#9A9A9A",marginTop:1}},
                    item.unit||"")),
               h("button",{onClick:()=>setReceivedQtys(p=>({...p,[ item.id]:(p[ item.id]??drQty)+(Number( item.packSize)||1)})),
                 style:{width:26,height:26,borderRadius:6,border:`1px solid ${C.primary}`,background:"#F3E9F7",cursor:"pointer",fontWeight:900,color:C.primary,fontSize:14}},"+"),
@@ -8462,7 +8489,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260831-143000";
+const BUILD = "20260901-160000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -14066,21 +14093,10 @@ function App(){
   const [snapSaving,setSnapSaving]=useState(false);
   const [addLogs,setAddLogs]=useState([]);              // arrivals, for lot dating
   const [poOpen,setPoOpen]=useState("");                 // expanded PO row
-  // When a PO row is opened, scroll its detail panel into view — the panel
-  // renders below the whole table, so without this the user had to scroll down
-  // to find it. A short delay lets the panel render first.
-  useEffect(()=>{
-    if(!poOpen)return;
-    const t=setTimeout(()=>{
-      try{
-        const el=document.getElementById("po-detail-panel");
-        // "nearest" only nudges when the panel is off-screen and never pushes
-        // the page to the top — "start" was shoving the header out of view.
-        if(el)el.scrollIntoView({behavior:"smooth",block:"nearest"});
-      }catch(e){}
-    },80);
-    return ()=>clearTimeout(t);
-  },[poOpen]);
+  // (Auto-scroll to the PO detail was removed — every scrollIntoView variant
+  // pushed the page header out of view because the scroll container is the page
+  // itself, and it needed a refresh to come back. The proper fix is to render
+  // the detail INLINE under the clicked row, which is a separate careful task.)
   const [editSub,setEditSub]=useState(null);             // subscription being edited
   const [payingId,setPayingId]=useState(null);           // subscription write in flight
   const [subLogFor,setSubLogFor]=useState(null);         // branch whose payments are open
