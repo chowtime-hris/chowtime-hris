@@ -99,7 +99,7 @@ tbody td{padding:9px 11px;}
 .modal-box h2{font-family:'Syne',sans-serif;font-size:18px;margin-bottom:16px;}
 @media(max-width:600px){nav.tabs{padding:5px 10px;}.kpi-value{font-size:20px;}.panel{padding:14px;}}
 </style>
-<!-- BUILD:20260902-031000 -->
+<!-- BUILD:20260902-050000 -->
 </head>
 <body>
 
@@ -3727,12 +3727,21 @@ async function recordSalariesToPOS(){
     + (noBranch.length ? '\n\n('+noBranch.length+' skipped — no branch set)' : '')
     + '\n\nCash In is added so the drawer is not short. Loans/CA are not taken from cash, so both use GROSS.')) return;
 
-  alert('STEP 1: past both confirms. posFS='+(window._posFS?'yes':'NO')+' posFns='+(window._posFns?'yes':'NO')+' payable='+payable.length);
   let okE = 0, okC = 0, failed = 0, firstErr = '';
   try{
     const { collection, addDoc, serverTimestamp } = window._posFns;
     const fs = window._posFS;
-    alert('STEP 2: got fns. collection='+(typeof collection)+' addDoc='+(typeof addDoc)+' serverTimestamp='+(typeof serverTimestamp));
+    // Resolve a branch NAME (how payroll stores emp.branch) to the POS branch ID
+    // that the POS filters on. Try id match first, then name, then a slug.
+    const brToId = (b)=>{
+      if(!b) return b;
+      const list = (typeof posBranches!=='undefined' && posBranches) ? posBranches : [];
+      const byId   = list.find(x=>x && (x.id===b));
+      if(byId) return byId.id;
+      const byName = list.find(x=>x && String(x.name).toLowerCase()===String(b).toLowerCase());
+      if(byName && byName.id) return byName.id;
+      return b;   // fall back to whatever was stored
+    };
     const todayStr = toLocalDateStr(new Date());
     // A blocked Firestore write can hang instead of rejecting; race each write
     // against a timeout so one stuck write cannot freeze the whole run silently.
@@ -3740,7 +3749,7 @@ async function recordSalariesToPOS(){
       pr, new Promise((_,rej)=>setTimeout(()=>rej(new Error('timed out — likely blocked by rules')), ms))
     ]);
     for(const x of payable){
-      const br = x.emp.branch;
+      const br = brToId(x.emp.branch);
       const gross = Math.round((x.r.gross||0)*100)/100;
       const name = x.emp.name || x.emp.id;
       try{
@@ -3752,7 +3761,6 @@ async function recordSalariesToPOS(){
           timestamp: serverTimestamp()
         }), 8000);
         okE++;
-        if(okE===1) alert('STEP 3: first expense write SUCCEEDED');
         await withTimeout(addDoc(collection(fs,'cash_log'), {
           branch: br, type: 'in', desc: 'Salary payout — '+name+' ('+pLabel+')',
           amount: gross, date: todayStr,
@@ -3763,8 +3771,7 @@ async function recordSalariesToPOS(){
         okC++;
       }catch(e){
         failed++;
-        if(!firstErr){ firstErr = String((e&&e.code)||(e&&e.message)||e);
-          alert('STEP 3-FAIL: first write failed → '+firstErr); }
+        if(!firstErr){ firstErr = String((e&&e.code)||(e&&e.message)||e); }
         console.warn('POS post failed for', name, e);
       }
     }
