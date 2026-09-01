@@ -99,7 +99,7 @@ tbody td{padding:9px 11px;}
 .modal-box h2{font-family:'Syne',sans-serif;font-size:18px;margin-bottom:16px;}
 @media(max-width:600px){nav.tabs{padding:5px 10px;}.kpi-value{font-size:20px;}.panel{padding:14px;}}
 </style>
-<!-- BUILD:20260901-123000 -->
+<!-- BUILD:20260901-130000 -->
 </head>
 <body>
 
@@ -4956,15 +4956,18 @@ onValue(ref(db,'payrollLog'), snap => {
 onValue(ref(db,'loans'), snap => {
   if (_loanSaving) return; // blocked — save in progress
   const data = snap.val();
-  if (data !== null && data !== undefined) {
-    const arr = Array.isArray(data) ? data : Object.values(data);
-    if (arr.length > 0) {
-      loans = arr;
-      save('loans', loans);
-      const active = document.querySelector('.page.active');
-      if (active?.id === 'page-loans') renderLoans();
-    }
-  }
+  // Firebase is authoritative here. Accept whatever it holds — INCLUDING an
+  // empty list — so deleting the last loan sticks. Previously an empty result
+  // was ignored (`arr.length > 0`), which made deletes reappear on refresh.
+  // A null snapshot (node never written) is the only "keep what we have" case.
+  if (data === null || data === undefined) return;
+  const arr = Array.isArray(data)
+    ? data.filter(x=>x)                 // Firebase arrays can have holes
+    : Object.values(data);
+  loans = arr;
+  save('loans', loans);
+  const active = document.querySelector('.page.active');
+  if (active?.id === 'page-loans') renderLoans();
 });
 
 // ── Pull settings from Firebase ────────────────────────────
