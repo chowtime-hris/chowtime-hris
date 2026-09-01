@@ -99,7 +99,7 @@ tbody td{padding:9px 11px;}
 .modal-box h2{font-family:'Syne',sans-serif;font-size:18px;margin-bottom:16px;}
 @media(max-width:600px){nav.tabs{padding:5px 10px;}.kpi-value{font-size:20px;}.panel{padding:14px;}}
 </style>
-<!-- BUILD:20260901-150000 -->
+<!-- BUILD:20260901-153000 -->
 </head>
 <body>
 
@@ -2302,8 +2302,27 @@ function copyWeekToMonth(){
              : (bFilter ? employees.filter(e=>e&&e.branch===bFilter) : employees.filter(e=>e&&e.id));
   if(!crew.length){ alert('No crew in this view.'); return; }
 
-  // The month is taken from the Monday of the shown week.
-  const year=start.getFullYear(), month=start.getMonth();
+  // Figure out which month to fill. A week can straddle two months (e.g. the
+  // week of Aug 31 runs into September). Collect the distinct months the week
+  // touches; if there is more than one, ask which to fill so nothing is guessed.
+  const monthsInWeek = [];
+  srcDates.forEach(d=>{
+    const key = d.getFullYear()+'-'+d.getMonth();
+    if(!monthsInWeek.some(m=>m.key===key))
+      monthsInWeek.push({key, year:d.getFullYear(), month:d.getMonth(),
+        label:d.toLocaleDateString('en-PH',{month:'long',year:'numeric'})});
+  });
+  let target = monthsInWeek[0];
+  if(monthsInWeek.length > 1){
+    const choice = prompt(
+      'This week covers more than one month. Which month should be filled?\n\n'
+      + monthsInWeek.map((m,i)=>(i+1)+') '+m.label).join('\n')
+      + '\n\nType the number:', String(monthsInWeek.length));  // default = the later month
+    const idx = parseInt(choice,10) - 1;
+    if(isNaN(idx) || !monthsInWeek[idx]) return;   // cancelled or invalid
+    target = monthsInWeek[idx];
+  }
+  const year=target.year, month=target.month;
   const lastDay=new Date(year,month+1,0).getDate();
   const today=midnight(new Date());
 
@@ -2329,7 +2348,7 @@ function copyWeekToMonth(){
   }
   if(!targets.length){ alert('No upcoming days left in this month outside the selected week.'); return; }
 
-  const label=start.toLocaleDateString('en-PH',{month:'long',year:'numeric'});
+  const label=new Date(year,month,1).toLocaleDateString('en-PH',{month:'long',year:'numeric'});
   if(!confirm('Copy the week of '+toLocalDateStr(start)+' across '+label+'?\n\n'
       +'Crew: '+crew.length+(bFilter&&bFilter!=='__none'?' in '+bFilter:'')+'\n'
       +'Days to fill: '+targets.length+' ('+toLocalDateStr(targets[0])+' to '+toLocalDateStr(targets[targets.length-1])+')\n\n'
