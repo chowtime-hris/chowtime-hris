@@ -99,7 +99,7 @@ tbody td{padding:9px 11px;}
 .modal-box h2{font-family:'Syne',sans-serif;font-size:18px;margin-bottom:16px;}
 @media(max-width:600px){nav.tabs{padding:5px 10px;}.kpi-value{font-size:20px;}.panel{padding:14px;}}
 </style>
-<!-- BUILD:20260901-200000 -->
+<!-- BUILD:20260902-030000 -->
 </head>
 <body>
 
@@ -3727,35 +3727,55 @@ async function recordSalariesToPOS(){
     + (noBranch.length ? '\n\n('+noBranch.length+' skipped — no branch set)' : '')
     + '\n\nCash In is added so the drawer is not short. Loans/CA are not taken from cash, so both use GROSS.')) return;
 
-  const { collection, addDoc, serverTimestamp } = window._posFns;
-  const fs = window._posFS;
-  const todayStr = toLocalDateStr(new Date());
-  let okE = 0, okC = 0, failed = 0;
-  for(const x of payable){
-    const br = x.emp.branch;
-    const gross = Math.round((x.r.gross||0)*100)/100;
-    const name = x.emp.name || x.emp.id;
-    try{
-      await addDoc(collection(fs,'expenses'), {
-        branch: br, cat: 'Salary', desc: 'Salary — '+name+' ('+pLabel+')',
-        amount: gross, date: todayStr, fromDrawer: true, enteredOn: todayStr,
-        by: 'Payroll', status: 'approved',
-        salaryPeriod: pKey, salaryEmpId: x.emp.id, source: 'payroll',
-        timestamp: serverTimestamp()
-      });
-      okE++;
-      await addDoc(collection(fs,'cash_log'), {
-        branch: br, type: 'in', desc: 'Salary payout — '+name+' ('+pLabel+')',
-        amount: gross, date: todayStr,
-        time: new Date().toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit'}),
-        by: 'Payroll', salaryPeriod: pKey, salaryEmpId: x.emp.id, source: 'payroll',
-        timestamp: serverTimestamp(), at: serverTimestamp()
-      });
-      okC++;
-    }catch(e){ failed++; console.warn('POS post failed for', name, e); }
+  let okE = 0, okC = 0, failed = 0, firstErr = '';
+  try{
+    const { collection, addDoc, serverTimestamp } = window._posFns;
+    const fs = window._posFS;
+    const todayStr = toLocalDateStr(new Date());
+    // A blocked Firestore write can hang instead of rejecting; race each write
+    // against a timeout so one stuck write cannot freeze the whole run silently.
+    const withTimeout = (pr, ms) => Promise.race([
+      pr, new Promise((_,rej)=>setTimeout(()=>rej(new Error('timed out — likely blocked by rules')), ms))
+    ]);
+    for(const x of payable){
+      const br = x.emp.branch;
+      const gross = Math.round((x.r.gross||0)*100)/100;
+      const name = x.emp.name || x.emp.id;
+      try{
+        await withTimeout(addDoc(collection(fs,'expenses'), {
+          branch: br, cat: 'Salary', desc: 'Salary — '+name+' ('+pLabel+')',
+          amount: gross, date: todayStr, fromDrawer: true, enteredOn: todayStr,
+          by: 'Payroll', status: 'approved',
+          salaryPeriod: pKey, salaryEmpId: x.emp.id, source: 'payroll',
+          timestamp: serverTimestamp()
+        }), 8000);
+        okE++;
+        await withTimeout(addDoc(collection(fs,'cash_log'), {
+          branch: br, type: 'in', desc: 'Salary payout — '+name+' ('+pLabel+')',
+          amount: gross, date: todayStr,
+          time: new Date().toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit'}),
+          by: 'Payroll', salaryPeriod: pKey, salaryEmpId: x.emp.id, source: 'payroll',
+          timestamp: serverTimestamp(), at: serverTimestamp()
+        }), 8000);
+        okC++;
+      }catch(e){
+        failed++;
+        if(!firstErr) firstErr = String((e&&e.code)||(e&&e.message)||e);
+        console.warn('POS post failed for', name, e);
+      }
+    }
+    if(okE>0) { posted[pKey] = { at: Date.now(), count: okE, total: grand, by: 'Payroll' }; save('salaryPostedToPOS', posted); }
+  }catch(fatal){
+    alert('Could not record salaries — '+String((fatal&&fatal.message)||fatal)
+      +'\n\nNothing was posted. Tell your developer.');
+    return;
   }
-  posted[pKey] = { at: Date.now(), count: okE, total: grand, by: 'Payroll' };
-  save('salaryPostedToPOS', posted);
+  if(failed && okE===0){
+    alert('None recorded for '+pLabel+' — all '+failed+' failed.\n\nReason: '+firstErr
+      +'\n\nMost likely the POS database rules block this app (it has no login). '
+      +'Tell your developer to allow expenses + cash_log writes.');
+    return;
+  }
   alert('Done for '+pLabel+':\n\n'
     + okE+' salary expense(s) recorded\n'
     + okC+' cash-in entr(ies) recorded\n'
