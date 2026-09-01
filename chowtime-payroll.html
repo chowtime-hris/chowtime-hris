@@ -99,7 +99,7 @@ tbody td{padding:9px 11px;}
 .modal-box h2{font-family:'Syne',sans-serif;font-size:18px;margin-bottom:16px;}
 @media(max-width:600px){nav.tabs{padding:5px 10px;}.kpi-value{font-size:20px;}.panel{padding:14px;}}
 </style>
-<!-- BUILD:20260901-080000 -->
+<!-- BUILD:20260901-123000 -->
 </head>
 <body>
 
@@ -2933,7 +2933,7 @@ function generatePayslip() {
   const emp = employees.find(e=>e.id===id);
   if (!emp || !pKey) return;
   const p = getPeriodDetails(pKey);
-  const r = buildPayrollRow(emp, pKey);
+  const r = buildPayrollRow(emp, pKey, {preview:true});
   const dtrNote = r.hasDTR
     ? ''
     : `<div class="alert alert-warn" style="margin-bottom:12px;">⚠️ No DTR entries found for this period. Enter attendance in the DTR tab first.</div>`;
@@ -3196,7 +3196,10 @@ function deleteLoan(i){
   if(window._fbDB&&window._fbFns){
     window._fbFns.set(window._fbFns.ref(window._fbDB,'loans'),loans)
       .then(()=>{ setTimeout(()=>{_loanSaving=false;},8000); renderLoans(); })
-      .catch(e=>{ _loanSaving=false; console.warn(e); renderLoans(); });
+      .catch(e=>{ _loanSaving=false; renderLoans();
+        alert('⚠ Delete did NOT save to the database — it will come back on '
+          +'refresh.\n\n'+((e&&e.code)||(e&&e.message)||e)
+          +'\n\nLikely the loans rules block this app. Tell your developer.'); });
   } else { setTimeout(()=>{_loanSaving=false;},8000); renderLoans(); }
 }
 function resetLoanBalance(i){
@@ -3208,7 +3211,10 @@ function resetLoanBalance(i){
   if(window._fbDB&&window._fbFns){
     window._fbFns.set(window._fbFns.ref(window._fbDB,'loans'),loans)
       .then(()=>{ setTimeout(()=>{_loanSaving=false;},8000); renderLoans(); showToastAdmin&&showToastAdmin(`✅ Reset to ₱${principal.toFixed(2)}`); })
-      .catch(e=>{ _loanSaving=false; console.warn(e); renderLoans(); });
+      .catch(e=>{ _loanSaving=false; renderLoans();
+        alert('⚠ Reset did NOT save to the database — it will come back on '
+          +'refresh.\n\n'+((e&&e.code)||(e&&e.message)||e)
+          +'\n\nLikely the loans rules block this app.'); });
   } else { setTimeout(()=>{_loanSaving=false;},8000); renderLoans(); showToastAdmin&&showToastAdmin(`✅ Reset to ₱${principal.toFixed(2)}`); }
 }
 let _deductNowIdx = -1;
