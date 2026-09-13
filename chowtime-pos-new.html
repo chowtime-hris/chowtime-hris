@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260910-140000 -->
+<!-- BUILD:20260911-100000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -5291,7 +5291,30 @@ function HRISBranchPage({user,branchId,curBranch,db,hrisDB,showT}){
 const EMOJI_LIST = ["🍗","🥩","🐟","🍖","🌭","🥟","🍝","🍚","🧋","🥤","🍌","🍳","🍱","🥗","🍜","🍛","🍲","🫔","🌮","🌯","🥪","🧆","🧇","🥞","🍔","🍟","🌽","🥕","🧅","🍄"];
 const CAT_LIST = ["Bestsellers","Silog Meals","Rice Toppings","Merienda","Drinks","Add-ons","Specials"];
 
-function MenuEditor({menuItems,setMenuItems,db,user,showT}){
+function MenuEditor({menuItems,setMenuItems,db,user,showT,allMenuCats,customMenuCats}){
+  // Live category list (built-ins + custom). Falls back to CAT_LIST if not passed.
+  const _cats = (allMenuCats && allMenuCats.length) ? allMenuCats : CAT_LIST;
+  const _custom = customMenuCats || [];
+  const [newMenuCat,setNewMenuCat]=useState("");
+  const _saveMenuCats=async(list)=>{
+    try{ await setDoc(doc(db,"settings","menu_cats"),
+      {cats:list.filter(c=>CAT_LIST.indexOf(c)<0)},{merge:true}); }catch(e){ showT("Failed to save category","err"); }
+  };
+  const _addMenuCat=async()=>{
+    const t=(newMenuCat||"").trim();
+    if(!t){return;}
+    if(_cats.some(c=>c.toLowerCase()===t.toLowerCase())){showT("Category already exists","warn");return;}
+    setNewMenuCat("");
+    await _saveMenuCats([..._cats,t]);
+    showT(t+" added ✓");
+  };
+  const _delMenuCat=async(cat)=>{
+    if(CAT_LIST.indexOf(cat)>=0){showT("Cannot delete a built-in category","warn");return;}
+    const inUse=(menuItems||[]).filter(i=>i&&i.cat===cat).length;
+    if(inUse>0 && !confirm(inUse+" item(s) use \""+cat+"\". Delete the category anyway? Those items keep the name but it won\'t be in the list.")) return;
+    await _saveMenuCats(_cats.filter(c=>c!==cat));
+    showT(cat+" deleted ✓");
+  };
   const [view,setView]         = useState("list");
   const [editItem,setEditItem] = useState(null);
   const [filterCat,setFilter]  = useState("All");
@@ -5411,7 +5434,7 @@ function MenuEditor({menuItems,setMenuItems,db,user,showT}){
     ),
     // Category filter tabs
     h("div",{style:{display:"flex",gap:0,borderBottom:"1px solid "+C.border,marginBottom:14,overflowX:"auto"}},
-      ["All",...CAT_LIST].map(c=>h("button",{key:c,onClick:()=>setFilter(c),
+      ["All",..._cats].map(c=>h("button",{key:c,onClick:()=>setFilter(c),
         style:{padding:"8px 14px",border:"none",background:"transparent",
           color:filterCat===c?C.primary:C.muted,
           fontWeight:filterCat===c?700:400,fontSize:13,cursor:"pointer",
@@ -5420,6 +5443,35 @@ function MenuEditor({menuItems,setMenuItems,db,user,showT}){
         c+" ("+(c==="All"?menuItems.length:menuItems.filter(i=>i.cat===c).length)+")"
       ))
     ),
+    // Manage menu categories — create / delete
+    h("div",{style:{background:"#FAFAFA",border:"1px solid "+C.border,
+      borderRadius:10,padding:"10px 12px",marginBottom:14}},
+      h("div",{style:{fontSize:12,fontWeight:800,color:C.muted,letterSpacing:1,
+        marginBottom:8}},"MENU CATEGORIES"),
+      h("div",{style:{display:"flex",gap:8,marginBottom:_custom.length?10:0}},
+        h("input",{value:newMenuCat,
+          onChange:e=>setNewMenuCat(e.target.value),
+          onKeyDown:e=>{if(e.key==="Enter")_addMenuCat();},
+          placeholder:"New category name…",
+          style:{flex:1,padding:"8px 11px",border:"1px solid "+C.border,
+            borderRadius:8,fontSize:13,outline:"none"}}),
+        h("button",{onClick:_addMenuCat,
+          style:{padding:"8px 16px",background:C.primary,border:"none",
+            borderRadius:8,color:"#fff",fontWeight:700,fontSize:13,cursor:"pointer"}},
+          "+ Add")),
+      _custom.length>0&&h("div",{style:{display:"flex",flexWrap:"wrap",gap:6}},
+        _custom.map(c=>h("span",{key:c,style:{display:"inline-flex",
+          alignItems:"center",gap:6,padding:"4px 6px 4px 11px",
+          background:"#EDE7F6",borderRadius:20,fontSize:12,fontWeight:600,
+          color:C.primary}},
+          c,
+          h("button",{onClick:()=>_delMenuCat(c),title:"Delete category",
+            style:{border:"none",background:"none",color:C.danger,
+              cursor:"pointer",fontSize:14,fontWeight:800,lineHeight:1,
+              padding:"0 2px"}},"×")))),
+      _custom.length===0&&h("div",{style:{fontSize:11,color:C.muted,
+        fontStyle:"italic",marginTop:2}},
+        "Built-in categories can\'t be deleted. Add your own above.")),
     // Item cards grid
     filtered.length===0
       ?h("div",{style:{textAlign:"center",padding:"40px",color:C.muted}},
@@ -5669,7 +5721,7 @@ function MenuEditor({menuItems,setMenuItems,db,user,showT}){
               h("div",{style:{fontSize:12,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"CATEGORY"),
               h("select",{value: item.cat,onChange:e=>setField("cat",e.target.value),
                 style:{width:"100%",padding:"9px",border:"1px solid "+C.border,borderRadius:7,fontSize:14,outline:"none"}},
-                CAT_LIST.map(c=>h("option",{key:c,value:c},c)))
+                _cats.map(c=>h("option",{key:c,value:c},c)))
             ),
 
             // Description
@@ -5701,7 +5753,7 @@ function MenuEditor({menuItems,setMenuItems,db,user,showT}){
             h("div",{style:{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 12px",background:C.bg,borderRadius:8,marginTop:8}},
               h("div",null,
                 h("div",{style:{fontSize:13,fontWeight:700}},"Main store only"),
-                h("div",{style:{fontSize:12,color:C.muted}},"Hide from franchisee POS — sold at Main only")
+                h("div",{style:{fontSize:12,color:C.muted}},"Sold at Main only — hidden from ALL branch POS (franchise and company-owned)")
               ),
               h("button",{onClick:()=>setField("mainOnly",! item.mainOnly),
                 style:{width:42,height:23,borderRadius:12,border:"none",
@@ -8493,7 +8545,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260910-140000";
+const BUILD = "20260911-100000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -14033,6 +14085,19 @@ function App(){
   // many. An empty dropdown says nothing about why it is empty.
   const [prodStatus,setProdStatus]=useState("connecting...");
   const [menuItems,setMenuItems]=useState(MENU_CATALOG);
+  // Editable menu categories = built-in CAT_LIST + any custom ones saved in
+  // settings/menu_cats. Used by the item editor dropdown and the filter tabs.
+  const [customMenuCats,setCustomMenuCats]=useState([]);
+  useEffect(()=>{
+    try{
+      const un=onSnapshot(doc(db,"settings","menu_cats"),snap=>{
+        const c=(snap.exists()&&Array.isArray(snap.data().cats))?snap.data().cats:[];
+        setCustomMenuCats(c.filter(x=>x&&CAT_LIST.indexOf(x)<0));
+      },()=>{});
+      return ()=>un();
+    }catch(e){}
+  },[]);
+  const allMenuCats=[...CAT_LIST,...customMenuCats];
   // POS
   const [cart,setCart]=useState([]);
   const [customizing,setCustomizing]=useState(null);
@@ -15143,10 +15208,13 @@ function App(){
       options:[],promos:[]
     }))
   ];
+  // Main-only items are the wholesale/retail stock Main itself sells. They must
+  // appear on the MAIN POS only (owner, or a Main manager/cashier) — never on
+  // any branch, whether franchised or company-owned. `_isMainPOS` is true when
+  // this account is operating as Main.
+  const _isMainPOS = (branchId==="ct-main" || branchId==="main" || user.role==="owner");
   const filtMenu=menuWithOverrides.filter(i=>
-    // Main-only items (wholesale/retail stock Main sells) never appear on a
-    // franchisee's POS — they are not the franchisee's to sell.
-    (!isFranchiseAcct || !i.mainOnly)
+    (_isMainPOS || !i.mainOnly)
     &&(menuCat==="All"||i.cat===menuCat)
     &&i.name.toLowerCase().includes(menuSrch.toLowerCase())&&i.avail);
   const sBg={pending:"#FFF8E1",preparing:"#E3F2FD",served:"#E8F5E9",cancelled:"#FFEBEE"};
@@ -22134,6 +22202,7 @@ function App(){
         // ══ MENU MGMT (Full Editor) ══
         page==="menu_mgmt"&&h(MenuEditor,{
           menuItems,setMenuItems,db,user,showT,
+          allMenuCats,customMenuCats,
           key:"menu_editor"
         }),
 
