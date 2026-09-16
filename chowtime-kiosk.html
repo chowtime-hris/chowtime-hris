@@ -141,7 +141,7 @@ body{font-family:'Inter',sans-serif;background:#FFFFFF;color:#111111;min-height:
 /* face loading */
 .model-loading{background:rgba(26,111,168,.1);border:1px solid rgba(26,111,168,.25);border-radius:10px;padding:10px 14px;font-size:12px;color:#6A1B9A;display:none;}
 </style>
-<!-- BUILD:20260916-091000 -->
+<!-- BUILD:20260916-092000 -->
 </head>
 <body>
 
@@ -1393,6 +1393,15 @@ if(!fbCfg?.apiKey||!fbCfg?.databaseURL){
         // with a fallback to the un-prefixed keys just in case.
         const localLog = JSON.parse(localStorage.getItem('ct_kioskLog')||localStorage.getItem('kioskLog')||'[]');
         const localDtr = JSON.parse(localStorage.getItem('ct_dtrData')||localStorage.getItem('dtrData')||'{}');
+        // TEMP on-screen trace (tablet has no console).
+        try{
+          const dtrKeys=Object.keys(localDtr).length;
+          let dtrDays=0; Object.keys(localDtr).forEach(function(k){dtrDays+=Object.keys(localDtr[k]||{}).length;});
+          alert('RECOVERY: local kioskLog entries='+localLog.length
+            +'\ndtrData keys='+dtrKeys+' (day-records='+dtrDays+')'
+            +'\nDB: '+(HARDCODED_FB_CFG.projectId||'?')
+            +'\n\nIf both are 0, this tablet\'s localStorage has no saved punches.');
+        }catch(_e){}
         if(!localLog.length && !Object.keys(localDtr).length) return;
         const fmap={in:'in',out:'out',bstart:'bstart',bend:'bend'};
         // 1) DTR: re-assert every local in/out/break to its fixed path. set() is
@@ -1430,7 +1439,8 @@ if(!fbCfg?.apiKey||!fbCfg?.databaseURL){
             }
           }
         }
-        if(dtrPushed||logPushed) console.log('[kiosk] recovered local punches → dtr:'+dtrPushed+' log:'+logPushed);
+        alert('RECOVERY DONE → DTR pushed:'+dtrPushed+' · kioskLog pushed:'+logPushed
+          +'\nDB: '+(HARDCODED_FB_CFG.databaseURL||'?'));
       }catch(e){ console.warn('recoverLocalPunches',e); }
     })();
 
@@ -1630,7 +1640,7 @@ if(!fbCfg?.apiKey||!fbCfg?.databaseURL){
     // — which build, which database, which branch it thinks it is, how many
     // people it can see — was only answerable by standing in front of it.
     const BRANCH=fbCfg.branch||'Kiosk';
-    const KIOSK_BUILD = '20260916-091000';
+    const KIOSK_BUILD = '20260916-092000';
     const hb=()=>set(ref(db,`devices/${BRANCH.replace(/[^a-zA-Z0-9]/g,'_')}`),{
       name:BRANCH, lastSeen:Date.now(), type:'kiosk', online:true,
       build:KIOSK_BUILD,
