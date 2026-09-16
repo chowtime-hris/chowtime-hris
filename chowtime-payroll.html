@@ -266,8 +266,13 @@ tbody td{padding:9px 11px;}
       <table>
         <thead><tr>
           <th>Date</th><th>Day</th>
-          <th>Time In</th><th>Break Start</th><th>Break End</th><th>Time Out</th>
-          <th>Hours</th><th>Late (min)</th><th>OT (hrs)</th><th>Holiday</th><th>Shift</th><th>Status</th>
+          <th>Time In</th>
+          <th style="background:#c73b08;">Break Start</th>
+          <th style="background:#c73b08;">Break End</th>
+          <th style="background:#c73b08;">Break (hrs)</th>
+          <th>Time Out</th>
+          <th>Hours</th><th>Late (min)</th><th>UT (min)</th><th>OT (hrs)</th><th>ND (hrs)</th>
+          <th>Holiday</th><th>Holiday Pay</th><th>Deduction</th><th>Shift</th><th>Status</th>
         </tr></thead>
         <tbody id="editor-tbody"></tbody>
       </table>
@@ -1795,6 +1800,9 @@ function loadDTREditor() {
       <td><input class="dtr-input" type="time" value="${entry.bend||''}"
           onchange="adminEditDTR('${dateStr}','bend',this.value,'${empId}','${periodKey}')"
           style="background:#fff8e1;border:1px solid #f0a500;border-radius:5px;padding:4px;font-size:12px;"></td>
+      <td style="background:#fff8e1;color:var(--muted);text-align:center;font-size:12px;">${
+        schedule && ((schedule.name||schedule.label||'').toUpperCase().includes('STRAIGHT')) ? '0h straight' : '1h auto'
+      }</td>
       <td><input class="dtr-input" type="time" value="${entry.out||''}"
           onchange="adminEditDTR('${dateStr}','out',this.value,'${empId}','${periodKey}')"
           style="border:1px solid #C0392B;border-radius:5px;padding:4px;font-size:12px;"></td>
@@ -1804,7 +1812,9 @@ function loadDTREditor() {
           : (entry.in&&entry.out)?c.hrs+'h':'—'
       }</td>
       <td style="color:${c.late>0?'var(--red)':'var(--muted)'};">${c.late>0?c.late+'m':'—'}</td>
+      <td style="color:var(--red);">${c.ut>0?c.ut+'m':'—'}</td>
       <td style="color:var(--blue);">${c.ot>0?c.ot+'h':'—'}</td>
+      <td>${c.nd>0?c.nd+'h':'—'}</td>
       <td><select class="dtr-select" onchange="adminEditDTR('${dateStr}','holiday',this.value,'${empId}','${periodKey}')"
           style="padding:3px;border:1px solid var(--border);border-radius:5px;font-size:11px;">
         <option value="">—</option>
@@ -1812,6 +1822,16 @@ function loadDTREditor() {
         <option value="SH" ${entry.holiday==='SH'?'selected':''}>Special Holiday</option>
         <option value="RD" ${entry.holiday==='RD'?'selected':''}>Rest Day</option>
       </select></td>
+      <td style="font-size:12px;">${(function(){
+        if(!entry.holiday||(entry.holiday!=='RH'&&entry.holiday!=='SH')) return '—';
+        const r=emp?.rate||0;
+        const worked=(entry.in&&String(entry.in).includes(':')&&entry.out&&String(entry.out).includes(':'));
+        let extra=0;
+        if(entry.holiday==='RH') extra = worked ? r*((+settings.rh||2)-1) : r*1.0;
+        else if(entry.holiday==='SH') extra = worked ? r*((+settings.sh||1.3)-1) : 0;
+        return '₱'+fmt(extra);
+      })()}</td>
+      <td style="color:var(--red);font-size:12px;">${c.late>0||c.ut>0?'₱'+fmt(((c.late+c.ut)/60)*((emp?.rate||0)/(+settings.hours||8))):'—'}</td>
       <td>${(function(){
         const defs = Array.isArray(shiftDefs) ? shiftDefs : Object.values(shiftDefs||{});
         // What is assigned for THIS date (date override, else pattern).
