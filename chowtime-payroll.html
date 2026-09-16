@@ -99,7 +99,7 @@ tbody td{padding:9px 11px;}
 .modal-box h2{font-family:'Syne',sans-serif;font-size:18px;margin-bottom:16px;}
 @media(max-width:600px){nav.tabs{padding:5px 10px;}.kpi-value{font-size:20px;}.panel{padding:14px;}}
 </style>
-<!-- BUILD:20260902-050000 -->
+<!-- BUILD:20260916-100000 -->
 </head>
 <body>
 
@@ -1959,10 +1959,19 @@ function deleteShiftDef(idx) {
   syncShiftsToFirebase(); renderShiftDefs();
 }
 
+let _shiftSaving = false;
 function syncShiftsToFirebase() {
   if(window._fbDB&&window._fbFns){
+    _shiftSaving = true;
     window._fbFns.set(window._fbFns.ref(window._fbDB,'shiftDefs'),shiftDefs).catch(e=>console.warn(e));
-    window._fbFns.set(window._fbFns.ref(window._fbDB,'empShifts'),empShifts).catch(e=>console.warn(e));
+    window._fbFns.set(window._fbFns.ref(window._fbDB,'empShifts'),empShifts)
+      .then(()=>{ setTimeout(()=>{_shiftSaving=false;}, 4000); })
+      .catch(e=>{
+        _shiftSaving=false;
+        alert('⚠ Shift change did NOT save — it will revert on refresh.\n\n'
+          +((e&&e.code)||(e&&e.message)||e)
+          +'\n\nLikely the empShifts rules block this app.');
+      });
   }
 }
 
@@ -5028,6 +5037,7 @@ onValue(ref(db,'shiftDefs'), snap => {
   }
 });
 onValue(ref(db,'empShifts'), snap => {
+  if (_shiftSaving) return;   // don't clobber a change still being written
   const data = snap.val();
   if (data) {
     empShifts = data;
