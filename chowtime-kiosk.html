@@ -141,7 +141,7 @@ body{font-family:'Inter',sans-serif;background:#FFFFFF;color:#111111;min-height:
 /* face loading */
 .model-loading{background:rgba(26,111,168,.1);border:1px solid rgba(26,111,168,.25);border-radius:10px;padding:10px 14px;font-size:12px;color:#6A1B9A;display:none;}
 </style>
-<!-- BUILD:20260901-070000 -->
+<!-- BUILD:20260916-090000 -->
 </head>
 <body>
 
@@ -1384,6 +1384,54 @@ if(!fbCfg?.apiKey||!fbCfg?.databaseURL){
     window._fbDB=db; window._fbFns={ref,push,set};
     window.setLoadingProgress && window.setLoadingProgress(65,'Loading employees…');
 
+    // ── RECOVER PUNCHES STUCK IN LOCALSTORAGE ────────────────────────
+    // Runs once per connect, in the background. Any local punch not yet in
+    // Firebase (e.g. made while kioskLog was blocked by rules) is pushed now.
+    (async function recoverLocalPunches(){
+      try{
+        const localLog = JSON.parse(localStorage.getItem('kioskLog')||'[]');
+        const localDtr = JSON.parse(localStorage.getItem('dtrData')||'{}');
+        if(!localLog.length && !Object.keys(localDtr).length) return;
+        const fmap={in:'in',out:'out',bstart:'bstart',bend:'bend'};
+        // 1) DTR: re-assert every local in/out/break to its fixed path. set() is
+        //    idempotent, so re-writing an already-synced time changes nothing.
+        let dtrPushed=0;
+        for(const dKey of Object.keys(localDtr)){
+          const days = localDtr[dKey]||{};
+          for(const dateStr of Object.keys(days)){
+            const rec = days[dateStr]||{};
+            for(const f of ['in','out','bstart','bend']){
+              if(rec[f]){
+                try{ await set(ref(db,`dtrData/${dKey}/${dateStr}/${f}`), rec[f]); dtrPushed++; }catch(e){}
+              }
+            }
+          }
+        }
+        // 2) kioskLog: for each day, if the online bucket has fewer entries than
+        //    the local log for that day, push the local ones that are missing
+        //    (matched loosely by empId+action+timeStr so we don't duplicate).
+        const byDay={};
+        localLog.forEach(function(e){
+          if(!e||!e.date) return;
+          const dk = e.date.replace(/-/g,'');   // YYYYMMDD bucket
+          (byDay[dk]=byDay[dk]||[]).push(e);
+        });
+        let logPushed=0;
+        for(const dk of Object.keys(byDay)){
+          let online={};
+          try{ const g=window._fbFns; const snap=await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js').then(m=>m.get(m.ref(db,`kioskLog/${dk}`))); online=snap.exists()?snap.val():{}; }catch(e){ online={}; }
+          const onlineKeys=Object.values(online).map(function(o){return (o.empId||'')+'|'+(o.action||'')+'|'+(o.timeStr||'');});
+          for(const e of byDay[dk]){
+            const sig=(e.empId||'')+'|'+(e.action||'')+'|'+(e.timeStr||'');
+            if(onlineKeys.indexOf(sig)<0){
+              try{ await push(ref(db,`kioskLog/${dk}`),{...e,photo:''}); logPushed++; onlineKeys.push(sig); }catch(e2){}
+            }
+          }
+        }
+        if(dtrPushed||logPushed) console.log('[kiosk] recovered local punches → dtr:'+dtrPushed+' log:'+logPushed);
+      }catch(e){ console.warn('recoverLocalPunches',e); }
+    })();
+
     // Pull employees — hide loading screen once loaded
     onValue(ref(db,'employees'),snap=>{
       const data=snap.val();
@@ -1580,7 +1628,7 @@ if(!fbCfg?.apiKey||!fbCfg?.databaseURL){
     // — which build, which database, which branch it thinks it is, how many
     // people it can see — was only answerable by standing in front of it.
     const BRANCH=fbCfg.branch||'Kiosk';
-    const KIOSK_BUILD = '20260901-070000';
+    const KIOSK_BUILD = '20260916-090000';
     const hb=()=>set(ref(db,`devices/${BRANCH.replace(/[^a-zA-Z0-9]/g,'_')}`),{
       name:BRANCH, lastSeen:Date.now(), type:'kiosk', online:true,
       build:KIOSK_BUILD,
