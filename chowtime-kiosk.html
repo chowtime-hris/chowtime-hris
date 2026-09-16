@@ -141,7 +141,7 @@ body{font-family:'Inter',sans-serif;background:#FFFFFF;color:#111111;min-height:
 /* face loading */
 .model-loading{background:rgba(26,111,168,.1);border:1px solid rgba(26,111,168,.25);border-radius:10px;padding:10px 14px;font-size:12px;color:#6A1B9A;display:none;}
 </style>
-<!-- BUILD:20260916-090000 -->
+<!-- BUILD:20260916-091000 -->
 </head>
 <body>
 
@@ -1389,8 +1389,10 @@ if(!fbCfg?.apiKey||!fbCfg?.databaseURL){
     // Firebase (e.g. made while kioskLog was blocked by rules) is pushed now.
     (async function recoverLocalPunches(){
       try{
-        const localLog = JSON.parse(localStorage.getItem('kioskLog')||'[]');
-        const localDtr = JSON.parse(localStorage.getItem('dtrData')||'{}');
+        // Kiosk stores under a 'ct_' prefix (see lsGet/lsSet). Read those,
+        // with a fallback to the un-prefixed keys just in case.
+        const localLog = JSON.parse(localStorage.getItem('ct_kioskLog')||localStorage.getItem('kioskLog')||'[]');
+        const localDtr = JSON.parse(localStorage.getItem('ct_dtrData')||localStorage.getItem('dtrData')||'{}');
         if(!localLog.length && !Object.keys(localDtr).length) return;
         const fmap={in:'in',out:'out',bstart:'bstart',bend:'bend'};
         // 1) DTR: re-assert every local in/out/break to its fixed path. set() is
@@ -1628,7 +1630,7 @@ if(!fbCfg?.apiKey||!fbCfg?.databaseURL){
     // — which build, which database, which branch it thinks it is, how many
     // people it can see — was only answerable by standing in front of it.
     const BRANCH=fbCfg.branch||'Kiosk';
-    const KIOSK_BUILD = '20260916-090000';
+    const KIOSK_BUILD = '20260916-091000';
     const hb=()=>set(ref(db,`devices/${BRANCH.replace(/[^a-zA-Z0-9]/g,'_')}`),{
       name:BRANCH, lastSeen:Date.now(), type:'kiosk', online:true,
       build:KIOSK_BUILD,
