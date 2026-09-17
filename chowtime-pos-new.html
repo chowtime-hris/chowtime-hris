@@ -14214,6 +14214,8 @@ function App(){
     return()=>{alive=false;};
   },[user]);
   const [expMonth,setExpMonth]=useState("");             // "" = all months
+  const [expDateFrom,setExpDateFrom]=useState("");       // "" = no lower bound
+  const [expDateTo,setExpDateTo]=useState("");           // "" = no upper bound
   const [expCat,setExpCat]=useState("");
   const [expBranch,setExpBranch]=useState("");           // owner only, "" = all
   const [editExp,setEditExp]=useState(null);             // manager/owner edit
@@ -19802,6 +19804,8 @@ function App(){
             .filter(Boolean).sort().reverse();
           const rows=mine
             .filter(e=>!expMonth||String(e.date||"").slice(0,7)===expMonth)
+            .filter(e=>!expDateFrom||String(e.date||"")>=expDateFrom)
+            .filter(e=>!expDateTo||String(e.date||"")<=expDateTo)
             .filter(e=>!expCat||e.cat===expCat)
             .filter(e=>!expBranch||e.branch===expBranch)
             .filter(e=>{
@@ -19834,7 +19838,10 @@ function App(){
               const blob=new Blob([lines.join("\n")],{type:"text/csv;charset=utf-8;"});
               const url=URL.createObjectURL(blob);
               const a=document.createElement("a");
-              a.href=url; a.download="chowtime-expenses-"+(expMonth||"lahat")+".csv";
+              const rangeTag=(expDateFrom||expDateTo)
+                ?(expDateFrom||"start")+"_to_"+(expDateTo||"end")
+                :(expMonth||"lahat");
+              a.href=url; a.download="chowtime-expenses-"+rangeTag+".csv";
               document.body.appendChild(a); a.click(); document.body.removeChild(a);
               URL.revokeObjectURL(url);
               showT(rows.length+" expenses downloaded ✓");
@@ -19867,6 +19874,25 @@ function App(){
               h("option",{value:""},"All months ("+mine.length+")"),
               months.map(m=>h("option",{key:m,value:m},m+
                 " ("+mine.filter(e=>String(e.date||"").slice(0,7)===m).length+")"))),
+            h("div",{style:{display:"flex",alignItems:"center",gap:5}},
+              h("input",{type:"date",value:expDateFrom,
+                onChange:e=>{setExpDateFrom(e.target.value);setExpPage(1);},
+                style:{padding:"7px 9px",borderRadius:8,fontSize:13,outline:"none",
+                  border:"1px solid "+(expDateFrom?C.primary:C.border),
+                  background:expDateFrom?"#F3E9F7":"#fff",
+                  color:expDateFrom?C.primary:C.text,fontWeight:expDateFrom?700:400}}),
+              h("span",{style:{fontSize:12,color:C.muted}},"–"),
+              h("input",{type:"date",value:expDateTo,
+                onChange:e=>{setExpDateTo(e.target.value);setExpPage(1);},
+                style:{padding:"7px 9px",borderRadius:8,fontSize:13,outline:"none",
+                  border:"1px solid "+(expDateTo?C.primary:C.border),
+                  background:expDateTo?"#F3E9F7":"#fff",
+                  color:expDateTo?C.primary:C.text,fontWeight:expDateTo?700:400}}),
+              (expDateFrom||expDateTo)&&h("button",{
+                onClick:()=>{setExpDateFrom("");setExpDateTo("");},
+                title:"Clear date range",
+                style:{padding:"6px 8px",borderRadius:8,border:"1px solid "+C.border,
+                  background:"#fff",color:C.muted,fontSize:12,cursor:"pointer"}},"✕")),
             h("select",{value:expCat,onChange:e=>setExpCat(e.target.value),
               style:{padding:"8px 11px",borderRadius:8,fontSize:13,outline:"none",
                 cursor:"pointer",border:"1px solid "+(expCat?C.primary:C.border),
