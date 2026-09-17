@@ -5999,6 +5999,18 @@ function BranchMenuPage({menuItems,setMenuItems,branchId,curBranch,user,db,showT
   const [showAddExclusive,setShowAddExclusive] = useState(false);
   const [newExItem,setNewExItem] = useState({name:"",basePrice:"",cat:"",emoji:"🍽️",desc:""});
   const [srch,setSrch]           = useState("");
+  // Typed-but-not-yet-saved branch prices, keyed by item.id. While a row is
+  // here, the field shows what the user is typing — never the Firestore
+  // value — so a slow round trip from a PREVIOUS keystroke's write can no
+  // longer race a later keystroke and stomp it. Committed on blur, and
+  // cleared right after so the field falls back to reading the (now
+  // matching) saved value.
+  const [priceDrafts,setPriceDrafts] = useState({});
+  // Same idea, but for per-variant prices on items with Size/Quantity
+  // options (R1-R6 style — Solo/BOGO w/ or w/o Drink). Keyed by
+  // "<itemId>__<variantId>".
+  const [variantDrafts,setVariantDrafts] = useState({});
+  const [expandedItem,setExpandedItem]   = useState(null);
 
   // Load overrides for this branch
   useEffect(()=>{
@@ -6011,7 +6023,8 @@ function BranchMenuPage({menuItems,setMenuItems,branchId,curBranch,user,db,showT
         if(data.isExclusive){
           ex.push(data);
         } else {
-          ov[data. itemId]={avail:data.avail,price:data.price,docId:d.id};
+          ov[data. itemId]={avail:data.avail,price:data.price,
+            variantPrices:data.variantPrices||{},docId:d.id};
         }
       });
       setOverrides(ov);
@@ -6040,7 +6053,27 @@ function BranchMenuPage({menuItems,setMenuItems,branchId,curBranch,user,db,showT
   };
 
   const savePrice=async( item,price)=>{
-    await saveOverride( item,{price:parseFloat(price)|| item.basePrice});
+    // An emptied field on blur is treated as "changed my mind", not as a
+    // silent reset to the main price — the row just falls back to
+    // whatever's already saved (an override if one exists, else the main
+    // price), with nothing written.
+    if(String(price).trim()==="")return;
+    const n=parseFloat(price);
+    if(!isFinite(n)||n<0)return;
+    await saveOverride( item,{price:n});
+  };
+
+  // Items with a Size/Quantity picker (Solo/BOGO, etc.) do NOT take their
+  // selling price from `basePrice` at checkout — each variant carries its
+  // own absolute price. So overriding `price` above does nothing for these;
+  // the branch has to override each variant's price instead.
+  const getVariantPrice=( item,v)=>overrides[ item.id]?.variantPrices?.[v.id]??v.priceAdd;
+  const saveVariantPrice=async( item,variantId,price)=>{
+    if(String(price).trim()==="")return;
+    const n=parseFloat(price);
+    if(!isFinite(n)||n<0)return;
+    const cur=overrides[ item.id]?.variantPrices||{};
+    await saveOverride( item,{variantPrices:{...cur,[variantId]:n}});
   };
 
   const resetItem=async( item)=>{
@@ -6206,12 +6239,20 @@ function BranchMenuPage({menuItems,setMenuItems,branchId,curBranch,user,db,showT
         const avail=getAvail( item);
         const price=getPrice( item);
         const hasOverride=overrides[ item.id]!=null;
-        const priceChanged=overrides[ item.id]?.price!=null&&overrides[ item.id].price!== item.basePrice;
-        return h("div",{key: item.id,
+        const hasVariants=(( item.variants)||[]).length>1;
+        const variantOverridesCount=hasVariants
+          ?( item.variants).filter(v=>overrides[ item.id]?.variantPrices?.[v.id]!=null).length
+          :0;
+        const priceChanged=hasVariants
+          ?variantOverridesCount>0
+          :(overrides[ item.id]?.price!=null&&overrides[ item.id].price!== item.basePrice);
+        const isOpen=expandedItem=== item.id;
+        return h("div",{key: item.id},
+        h("div",{
           style:{display:"grid",
             gridTemplateColumns:"36px 1fr 120px 100px 80px 80px",
             padding:"10px 14px",alignItems:"center",
-            borderBottom:i<filtered.length-1?"1px solid #f5f5f5":"none",
+            borderBottom:(i<filtered.length-1&&!isOpen)?"1px solid #f5f5f5":"none",
             background:!avail?"#FFEBEE":priceChanged?"#FFF8E1":"#fff",
             opacity:avail?1:0.7}},
           h("div",{style:{fontSize:22}}, item.emoji||"🍽️"),
@@ -6220,18 +6261,44 @@ function BranchMenuPage({menuItems,setMenuItems,branchId,curBranch,user,db,showT
                item.name+(hasOverride?" ✏️":"")),
             h("div",{style:{fontSize:12,color:C.muted}}, item.cat)
           ),
-          // Branch price (editable)
-          h("div",{style:{display:"flex",gap:4,alignItems:"center"}},
-            h("span",{style:{color:C.muted,fontSize:13}},"₱"),
-            h("input",{type:"number",onFocus:e=>e.target.select(),
-              value:price||"",
-              onChange:e=>{savePrice( item,e.target.value);},
-              style:{width:70,padding:"5px 6px",
-                border:"1px solid "+(priceChanged?C.warning:C.border),
-                borderRadius:6,fontSize:14,fontWeight:priceChanged?700:400,
-                color:priceChanged?C.warning:C.text,outline:"none",
-                background:priceChanged?"#FFFDE7":"#fff"}})
-          ),
+          // Branch price. Items with a Size/Quantity picker (Solo/BOGO,
+          // etc.) don't have ONE price — each variant is its own absolute
+          // price at checkout — so these get an expand button listing every
+          // variant instead of a single field that would quietly do
+          // nothing. Everything else keeps the single editable field: types
+          // freely into a local draft, only writes to Firestore on blur or
+          // Enter, so a mid-typing server echo can't overwrite a keystroke
+          // you haven't finished making yet.
+          hasVariants
+            ? h("button",{onClick:()=>setExpandedItem(isOpen?null: item.id),
+                style:{padding:"5px 10px",borderRadius:8,fontSize:12,fontWeight:700,
+                  border:"1px solid "+(variantOverridesCount>0?C.warning:C.border),
+                  background:variantOverridesCount>0?"#FFFDE7":"#fff",
+                  color:variantOverridesCount>0?C.warning:C.text,cursor:"pointer"}},
+                (isOpen?"▾ ":"▸ ")+"I-edit ("+ item.variants.length+")"
+                  +(variantOverridesCount>0?" · "+variantOverridesCount+" ✏️":""))
+            : h("div",{style:{display:"flex",gap:4,alignItems:"center"}},
+                h("span",{style:{color:C.muted,fontSize:13}},"₱"),
+                h("input",{type:"number",onFocus:e=>e.target.select(),
+                  value: item.id in priceDrafts ? priceDrafts[ item.id] : (price||""),
+                  onChange:e=>{
+                    const v=e.target.value;
+                    setPriceDrafts(p=>({...p,[ item.id]:v}));
+                  },
+                  onBlur:()=>{
+                    if( item.id in priceDrafts){
+                      const v=priceDrafts[ item.id];
+                      setPriceDrafts(p=>{const p2={...p};delete p2[ item.id];return p2;});
+                      savePrice( item,v);
+                    }
+                  },
+                  onKeyDown:e=>{if(e.key==="Enter")e.target.blur();},
+                  style:{width:70,padding:"5px 6px",
+                    border:"1px solid "+(priceChanged?C.warning:C.border),
+                    borderRadius:6,fontSize:14,fontWeight:priceChanged?700:400,
+                    color:priceChanged?C.warning:C.text,outline:"none",
+                    background:priceChanged?"#FFFDE7":"#fff"}})
+              ),
           // Main price (reference)
           h("div",{style:{fontSize:13,color:C.muted}},"₱"+cardPrice( item)),
           // Toggle
@@ -6246,6 +6313,47 @@ function BranchMenuPage({menuItems,setMenuItems,branchId,curBranch,user,db,showT
             style:{padding:"4px 8px",background:"#fff",border:"1px solid "+C.border,
               borderRadius:6,fontSize:12,cursor:"pointer",color:C.muted}},"↺ Reset")
           :h("div",{style:{fontSize:12,color:"#5A5A5A"}},"—")
+        ),
+        // Per-variant price panel (Solo/BOGO etc.) — only for items with a
+        // Size/Quantity picker, only when expanded.
+        hasVariants&&isOpen&&h("div",{style:{padding:"4px 14px 12px 58px",
+          background:"#FAFAFA",borderBottom:i<filtered.length-1?"1px solid #f5f5f5":"none"}},
+           item.variants.map(v=>{
+            const vKey= item.id+"__"+v.id;
+            const vPrice=getVariantPrice( item,v);
+            const vOverridden=overrides[ item.id]?.variantPrices?.[v.id]!=null;
+            return h("div",{key:v.id,style:{display:"flex",alignItems:"center",
+              justifyContent:"space-between",gap:10,padding:"6px 0",
+              borderBottom:"1px solid #eee"}},
+              h("div",{style:{fontSize:13,fontWeight:vOverridden?700:500,
+                color:vOverridden?C.warning:C.text}},
+                v.label+(v.tag?" · "+v.tag:"")),
+              h("div",{style:{display:"flex",gap:6,alignItems:"center"}},
+                h("span",{style:{fontSize:12,color:C.muted}},"main ₱"+(v.priceAdd||0)),
+                h("span",{style:{color:C.muted,fontSize:13}},"₱"),
+                h("input",{type:"number",onFocus:e=>e.target.select(),
+                  value:vKey in variantDrafts?variantDrafts[vKey]:(vPrice||""),
+                  onChange:e=>{
+                    const val=e.target.value;
+                    setVariantDrafts(p=>({...p,[vKey]:val}));
+                  },
+                  onBlur:()=>{
+                    if(vKey in variantDrafts){
+                      const val=variantDrafts[vKey];
+                      setVariantDrafts(p=>{const p2={...p};delete p2[vKey];return p2;});
+                      saveVariantPrice( item,v.id,val);
+                    }
+                  },
+                  onKeyDown:e=>{if(e.key==="Enter")e.target.blur();},
+                  style:{width:70,padding:"5px 6px",
+                    border:"1px solid "+(vOverridden?C.warning:C.border),
+                    borderRadius:6,fontSize:14,fontWeight:vOverridden?700:400,
+                    color:vOverridden?C.warning:C.text,outline:"none",
+                    background:vOverridden?"#FFFDE7":"#fff"}})
+              )
+            );
+          })
+        )
         );
       })
     )
@@ -14885,7 +14993,7 @@ function App(){
         // branch-exclusive items. The POS only unpacked the first, so an
         // exclusive item could be created and saved but never sold.
         if(dd.isExclusive)ex.push(dd);
-        else ov[dd.itemId]={avail:dd.avail,price:dd.price};
+        else ov[dd.itemId]={avail:dd.avail,price:dd.price,variantPrices:dd.variantPrices||{}};
       });
       setBranchOverrides(ov);
       setBranchExclusives(ex);
@@ -15214,11 +15322,23 @@ function App(){
   const myOrders=user?.role==="owner"?orders:orders.filter(o=>o.branch===branchId);
   const menuWithOverrides=[
     // Main menu  items with branch overrides
-    ...menuItems.map(i=>({
-      ...i,
-      avail:(branchOverrides[i.id]?.avail??i.avail)!==false,
-      basePrice:branchOverrides[i.id]?.price??i.basePrice
-    })),
+    ...menuItems.map(i=>{
+      const ov=branchOverrides[i.id];
+      // A variant's own priceAdd is what checkout actually charges for
+      // items with a Size/Quantity picker (Solo/BOGO etc.) — overriding
+      // basePrice alone does nothing for those, so each variant needs its
+      // own override applied here too.
+      const variants=ov&&ov.variantPrices
+        ?(i.variants||[]).map(v=>
+            ov.variantPrices[v.id]!=null?{...v,priceAdd:ov.variantPrices[v.id]}:v)
+        :i.variants;
+      return {
+        ...i,
+        variants,
+        avail:(ov?.avail??i.avail)!==false,
+        basePrice:ov?.price??i.basePrice
+      };
+    }),
     // Branch-exclusive  items (from menu_overrides where isExclusive:true)
     ...(branchExclusives||[]).map(ex=>({
       ...ex,
