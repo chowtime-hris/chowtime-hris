@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260919-180000 -->
+<!-- BUILD:20260919-190000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -8670,7 +8670,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260919-180000";
+const BUILD = "20260919-190000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -14468,6 +14468,18 @@ function App(){
     // must match the branchId used for writes, or reads and writes diverge
     const bId=(user.branch==="all"||user.branch==="comm")?"ct-main":user.branch;
 
+    // Hoisted out of the "Orders" try block below: __ctEnsureOrders (defined
+    // after that block ends) reads winFrom on every call, and the P&L/cash
+    // listeners further down read readFrom — both were declared with const
+    // INSIDE that try{}, so every reference outside it was a silent
+    // ReferenceError, caught by whichever try/catch happened to wrap the
+    // caller, with nothing ever reaching the screen. Real fix is here, not
+    // just showing the error.
+    const _wf=new Date(); _wf.setDate(_wf.getDate()-7);
+    const winFrom=localDate(_wf);
+    const _rf=new Date(); _rf.setDate(_rf.getDate()-60);
+    const readFrom=localDate(_rf);
+
     // Orders
     try{
       // A rolling window by DATE, not a blind slice. 14 days covers Today,
@@ -14482,9 +14494,9 @@ function App(){
       // app — 2,500+ documents, re-fetched on every open. A week covers the
       // Z-Reading history, the dashboard and every date preset except This
       // month, which fetches on demand anyway.
-      const _wf=new Date(); _wf.setDate(_wf.getDate()-7);
-      const winFrom=localDate(_wf);
-      // NOTE: winFrom is a const in THIS scope. The guard below must read it
+      // NOTE: winFrom is declared OUTSIDE this try block now (see above) —
+      // it used to live here, which is what broke every reference to it
+      // outside this block. The guard below must read this hoisted const
       // and not the ordersWindowFrom state that used to live here — setting
       // state does not change the value already captured by the closure, so
       // the guard saw "" forever and every older-orders fetch died on entry.
@@ -14492,8 +14504,6 @@ function App(){
       // allows 50,000 reads a day; the listeners here were fetching close to
       // 7,000 documents on EVERY app open, across every tablet, all day. That
       // is what exhausted the quota and made the branch list look deleted.
-      const _rf=new Date(); _rf.setDate(_rf.getDate()-60);
-      const readFrom=localDate(_rf);
       const oq=isOwner
         ?query(collection(db,"orders"),where("date",">=",winFrom))
         :query(collection(db,"orders"),where("branch","==",bId),
