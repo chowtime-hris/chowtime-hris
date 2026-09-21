@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260921-093000 -->
+<!-- BUILD:20260921-101500 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -8670,7 +8670,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260921-093000";
+const BUILD = "20260921-101500";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -11078,9 +11078,21 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
   };
 
   // The combined log mixes every item together, so reading one item's story
-  // means scrolling past everyone else's. Load just this item's entries.
+  // means scrolling past everyone else's. Load just this item's entries,
+  // more at a time — an item with more than 100 movements (a fast-moving
+  // ingredient over months) used to just stop at 100 with no way to see
+  // older ones.
+  //
+  // Raising `limit` and re-fetching, not a startAfter cursor — a real
+  // cursor needs orderBy("at") alongside where("itemId"), which Firestore
+  // only allows with a composite index, one per branch's log collection.
+  // Re-fetching is more reads per click but needs no index at all, which
+  // matches how every other query in this file was deliberately shaped.
+  var HIST_PAGE=100;
   var [hist,setHist]=useState([]);
+  var [histLimit,setHistLimit]=useState(HIST_PAGE);
   var [histLoading,setHistLoading]=useState(false);
+  var [histHasMore,setHistHasMore]=useState(false);
   useEffect(function(){
     if(tab!=="history"||!item||!item.id)return;
     var alive=true;
@@ -11088,7 +11100,7 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
     (async function(){
       try{
         var snap=await getDocs(query(collection(db,logCol),
-          where("itemId","==",item.id),limit(100)));
+          where("itemId","==",item.id),limit(histLimit)));
         var rows=snap.docs.map(function(d){return Object.assign({},d.data(),{_id:d.id});});
         var t=function(r){return (r.at&&r.at.seconds)||(r.timestamp&&r.timestamp.seconds)||0;};
         rows.sort(function(a,b){
@@ -11096,15 +11108,16 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
           if(d)return d;
           return String(b.date||"").localeCompare(String(a.date||""));
         });
-        if(alive)setHist(rows);
+        if(alive){setHist(rows);setHistHasMore(rows.length===histLimit);}
       }catch(e){
         console.error("item history:",e);
-        if(alive)setHist([]);
+        if(alive){setHist([]);setHistHasMore(false);}
       }
       if(alive)setHistLoading(false);
     })();
     return function(){alive=false;};
-  },[tab,item&&item.id]);
+  },[tab,item&&item.id,histLimit]);
+  useEffect(function(){setHistLimit(HIST_PAGE);},[item&&item.id]);
 
   var saveStock=async function(){
     if(!display){showT("Enter amount","warn");return;}
@@ -11425,7 +11438,7 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
                   "appear here with its before and after."))
             : h("div",null,
                 h("div",{style:{fontSize:12,color:"#5A5A5A",marginBottom:9}},
-                  hist.length+" movement"+(hist.length>1?"s":"")+" · newest first"),
+                  hist.length+(histHasMore?"+":"")+" movement"+(hist.length>1?"s":"")+" · newest first"),
                 hist.map(function(l,li){
                   var amt=Number(l.amount)||0;
                   var up=amt>=0;
@@ -11453,7 +11466,16 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
                         +(l.ref?" · "+l.ref:""))
                     )
                   );
-                })
+                }),
+                histHasMore&&h("div",{style:{textAlign:"center",marginTop:8}},
+                  h("button",{
+                    disabled:histLoading,
+                    onClick:function(){setHistLimit(function(p){return p+HIST_PAGE;});},
+                    style:{padding:"9px 18px",borderRadius:8,border:"1px solid #1565C0",
+                      background:histLoading?"#eee":"#fff",color:"#1565C0",
+                      fontSize:13,fontWeight:800,
+                      cursor:histLoading?"not-allowed":"pointer"}},
+                    histLoading?"Loading...":"Load older movements"))
               )
       ),
 
@@ -21301,11 +21323,18 @@ function App(){
                     }
                     if(!confirm("Delete "+ item.name+"?"))return;
                     const isOwner=user.role==="owner"||user.role==="commissary";
-                    const col=invColFor(branchId);
+                    // invView is set only when peeking another branch's
+                    // inventory (read-only for Edit, but this button and the
+                    // +/- field below were never gated the same way — they
+                    // kept writing to the owner's OWN branch (branchId) even
+                    // while the row on screen was a PEEKED branch's item.
+                    // Same fix as the batch-edit log/col below: follow
+                    // whichever branch is actually being looked at.
+                    const col=invColFor(invView||branchId);
                     try{
-                      // Log the deletion first — follows branchId, not
-                      // forced to main (see the StockEditModal note).
-                      const logCol2=logColFor(branchId);
+                      // Log the deletion first — follows the same branch as
+                      // the stock write above.
+                      const logCol2=logColFor(invView||branchId);
                       await addDoc(collection(db,logCol2),{
                          itemId: item.id,
                          itemName: item.name,
@@ -21337,8 +21366,12 @@ function App(){
                     const adj=parseFloat(e.target.value);
                     if(!adj)return;
                     const isOwner=user.role==="owner"||user.role==="commissary";
-                    const invCol=invColFor(branchId);
-                    const logCol=logColFor(branchId);
+                    // Same invView fix as Delete above — this field wrote to
+                    // the owner's own branch even while a peeked branch's
+                    // row was on screen, so a "correction" typed while
+                    // looking at WPAN silently landed on MAIN's item instead.
+                    const invCol=invColFor(invView||branchId);
+                    const logCol=logColFor(invView||branchId);
                     const newQ=Math.max(0,( item.stock||0)+adj);
                     try{
                       const _u=lotsUnitCost( item.lots,Number( item.cost)||0);
