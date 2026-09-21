@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260919-190000 -->
+<!-- BUILD:20260921-093000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -8670,7 +8670,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260919-190000";
+const BUILD = "20260921-093000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -11004,7 +11004,14 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
   if(! item)return null;
   var isOwner=user.role==="owner"||user.role==="commissary";
   var invCol=invColFor(branchId);
-  var logCol=logColFor(isOwner?"main":branchId);
+  // Was logColFor(isOwner?"main":branchId) — an owner acting on a BRANCH's
+  // item (branchId is that branch, invCol above already reflects it) still
+  // had every log entry forced into MAIN's collection. The stock write
+  // landed on the branch correctly; the log entry for it did not, so that
+  // branch's own History tab — which correctly queries its own collection —
+  // never showed adjustments an owner made. Log now follows the same
+  // branch the stock write does, same as invCol.
+  var logCol=logColFor(branchId);
 
   var DEFAULT_CATS=["Frozen","Produce","Protein","Sauce","Dry Goods","Packaging","Beverage","Other"];
   var UNITS=["pc","kg","g","L","ml","pack","box","tray","sachet","EA","roll"];
@@ -11182,8 +11189,9 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
           if(updated>0)showT("✅ Updated "+updated+" BOM recipe(s) with new name","ok");
         }catch(e){console.warn("BOM sync:",e);}
       }
-      // Log details edit
-      await addDoc(collection(db,logColFor(isOwner?"main":branchId)),{
+      // Log details edit — see the note above on logCol: follows branchId,
+      // not forced to main.
+      await addDoc(collection(db,logCol),{
          itemId: item.id, itemName:details.name,unit:details.unit,
         type:"edited",
         changes:{
@@ -14179,6 +14187,12 @@ function App(){
   const [cashLog,setCashLog]=useState([]);
   const [advances,setAdvances]=useState([]);
   const prevPOStatuses=useRef({});
+  // Guards PO actions (approve discrepancy, deduct, etc.) against a
+  // double-tap: each writes stock in a loop and only marks the PO
+  // done (stockPosted) at the very END, so two taps close together both
+  // read "not done yet" and both post the goods — one PO went into
+  // stock twice from a single double-tap on a tablet screen.
+  const poActionBusy=useRef({});
   const [inventory,setInventory]=useState(INIT_INVENTORY);
   const [invBranch,setInvBranch]=useState("main"); // which branch inventory to view
   const [invCustomCats,setInvCustomCats]=useState([]); // custom inventory categories
@@ -21289,8 +21303,9 @@ function App(){
                     const isOwner=user.role==="owner"||user.role==="commissary";
                     const col=invColFor(branchId);
                     try{
-                      // Log the deletion first
-                      const logCol2=logColFor(isOwner?"main":branchId);
+                      // Log the deletion first — follows branchId, not
+                      // forced to main (see the StockEditModal note).
+                      const logCol2=logColFor(branchId);
                       await addDoc(collection(db,logCol2),{
                          itemId: item.id,
                          itemName: item.name,
@@ -21323,7 +21338,7 @@ function App(){
                     if(!adj)return;
                     const isOwner=user.role==="owner"||user.role==="commissary";
                     const invCol=invColFor(branchId);
-                    const logCol=logColFor(isOwner?"main":branchId);
+                    const logCol=logColFor(branchId);
                     const newQ=Math.max(0,( item.stock||0)+adj);
                     try{
                       const _u=lotsUnitCost( item.lots,Number( item.cost)||0);
@@ -24143,6 +24158,12 @@ function App(){
                   // never delivered.
                   st==="discrepancy"&&h("button",{
                     onClick:async()=>{
+                     // A double-tap fires this twice before either write
+                     // lands — this is the actual lock; the button also
+                     // dims below, but the dim alone doesn't stop a second
+                     // tap that lands before the re-render does.
+                     if(poActionBusy.current[po._docId])return;
+                     poActionBusy.current[po._docId]=true;
                      // Nothing in this handler could report a failure, so any
                      // error left the button looking dead: no dialog, no toast,
                      // no clue. Whatever goes wrong now says so.
@@ -24359,6 +24380,8 @@ function App(){
                        console.error("approve discrepancy:",err);
                        showT("Approve failed: "
                          +String((err&&err.message)||err).slice(0,80),"err");
+                     }finally{
+                       delete poActionBusy.current[po._docId];
                      }
                     },
                     style:{padding:"7px 14px",background:C.danger,
