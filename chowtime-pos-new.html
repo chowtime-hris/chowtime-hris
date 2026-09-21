@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260921-103000 -->
+<!-- BUILD:20260921-211500 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -8670,7 +8670,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260921-103000";
+const BUILD = "20260921-211500";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -11078,21 +11078,27 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
   };
 
   // The combined log mixes every item together, so reading one item's story
-  // means scrolling past everyone else's. Load just this item's entries,
-  // more at a time — an item with more than 100 movements (a fast-moving
-  // ingredient over months) used to just stop at 100 with no way to see
-  // older ones.
+  // means scrolling past everyone else's. Load just this item's entries.
   //
-  // Raising `limit` and re-fetching, not a startAfter cursor — a real
-  // cursor needs orderBy("at") alongside where("itemId"), which Firestore
-  // only allows with a composite index, one per branch's log collection.
-  // Re-fetching is more reads per click but needs no index at all, which
-  // matches how every other query in this file was deliberately shaped.
+  // REAL BUG, found by testing: the query below had no orderBy, only
+  // where("itemId")+limit(N). Without an orderBy, Firestore does NOT
+  // guarantee the newest N — for an item already past N total entries, a
+  // brand-new write was simply not among the arbitrary N returned, no
+  // matter how it was sorted afterward on this side. Sorting what you
+  // already have never fixes fetching the wrong "have" in the first place.
+  //
+  // Fix: fetch the WHOLE set for this item once (a generous cap, not a
+  // display page size — no orderBy still means no composite index needed),
+  // sort it completely, and only PAGE the display from that full sorted
+  // list. "Load more" below is then free — it reveals more of what's
+  // already in memory, no second Firestore read.
+  var HIST_FETCH_CAP=3000;
   var HIST_PAGE=100;
-  var [hist,setHist]=useState([]);
+  var [histAll,setHistAll]=useState([]);
   var [histLimit,setHistLimit]=useState(HIST_PAGE);
   var [histLoading,setHistLoading]=useState(false);
-  var [histHasMore,setHistHasMore]=useState(false);
+  var hist=histAll.slice(0,histLimit);
+  var histHasMore=histAll.length>histLimit;
   useEffect(function(){
     if(tab!=="history"||!item||!item.id)return;
     var alive=true;
@@ -11100,7 +11106,7 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
     (async function(){
       try{
         var snap=await getDocs(query(collection(db,logCol),
-          where("itemId","==",item.id),limit(histLimit)));
+          where("itemId","==",item.id),limit(HIST_FETCH_CAP)));
         var rows=snap.docs.map(function(d){return Object.assign({},d.data(),{_id:d.id});});
         var t=function(r){return (r.at&&r.at.seconds)||(r.timestamp&&r.timestamp.seconds)||0;};
         rows.sort(function(a,b){
@@ -11108,15 +11114,15 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
           if(d)return d;
           return String(b.date||"").localeCompare(String(a.date||""));
         });
-        if(alive){setHist(rows);setHistHasMore(rows.length===histLimit);}
+        if(alive)setHistAll(rows);
       }catch(e){
         console.error("item history:",e);
-        if(alive){setHist([]);setHistHasMore(false);}
+        if(alive)setHistAll([]);
       }
       if(alive)setHistLoading(false);
     })();
     return function(){alive=false;};
-  },[tab,item&&item.id,histLimit]);
+  },[tab,item&&item.id]);
   useEffect(function(){setHistLimit(HIST_PAGE);},[item&&item.id]);
 
   var saveStock=async function(){
