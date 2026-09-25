@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260925-142000 -->
+<!-- BUILD:20260925-144500 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -8670,7 +8670,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260925-142000";
+const BUILD = "20260925-144500";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -24463,32 +24463,49 @@ function App(){
                         for(const  item of _rows){
                           const qty= item.actualQty!=null? item.actualQty:( item.qty||0);
                           if(!qty)continue;
-                          let prev=null, _rawLots=null;
+                          let prev=null, _rawLots=null, _cat="", _psz=0;
                           try{
                             const snap=await getDoc(doc(db,"inventory", item.id));
                             if(snap.exists()){
                               prev=Number(snap.data().stock)||0;
                               _rawLots=snap.data().lots;
+                              _cat=snap.data().cat||"";
+                              _psz=packSizeOf(snap.data());
                             }
                           }catch(e){}
-                          if(prev!=null&&prev<qty){
+                          // Frozen items ship whole packs only — Main never
+                          // breaks a pack to send loose pieces (his rule, Sep
+                          // 25 2026: "hindi kami nagrerelease sa Main ng loose
+                          // pack or pcs sa frozen item"). So what Main can
+                          // actually SHIP is stock rounded DOWN to the nearest
+                          // whole pack, not the raw stock figure — a partial
+                          // pack's worth of loose pieces stays on Main's
+                          // shelf, same as it would if a crew member were
+                          // physically packing the delivery box.
+                          const _wholePackOnly=_cat==="Frozen"&&_psz>0;
+                          const _shippable=(prev!=null&&_wholePackOnly)
+                            ? Math.floor(prev/_psz)*_psz : prev;
+                          if(prev!=null&&_shippable<qty){
                             // BUG (found investigating a report where Chicken
-                            // Fillet — needed 40, Main had 39pk+3pc — never
-                            // deducted at all, while every other item on the
-                            // same PO did): this branch used to just record
-                            // the shortage and drop the item from _plan
-                            // entirely, so it deducted ZERO — even though the
-                            // confirm dialog below promises to "deduct and
-                            // deliver the items Main CAN cover now." Partial
-                            // stock was never partial-deducted. Fixed: take
-                            // what Main actually has (down to 0) into _plan,
-                            // and only the shortfall goes to the follow-up PO.
+                            // Fillet — needed 40pk/400pc, Main had 39pk+3pc —
+                            // never deducted at all, while every other item on
+                            // the same PO did): this branch used to just
+                            // record the shortage and drop the item from
+                            // _plan entirely, so it deducted ZERO — even
+                            // though the confirm dialog below promises to
+                            // "deduct and deliver the items Main CAN cover
+                            // now." Partial stock was never partial-deducted.
+                            // Fixed: take what Main can actually SHIP into
+                            // _plan (whole packs only for Frozen — see
+                            // _shippable above), and only the true shortfall
+                            // (400-390=10pc/1pack here, not 400-393=7) goes to
+                            // the follow-up PO.
                             _short.push({id: item.id,name: item.name|| item.id,
-                              unit: item.unit||"",have:prev,need:qty,
-                              shortBy:Math.round((qty-prev)*1000)/1000});
-                            if(prev>0){
-                              _plan.push({item: item,qty:prev,prev:prev,
-                                lots:lotsConsume(_rawLots,prev).lots});
+                              unit: item.unit||"",have:_shippable,need:qty,
+                              shortBy:Math.round((qty-_shippable)*1000)/1000});
+                            if(_shippable>0){
+                              _plan.push({item: item,qty:_shippable,prev:prev,
+                                lots:lotsConsume(_rawLots,_shippable).lots});
                             }
                           }else{
                             _plan.push({item: item,qty:qty,prev:prev,
