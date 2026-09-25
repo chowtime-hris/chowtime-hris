@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260925-145500 -->
+<!-- BUILD:20260925-210000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -8670,7 +8670,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260925-145500";
+const BUILD = "20260925-210000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -11955,8 +11955,17 @@ function PaymentModal({po,db,user,showT,onClose}){
       };
       const newPayments=[...payments,newPayment];
       const newTotalPaid=newPayments.reduce((s,p)=>s+(p.amount||0),0);
-      const newStatus=newTotalPaid>=grandTotal?"paid":"processing";
-      const newPayStatus=newTotalPaid>=grandTotal?"Paid":newTotalPaid>0?"Partial":"Unpaid";
+      const fullyPaid=newTotalPaid>=grandTotal;
+      // "Ready to receive" (status:"paid") needs BOTH conditions — paid AND
+      // deducted from Main — or the branch is told to go receive stock that
+      // never left Main's shelf. This used to flip on payment alone; now,
+      // paying before the deduction (a real flow — see the Record Payment
+      // gate removed above) leaves status at "processing" until Deduct Main
+      // Inv also runs, which then checks paymentStatus and flips it from
+      // its side.
+      const alreadyDeducted=!!(po.mainDeducted||po.stockIssued);
+      const newStatus=(fullyPaid&&alreadyDeducted)?"paid":"processing";
+      const newPayStatus=fullyPaid?"Paid":newTotalPaid>0?"Partial":"Unpaid";
       await updateDoc(doc(db,"advances",po._docId),{
         payments:newPayments,
         totalPaid:newTotalPaid,
@@ -11964,15 +11973,18 @@ function PaymentModal({po,db,user,showT,onClose}){
         status:newStatus,
         ...(newStatus==="paid"?{paidAt:serverTimestamp(),paidBy:user.name}:{})
       });
-      // Receiving is gated on payment, so this is the one message the branch
-      // is actually waiting for — and it was the one nobody sent.
+      // Receiving is gated on payment AND deduction, so this is the one
+      // message the branch is actually waiting for.
       await notify(db,{to:po.branch,
         type:newStatus==="paid"?"success":"info",
         title:(newStatus==="paid"?"Paid — ":"Payment recorded — ")+po.poNum,
         message:newStatus==="paid"
           ? ("₱"+peso(newTotalPaid)+" settled. You can receive the items now.")
-          : ("₱"+peso(newTotalPaid)+" of ₱"+peso(grandTotal)+" recorded. "
-             +"₱"+peso(grandTotal-newTotalPaid)+" still due before you can receive."),
+          : fullyPaid
+            ? ("₱"+peso(newTotalPaid)+" settled — waiting for Main to "
+               +"release the items before you can receive.")
+            : ("₱"+peso(newTotalPaid)+" of ₱"+peso(grandTotal)+" recorded. "
+               +"₱"+peso(grandTotal-newTotalPaid)+" still due before you can receive."),
         page:"stock_order",ref:po.poNum,by:user.name});
       showT("Payment recorded ✓ — "+newPayStatus);
       onClose();
@@ -24614,7 +24626,17 @@ function App(){
                           partialFilled:!!_shortPO,
                           followUpPO:_shortPO||null,
                           mainDeductedBy:user.name,
-                          mainDeductedAt:serverTimestamp()
+                          mainDeductedAt:serverTimestamp(),
+                          // The other half of the paid/deducted pair above —
+                          // if payment finished FIRST (now allowed), status
+                          // stayed "processing" waiting on this deduction.
+                          // This is the moment the second condition lands, so
+                          // flip it to "paid" (→ "Ready to receive") now
+                          // rather than leaving the branch waiting on a PO
+                          // that is actually fully settled.
+                          ...(po.paymentStatus==="Paid"
+                            ? {status:"paid",paidAt:po.paidAt||serverTimestamp()}
+                            : {})
                         });
                         if(_shortPO){
                           // Tell the branch what shipped and what is still owed.
@@ -24723,7 +24745,15 @@ function App(){
                           mainDeducted:false,stockIssued:false,stockShort:[],
                           mainDeductedBy:null,mainDeductedAt:null,
                           mainRevertedBy:user.name,
-                          mainRevertedAt:serverTimestamp()});
+                          mainRevertedAt:serverTimestamp(),
+                          // Mirror of the flip in Deduct/Record Payment above:
+                          // "paid" (→ "Ready to receive") needs both
+                          // conditions, and this just removed one of them —
+                          // Revert Deduction is now allowed on a paid PO, so
+                          // without this a reverted-but-paid PO would still
+                          // read "Ready to receive" with nothing on the truck.
+                          ...(po.status==="paid"?{status:"processing"}:{})
+                        });
                         showT("Reverted "+done+" item(s) back to Main \u2014 "
                           +po.poNum+" can be deducted again","ok");
                       }catch(e){
