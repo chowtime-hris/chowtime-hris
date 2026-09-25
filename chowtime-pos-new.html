@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260921-211500 -->
+<!-- BUILD:20260925-142000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -8670,7 +8670,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260921-211500";
+const BUILD = "20260925-142000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -24463,20 +24463,36 @@ function App(){
                         for(const  item of _rows){
                           const qty= item.actualQty!=null? item.actualQty:( item.qty||0);
                           if(!qty)continue;
-                          let prev=null, _plots=null;
+                          let prev=null, _rawLots=null;
                           try{
                             const snap=await getDoc(doc(db,"inventory", item.id));
                             if(snap.exists()){
                               prev=Number(snap.data().stock)||0;
-                              _plots=lotsConsume(snap.data().lots,qty).lots;
+                              _rawLots=snap.data().lots;
                             }
                           }catch(e){}
                           if(prev!=null&&prev<qty){
+                            // BUG (found investigating a report where Chicken
+                            // Fillet — needed 40, Main had 39pk+3pc — never
+                            // deducted at all, while every other item on the
+                            // same PO did): this branch used to just record
+                            // the shortage and drop the item from _plan
+                            // entirely, so it deducted ZERO — even though the
+                            // confirm dialog below promises to "deduct and
+                            // deliver the items Main CAN cover now." Partial
+                            // stock was never partial-deducted. Fixed: take
+                            // what Main actually has (down to 0) into _plan,
+                            // and only the shortfall goes to the follow-up PO.
                             _short.push({id: item.id,name: item.name|| item.id,
                               unit: item.unit||"",have:prev,need:qty,
                               shortBy:Math.round((qty-prev)*1000)/1000});
+                            if(prev>0){
+                              _plan.push({item: item,qty:prev,prev:prev,
+                                lots:lotsConsume(_rawLots,prev).lots});
+                            }
                           }else{
-                            _plan.push({item: item,qty:qty,prev:prev,lots:_plots});
+                            _plan.push({item: item,qty:qty,prev:prev,
+                              lots:lotsConsume(_rawLots,qty).lots});
                           }
                         }
                         // Main is short on some items. Rather than block the
