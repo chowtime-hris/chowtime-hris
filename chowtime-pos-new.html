@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260925-210000 -->
+<!-- BUILD:20260926-150900 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -349,7 +349,7 @@ const BRANCHES = [
 
 const ROLES = {
   owner:     {label:"Owner / Admin",    emoji:"\u{1F451}", color:"#6A1B9A",
-    nav:["dashboard","branches","subs","pos","orders","void_requests","all_orders","analytics","z_reading","reports","feedback","cash_count","cash_in","expenses","cash_monitor","discount_mgmt","inventory","inv_log","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","settings","health","printer","ext_payroll","ext_kiosk","hris_dash","ext_production","ext_stock","branch_pl"]},
+    nav:["dashboard","branches","subs","pos","orders","void_requests","all_orders","analytics","sales_report","z_reading","reports","feedback","cash_count","cash_in","expenses","cash_monitor","discount_mgmt","inventory","inv_log","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","settings","health","printer","ext_payroll","ext_kiosk","hris_dash","ext_production","ext_stock","branch_pl"]},
   manager:   {label:"Branch Manager",   emoji:"\u{1F3EA}", color:"#007AFF",
     nav:["branch_dash","pos","orders","analytics","z_reading","reports","feedback","cash_count","cash_in","expenses","ext_payroll","inventory","inv_log","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","hris_dash","bom_mgmt","branch_settings","printer","ext_kiosk","ext_stock","branch_pl"]},
   cashier:   {label:"Cashier",          emoji:"\u{1F4B3}", color:"#34C759",
@@ -2290,25 +2290,20 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
           stockShort:[]
         }, _newDelivered?{deliveredItems:_newDelivered}:{}));
 
-        // Who edited decides who needs telling. A branch fixing its own order
-        // tells Main; Main changing a branch's order tells the branch, because
-        // they are the ones who will receive a delivery they did not type.
+        // Every edit is told to BOTH sides — Main and the branch — so
+        // neither one is caught off guard by a delivery that changed.
         const editedByMain=!!(editPO.branch&&userBranchId
                               &&editPO.branch!==userBranchId);
-        if(editedByMain){
-          await notify(db,{to:editPO.branch,type:"po_edited",
-            title:"Main edited "+(editPO.poNum||po.poNum),
-            message:ordered.length+" item/s · review before the delivery arrives",
-            page:"stock_order",ref:editPO.poNum||po.poNum,by:user.name});
-          showT((editPO.poNum||po.poNum)+" updated \u2014 naabisuhan ang "
-            +(po.branchName||editPO.branch));
-        }else{
-          await notify(db,{to:"ct-main",type:"po_new",
-            title:"Na-edit na order — "+(po.branchName||branchId),
-            message:ordered.length+"  item/s (binago)",
-            page:"po_monitor",ref:editPO.poNum||po.poNum,by:user.name});
-          showT((editPO.poNum||po.poNum)+" updated ✓");
-        }
+        await notify(db,{to:editPO.branch,type:"po_edited",
+          title:(editedByMain?"Main edited ":"Order edited — ")+(editPO.poNum||po.poNum),
+          message:ordered.length+" item/s · review before the delivery arrives",
+          page:"stock_order",ref:editPO.poNum||po.poNum,by:user.name});
+        await notify(db,{to:"ct-main",type:"po_edited",
+          title:"Na-edit na order — "+(po.branchName||editPO.branch||branchId),
+          message:ordered.length+"  item/s (binago)",
+          page:"po_monitor",ref:editPO.poNum||po.poNum,by:user.name});
+        showT((editPO.poNum||po.poNum)+" updated \u2014 naabisuhan ang Main at "
+          +(po.branchName||editPO.branch));
         onClose();return;
       }
       await addDoc(collection(db,"advances"),po);
@@ -8670,7 +8665,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260925-210000";
+const BUILD = "20260926-150900";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -10596,35 +10591,45 @@ function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inve
     window.__ctEnsureOrders(from, period==="custom"?(dateTo||today):today);
   },[period,dateFrom,dateTo]);
 
+  // Owner/commissary sit at Main, which barely sells anything itself — locking
+  // this screen to their own branch made it look empty. They see every
+  // branch's sales here; everyone else still sees only their own.
+  const _seeAll=(user.role==="owner"||user.role==="commissary");
+
   const filtOrders = orders.filter(o=>{
     if(o.status==="voided"||o.status==="void"||o.status==="cancelled")return false;
-    if(o.branch!==branchId)return false;
+    if(!_seeAll&&o.branch!==branchId)return false;
     return inPeriod(o.date||"");
   });
 
-  // Saved daily rollups for this branch — the only source that reaches
-  // further back than the live subscription's 300-order window.
+  // Saved daily rollups — the only source that reaches further back than the
+  // live subscription's rolling window. Scoped to the branch, except for
+  // owner/commissary who need every branch's rollups to match filtOrders above.
   const [rollups,setRollups]=useState([]);
   useEffect(()=>{
     let alive=true;
     (async()=>{
       try{
-        const snap=await getDocs(query(collection(db,"daily_sales"),
-          where("branch","==",branchId),limit(400)));
+        const snap=await getDocs(_seeAll
+          ? query(collection(db,"daily_sales"),limit(3000))
+          : query(collection(db,"daily_sales"),where("branch","==",branchId),limit(400)));
         if(alive)setRollups(snap.docs.map(d=>d.data()));
       }catch(e){ if(alive)setRollups([]); }
     })();
     return()=>{alive=false;};
-  },[branchId]);
+  },[branchId,_seeAll]);
 
   const periodRolls=rollups.filter(r=>inPeriod(r.date)&&r.date!==today);
   // Days already rolled up come from the saved record; every other day in the
   // period still comes from live orders. Using rollups as an either/or meant a
   // day with sales but no rollup vanished from the totals entirely.
-  const rollDates=new Set(periodRolls.map(r=>r.date));
-  const liveRest=filtOrders.filter(o=>!rollDates.has(o.date||""));
+  // Keyed by branch+date (not just date) — with every branch in view for
+  // owner/commissary, one branch having a rollup for a day must not hide
+  // another branch's live orders on that same day.
+  const rollDates=new Set(periodRolls.map(r=>(r.branch||branchId)+"|"+r.date));
+  const liveRest=filtOrders.filter(o=>!rollDates.has((o.branch||branchId)+"|"+(o.date||"")));
   const todayOrders=orders.filter(o=>(o.date||"")===today
-    &&o.branch===branchId
+    &&(_seeAll||o.branch===branchId)
     &&o.status!=="void"&&o.status!=="voided"&&o.status!=="cancelled");
   const useRollups=period!=="today"&&periodRolls.length>0;
 
@@ -10739,7 +10744,7 @@ function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inve
     h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}},
       h("div",null,
         h("div",{style:{fontSize:17,fontWeight:900}},"📊 Sales Analytics"),
-        h("div",{style:{fontSize:13,color:C.muted}},(branchId||"").toUpperCase()+" · "+today)
+        h("div",{style:{fontSize:13,color:C.muted}},(_seeAll?"ALL BRANCHES":(branchId||"").toUpperCase())+" · "+today)
       ),
       h("button",{onClick:exportCSV,
         style:{padding:"7px 14px",background:C.success,border:"none",borderRadius:8,
