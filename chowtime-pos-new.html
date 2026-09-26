@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260926-150900 -->
+<!-- BUILD:20260926-151600 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -8665,7 +8665,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260926-150900";
+const BUILD = "20260926-151600";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -10715,6 +10715,29 @@ function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inve
   const poPaid=poAll.filter(a=>a.paymentStatus==="Paid");
   const poTotal=poPaid.reduce((s,a)=>s+poValue(a),0);
 
+  // What branches actually bought from Main — item by item. Counts only POs
+  // Main has released stock for (mainDeducted/stockIssued); an order still
+  // sitting in "processing" hasn't left Main yet, so it isn't a purchase yet.
+  const poFulfilled=poAll.filter(a=>a.mainDeducted||a.stockIssued);
+  const poItemMap={};
+  poFulfilled.forEach(po=>{
+    const rows=(Array.isArray(po.deliveredItems)&&po.deliveredItems.length)
+      ? po.deliveredItems : (po.items||[]);
+    rows.forEach(it=>{
+      const qty=it.actualQty!=null?Number(it.actualQty):Number(it.qty)||0;
+      if(!qty)return;
+      const amt=qty*(Number(it.price)||0);
+      const nm=it.name||it.id||"";
+      if(!nm)return;
+      if(!poItemMap[nm])poItemMap[nm]={name:nm,qty:0,amt:0,branches:{}};
+      poItemMap[nm].qty+=qty;
+      poItemMap[nm].amt+=amt;
+      const br=po.branchName||po.branch||"—";
+      poItemMap[nm].branches[br]=(poItemMap[nm].branches[br]||0)+qty;
+    });
+  });
+  const poItemList=Object.values(poItemMap).sort((a,b)=>b.qty-a.qty);
+
   // Inventory value
   const invValue=inventory.reduce((s,i)=>s+(i.cost||0)*(i.stock||0),0);
   const invValueSell=inventory.reduce((s,i)=>s+(i.price||0)*(i.stock||0),0);
@@ -10955,6 +10978,32 @@ function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inve
             ""+advances.filter(a=>a._type==="po"&&a.status==="discrepancy").length),
           h("div",{style:{fontSize:13,color:C.muted}},"Needs resolution")
         )
+      ),
+      // Items branches bought from Main — the "sold items" view for purchasing
+      h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,
+        overflow:"hidden",marginBottom:14}},
+        h("div",{style:{padding:"10px 16px",borderBottom:"1px solid "+C.border,
+          fontSize:14,fontWeight:800}},"Items Bought by Branches"),
+        h("div",{style:{display:"grid",gridTemplateColumns:"2fr 90px 100px 2fr",
+          padding:"8px 16px",background:"#fafafa",borderBottom:"1px solid "+C.border}},
+          ["ITEM","QTY","AMOUNT","TOP BRANCHES"].map(h2=>
+            h("div",{key:h2,style:{fontSize:11,fontWeight:700,color:C.muted,letterSpacing:1}},h2))
+        ),
+        poItemList.length===0&&h("div",{style:{padding:"30px",textAlign:"center",color:C.muted}},
+          "No stock released to branches for this period"),
+        poItemList.map(it=>h("div",{key:it.name,
+          style:{display:"grid",gridTemplateColumns:"2fr 90px 100px 2fr",
+            padding:"10px 16px",borderBottom:"1px solid #f5f5f5",alignItems:"center"}},
+          h("div",{style:{fontWeight:700,fontSize:14}},it.name),
+          h("div",{style:{fontSize:14,fontWeight:700}},it.qty),
+          h("div",{style:{fontSize:14,fontWeight:700,color:C.primary}},"₱"+peso(it.amt)),
+          h("div",{style:{fontSize:12,color:C.muted}},
+            Object.entries(it.branches)
+              .sort((a,b)=>b[1]-a[1])
+              .slice(0,3)
+              .map(([br,q])=>br+" ("+q+")")
+              .join(", "))
+        ))
       ),
       // PO list
       h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
