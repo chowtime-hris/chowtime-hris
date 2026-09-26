@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260926-152200 -->
+<!-- BUILD:20260926-153300 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -6728,7 +6728,8 @@ const GUIDE_PAGES = {
   cost:      ["bom_mgmt"],
   fifo:      ["inventory"],
   perms:     ["settings"],
-  inventory: ["inventory"]
+  inventory: ["inventory"],
+  analytics: ["analytics","sales_report"]
   // `audit` is deliberately absent: the Auditor Count rewrites POS stock for a
   // whole branch, so it stays with the roles named on the guide itself rather
   // than following anyone who happens to hold the freezer page.
@@ -6908,6 +6909,17 @@ const GUIDES=[
     "Enter the amount and pick a reason — Physical Count, Spoilage, Wastage, Correction.",
     "Save. The before and after are written to the log with your name."],
    note:"Use Batch edit for many items at once — the toolbar button. Each row lets you enter the figure in its own unit or in packs, tubs or bottles, and shows the conversion before you save. Every change still writes its own log line. For a WHOLE freezer, do not adjust item by item here — use the Auditor Count instead: it sets every counted item at once and clears the crew's running baseline in the same pass, which this screen does not."},
+
+  {id:"analytics",roles:["owner","manager"],icon:"📈",
+   title:"How to see what's selling and what branches are buying",
+   steps:[
+    "Open POS & Sales → Analytics. Pick a period: Today, This Week, This Month, or Custom.",
+    "General tab — the day's totals: gross, net, transactions, VAT, void orders.",
+    "Item tab — every menu item sold in the period, ranked by revenue, with qty sold and % of total sales. This is where you find 'how many Chicken Fillet / Reg Meal Box did we sell'.",
+    "Category tab — the same, rolled up by menu category (Bestsellers, Silog Meals, etc.).",
+    "Payment tab — split by Cash, GCash, Maya, Bank, FoodPanda, GrabFood.",
+    "Purchasing tab — what branches actually bought FROM Main, grouped by item category (Frozen, Dry Goods, Packaging, etc.), showing qty, amount, and the top branches buying each item. It only counts POs Main has already released stock for — a PO still 'processing' hasn't left Main yet, so it doesn't count as bought."],
+   note:"Owner and Commissary see every branch's sales here, not just Main's — Main itself barely sells at POS, so a branch-locked view used to look empty. A Manager sees only their own branch. Sales Report (also under POS & Sales) is a simpler always-all-time summary — gross/net sales, sales by branch, sales by payment method — with no period filter and no item breakdown; use Analytics when you need a specific period or a per-item list."},
 ];
 
 // The price to show on a card. When sizes carry the whole price the base is
@@ -8665,7 +8677,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260926-152200";
+const BUILD = "20260926-153300";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -10720,7 +10732,16 @@ function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inve
   // (mainDeducted/stockIssued); an order still sitting in "processing" hasn't
   // left Main yet, so it isn't a purchase yet.
   const invCatById={};
-  inventory.forEach(i=>{ if(i&&i.id)invCatById[i.id]=i.cat||"Other"; });
+  const invPackSzById={};
+  const invPackUnitById={};
+  const invBaseUnitById={};
+  inventory.forEach(i=>{
+    if(!i||!i.id)return;
+    invCatById[i.id]=i.cat||"Other";
+    invPackSzById[i.id]=packSizeOf(i);
+    invPackUnitById[i.id]=packUnitOf(i);
+    invBaseUnitById[i.id]=baseUnitOf(i);
+  });
   const poFulfilled=poAll.filter(a=>a.mainDeducted||a.stockIssued);
   const poItemMap={};
   poFulfilled.forEach(po=>{
@@ -10733,7 +10754,9 @@ function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inve
       const nm=it.name||it.id||"";
       if(!nm)return;
       const cat=invCatById[it.id]||it.cat||"Other";
-      if(!poItemMap[nm])poItemMap[nm]={name:nm,cat:cat,qty:0,amt:0,branches:{}};
+      const psz=invPackSzById[it.id]||0;
+      if(!poItemMap[nm])poItemMap[nm]={name:nm,cat:cat,qty:0,amt:0,branches:{},
+        packSize:psz,packUnit:invPackUnitById[it.id]||"pack",baseUnit:invBaseUnitById[it.id]||""};
       poItemMap[nm].qty+=qty;
       poItemMap[nm].amt+=amt;
       const br=po.branchName||po.branch||"—";
@@ -11008,16 +11031,21 @@ function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inve
             h("div",{style:{fontSize:12,color:C.muted}},
               cg.qty+" qty · ₱"+peso(cg.amt))
           ),
-          h("div",{style:{display:"grid",gridTemplateColumns:"2fr 90px 100px 2fr",
+          h("div",{style:{display:"grid",gridTemplateColumns:"2fr 90px 110px 100px 2fr",
             padding:"6px 16px",background:"#fafafa"}},
-            ["ITEM","QTY","AMOUNT","TOP BRANCHES"].map(h2=>
+            ["ITEM","QTY","PACKS SOLD","AMOUNT","TOP BRANCHES"].map(h2=>
               h("div",{key:h2,style:{fontSize:11,fontWeight:700,color:C.muted,letterSpacing:1}},h2))
           ),
           cg.items.map(it=>h("div",{key:it.name,
-            style:{display:"grid",gridTemplateColumns:"2fr 90px 100px 2fr",
+            style:{display:"grid",gridTemplateColumns:"2fr 90px 110px 100px 2fr",
               padding:"10px 16px",borderTop:"1px solid #f5f5f5",alignItems:"center"}},
             h("div",{style:{fontWeight:700,fontSize:14}},it.name),
             h("div",{style:{fontSize:14,fontWeight:700}},it.qty),
+            h("div",{style:{fontSize:13,color:C.muted}},
+              it.packSize>0
+                ? (Math.floor(it.qty/it.packSize)+" "+it.packUnit
+                   +(it.qty%it.packSize>0?" + "+(it.qty%it.packSize)+" "+it.baseUnit:""))
+                : "—"),
             h("div",{style:{fontSize:14,fontWeight:700,color:C.primary}},"₱"+peso(it.amt)),
             h("div",{style:{fontSize:12,color:C.muted}},
               Object.entries(it.branches)
