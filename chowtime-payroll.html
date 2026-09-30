@@ -37,6 +37,14 @@ nav.tabs::-webkit-scrollbar{display:none;}
 nav.tabs button{background:none;border:none;color:#5A5A5A;padding:7px 14px;border-radius:6px;font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap;transition:.15s;scroll-snap-align:start;touch-action:manipulation;}
 nav.tabs button.active,nav.tabs button:hover{background:var(--brand);color:#fff;}
 main{max-width:1320px;margin:0 auto;padding:22px 18px 60px;}
+/* These tabs' tables run wide (12-17 columns) — the normal 1320px cap left
+   unused space on a wide screen while the table squeezed into a horizontal
+   scroll. Widen the page only while one of these is the tab showing. */
+main:has(#page-dtr-editor.active),
+main:has(#page-dtr.active),
+main:has(#page-employees.active),
+main:has(#page-payroll.active),
+main:has(#page-shifts.active){max-width:1800px;}
 .page{display:none;}.page.active{display:block;}
 .kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:22px;}
 .kpi-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;position:relative;overflow:hidden;}
