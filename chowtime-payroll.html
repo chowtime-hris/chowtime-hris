@@ -63,6 +63,14 @@ thead th{background:#F7F7F7;color:#111111;padding:9px 11px;text-align:left;font-
 tbody tr{border-bottom:1px solid var(--border);}
 tbody tr:hover{background:#fff5f0;}
 tbody td{padding:9px 11px;}
+/* DTR Editor has 17 columns — the normal padding/font forced a horizontal
+   scroll. Scoped so no other table on the page is affected. */
+#page-dtr-editor #editor-tbody-wrap thead th,
+#page-dtr-editor #editor-tbody-wrap tbody td{padding:5px 6px;font-size:11px;}
+#page-dtr-editor #editor-tbody-wrap thead th{font-size:9px;white-space:normal;line-height:1.2;}
+#page-dtr-editor #editor-tbody-wrap input.dtr-input[type="time"]{width:78px;padding:3px!important;font-size:11px!important;}
+#page-dtr-editor #editor-tbody-wrap select.dtr-select{max-width:118px;font-size:10px!important;padding:2px!important;text-overflow:ellipsis;overflow:hidden;white-space:nowrap;}
+#page-dtr-editor #editor-tbody-wrap td{white-space:nowrap;}
 .tag{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;}
 .tag-green{background:#d4edda;color:var(--green);}
 .tag-red{background:#fde8e6;color:var(--red);}
@@ -262,7 +270,7 @@ tbody td{padding:9px 11px;}
         <select id="editor-period" onchange="loadDTREditor()"></select>
       </div>
     </div>
-    <div class="table-wrap">
+    <div class="table-wrap" id="editor-tbody-wrap">
       <table>
         <thead><tr>
           <th>Date</th><th>Day</th>
