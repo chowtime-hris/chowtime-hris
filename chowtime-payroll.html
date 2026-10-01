@@ -1479,9 +1479,15 @@ function buildPayrollRow(emp, periodKey, opts) {
     const remaining = loanBalanceOf(l);
     let due = 0, after = remaining, isRecorded = false;
     if (recorded.length) {
-      // Charged for real — replay the ledger, including the closing balance
+      // "due" (what was actually taken from pay this cut-off) stays the
+      // frozen historical figure from the ledger — that never changes.
+      // "after" (balance remaining) now always reads the CURRENT live
+      // balance instead of that old snapshot, so a later Balance
+      // Correction (e.g. fixing a lost deduction) shows up here too,
+      // even on an already-released payslip, without rewriting what was
+      // actually deducted that cut-off.
       due   = +recorded.reduce((a,e)=>a+(+e.amount||0), 0).toFixed(2);
-      after = +(+recorded[recorded.length-1].after || 0).toFixed(2);
+      after = remaining;
       isRecorded = true;
     } else if (periodReleased) {
       // Cut-off is closed and this loan was not charged in it
