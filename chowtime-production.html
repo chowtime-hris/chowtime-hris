@@ -605,13 +605,25 @@ function staffCutoffProduction(staffId, cutoffKey){
 }
 function ledgerBalance(staffId){
   const entries = state.ledger[staffId] || [];
-  let loanOwed=0, cashFund=0, totalOwedRaised=0, totalPaid=0;
+  let cashFund=0, totalOwedRaised=0;
   entries.forEach(e=>{
-    if(e.type==='loan' || e.type==='fine' || e.type==='ca'){ loanOwed += Number(e.amount); totalOwedRaised += Number(e.amount); }
-    if(e.type==='payment'){ loanOwed -= Number(e.amount); totalPaid += Number(e.amount); }
+    if(e.type==='loan' || e.type==='fine' || e.type==='ca'){ totalOwedRaised += Number(e.amount); }
     if(e.type==='cashfund_add') cashFund += Number(e.amount);
     if(e.type==='cashfund_deduct') cashFund -= Number(e.amount);
   });
+  // "Still owed" and "paid so far" both have to count the automatic
+  // per-cutoff deduction, not just a hand-logged "Payment received" entry —
+  // the payslip has genuinely been withholding a debt's scheduled amount
+  // every cutoff whether or not anyone logs a payment for it (see
+  // debtDueThisCutoff, used when the payslip is built). staffDebts() already
+  // works this out per debt; this used to only look at manual payments, so
+  // a debt with an active per-cutoff schedule showed as still fully owed
+  // here (Balances Overview, and the payslip's own summary line) while the
+  // "which debt" picker and the payslip's own per-debt lines — both driven
+  // by staffDebts() — correctly showed it as partly or fully paid down.
+  const debts = staffDebts(staffId);
+  const loanOwed  = debts.reduce((a,d)=>a+d.balance, 0);
+  const totalPaid = debts.reduce((a,d)=>a+(d.deemedPaid!=null?d.deemedPaid:d.paid), 0);
   return {loanOwed, cashFund, totalOwedRaised, totalPaid};
 }
 function activeStaffList(){
