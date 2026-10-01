@@ -1030,10 +1030,19 @@ tbody td{padding:9px 11px;}
 
 <div id="deduct-now-modal" class="modal-overlay">
   <div class="modal-box" style="max-width:400px;">
-    <h2>💳 Manual Deduction</h2>
+    <h2 id="deduct-now-title">💳 Manual Deduction</h2>
     <div id="deduct-now-info" style="background:var(--surface);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px;"></div>
     <div class="form-group">
-      <label>Amount to Deduct (₱)</label>
+      <label>Action</label>
+      <select id="deduct-now-dir" onchange="onDeductDirChange()">
+        <option value="deduct">Deduct Now — takes money off THIS cut-off's pay, and lowers the balance</option>
+        <option value="correct-down">Correction: Lower balance only — NO payslip effect (money was already taken from pay before, just never got recorded)</option>
+        <option value="correct-up">Correction: Raise balance only — NO payslip effect (a deduction was recorded but the money was never actually taken)</option>
+      </select>
+      <div id="deduct-now-dir-hint" style="font-size:11px;color:var(--muted);margin-top:4px;"></div>
+    </div>
+    <div class="form-group">
+      <label id="deduct-now-amount-label">Amount to Deduct (₱)</label>
       <input type="number" id="deduct-now-amount" placeholder="Enter amount" style="font-size:18px;font-weight:700;">
     </div>
     <div class="form-group">
@@ -1041,7 +1050,7 @@ tbody td{padding:9px 11px;}
       <input id="deduct-now-note" placeholder="e.g. Early payment, July salary">
     </div>
     <div style="display:flex;gap:10px;margin-top:16px;">
-      <button class="btn btn-primary" onclick="confirmDeductNow()" style="background:#e67e22;">💳 Deduct Now</button>
+      <button class="btn btn-primary" id="deduct-now-btn" onclick="confirmDeductNow()" style="background:#e67e22;">💳 Deduct Now</button>
       <button class="btn btn-secondary" onclick="closeModal('deduct-now-modal')">Cancel</button>
     </div>
   </div>
@@ -3270,16 +3279,19 @@ function saveLoan(){
   }
 }
 function markLoanPaid(i){
-  const before = loanBalanceOf(loans[i]);
+  const loan = loans[i]; if (!loan) return;
+  const before = loanBalanceOf(loan);
   if(!confirm(`Mark this loan as fully paid?\n\nRemaining balance of \u20b1${fmt(before)} will be closed out and recorded in the ledger.`)) return;
-  loans[i].status='Paid'; loans[i].balance=0;
-  logLedger(loans[i], 'marked-paid', before, before, 0, 'Closed out manually');
-  save('loans',loans); _loanSaving=true;
-  if(window._fbDB&&window._fbFns){
-    window._fbFns.set(window._fbFns.ref(window._fbDB,'loans'),loans)
-      .then(()=>{ setTimeout(()=>{_loanSaving=false;},8000); renderLoans(); })
-      .catch(e=>{ _loanSaving=false; console.warn(e); renderLoans(); });
-  } else { setTimeout(()=>{_loanSaving=false;},8000); renderLoans(); }
+  const id = loan.id;
+  runLoansTransaction(arr=>{
+    const l = arr.find(x=>x && x.id===id); if(!l) return {arr};
+    const b = loanBalanceOf(l);
+    l.status='Paid'; l.balance=0;
+    return {arr, ledger:[{loan:l, action:'marked-paid', amount:b, before:b, after:0, note:'Closed out manually'}]};
+  }).catch(e=>{
+    console.warn(e);
+    alert('\u26a0 Did NOT save to the database \u2014 it will come back on refresh.\n\n'+((e&&e.code)||(e&&e.message)||e));
+  });
 }
 function deleteLoan(i){
   const before = loanBalanceOf(loans[i]);
@@ -3296,33 +3308,34 @@ function deleteLoan(i){
   } else { setTimeout(()=>{_loanSaving=false;},8000); renderLoans(); }
 }
 function resetLoanBalance(i){
-  const loan = loans[i];
+  const loan = loans[i]; if (!loan) return;
   const principal = +(loan.amount || 0);
   const before = loanBalanceOf(loan);
   if(!confirm('Reset this loan to its full principal (\u20b1'+fmt(principal)+')?\n\n'
     +'This also CLEARS its recorded cut-off deductions, so it can be deducted '
-    +'again cleanly — use this to fix a loan that shows "Deducted" but whose '
+    +'again cleanly \u2014 use this to fix a loan that shows "Deducted" but whose '
     +'balance never went down.')) return;
-  loan.status='Active'; loan.balance=principal;
+  const id = loan.id;
   // Drop this loan's deduction rows so wasDeductedInPeriod() no longer blocks
   // a fresh deduction. Keep other loans' history and non-deduction rows.
-  if(loan.id){
+  if(id){
     loanLedger = loanLedger.filter(e =>
-      !(e.loanId === loan.id &&
+      !(e.loanId === id &&
         (e.action === 'cutoff-deduction' || e.action === 'manual-deduction')));
+    pushLedger();
   }
-  logLedger(loan, 'balance-reset', principal - before, before, principal, 'Balance reset to principal; deductions cleared');
-  save('loans',loans); save('loanLedger',loanLedger); _loanSaving=true;
-  const done = ()=>{ setTimeout(()=>{_loanSaving=false;},8000); renderLoans(); showToastAdmin&&showToastAdmin(`✅ Reset to ₱${principal.toFixed(2)}`); };
-  const fail = e=>{ _loanSaving=false; renderLoans();
-    alert('⚠ Reset did NOT save to the database — it will come back on refresh.\n\n'
-      +((e&&e.code)||(e&&e.message)||e)+'\n\nLikely the loans rules block this app.'); };
-  if(window._fbDB&&window._fbFns){
-    Promise.all([
-      window._fbFns.set(window._fbFns.ref(window._fbDB,'loans'),loans),
-      window._fbFns.set(window._fbFns.ref(window._fbDB,'loanLedger'),loanLedger)
-    ]).then(done).catch(fail);
-  } else { done(); }
+  runLoansTransaction(arr=>{
+    const l = arr.find(x=>x && x.id===id); if(!l) return {arr};
+    const b = loanBalanceOf(l);
+    l.status='Active'; l.balance=principal;
+    return {arr, ledger:[{loan:l, action:'balance-reset', amount:principal-b, before:b, after:principal,
+      note:'Balance reset to principal; deductions cleared'}]};
+  }).then(()=>{
+    showToastAdmin&&showToastAdmin(`\u2705 Reset to \u20b1${principal.toFixed(2)}`);
+  }).catch(e=>{
+    alert('\u26a0 Reset did NOT save to the database \u2014 it will come back on refresh.\n\n'
+      +((e&&e.code)||(e&&e.message)||e)+'\n\nLikely the loans rules block this app.');
+  });
 }
 let _deductNowIdx = -1;
 function openDeductNow(i) {
@@ -3331,49 +3344,108 @@ function openDeductNow(i) {
   _deductNowIdx = i;
   const currentBalance = loanBalanceOf(l);
   document.getElementById('deduct-now-info').innerHTML = `
-    <strong>${l.empName}</strong> — ${l.type}<br>
-    Principal: ₱${fmt(l.amount)} | Balance: <strong>₱${fmt(currentBalance)}</strong><br>
-    <span style="color:var(--muted);font-size:11px;">Scheduled per cut-off: ₱${fmt(l.monthly)}</span>`;
+    <strong>${l.empName}</strong> \u2014 ${l.type}<br>
+    Principal: \u20b1${fmt(l.amount)} | Balance: <strong>\u20b1${fmt(currentBalance)}</strong><br>
+    <span style="color:var(--muted);font-size:11px;">Scheduled per cut-off: \u20b1${fmt(l.monthly)}</span>`;
   document.getElementById('deduct-now-amount').value = '';
   document.getElementById('deduct-now-note').value = '';
+  const dirEl = document.getElementById('deduct-now-dir');
+  if (dirEl) dirEl.value = 'deduct';
+  onDeductDirChange();
   document.getElementById('deduct-now-modal').style.display = 'block';
 }
 window.openDeductNow = openDeductNow;
 
+// Flips the modal between a normal deduction and a CREDIT (correction) \u2014
+// used to add money back to a balance when a deduction was taken from an
+// employee's pay but never actually landed on the loan (see runLoansTransaction
+// for why that could happen before this fix).
+function onDeductDirChange(){
+  const dir = document.getElementById('deduct-now-dir')?.value || 'deduct';
+  const titleEl = document.getElementById('deduct-now-title');
+  const lblEl   = document.getElementById('deduct-now-amount-label');
+  const btnEl   = document.getElementById('deduct-now-btn');
+  const hintEl  = document.getElementById('deduct-now-dir-hint');
+  if (dir === 'correct-down') {
+    if (titleEl) titleEl.textContent = '\ud83d\udd27 Balance Correction';
+    if (lblEl)   lblEl.textContent   = 'Amount to Lower Balance By (\u20b1)';
+    if (btnEl) { btnEl.textContent = '\ud83d\udd27 Apply Correction'; btnEl.style.background = '#6c757d'; }
+    if (hintEl) hintEl.textContent = 'Only the balance moves. This cut-off\u2019s payslip (and any already-released payslip) is untouched.';
+  } else if (dir === 'correct-up') {
+    if (titleEl) titleEl.textContent = '\ud83d\udd27 Balance Correction';
+    if (lblEl)   lblEl.textContent   = 'Amount to Raise Balance By (\u20b1)';
+    if (btnEl) { btnEl.textContent = '\ud83d\udd27 Apply Correction'; btnEl.style.background = '#6c757d'; }
+    if (hintEl) hintEl.textContent = 'Only the balance moves. This cut-off\u2019s payslip (and any already-released payslip) is untouched.';
+  } else {
+    if (titleEl) titleEl.textContent = '\ud83d\udcb3 Manual Deduction';
+    if (lblEl)   lblEl.textContent   = 'Amount to Deduct (\u20b1)';
+    if (btnEl) { btnEl.textContent = '\ud83d\udcb3 Deduct Now'; btnEl.style.background = '#e67e22'; }
+    if (hintEl) hintEl.textContent = 'This also counts toward THIS cut-off\u2019s payslip deduction \u2014 use a Correction instead if you only want to fix the balance.';
+  }
+}
+window.onDeductDirChange = onDeductDirChange;
+
 function confirmDeductNow() {
   const i = _deductNowIdx;
   if (i < 0 || !loans[i]) return;
+  const loan = loans[i];
+  const id = loan.id;
+  const dir = document.getElementById('deduct-now-dir')?.value || 'deduct';
   const amount = +document.getElementById('deduct-now-amount').value;
   if (!amount || amount <= 0) { alert('Please enter a valid amount.'); return; }
   const note = document.getElementById('deduct-now-note').value || '';
-  const l = loans[i];
-  const currentBalance = loanBalanceOf(l);
-  if (amount > currentBalance &&
+  const currentBalance = loanBalanceOf(loan);
+  const principal = +(loan.amount || 0);
+
+  if (dir === 'deduct' && amount > currentBalance &&
       !confirm('\u20b1' + fmt(amount) + ' is more than the \u20b1' + fmt(currentBalance) +
                ' still owed.\n\nThe balance will be closed at \u20b10.00 and the ledger will ' +
                'record the full \u20b1' + fmt(amount) + ' you entered. Continue?')) return;
-  const newBalance = Math.max(0, currentBalance - amount);
-  loans[i].balance = newBalance;
-  if (newBalance <= 0) loans[i].status = 'Paid';
-  // Log the manual deduction
-  if (!loans[i].deductions) loans[i].deductions = [];
-  loans[i].deductions.push({
-    date: toLocalDateStr(new Date()),
-    amount,
-    note,
-    type: 'manual'
+  if (dir === 'correct-down' &&
+      !confirm('Lower ' + (loan.empName||'this employee') + "'s balance by \u20b1" + fmt(amount) +
+               '?\n\nThis does NOT touch any payslip \u2014 it only fixes the balance on record.\n\n' +
+               (note ? 'Note: ' + note : 'Tip: add a note above explaining why.'))) return;
+  if (dir === 'correct-up' &&
+      !confirm('Raise ' + (loan.empName||'this employee') + "'s balance by \u20b1" + fmt(amount) +
+               '?\n\nThis does NOT touch any payslip \u2014 it only fixes the balance on record.\n\n' +
+               (note ? 'Note: ' + note : 'Tip: add a note above explaining why.'))) return;
+
+  runLoansTransaction(arr=>{
+    const l = arr.find(x=>x && x.id===id);
+    if (!l) return {arr};
+    const before = loanBalanceOf(l);
+    let after, action;
+    if (dir === 'correct-down') {
+      after = Math.max(0, +(before - amount).toFixed(2));
+      l.balance = after;
+      if (after <= 0) l.status = 'Paid';
+      action = 'balance-correction';
+    } else if (dir === 'correct-up') {
+      after = Math.min(principal, +(before + amount).toFixed(2));
+      l.balance = after;
+      if (after > 0) l.status = 'Active';
+      action = 'balance-correction';
+    } else {
+      after = Math.max(0, before - amount);
+      l.balance = after;
+      if (after <= 0) l.status = 'Paid';
+      if (!l.deductions) l.deductions = [];
+      l.deductions.push({ date: toLocalDateStr(new Date()), amount, note, type: 'manual' });
+      action = 'manual-deduction';
+    }
+    return {arr, ledger:[{loan:l, action, amount, before, after, note}]};
+  }).then(res=>{
+    closeModal('deduct-now-modal');
+    const l = (res.arr||loans).find(x=>x&&x.id===id) || loan;
+    showToastAdmin && showToastAdmin(dir === 'correct-down'
+      ? `\u2705 Balance corrected \u2014 \u20b1${fmt(amount)} lower for ${l.empName}'s ${l.type}. Balance: \u20b1${fmt(loanBalanceOf(l))} (no payslip affected)`
+      : dir === 'correct-up'
+      ? `\u2705 Balance corrected \u2014 \u20b1${fmt(amount)} higher for ${l.empName}'s ${l.type}. Balance: \u20b1${fmt(loanBalanceOf(l))} (no payslip affected)`
+      : `\u2705 \u20b1${fmt(amount)} deducted from ${l.empName}'s ${l.type}. Balance: \u20b1${fmt(loanBalanceOf(l))}`);
+  }).catch(e=>{
+    console.warn(e);
+    alert('\u26a0 Did NOT save to the database \u2014 it will come back on refresh.\n\n'+((e&&e.code)||(e&&e.message)||e));
   });
-  logLedger(loans[i], 'manual-deduction', amount, currentBalance, newBalance, note);
-  save('loans', loans);
-  _loanSaving = true;
-  if (window._fbDB && window._fbFns) {
-    window._fbFns.set(window._fbFns.ref(window._fbDB,'loans'), loans)
-      .then(()=>{ setTimeout(()=>{_loanSaving=false;},8000); })
-      .catch(e=>{ _loanSaving=false; console.warn(e); });
-  } else { setTimeout(()=>{_loanSaving=false;},8000); }
-  closeModal('deduct-now-modal');
-  renderLoans();
-  showToastAdmin && showToastAdmin(`✅ ₱${fmt(amount)} deducted from ${l.empName}'s ${l.type}. Balance: ₱${fmt(newBalance)}`);
 }
 window.confirmDeductNow = confirmDeductNow;
 
@@ -3383,8 +3455,8 @@ window.confirmDeductNow = confirmDeductNow;
 // which only ever knew what THIS browser had done.
 function deductLoanBalances() {
   const p = getPeriod();
-  const res = applyCutoffDeductions(p.key, { confirm: true, source: 'manual-override' });
-  if (res && res.applied) renderLoans();
+  Promise.resolve(applyCutoffDeductions(p.key, { confirm: true, source: 'manual-override' }))
+    .then(res => { if (res && res.applied) renderLoans(); });
 }
 window.deductLoanBalances = deductLoanBalances;
 
@@ -3402,6 +3474,7 @@ const LEDGER_ACTIONS = {
   'loan-edited':      {label:'Loan edited',       tag:'tag-gray'},
   'cutoff-deduction': {label:'Cut-off deduction', tag:'tag-orange'},
   'manual-deduction': {label:'Manual deduction',  tag:'tag-orange'},
+  'balance-correction': {label:'Balance correction', tag:'tag-gray'},
   'marked-paid':      {label:'Marked paid',       tag:'tag-green'},
   'balance-reset':    {label:'Balance reset',     tag:'tag-red'},
   'loan-deleted':     {label:'Loan deleted',      tag:'tag-red'},
@@ -3418,6 +3491,54 @@ function ensureLoanIds(){
   loans.forEach(l => { if (l && !l.id) { l.id = newLoanId(); changed = true; } });
   if (changed) { save('loans', loans); pushLoans(); }
   return changed;
+}
+function ensureIdsIn(arr){
+  arr.forEach(l => { if (l && !l.id) l.id = newLoanId(); });
+  return arr;
+}
+
+// ── Safe loan-array writer ──────────────────────────────────
+// Every balance-changing action used to mutate the LOCAL `loans` array and
+// blind-overwrite the whole Firebase node with it. If this tab's copy was
+// stale (another device/tab wrote since this page loaded, or a previous
+// write never landed), that overwrite silently erases the other change —
+// a cut-off would show "deducted" in the ledger while the real balance on
+// the server never moved. (This is exactly what happened to Jessa Mae
+// Padrid's Cash Bond: the Sep 1-15 deduction logged a before/after of
+// 6000→4000 in the ledger, but the matching `set()` never actually landed,
+// so Sep 16-30 read the server's true balance — still 6000 — and deducted
+// from there, landing on 4000 again.)
+//
+// `runTransaction` re-reads the ACTUAL server array first and retries if
+// something else wrote in the meantime, so `mutate` always runs against
+// real, current data — never a stale local copy. `mutate(freshArr)` mutates
+// freshArr in place (or returns a replacement array) and may return
+// {ledger:[...]} entries to log — logged only once, after the commit
+// succeeds, using the real committed values.
+function runLoansTransaction(mutate){
+  if (!(window._fbDB && window._fbFns && window._fbFns.runTransaction)) {
+    // No live DB (offline/preview) — just mutate the local copy.
+    const arr = ensureIdsIn(loans.slice());
+    const res = mutate(arr) || {};
+    loans = res.arr || arr;
+    save('loans', loans);
+    (res.ledger || []).forEach(e => logLedger(e.loan, e.action, e.amount, e.before, e.after, e.note, e.period));
+    renderLoans();
+    return Promise.resolve(res);
+  }
+  let result = {};
+  return window._fbFns.runTransaction(window._fbFns.ref(window._fbDB, 'loans'), cur => {
+    const arr = ensureIdsIn(cur ? (Array.isArray(cur) ? cur.filter(x=>x) : Object.values(cur)) : []);
+    result = mutate(arr) || {};
+    return result.arr || arr;
+  }).then(txRes => {
+    const committed = txRes && txRes.snapshot ? txRes.snapshot.val() : null;
+    loans = ensureIdsIn(committed ? (Array.isArray(committed) ? committed.filter(x=>x) : Object.values(committed)) : (result.arr || []));
+    save('loans', loans);
+    (result.ledger || []).forEach(e => logLedger(e.loan, e.action, e.amount, e.before, e.after, e.note, e.period));
+    renderLoans();
+    return result;
+  });
 }
 
 // Balance that is actually true right now — 0 means 0, not "fall back to principal"
@@ -3446,21 +3567,28 @@ function toggleSkipCutoff(i){
   if (!l) return;
   const p = getPeriod();
   if (wasDeductedInPeriod(l, p.key)) {
-    alert('Already deducted for ' + (p.label||p.key) + ' — reset the deduction first if you meant to undo it.');
+    alert('Already deducted for ' + (p.label||p.key) + ' \u2014 reset the deduction first if you meant to undo it.');
     return;
   }
-  l.skipPeriods = l.skipPeriods || {};
-  const wasSkipped = !!l.skipPeriods[p.key];
-  if (wasSkipped) delete l.skipPeriods[p.key];
-  else l.skipPeriods[p.key] = true;
-  logLedger(l, wasSkipped ? 'cutoff-unskip' : 'cutoff-skip', 0, loanBalanceOf(l), loanBalanceOf(l),
-    (wasSkipped ? 'Un-skipped — ' : 'Skipped — no deduction for ') + (p.label||p.key), p.key);
-  save('loans', loans);
-  pushLoans();
-  renderLoans();
-  showToastAdmin && showToastAdmin(wasSkipped
-    ? '↩️ ' + (p.label||p.key) + ' deduction restored for ' + (l.empName||'employee')
-    : '⏭️ ' + (p.label||p.key) + ' deduction skipped for ' + (l.empName||'employee'));
+  const id = l.id;
+  const wasSkipped = !!(l.skipPeriods && l.skipPeriods[p.key]);
+  runLoansTransaction(arr=>{
+    const loan = arr.find(x=>x && x.id===id); if (!loan) return {arr};
+    loan.skipPeriods = loan.skipPeriods || {};
+    const skipped = !!loan.skipPeriods[p.key];
+    if (skipped) delete loan.skipPeriods[p.key];
+    else loan.skipPeriods[p.key] = true;
+    const bal = loanBalanceOf(loan);
+    return {arr, ledger:[{loan, action: skipped ? 'cutoff-unskip' : 'cutoff-skip', amount:0, before:bal, after:bal,
+      note: (skipped ? 'Un-skipped \u2014 ' : 'Skipped \u2014 no deduction for ') + (p.label||p.key), period:p.key}]};
+  }).then(()=>{
+    showToastAdmin && showToastAdmin(wasSkipped
+      ? '\u21a9\ufe0f ' + (p.label||p.key) + ' deduction restored for ' + (l.empName||'employee')
+      : '\u23ed\ufe0f ' + (p.label||p.key) + ' deduction skipped for ' + (l.empName||'employee'));
+  }).catch(e=>{
+    console.warn(e);
+    alert('\u26a0 Did NOT save to the database \u2014 it will come back on refresh.\n\n'+((e&&e.code)||(e&&e.message)||e));
+  });
 }
 window.toggleSkipCutoff = toggleSkipCutoff;
 
@@ -3597,10 +3725,15 @@ function applyCutoffDeductions(periodKey, opts){
   const pLabel = pDet.label || periodKey;
   const pEnd   = periodEndStr(periodKey);
 
+  // Preview against the best-known LOCAL state, just to show the confirm
+  // dialog. The actual commit below always recomputes eligibility against
+  // the live server data inside the transaction, so a stale preview here
+  // can never cause a wrong amount to be deducted \u2014 at worst the dialog's
+  // numbers are a few seconds out of date.
   const eligible = [];
   const skipped  = {paid:0, notStarted:0, alreadyDone:0, noSchedule:0, manuallySkipped:0};
 
-  loans.forEach((l, i) => {
+  loans.forEach((l) => {
     if (l.status === 'Paid')                 { skipped.paid++;        return; }
     if (l.start && l.start > pEnd)           { skipped.notStarted++;  return; }
     if (wasDeductedInPeriod(l, periodKey))   { skipped.alreadyDone++; return; }
@@ -3610,7 +3743,7 @@ function applyCutoffDeductions(periodKey, opts){
     const before = loanBalanceOf(l);
     if (before <= 0)                         { skipped.paid++;        return; }
     const amount = Math.min(sched, before);
-    eligible.push({i, l, before, amount, after: before - amount});
+    eligible.push({l, before, amount, after: before - amount});
   });
 
   if (!eligible.length) {
@@ -3622,7 +3755,7 @@ function applyCutoffDeductions(periodKey, opts){
     if (skipped.noSchedule)      why.push(skipped.noSchedule + ' with no per-cut-off amount set');
     alert('Nothing to deduct for ' + pLabel + '.\n\n' +
           (why.length ? why.join('\n') : 'No loans on file.'));
-    return {applied:false, count:0, total:0};
+    return Promise.resolve({applied:false, count:0, total:0});
   }
 
   if (opts.confirm) {
@@ -3639,34 +3772,59 @@ function applyCutoffDeductions(periodKey, opts){
             '.\n\nThe loans below have no recorded deduction for this cut-off, so they would be ' +
             'deducted now. If they were in fact already deducted, this will take the money twice.\n\n' + msg;
     }
-    if (!confirm(msg)) return {applied:false, count:0, total:0};
+    if (!confirm(msg)) return Promise.resolve({applied:false, count:0, total:0});
   }
 
-  let total = 0;
-  eligible.forEach(e => {
-    loans[e.i].balance = e.after;
-    if (e.after <= 0) { loans[e.i].status = 'Paid'; loans[e.i].balance = 0; }
-    logLedger(loans[e.i], 'cutoff-deduction', e.amount, e.before, e.after,
-      (opts.source === 'payroll-release'
-        ? 'Applied when ' + pLabel + ' payroll was released'
-        : 'Manual override for ' + pLabel),
-      periodKey);
-    total += e.amount;
+  // Commit against the LIVE server array \u2014 recomputed from scratch inside
+  // the transaction so nothing from the preview above is trusted blindly.
+  // This is the actual fix for the lost-deduction bug: before, this function
+  // mutated the in-memory `loans` array and fire-and-forgot a set() of it,
+  // so a stale local copy (another tab/device, or an earlier failed write)
+  // could silently overwrite someone else's already-applied deduction.
+  return runLoansTransaction(arr=>{
+    const elig = [];
+    arr.forEach((l,i) => {
+      if (l.status === 'Paid') return;
+      if (l.start && l.start > pEnd) return;
+      if (wasDeductedInPeriod(l, periodKey)) return;
+      if (isSkippedThisPeriod(l, periodKey)) return;
+      const sched = +(l.monthly || 0);
+      if (sched <= 0) return;
+      const before = loanBalanceOf(l);
+      if (before <= 0) return;
+      const amount = Math.min(sched, before);
+      elig.push({i, before, amount, after: before - amount});
+    });
+    const ledger = [];
+    let total = 0;
+    elig.forEach(e => {
+      const l = arr[e.i];
+      l.balance = e.after;
+      if (e.after <= 0) { l.status = 'Paid'; l.balance = 0; }
+      ledger.push({loan:l, action:'cutoff-deduction', amount:e.amount, before:e.before, after:e.after,
+        note: (opts.source === 'payroll-release'
+          ? 'Applied when ' + pLabel + ' payroll was released'
+          : 'Manual override for ' + pLabel),
+        period: periodKey});
+      total += e.amount;
+    });
+    return {arr, ledger, _count: elig.length, _total: total};
+  }).then(res=>{
+    loanDeductLog[periodKey] = {
+      ts: Date.now(),
+      count: (loanDeductLog[periodKey]?.count || 0) + (res._count||0),
+      total: +((loanDeductLog[periodKey]?.total || 0) + (res._total||0)).toFixed(2),
+      source: opts.source || 'manual',
+    };
+    pushDeductLog();
+    showToastAdmin && showToastAdmin('\u2705 \u20b1' + fmt(res._total||0) + ' deducted across ' +
+      (res._count||0) + ' loan' + ((res._count||0)>1?'s':'') + ' for ' + pLabel);
+    return {applied:true, count:res._count||0, total:res._total||0};
+  }).catch(e=>{
+    console.warn(e);
+    alert('\u26a0 Deduction did NOT save to the database.\n\n'+((e&&e.code)||(e&&e.message)||e));
+    return {applied:false, count:0, total:0};
   });
-
-  loanDeductLog[periodKey] = {
-    ts: Date.now(),
-    count: (loanDeductLog[periodKey]?.count || 0) + eligible.length,
-    total: +((loanDeductLog[periodKey]?.total || 0) + total).toFixed(2),
-    source: opts.source || 'manual',
-  };
-
-  save('loans', loans);
-  pushLoans();
-  pushDeductLog();
-  showToastAdmin && showToastAdmin('\u2705 \u20b1' + fmt(total) + ' deducted across ' +
-    eligible.length + ' loan' + (eligible.length>1?'s':'') + ' for ' + pLabel);
-  return {applied:true, count:eligible.length, total, eligible};
 }
 
 // ── Banners ────────────────────────────────────────────────
@@ -3751,35 +3909,44 @@ function releasePayroll(){
   }
   if (!confirm(msg)) return;
 
-  applyCutoffDeductions(p.key, {confirm:false, source:'payroll-release'});
+  // applyCutoffDeductions now commits through a Firebase transaction (so a
+  // stale local copy can never silently swallow someone else's balance
+  // update \u2014 see runLoansTransaction), which makes it asynchronous. The
+  // payslip snapshot below MUST be built only after that commit lands,
+  // otherwise it would snapshot the loan balances from before the deduction.
+  applyCutoffDeductions(p.key, {confirm:false, source:'payroll-release'}).then(()=>{
+    // Recompute after deductions so the snapshot matches what was paid
+    const finalRows = employees.filter(e => e && e.id && e.name).map(e => {
+      try { return buildPayrollRow(e, p.key); } catch(err) { return null; }
+    }).filter(Boolean).filter(r => r.gross > 0);
 
-  // Recompute after deductions so the snapshot matches what was paid
-  const finalRows = employees.filter(e => e && e.id && e.name).map(e => {
-    try { return buildPayrollRow(e, p.key); } catch(err) { return null; }
-  }).filter(Boolean).filter(r => r.gross > 0);
-
-  payrollLog[p.key] = {
-    period: p.key,
-    label: pLabel,
-    releasedAt: Date.now(),
-    releasedBy: (JSON.parse(localStorage.getItem('ct_firebase_cfg')||'{}').branch) || 'HR Admin',
-    rows: finalRows.map(r => ({
-      id:r.id, name:r.name, pos:r.pos||'', rate:r.rate, days:r.days,
-      basic:r.basic, otPay:r.otPay, ndPay:r.ndPay, holPay:r.holPay,
-      incentiveAmt:r.incentiveAmt||0, gross:r.gross,
-      sss:r.sss, phic:r.phic, pagibig:r.pagibig, tax:r.tax,
-      loanDed:r.loanDed, loanByCategory:r.loanByCategory||{}, otherDed:r.totalDed, net:r.net
-    })),
-    totals: finalRows.reduce((t,r)=>({
-      gross:+(t.gross+r.gross).toFixed(2), gov:+(t.gov+r.sss+r.phic+r.pagibig).toFixed(2),
-      tax:+(t.tax+r.tax).toFixed(2), loan:+(t.loan+r.loanDed).toFixed(2),
-      other:+(t.other+r.totalDed).toFixed(2), net:+(t.net+r.net).toFixed(2)
-    }), {gross:0,gov:0,tax:0,loan:0,other:0,net:0}),
-  };
-  pushPayrollLog();
-  renderPayrollReleaseBanner();
-  computeAllPayroll();
-  showToastAdmin && showToastAdmin('\u2705 ' + pLabel + ' released and logged');
+    payrollLog[p.key] = {
+      period: p.key,
+      label: pLabel,
+      releasedAt: Date.now(),
+      releasedBy: (JSON.parse(localStorage.getItem('ct_firebase_cfg')||'{}').branch) || 'HR Admin',
+      rows: finalRows.map(r => ({
+        id:r.id, name:r.name, pos:r.pos||'', rate:r.rate, days:r.days,
+        basic:r.basic, otPay:r.otPay, ndPay:r.ndPay, holPay:r.holPay,
+        incentiveAmt:r.incentiveAmt||0, gross:r.gross,
+        sss:r.sss, phic:r.phic, pagibig:r.pagibig, tax:r.tax,
+        loanDed:r.loanDed, loanByCategory:r.loanByCategory||{}, otherDed:r.totalDed, net:r.net
+      })),
+      totals: finalRows.reduce((t,r)=>({
+        gross:+(t.gross+r.gross).toFixed(2), gov:+(t.gov+r.sss+r.phic+r.pagibig).toFixed(2),
+        tax:+(t.tax+r.tax).toFixed(2), loan:+(t.loan+r.loanDed).toFixed(2),
+        other:+(t.other+r.totalDed).toFixed(2), net:+(t.net+r.net).toFixed(2)
+      }), {gross:0,gov:0,tax:0,loan:0,other:0,net:0}),
+    };
+    pushPayrollLog();
+    renderPayrollReleaseBanner();
+    computeAllPayroll();
+    showToastAdmin && showToastAdmin('\u2705 ' + pLabel + ' released and logged');
+  }).catch(e=>{
+    console.warn(e);
+    alert('\u26a0 Releasing did NOT finish \u2014 the loan deductions failed to save.\n\n'
+      +((e&&e.code)||(e&&e.message)||e)+'\n\nNothing was logged as released. Try again.');
+  });
 }
 window.releasePayroll = releasePayroll;
 
@@ -4735,7 +4902,7 @@ window.emailPayslip = emailPayslip;
 <!-- Firebase multi-branch sync for HRIS admin -->
 <script type="module">
 import{initializeApp}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
-import{getDatabase,ref,set,onValue,remove,get}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js';
+import{getDatabase,ref,set,onValue,remove,get,runTransaction}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js';
 
 // ── Firebase config — hardcoded so it never needs localStorage ──
 // ─── TENANTS ─────────────────────────────────────────────
@@ -4987,7 +5154,7 @@ try {
   }
   const db = getDatabase(app);
   window._fbDB  = db;
-  window._fbFns = { ref, set, remove, get };
+  window._fbFns = { ref, set, remove, get, runTransaction };
   window._fbConnected = true;
 
   // ── POS Firestore (separate project) so payroll can record salary as a POS
