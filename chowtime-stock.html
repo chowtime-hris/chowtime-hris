@@ -140,7 +140,7 @@
   .cutoff-foot .save-btn{width:auto;padding:8px 16px;font-size:12.5px;}
   .cutoff-foot .cp-status{font-size:11.5px;color:var(--muted);}
 </style>
-<!-- BUILD:20260901-100000 -->
+<!-- BUILD:20261002-072500 -->
 </head>
 <body>
 
@@ -1293,7 +1293,10 @@ async function buildAuditPlan(values){
   if(!POS_BRANCH) throw new Error('this branch is not linked to a POS branch');
   const snap = await fs.collection(posInvCollection(POS_BRANCH)).get();
   const fresh = {};
-  snap.forEach(doc=>{ fresh[doc.id] = Number((doc.data()||{}).stock) || 0; });
+  snap.forEach(doc=>{
+    const d = doc.data()||{};
+    fresh[doc.id] = {stock: Number(d.stock) || 0, cost: Number(d.cost) || 0};
+  });
   const rows = [], unlinked = [];
   Object.entries(values).forEach(([id, v])=>{
     const it = items[id] || {};
@@ -1305,7 +1308,8 @@ async function buildAuditPlan(values){
       return;
     }
     const atLoad  = Number(AUDIT_POS_AT_LOAD[pid]);
-    const posNow  = fresh[pid];
+    const posNow  = fresh[pid].stock;
+    const cost    = fresh[pid].cost;
     // Shown so the auditor can see the shelf moved under them, but it does NOT
     // change what gets written. The audit is a reset: the freezer was counted,
     // and that count is the figure the POS should hold. Netting movement off
@@ -1314,9 +1318,10 @@ async function buildAuditPlan(values){
     const movedSince = isNaN(atLoad) ? 0 : Math.round((atLoad - posNow)*1000)/1000;
     const countedBase = Math.round((Number(v.freezer)||0) * per * 1000)/1000;
     const newStock = countedBase;
+    const delta = Math.round((newStock - posNow)*1000)/1000;
     rows.push({id, pid, per, name: it.name||id, unit: it.unit||'',
                posNow, newStock, movedSince, countedBase,
-               delta: Math.round((newStock - posNow)*1000)/1000});
+               delta, cost, deltaValue: Math.round(delta*cost*100)/100});
   });
   return {rows, unlinked};
 }
@@ -1329,7 +1334,12 @@ function showAuditPushPreview(plan){
       : (r.delta>0 ? '+'+fmt(r.delta) : fmt(r.delta));
     const moved = Math.abs(r.movedSince)>0.001
       ? `<br><small style="color:var(--muted);">POS moved ${fmt(Math.abs(r.movedSince))} ${escapeHtml(r.unit||'pc')} since this screen opened — your count overwrites it</small>` : '';
-    return `<div class="result-row"><div><strong>${escapeHtml(r.name)}</strong>${moved}</div>`
+    // Cost value of the adjustment, so a shortage/overage isn't just a raw
+    // quantity — the auditor sees the ₱ it represents.
+    const valueLine = (r.cost>0 && Math.abs(r.deltaValue)>=0.01)
+      ? `<br><small style="color:${r.deltaValue<0?'var(--danger)':'var(--muted)'};font-weight:700;">`
+        + `${peso(Math.abs(r.deltaValue))} ${r.deltaValue<0?'shortage':'overage'} value</small>` : '';
+    return `<div class="result-row"><div><strong>${escapeHtml(r.name)}</strong>${moved}${valueLine}</div>`
       + `<div class="result-tag ${Math.abs(r.delta)<0.001?'tag-ok':(r.delta<0?'tag-short':'tag-over')}">`
       + `${fmt(r.posNow)} → ${fmt(r.newStock)} (${dir})</div></div>`;
   }).join('') : '<p class="sub">No linked items to push.</p>';
