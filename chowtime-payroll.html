@@ -1477,6 +1477,10 @@ function buildPayrollRow(emp, periodKey, opts) {
     } else if (periodReleased) {
       // Cut-off is closed and this loan was not charged in it
       due = 0; after = remaining;
+    } else if (isSkippedThisPeriod(l, periodKey)) {
+      // Admin marked this loan to sit out THIS cut-off only — the monthly
+      // schedule is untouched, so it resumes deducting next cut-off.
+      due = 0; after = remaining;
     } else if (preview && gross > 0 && l.status !== 'Paid' && (!l.start || l.start <= pEndStr)) {
       // Preview only — the scheduled amount, never more than owed
       due   = Math.max(0, Math.min(+(l.monthly||0), remaining));
@@ -1486,7 +1490,8 @@ function buildPayrollRow(emp, periodKey, opts) {
     if (due <= 0 && after <= 0) return;   // settled and nothing to report
     loanByCategory[cat] += due;
     loanLines.push({type: l.type || 'Other Deduction', principal: +(l.amount||0),
-                    due, after, recorded: isRecorded, closed: after <= 0});
+                    due, after, recorded: isRecorded, closed: after <= 0,
+                    skipped: due<=0 && isSkippedThisPeriod(l, periodKey)});
   });
   const loanDed  = +Object.values(loanByCategory).reduce((a,b)=>a+b, 0).toFixed(2);
   const totalDed = gross > 0 ? totals.ded : 0;
@@ -3045,7 +3050,7 @@ function generatePayslip() {
     ${(r.loanLines||[]).length ? `
     <div class="payslip-section">Loan Balances</div>
     ${r.loanLines.map(l=>`
-    <div class="payslip-row"><span>${l.type}${l.principal>0?` <span style="font-size:10px;color:var(--muted);">of ₱${fmt(l.principal)}</span>`:''}</span><span>${l.closed?`<span style="color:var(--green);font-weight:600;">FULLY PAID</span>`:`₱${fmt(l.after)}`}</span></div>`).join('')}
+    <div class="payslip-row"><span>${l.type}${l.principal>0?` <span style="font-size:10px;color:var(--muted);">of ₱${fmt(l.principal)}</span>`:''}${l.skipped?` <span style="font-size:10px;color:var(--muted);">(skipped this cut-off)</span>`:''}</span><span>${l.closed?`<span style="color:var(--green);font-weight:600;">FULLY PAID</span>`:`₱${fmt(l.after)}`}</span></div>`).join('')}
     <div style="font-size:10px;color:var(--muted);margin-top:5px;">${r.periodReleased ? 'Balance remaining after this cut-off.' : 'Current balance — nothing charged for this cut-off yet.'}</div>` : ''}
     <div style="margin-top:22px;font-size:11px;color:var(--muted);text-align:center;">System-generated payslip — ${settings.company}</div>`;
 }
@@ -3090,13 +3095,16 @@ function renderLoans(){
     const pct  = (+l.amount||0) > 0 ? Math.round(paid / (+l.amount) * 100) : 0;
     const notStarted = l.start && l.start > pEnd;
     const done = wasDeductedInPeriod(l, p.key);
+    const skippedNow = !done && isSkippedThisPeriod(l, p.key);
     const cutoffCell = l.status === 'Paid'
       ? `<span class="tag tag-gray">Closed</span>`
       : notStarted
         ? `<span class="tag tag-gray" title="Loan starts ${l.start} — after this cut-off ends">Not yet due</span>`
         : done
           ? `<span class="tag tag-green">✓ Deducted</span>`
-          : `<span class="tag tag-orange">Pending</span>`;
+          : skippedNow
+            ? `<span class="tag tag-gray" title="Marked to sit out ${p.label||p.key} — resumes automatically next cut-off">⏭️ Skipped</span>`
+            : `<span class="tag tag-orange">Pending</span>`;
     return `
     <tr><td>${l.empName}</td><td><span class="tag tag-blue">${l.type}</span></td>
         <td>₱${fmt(l.amount)}</td><td>₱${fmt(l.monthly)}</td>
@@ -3108,6 +3116,10 @@ function renderLoans(){
           <span class="tag ${l.status==='Paid'?'tag-green':'tag-orange'}">${l.status||'Active'}</span>
           <button class="btn btn-sm btn-secondary" style="margin-left:4px;" title="History" onclick="openLoanHistory(${i})">📜</button>
           <button class="btn btn-sm btn-secondary" style="margin-left:3px;" title="Edit" onclick="editLoan(${i})">✏️</button>
+          ${l.status==='Paid'||notStarted||done
+            ? ``
+            : `<button class="btn btn-sm btn-secondary" style="margin-left:3px;${skippedNow?'background:#fde8e6;':''}" title="${skippedNow?'Restore the deduction for '+(p.label||p.key):'Skip the deduction for '+(p.label||p.key)+' only — resumes automatically next cut-off'}" onclick="toggleSkipCutoff(${i})">${skippedNow?'↩️ Unskip':'⏭️ Skip this cut-off'}</button>`
+          }
           ${l.status==='Paid'
             ? ``
             : `<button class="btn btn-sm btn-primary" style="margin-left:3px;background:#e67e22;" onclick="openDeductNow(${i})">💳 Deduct</button>
@@ -3393,6 +3405,8 @@ const LEDGER_ACTIONS = {
   'marked-paid':      {label:'Marked paid',       tag:'tag-green'},
   'balance-reset':    {label:'Balance reset',     tag:'tag-red'},
   'loan-deleted':     {label:'Loan deleted',      tag:'tag-red'},
+  'cutoff-skip':      {label:'Cut-off skipped',   tag:'tag-gray'},
+  'cutoff-unskip':    {label:'Skip undone',       tag:'tag-gray'},
 };
 
 function newLoanId(){
@@ -3419,6 +3433,36 @@ function periodEndStr(key){
   const d = getPeriodDetails(key);
   return d.year + '-' + String(d.month+1).padStart(2,'0') + '-' + String(d.end).padStart(2,'0');
 }
+
+// A loan can be told to sit out ONE specific cut-off (e.g. the employee is
+// short this period) without touching its recurring monthly amount, which
+// keeps deducting normally on every other cut-off. Keyed by period so it
+// never carries over to the next one by accident.
+function isSkippedThisPeriod(l, periodKey){
+  return !!(l && l.skipPeriods && l.skipPeriods[periodKey]);
+}
+function toggleSkipCutoff(i){
+  const l = loans[i];
+  if (!l) return;
+  const p = getPeriod();
+  if (wasDeductedInPeriod(l, p.key)) {
+    alert('Already deducted for ' + (p.label||p.key) + ' — reset the deduction first if you meant to undo it.');
+    return;
+  }
+  l.skipPeriods = l.skipPeriods || {};
+  const wasSkipped = !!l.skipPeriods[p.key];
+  if (wasSkipped) delete l.skipPeriods[p.key];
+  else l.skipPeriods[p.key] = true;
+  logLedger(l, wasSkipped ? 'cutoff-unskip' : 'cutoff-skip', 0, loanBalanceOf(l), loanBalanceOf(l),
+    (wasSkipped ? 'Un-skipped — ' : 'Skipped — no deduction for ') + (p.label||p.key), p.key);
+  save('loans', loans);
+  pushLoans();
+  renderLoans();
+  showToastAdmin && showToastAdmin(wasSkipped
+    ? '↩️ ' + (p.label||p.key) + ' deduction restored for ' + (l.empName||'employee')
+    : '⏭️ ' + (p.label||p.key) + ' deduction skipped for ' + (l.empName||'employee'));
+}
+window.toggleSkipCutoff = toggleSkipCutoff;
 
 function pushLoans(){
   _loanSaving = true;
@@ -3554,12 +3598,13 @@ function applyCutoffDeductions(periodKey, opts){
   const pEnd   = periodEndStr(periodKey);
 
   const eligible = [];
-  const skipped  = {paid:0, notStarted:0, alreadyDone:0, noSchedule:0};
+  const skipped  = {paid:0, notStarted:0, alreadyDone:0, noSchedule:0, manuallySkipped:0};
 
   loans.forEach((l, i) => {
     if (l.status === 'Paid')                 { skipped.paid++;        return; }
     if (l.start && l.start > pEnd)           { skipped.notStarted++;  return; }
     if (wasDeductedInPeriod(l, periodKey))   { skipped.alreadyDone++; return; }
+    if (isSkippedThisPeriod(l, periodKey))   { skipped.manuallySkipped++; return; }
     const sched = +(l.monthly || 0);
     if (sched <= 0)                          { skipped.noSchedule++;  return; }
     const before = loanBalanceOf(l);
@@ -3570,10 +3615,11 @@ function applyCutoffDeductions(periodKey, opts){
 
   if (!eligible.length) {
     const why = [];
-    if (skipped.alreadyDone) why.push(skipped.alreadyDone + ' already deducted for this cut-off');
-    if (skipped.notStarted)  why.push(skipped.notStarted + ' not yet started');
-    if (skipped.paid)        why.push(skipped.paid + ' fully paid');
-    if (skipped.noSchedule)  why.push(skipped.noSchedule + ' with no per-cut-off amount set');
+    if (skipped.alreadyDone)     why.push(skipped.alreadyDone + ' already deducted for this cut-off');
+    if (skipped.manuallySkipped) why.push(skipped.manuallySkipped + ' marked to skip this cut-off');
+    if (skipped.notStarted)      why.push(skipped.notStarted + ' not yet started');
+    if (skipped.paid)            why.push(skipped.paid + ' fully paid');
+    if (skipped.noSchedule)      why.push(skipped.noSchedule + ' with no per-cut-off amount set');
     alert('Nothing to deduct for ' + pLabel + '.\n\n' +
           (why.length ? why.join('\n') : 'No loans on file.'));
     return {applied:false, count:0, total:0};
@@ -3632,7 +3678,8 @@ function renderLoanCutoffBanner(){
   const pEnd = periodEndStr(p.key);
   const pending = loans.filter(l =>
     l.status !== 'Paid' && !(l.start && l.start > pEnd) &&
-    +(l.monthly||0) > 0 && loanBalanceOf(l) > 0 && !wasDeductedInPeriod(l, p.key));
+    +(l.monthly||0) > 0 && loanBalanceOf(l) > 0 && !wasDeductedInPeriod(l, p.key) &&
+    !isSkippedThisPeriod(l, p.key));
   const pendingTotal = pending.reduce((a,l)=>a+Math.min(+(l.monthly||0), loanBalanceOf(l)), 0);
 
   if (lock && !pending.length) {
