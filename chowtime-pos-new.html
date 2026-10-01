@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20260926-153300 -->
+<!-- BUILD:20261002-071800 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -1657,7 +1657,7 @@ function ItemCustomizer({ item,onAdd,onClose,optionGroups=[],priceType="retail",
   // bomCheck is optional — without it the customizer behaves exactly as before
   const oosChoice=(gid,cid)=>{
     if(!bomCheck)return null;
-    const sh=bomCheck.bomShort(bomCheck.choiceBomRows(gid,cid),1);
+    const sh=bomCheck.bomShort(bomCheck.choiceBomRows(gid,cid, item.id),1);
     return sh.length?sh:null;
   };
   const [selV,setSelV]=useState( item.variants[0]);
@@ -1793,8 +1793,22 @@ function ItemCustomizer({ item,onAdd,onClose,optionGroups=[],priceType="retail",
   const handleAdd=()=>{
     if(blocked)return;
     const freebies=[],optionRefs=[],labels=[];
+    // FIX: Item Options (the per-item options set up in Menu Editor / BOM
+    // editor's "Item Options" tab, separate from shared Option Groups) used
+    // to only push their label into `labels` for the receipt text — they
+    // were never added to optionRefs. The BOM-deduction code at order time
+    // only reads cartItem.optionRefs, so any ingredients assigned under an
+    // Item Option were never deducted from stock no matter how many times
+    // they were sold. The deduction code already has a fallback lookup for
+    // the item-embedded BOM key (<itemId>__opt_<optId>__<choiceId>) — it
+    // just never received an optionRefs entry to reach it.
     Object.entries(selO).filter(([k])=>!k.startsWith("og_"))
-      .forEach(([,cs])=>(cs||[]).forEach(c=>labels.push(c.label)));
+      .forEach(([optId,cs])=>(cs||[]).forEach(c=>{
+        labels.push(c.label);
+        optionRefs.push({groupId:optId,
+          groupName:(( item.options||[]).find(o=>o.id===optId)||{}).label||"",
+          choiceId:c.id,label:c.label,qty:1,free:false});
+      }));
     linkedGroups.forEach(function(g){
       const free=isFreeGrp(g);
       (selO["og_"+g.id]||[]).forEach(function(c){
@@ -1884,11 +1898,23 @@ function ItemCustomizer({ item,onAdd,onClose,optionGroups=[],priceType="retail",
           missing.includes(opt.label)&&h("div",{style:{fontSize:13,color:C.danger,fontWeight:600,marginBottom:5}},"⚠️ Please choose one"),
           opt.choices.map(ch=>{
             const on=ck(opt.id,ch.id);
-            return h("button",{key:ch.id,onClick:()=>tog(opt.id,ch,opt.multi),style:{display:"flex",alignItems:"center",gap:10,padding:"9px 12px",borderRadius:9,border:`2px solid ${on?C.primary:C.border}`,background:on?"#F3E9F7":"#fff",cursor:"pointer",textAlign:"left",width:"100%",marginBottom:5}},
-              opt.multi?h("div",{style:{width:18,height:18,borderRadius:4,border:`2px solid ${on?C.primary:C.border}`,background:on?C.primary:"#fff",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}},on&&h("span",{style:{color:"#111111",fontSize:13,fontWeight:900}},"✓"))
-              :h("div",{style:{width:18,height:18,borderRadius:"50%",border:`2px solid ${on?C.primary:C.border}`,background:on?C.primary:"#fff",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}},on&&h("div",{style:{width:7,height:7,borderRadius:"50%",background:"#fff"}})),
-              h("span",{style:{flex:1,fontSize:14,fontWeight:on?700:400}},ch.label),
-              h("span",{style:{fontSize:13,color:ch.priceAdd?C.primary:C.muted,fontWeight:ch.priceAdd?600:400}},ch.priceAdd?"+₱"+ch.priceAdd:"Free")
+            // FIX: Item Option choices had no out-of-stock check at all — now
+            // that they actually deduct (see handleAdd), an empty ingredient
+            // must stop the choice from being picked, same as Option Groups.
+            const oos=on?null:oosChoice(opt.id,ch.id);
+            return h("button",{key:ch.id,disabled:!!oos,
+              onClick:()=>{if(oos)return;tog(opt.id,ch,opt.multi);},
+              style:{display:"flex",alignItems:"center",gap:10,padding:"9px 12px",borderRadius:9,
+                border:`2px solid ${oos?"#eee":(on?C.primary:C.border)}`,
+                background:oos?"#FAFAFA":(on?"#F3E9F7":"#fff"),
+                cursor:oos?"not-allowed":"pointer",opacity:oos?.55:1,textAlign:"left",width:"100%",marginBottom:5}},
+              opt.multi?h("div",{style:{width:18,height:18,borderRadius:4,border:`2px solid ${oos?"#eee":(on?C.primary:C.border)}`,background:(on&&!oos)?C.primary:"#fff",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}},on&&!oos&&h("span",{style:{color:"#111111",fontSize:13,fontWeight:900}},"✓"))
+              :h("div",{style:{width:18,height:18,borderRadius:"50%",border:`2px solid ${oos?"#eee":(on?C.primary:C.border)}`,background:(on&&!oos)?C.primary:"#fff",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}},on&&!oos&&h("div",{style:{width:7,height:7,borderRadius:"50%",background:"#fff"}})),
+              h("span",{style:{flex:1}},
+                h("div",{style:{fontSize:14,fontWeight:on?700:400,color:oos?C.muted:C.text}},ch.label),
+                oos&&h("div",{style:{fontSize:11,color:C.danger,fontWeight:800}},"UBOS: "+oos[0].ingName)
+              ),
+              h("span",{style:{fontSize:13,color:oos?C.muted:(ch.priceAdd?C.primary:C.muted),fontWeight:ch.priceAdd?600:400}},ch.priceAdd?"+₱"+ch.priceAdd:"Free")
             );
           })
         )),
@@ -8677,7 +8703,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20260926-153300";
+const BUILD = "20261002-071800";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -15598,9 +15624,24 @@ function App(){
     const d=posBoms[ itemId]||{};
     return d[vKeyOf( itemId,vLabel)]||d[ itemId]||[];
   };
-  const choiceBomRows=(gid,cid)=>{
+  const choiceBomRows=(gid,cid, itemId)=>{
     const d=posBoms["optgrp_"+gid]||{};
-    return d["optgrp_"+gid+"__"+cid]||[];
+    const grpRows=d["optgrp_"+gid+"__"+cid]||[];
+    if(grpRows.length)return grpRows;
+    // FIX: this never checked the item-embedded BOM used by Item Options
+    // (BOM editor → Item Options tab), so an Item Option whose ingredient
+    // was out of stock showed no warning and never blocked checkout —
+    // the order would still go through and stock could go negative.
+    // Mirrors the fallback the actual deduction code already uses.
+    if(!itemId)return [];
+    const iDoc=posBoms[itemId]||{};
+    const exact=iDoc[itemId+"__opt_"+gid+"__"+cid];
+    if(exact&&exact.length)return exact;
+    const suffix="__"+cid;
+    for(const k of Object.keys(iDoc)){
+      if(k.indexOf("__opt_")>-1&&k.slice(-suffix.length)===suffix&&(iDoc[k]||[]).length)return iDoc[k];
+    }
+    return [];
   };
   // rows x multiplier -> [{ingName,need,have,unit}] for anything that falls short
   const bomShort=(rows,mult)=>{
@@ -15632,7 +15673,7 @@ function App(){
       (i.optionRefs||[]).forEach(ref=>{
         if(!ref.groupId||!ref.choiceId)return;
         const mult=ref.free?(ref.qty||1):((ref.qty||1)*(i.qty||1));
-        bump(choiceBomRows(ref.groupId,ref.choiceId),mult,ref.label);
+        bump(choiceBomRows(ref.groupId,ref.choiceId,i.id),mult,ref.label);
       });
     });
     const short=[];
