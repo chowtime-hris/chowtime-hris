@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261004-122500 -->
+<!-- BUILD:20261004-125500 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -8703,7 +8703,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261004-122500";
+const BUILD = "20261004-125500";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -20919,8 +20919,10 @@ function App(){
               })(),
               // Editing 40 fields through 16 separate modals is the slow part
               // of setting up a catalogue. Toggle the rows into inputs and
-              // write only what actually changed.
-              !invView&&h("button",{
+              // write only what actually changed. Already writes to
+              // invColFor(invView||branchId) below, so it's safe to offer
+              // while peeking a branch too.
+              h("button",{
                 onClick:()=>{ setBatchMode(v=>!v); setBatchEdits({}); },
                 style:{padding:"7px 12px",borderRadius:8,fontSize:13,
                   cursor:"pointer",fontWeight:800,
@@ -21416,9 +21418,10 @@ function App(){
               h("span",{style:{fontSize:15}},"👁"),
               h("div",{style:{flex:1,minWidth:200}},
                 h("div",{style:{fontSize:13,fontWeight:800,color:"#1565C0"}},
-                  "Viewing "+((branches.find(b=>b.id===invView)||{}).full||invView)+" — read only"),
+                  "Viewing "+((branches.find(b=>b.id===invView)||{}).full||invView)),
                 h("div",{style:{fontSize:13,color:C.muted,marginTop:1}},
-                  invViewData.length+" item/s · adjustments must be made by that branch")),
+                  invViewData.length+" item/s · any Edit, Batch edit, delete or +/- here writes to "
+                  +"this branch's own stock, not Main's")),
               h("button",{onClick:()=>setInvView(""),
                 style:{padding:"6px 12px",borderRadius:7,border:"none",
                   background:"#1565C0",color:"#fff",fontSize:13,fontWeight:800,
@@ -21609,7 +21612,7 @@ function App(){
                 })(),
                 h("div",{style:{fontSize:13,color:C.muted}}, item.cat||""),
                 h("div",{style:{display:"flex",gap:5,alignItems:"center"}},
-                h("button",{onClick:invView?(()=>showT("Read only — switch back to MAIN to adjust","warn")):()=>setModal("stock_edit_"+( item.id|| item.name)),
+                h("button",{onClick:()=>setModal("stock_edit_"+( item.id|| item.name)),
                   style:{padding:"4px 10px",background:"#1565C0",border:"none",
                     borderRadius:6,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}},
                   "✏️ Edit"),
@@ -25424,9 +25427,16 @@ function App(){
         display:"flex",alignItems:"flex-start",justifyContent:"center",
         overflowY:"auto",padding:"24px 12px",zIndex:900}},
       h(StockEditModal,{
-         item:inventory.find(function(i){return (i.id||i.name)===modal.replace("stock_edit_","");}),
+         item:(invView?invViewData:inventory).find(function(i){return (i.id||i.name)===modal.replace("stock_edit_","");}),
         boms:Object.values(appBoms||{}),
-        db,user,branchId,showT,
+        // FIX: this always edited and wrote to the signed-in account's own
+        // branch (branchId), even while the row on screen belonged to a
+        // branch being peeked via invView — the same corruption shape the
+        // old branch switcher had. The Edit modal was blocked outright
+        // instead of being fixed; now it reads the peeked branch's own
+        // item and writes to invColFor(invView||branchId) the same way
+        // Delete and the +/- field already do (see those for the same fix).
+        db,user,branchId:invView||branchId,showT,
         onClose:function(){setModal(null);}
       })
     ),
