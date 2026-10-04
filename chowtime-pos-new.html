@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261002-071800 -->
+<!-- BUILD:20261004-104700 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -8703,7 +8703,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261002-071800";
+const BUILD = "20261004-104700";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -14817,13 +14817,8 @@ function App(){
         err=>console.warn("add logs:",err.message)));
     }catch(e){console.warn("P&L log query:",e);}
 
-    // Expenses
-    try{
-      const eq=isOwner
-        ?query(collection(db,"expenses"),orderBy("timestamp","desc"),limit(100))
-        :query(collection(db,"expenses"),where("branch","==",bId),limit(200));
-      unsubs.push(onSnapshot(eq,snap=>setExpenses(snap.docs.map(d=>({...d.data(),_docId:d.id}))),onErr("expenses")));
-    }catch(e){}
+    // Expenses — moved to its own effect below (it needs to react to the
+    // Expenses page's branch/month filters, which this effect doesn't).
 
     // Cash log
     try{
@@ -15009,6 +15004,46 @@ function App(){
 
     return()=>unsubs.forEach(u=>u());
   },[user,companySettings&&companySettings.rolePerms]);
+
+  // ── EXPENSES LISTENER ────────────────────────────────────
+  // Split out from the listeners effect above so it can react to the
+  // Expenses page's own branch/month filters.
+  // FIX: this used to be one fixed query for the owner — the latest 100
+  // expenses across the WHOLE company, newest-timestamp-first. Once the
+  // branches combined had posted more than 100 expenses, older entries
+  // for any single branch silently fell out of that cached set — not just
+  // out of view, but completely unreachable: the table, the stat tiles,
+  // the CSV, all read from the same capped 100. Picking a branch or a
+  // month no longer helped, because the data was never fetched to begin
+  // with. Now the query itself follows whichever filter is picked, so the
+  // owner reads exactly the scoped set instead of hoping it survived the
+  // cap. One field server-side (branch, or failing that the date range)
+  // keeps each read scoped without needing a composite index — same
+  // approach as the Orders listener above.
+  useEffect(()=>{
+    if(!user)return;
+    const isOwner=user.role==="owner";
+    const bId=(user.branch==="all"||user.branch==="comm")?"ct-main":user.branch;
+    let eq;
+    if(!isOwner){
+      eq=query(collection(db,"expenses"),where("branch","==",bId),limit(200));
+    }else if(expBranch){
+      eq=query(collection(db,"expenses"),where("branch","==",expBranch),limit(2000));
+    }else if(expMonth){
+      eq=query(collection(db,"expenses"),
+        where("date",">=",expMonth+"-01"),where("date","<=",lastDayOf(expMonth)),
+        limit(3000));
+    }else{
+      // Neither branch nor month picked — nothing to scope the read by.
+      // Still capped, but 10x the old limit, and the page says so below
+      // instead of silently dropping anything past it.
+      eq=query(collection(db,"expenses"),orderBy("timestamp","desc"),limit(1000));
+    }
+    const unsub=onSnapshot(eq,
+      snap=>setExpenses(snap.docs.map(d=>({...d.data(),_docId:d.id}))),
+      onErr("expenses"));
+    return()=>unsub();
+  },[user,expBranch,expMonth]);
 
   // ── DERIVED ──────────────────────────────────────────────
   useEffect(()=>{
@@ -20286,11 +20321,22 @@ function App(){
                   color:expCat===c?C.primary:C.text}},
                 c+" · ₱"+peso(byCat[c])))
           ),
+          // FIX: these three used to re-filter the raw `expenses` state with
+          // only the owner/branch check — ignoring the month, date range,
+          // category and branch-dropdown filters above, so they showed a
+          // company-wide, all-time figure no matter what was selected. Now
+          // they read `rows`, the same filtered set the table and the CSV
+          // use, so every number on this page agrees.
           h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:12}},
-            h(Stat,{label:"Total",value:"₱"+expenses.filter(e=>user.role==="owner"||e.branch===branchId).reduce((s,e)=>s+(e.amount||0),0).toLocaleString(),icon:"💸",color:C.danger}),
-            h(Stat,{label:"Approved",value:expenses.filter(e=>e.status==="approved"&&(user.role==="owner"||e.branch===branchId)).length,icon:"✅",color:C.success}),
-            h(Stat,{label:"Pending",value:expenses.filter(e=>e.status==="pending"&&(user.role==="owner"||e.branch===branchId)).length,icon:"⏳",color:C.warning})
+            h(Stat,{label:"Total",value:"₱"+total.toLocaleString(),icon:"💸",color:C.danger}),
+            h(Stat,{label:"Approved",value:rows.filter(e=>e.status==="approved").length,icon:"✅",color:C.success}),
+            h(Stat,{label:"Pending",value:rows.filter(e=>e.status==="pending").length,icon:"⏳",color:C.warning})
           ),
+          !expBranch&&!expMonth&&expenses.length>=1000&&h("div",{style:{fontSize:12,
+            color:C.warning,marginBottom:10,fontWeight:700}},
+            "⚠️ Walang napiling branch o month — ipinapakita lang ang pinaka-"
+            +"kamakailang 1000 expenses. Pumili ng branch o month sa itaas "
+            +"para kumpleto."),
           // A table, not cards: a month of expenses is a ledger to scan down
           // — same reason, amount and branch on every line, in the same place.
           h("div",{style:{background:"#fff",borderRadius:12,
