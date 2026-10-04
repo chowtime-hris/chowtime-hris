@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261004-104700 -->
+<!-- BUILD:20261004-122000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -8703,7 +8703,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261004-104700";
+const BUILD = "20261004-122000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -10051,7 +10051,30 @@ async function performVoid(db, args){
       for(const ref of (it.optionRefs||[])){
         if(!ref.groupId||!ref.choiceId)continue;
         const d=bomData["optgrp_"+ref.groupId]||{};
-        const rows=d["optgrp_"+ref.groupId+"__"+ref.choiceId]||[];
+        let rows=d["optgrp_"+ref.groupId+"__"+ref.choiceId]||[];
+        if(!rows.length){
+          // FIX: Item Options (BOM editor's "Item Options" tab) keep their
+          // recipe on the item itself, not under an optgrp_ doc. Without
+          // this fallback — the same one the deduction code and the
+          // out-of-stock check already use — a partial void, or a full
+          // void with no matching log rows, found nothing here and gave
+          // back nothing, even though the ingredient really was deducted
+          // when the order was placed. That stock stayed permanently
+          // "missing" and nothing an audit found could explain it — not a
+          // crew shortage, a silent revert gap.
+          const iDoc=(it.id&&bomData[it.id])||{};
+          const exact=iDoc[it.id+"__opt_"+ref.groupId+"__"+ref.choiceId];
+          if(exact&&exact.length){
+            rows=exact;
+          }else{
+            const suffix="__"+ref.choiceId;
+            for(const k of Object.keys(iDoc)){
+              if(k.indexOf("__opt_")>-1&&k.slice(-suffix.length)===suffix&&(iDoc[k]||[]).length){
+                rows=iDoc[k]; break;
+              }
+            }
+          }
+        }
         const mult=ref.free?(ref.qty||1):((ref.qty||1)*(it.qty||1));
         await giveBack(rows, mult, ref.label, it.name||"");
       }
@@ -14324,6 +14347,10 @@ function App(){
     bankQR:"" // base64 image
   });
   const [authLoading,setAuthLoading]=useState(true);
+  // Which BUILD the branches should be running. Compared against the
+  // BUILD constant baked into this file — see the version-check effect
+  // below for how it's kept current.
+  const [latestBuild,setLatestBuild]=useState(null);
   const [loginEmail,setLoginEmail]=useState("");
   const [loginPw,setLoginPw]=useState("");
   const [loginErr,setLoginErr]=useState("");
@@ -15044,6 +15071,34 @@ function App(){
       onErr("expenses"));
     return()=>unsub();
   },[user,expBranch,expMonth]);
+
+  // ── VERSION CHECK ─────────────────────────────────────────
+  // A branch running an older copy of this file than what's been pushed
+  // should not keep selling on it — a fix like the BOM/void ones above
+  // does nothing for a tablet that never loaded the new file. One shared
+  // doc holds the newest BUILD anyone has opened; whoever opens this
+  // file with a BUILD older than that sees a blocking screen until they
+  // refresh. The OWNER's own session is what moves the marker forward —
+  // normally the first to open the file right after it's replaced on
+  // GitHub Pages — and only forward: BUILD is "YYYYMMDD-HHMMSS", which
+  // string-sorts the same as it reads, so an owner tab stuck on an older
+  // cached copy can never drag the shared marker backwards.
+  useEffect(()=>{
+    if(!user)return;
+    let unsub=()=>{};
+    try{
+      unsub=onSnapshot(doc(db,"app_meta","pos_version"),snap=>{
+        const v=snap.exists()?(snap.data()||{}):{};
+        setLatestBuild(v.latestBuild||null);
+        if(user.role==="owner" && BUILD>(v.latestBuild||"")){
+          setDoc(doc(db,"app_meta","pos_version"),
+            {latestBuild:BUILD,updatedAt:serverTimestamp(),updatedBy:user.name||""},
+            {merge:true}).catch(()=>{});
+        }
+      },()=>{});
+    }catch(e){}
+    return()=>unsub();
+  },[user]);
 
   // ── DERIVED ──────────────────────────────────────────────
   useEffect(()=>{
@@ -17294,6 +17349,30 @@ function App(){
   }
 
   return h("div",{style:{display:"flex",height:"100vh",background:C.bg,fontFamily:"'Segoe UI',system-ui,sans-serif",overflow:"hidden"}},
+
+    // VERSION GATE — blocks the whole app until this branch refreshes to
+    // the build everyone else has already moved to.
+    !!(latestBuild&&latestBuild>BUILD)&&h("div",{style:{position:"fixed",inset:0,
+      zIndex:99999,background:"rgba(0,0,0,.75)",display:"flex",
+      alignItems:"center",justifyContent:"center",padding:16}},
+      h("div",{style:{background:"#fff",borderRadius:16,padding:"28px 24px",
+        maxWidth:380,width:"100%",textAlign:"center",
+        boxShadow:"0 20px 60px rgba(0,0,0,.4)"}},
+        h("div",{style:{fontSize:40,marginBottom:10}},"🔄"),
+        h("div",{style:{fontSize:17,fontWeight:900,marginBottom:8}},
+          "May Bagong Update ang POS"),
+        h("div",{style:{fontSize:13,color:C.muted,marginBottom:18,
+          lineHeight:1.5}},
+          "May bagong bersyon na ng POS na kailangan mo munang i-load "
+          +"bago ka makapag-sale o makagawa ng kahit anong galaw dito. "
+          +"I-refresh ang page."),
+        h("button",{onClick:()=>window.location.reload(),
+          style:{width:"100%",padding:"12px",borderRadius:10,border:"none",
+            background:`linear-gradient(135deg,${C.primary},${C.dark})`,
+            color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer"}},
+          "🔄 I-refresh Ngayon")
+      )
+    ),
 
     // SIDEBAR
     h("div",{style:{width:(narrow&&!navOpen)?58:192,background:"#FFFFFF",
