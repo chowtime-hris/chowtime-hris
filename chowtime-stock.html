@@ -140,7 +140,7 @@
   .cutoff-foot .save-btn{width:auto;padding:8px 16px;font-size:12.5px;}
   .cutoff-foot .cp-status{font-size:11.5px;color:var(--muted);}
 </style>
-<!-- BUILD:20261002-073000 -->
+<!-- BUILD:20261005-095000 -->
 </head>
 <body>
 
@@ -1297,6 +1297,30 @@ async function buildAuditPlan(values){
     const d = doc.data()||{};
     fresh[doc.id] = {stock: Number(d.stock) || 0, cost: Number(d.cost) || 0};
   });
+  // Waste logged since the last audit, per item, so the auditor can see it
+  // beside the shortage. Display only — it does not change what is written.
+  const wasteBy = {};
+  try{
+    let lastTs = 0, lastDate = '';
+    const aSnap = await bref('audits').orderByKey().limitToLast(1).once('value');
+    const aVal = aSnap.val() || {};
+    Object.keys(aVal).forEach(d=>{
+      lastDate = d;
+      Object.keys(aVal[d]||{}).forEach(t=>{ lastTs = Math.max(lastTs, Number(aVal[d][t].timestamp)||Number(t)||0); });
+    });
+    let wq = bref('waste');
+    if(lastDate) wq = wq.orderByKey().startAt(lastDate);
+    const wSnap = await wq.once('value');
+    const wVal = wSnap.val() || {};
+    Object.keys(wVal).forEach(d=>{
+      Object.values(wVal[d]||{}).forEach(w=>{
+        if((Number(w.timestamp)||0) <= lastTs) return;
+        const b = wasteBy[w.itemId] || (wasteBy[w.itemId] = {qty:0, entries:[]});
+        b.qty += parseFloat(w.qty)||0;
+        b.entries.push({d, qty:parseFloat(w.qty)||0, reason:w.reason||'', by:w.loggedByName||'', note:w.note||''});
+      });
+    });
+  }catch(e){ console.warn('waste lookup failed', e); }
   const rows = [], unlinked = [];
   Object.entries(values).forEach(([id, v])=>{
     const it = items[id] || {};
@@ -1321,9 +1345,12 @@ async function buildAuditPlan(values){
     const delta = Math.round((newStock - posNow)*1000)/1000;
     rows.push({id, pid, per, name: it.name||id, unit: it.unit||'',
                posNow, newStock, movedSince, countedBase,
-               delta, cost, deltaValue: Math.round(delta*cost*100)/100});
+               delta, cost, deltaValue: Math.round(delta*cost*100)/100,
+               wasteQty: (wasteBy[id]||{}).qty||0,
+               wasteEntries: (wasteBy[id]||{}).entries||[],
+               wasteValue: Math.round(((wasteBy[id]||{}).qty||0)*per*cost*100)/100});
   });
-  return {rows, unlinked};
+  return {rows, unlinked, wasteBy};
 }
 
 function showAuditPushPreview(plan){
@@ -1339,7 +1366,14 @@ function showAuditPushPreview(plan){
     const valueLine = (r.cost>0 && Math.abs(r.deltaValue)>=0.01)
       ? `<br><small style="color:${r.deltaValue<0?'var(--danger)':'var(--muted)'};font-weight:700;">`
         + `${peso(Math.abs(r.deltaValue))} ${r.deltaValue<0?'shortage':'overage'} value</small>` : '';
-    return `<div class="result-row"><div><strong>${escapeHtml(r.name)}</strong>${moved}${valueLine}</div>`
+    const wasteLine = r.wasteQty>0
+      ? `<br><small style="color:#B45309;font-weight:700;">🗑️ Waste logged: ${fmt(r.wasteQty)} ${escapeHtml(r.unit||'pc')}`
+        + (r.wasteValue>=0.01?` (${peso(r.wasteValue)})`:'') + `</small>`
+        + (r.deltaValue<0 && r.wasteValue>=0.01
+            ? `<br><small style="font-weight:700;color:${(-r.deltaValue-r.wasteValue)>0.01?'var(--danger)':'var(--ok,#15803D)'};">Shortage net of waste: ${peso(Math.max(0,-r.deltaValue-r.wasteValue))}</small>` : '')
+        + r.wasteEntries.map(e=>`<br><small style="color:var(--muted);">· ${fmt(e.qty)} — ${escapeHtml(e.reason)} · ${escapeHtml(e.by)} · ${escapeHtml(e.d)}${e.note?' · '+escapeHtml(e.note):''}</small>`).join('')
+      : '';
+    return `<div class="result-row"><div><strong>${escapeHtml(r.name)}</strong>${moved}${valueLine}${wasteLine}</div>`
       + `<div class="result-tag ${Math.abs(r.delta)<0.001?'tag-ok':(r.delta<0?'tag-short':'tag-over')}">`
       + `${fmt(r.posNow)} → ${fmt(r.newStock)} (${dir})</div></div>`;
   }).join('') : '<p class="sub">No linked items to push.</p>';
@@ -1356,6 +1390,15 @@ function showAuditPushPreview(plan){
       + `<div class="result-tag tag-over">${peso(totalOverage)}</div></div>`
       + `<div class="result-row"><div><strong>Net</strong></div>`
       + `<div class="result-tag ${net<0?'tag-short':'tag-ok'}">${net<0?'-':''}${peso(Math.abs(net))}</div></div>`;
+  }
+  const totalWaste = plan.rows.reduce((s,r)=>s+(r.wasteValue||0),0);
+  if(totalWaste>=0.01){
+    list.innerHTML += `<div class="result-row"><div><strong>Total waste logged (since last audit)</strong></div>`
+      + `<div class="result-tag tag-ok">${peso(totalWaste)}</div></div>`;
+    // Waste only explains shortages, item by item — it can't cancel another item's overage.
+    const netShort = plan.rows.reduce((s,r)=>s+(r.deltaValue<0?Math.max(0,-r.deltaValue-(r.wasteValue||0)):0),0);
+    list.innerHTML += `<div class="result-row"><div><strong>Total shortage net of waste</strong></div>`
+      + `<div class="result-tag ${netShort>=0.01?'tag-short':'tag-ok'}">${peso(netShort)}</div></div>`;
   }
   const un = document.getElementById('auditPushUnlinked');
   un.innerHTML = plan.unlinked.length
