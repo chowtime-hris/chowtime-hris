@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261006-201500 -->
+<!-- BUILD:20261006-212500 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -2266,6 +2266,8 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
       deliveryStatus:"Pending",
       vatType,
       requestedBy:user.name,
+      // Main ordering on a branch's behalf — marked so the branch can see it
+      placedByMain:!!(userBranchId&&branchId!==userBranchId&&!editPO),
       timestamp:serverTimestamp()
     };
     try{
@@ -2333,6 +2335,12 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
         onClose();return;
       }
       await addDoc(collection(db,"advances"),po);
+      if(po.placedByMain){
+        await notify(db,{to:branchId,type:"po_new",
+          title:"Main placed an order for you \u2014 "+soNum,
+          message:ordered.length+"  item/s \u00b7 will arrive for you to receive",
+          page:"stock_order",ref:soNum,by:user.name});
+      }
       await notify(db,{to:"ct-main",type:"po_new",
         title:"New order — "+(po.branchName||branchId),
         message:ordered.length+"  item/s requested"+(deliveryReq?" · wants "+deliveryReq:""),
@@ -8703,7 +8711,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261006-201500";
+const BUILD = "20261006-212500";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -14591,6 +14599,7 @@ function App(){
   const [repFrom,setRepFrom]=useState("");   // Reports date range
   const [repTo,setRepTo]=useState("");
   const [ordBr,setOrdBr]=useState("");
+  const [poForBranch,setPoForBranch]=useState("");   // Main placing an order on a branch's behalf
   const [ordTot,setOrdTot]=useState(null);   // Reports: dine-in/takeout counted straight from orders
   const [zSel,setZSel]=useState("");                     // "" = live reading
   // A past date is not in the live arrays. The orders listener runs a 7-day
@@ -24012,6 +24021,27 @@ function App(){
         page==="po_monitor"&&h("div",null,
           h(SectionHeader,{title:"📦 PO Monitor — Main/Commissary"}),
 
+          // Main places an order FOR a branch. The form is already driven by
+          // branchId (its stock, PO numbering, name on the document), so it
+          // is simply opened with the chosen branch instead of Main's own.
+          (user.role==="owner"||user.role==="commissary")&&h("div",{style:{
+            background:"#fff",border:"1px solid "+C.border,borderRadius:12,
+            padding:"10px 14px",marginBottom:12,display:"flex",gap:8,
+            alignItems:"center",flexWrap:"wrap"}},
+            h("div",{style:{fontSize:13,fontWeight:800,flex:"1 1 160px"}},
+              "🛒 Order for a branch"),
+            h("select",{value:poForBranch,onChange:e=>setPoForBranch(e.target.value),
+              style:{padding:"8px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13}},
+              h("option",{value:""},"\u2014 pick branch \u2014"),
+              (branches||[]).filter(b=>b.id!==branchId).map(b=>
+                h("option",{key:b.id,value:b.id},b.full||b.name||b.id))),
+            h("button",{disabled:!poForBranch,
+              onClick:()=>{setEditingPO(null);setModal("new_po");},
+              style:{padding:"8px 14px",borderRadius:8,border:"none",
+                background:poForBranch?C.primary:"#8A8A8A",color:"#fff",fontWeight:800,
+                fontSize:13,cursor:poForBranch?"pointer":"not-allowed"}},
+              "\u2795 New Order")),
+
           // Four branches ordering weekly is two hundred POs a year on one
           // scrolling list, and the KPI counts above it grow with it — the
           // numbers stop meaning "now" and start meaning "ever".
@@ -25543,14 +25573,14 @@ function App(){
           // branch — its stock levels, its PO numbering, its name on the
           // document. Passing the editor's own branch would price the order
           // against the wrong shelf.
-          branchId:(editingPO&&editingPO.branch)||branchId,
+          branchId:(editingPO&&editingPO.branch)||(modal==="new_po"&&poForBranch)||branchId,
           userBranchId:branchId,
           user,db,
           // the live catalogue, not the hardcoded seed list
           INIT_INVENTORY:(inventory&&inventory.length?inventory:INIT_INVENTORY),
           editPO:editingPO,
-          key:editingPO?("edit-"+editingPO._docId):"new",
-          onClose:()=>{setModal(null);setEditingPO(null);},
+          key:editingPO?("edit-"+editingPO._docId):("new-"+(poForBranch||"")),
+          onClose:()=>{setModal(null);setEditingPO(null);setPoForBranch("");},
           showT,advances,setAdvances,branches})
       )
     ),
