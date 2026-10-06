@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261004-125500 -->
+<!-- BUILD:20261006-194500 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -8703,7 +8703,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261004-125500";
+const BUILD = "20261006-194500";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -14588,6 +14588,9 @@ function App(){
   const [chkSplitRows,setChkSplitRows]=useState([{method:"gcash",amount:""}]);
   const [repSrch,setRepSrch]=useState("");
   const [repMonth,setRepMonth]=useState("");
+  const [repFrom,setRepFrom]=useState("");   // Reports date range
+  const [repTo,setRepTo]=useState("");
+  const [ordTot,setOrdTot]=useState(null);   // Reports: dine-in/takeout counted straight from orders
   const [zSel,setZSel]=useState("");                     // "" = live reading
   // A past date is not in the live arrays. The orders listener runs a 7-day
   // window while expenses and cash_log run an unwindowed limit(100), so an
@@ -19664,6 +19667,8 @@ function App(){
           const months=[...new Set(mine.map(r=>(r.date||"").slice(0,7)))].sort().reverse();
           const rows=mine
             .filter(r=>!repMonth||(r.date||"").slice(0,7)===repMonth)
+            .filter(r=>!repFrom||(r.date||"")>=repFrom)
+            .filter(r=>!repTo||(r.date||"")<=repTo)
             .filter(r=>!repSrch||(r.date||"").includes(repSrch)
               ||String(r.branch||"").toLowerCase().includes(repSrch.toLowerCase()))
             .sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")));
@@ -19717,8 +19722,21 @@ function App(){
                 h("option",{value:""},"All months ("+mine.length+")"),
                 months.map(m=>h("option",{key:m,value:m},m+
                   " ("+mine.filter(r=>(r.date||"").slice(0,7)===m).length+")"))),
+              h("label",{style:{fontSize:12,color:C.muted,display:"flex",alignItems:"center",gap:5}},"From",
+                h("input",{type:"date",value:repFrom,max:repTo||undefined,
+                  onChange:e=>{setRepFrom(e.target.value);},
+                  style:{padding:"7px 9px",border:"1px solid "+(repFrom?C.primary:C.border),
+                    borderRadius:8,fontSize:13,outline:"none"}})),
+              h("label",{style:{fontSize:12,color:C.muted,display:"flex",alignItems:"center",gap:5}},"To",
+                h("input",{type:"date",value:repTo,min:repFrom||undefined,
+                  onChange:e=>{setRepTo(e.target.value);},
+                  style:{padding:"7px 9px",border:"1px solid "+(repTo?C.primary:C.border),
+                    borderRadius:8,fontSize:13,outline:"none"}})),
+              (repFrom||repTo)&&h("button",{onClick:()=>{setRepFrom("");setRepTo("");},
+                style:{padding:"7px 10px",borderRadius:8,border:"1px solid "+C.border,
+                  background:"#fff",fontSize:12,fontWeight:700,cursor:"pointer"}},"Clear dates"),
               h("button",{onClick:()=>download(
-                  "chowtime-daily-"+(repMonth||"lahat")+".csv",toCSV(rows)),
+                  "chowtime-daily-"+((repFrom||repTo)?((repFrom||"start")+"_to_"+(repTo||"now")):(repMonth||"lahat"))+".csv",toCSV(rows)),
                 disabled:!rows.length,
                 style:{padding:"8px 14px",borderRadius:8,border:"none",
                   background:rows.length?"#2E7D32":"#8A8A8A",color:"#fff",
@@ -19726,6 +19744,95 @@ function App(){
                   cursor:rows.length?"pointer":"not-allowed"}},
                 "⬇ Download CSV ("+rows.length+")")
             ),
+
+            // ── Dine-in / Takeout counted straight from orders — works with no Close Day
+            (()=>{
+              const isOwn=(user.role==="owner"||user.role==="commissary");
+              const mStart=localDate().slice(0,8)+"01";
+              const f=repFrom||mStart, t=repTo||localDate();
+              const run=async()=>{
+                const days=dateRange(f,t);
+                if(!days.length){showT("Pick a valid range","warn");return;}
+                if(days.length>62){showT("Too long \u2014 62 days maximum","warn");return;}
+                setOrdTot({busy:true});
+                try{
+                  const snap=await getDocs(query(collection(db,"orders"),
+                    where("date",">=",f),where("date","<=",t)));
+                  const by={};
+                  snap.docs.forEach(d=>{
+                    const o=d.data();
+                    if(!isOwn&&o.branch!==branchId)return;
+                    if(o.status==="void"||o.status==="cancelled")return;
+                    const b=o.branch||"?";
+                    const r=by[b]||(by[b]={dineIn:0,takeout:0,delivery:0,other:0,
+                      dineInAmt:0,takeoutAmt:0,deliveryAmt:0,otherAmt:0});
+                    const k=o.orderType==="dine-in"?"dineIn":o.orderType==="takeout"?"takeout"
+                      :o.orderType==="delivery"?"delivery":"other";
+                    r[k]++; r[k+"Amt"]+=Number(o.total)||0;
+                  });
+                  setOrdTot({from:f,to:t,by:by,read:snap.size});
+                }catch(e){
+                  setOrdTot({err:String((e&&e.message)||e).slice(0,120)});
+                }
+              };
+              const T=(ordTot&&ordTot.by)?Object.values(ordTot.by).reduce((a,r)=>{
+                ["dineIn","takeout","delivery","other"].forEach(k=>{a[k]+=r[k];a[k+"Amt"]+=r[k+"Amt"];});
+                return a;},{dineIn:0,takeout:0,delivery:0,other:0,dineInAmt:0,takeoutAmt:0,deliveryAmt:0,otherAmt:0}):null;
+              const tot=T?(T.dineIn+T.takeout+T.delivery+T.other):0;
+              const pct=(n)=>tot?" ("+Math.round(n/tot*100)+"%)":"";
+              const cell=(l,n,amt,c)=>h("div",{style:{flex:"1 1 130px",minWidth:120}},
+                h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,letterSpacing:1}},l),
+                h("div",{style:{fontSize:17,fontWeight:900,color:c||C.text}},n+pct(n)),
+                h("div",{style:{fontSize:12,color:C.muted}},"\u20b1"+peso(amt)));
+              return h("div",{style:{background:"#fff",border:"1px solid "+C.border,
+                borderRadius:12,padding:"12px 14px",marginBottom:12}},
+                h("div",{style:{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:ordTot&&!ordTot.busy?10:0}},
+                  h("div",{style:{flex:1,minWidth:200}},
+                    h("div",{style:{fontSize:14,fontWeight:800}},"\ud83e\uddfe Dine-in vs Takeout (from orders)"),
+                    h("div",{style:{fontSize:12,color:C.muted}},
+                      "Counts the actual orders from "+f+" to "+t+" \u2014 no Close Day needed. Uses the From/To above (default: this month).")),
+                  h("button",{onClick:run,disabled:!!(ordTot&&ordTot.busy),
+                    style:{padding:"9px 16px",borderRadius:8,border:"none",
+                      background:(ordTot&&ordTot.busy)?"#8A8A8A":C.primary,color:"#fff",
+                      fontWeight:800,fontSize:13,cursor:(ordTot&&ordTot.busy)?"wait":"pointer"}},
+                    (ordTot&&ordTot.busy)?"Counting\u2026":"\u25b6 Compute")),
+                ordTot&&ordTot.err&&h("div",{style:{color:C.danger,fontSize:13}},"Could not read orders: "+ordTot.err),
+                T&&h("div",null,
+                  h("div",{style:{display:"flex",gap:12,flexWrap:"wrap"}},
+                    cell("DINE-IN",T.dineIn,T.dineInAmt),
+                    cell("TAKEOUT",T.takeout,T.takeoutAmt,C.primary),
+                    cell("DELIVERY",T.delivery,T.deliveryAmt),
+                    T.other>0&&cell("NO TYPE",T.other,T.otherAmt),
+                    h("div",{style:{flex:"1 1 130px",minWidth:120}},
+                      h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,letterSpacing:1}},"TOTAL ORDERS"),
+                      h("div",{style:{fontSize:17,fontWeight:900}},tot),
+                      h("div",{style:{fontSize:12,color:C.muted}},"\u20b1"+peso(T.dineInAmt+T.takeoutAmt+T.deliveryAmt+T.otherAmt)))),
+                  isOwn&&Object.keys(ordTot.by).length>1&&h("div",{style:{marginTop:10,borderTop:"1px solid #f2f2f2",paddingTop:8}},
+                    Object.entries(ordTot.by).sort((a,b)=>String(a[0]).localeCompare(String(b[0]))).map(([bid,r])=>
+                      h("div",{key:bid,style:{display:"flex",gap:10,fontSize:12,padding:"3px 0"}},
+                        h("div",{style:{flex:1,fontWeight:700}},bName(bid)),
+                        h("div",null,"Dine-in "+r.dineIn),
+                        h("div",null,"Takeout "+r.takeout),
+                        h("div",null,"Delivery "+r.delivery)))),
+                  h("div",{style:{fontSize:11,color:C.muted,marginTop:6}},
+                    "Voided/cancelled orders excluded. Counts are per order, not per piece.")));
+            })(),
+
+            rows.length>0&&(()=>{
+              const sum=(k)=>rows.reduce((t,r)=>t+(Number(r[k])||0),0);
+              const dI=sum("dineIn"), tO=sum("takeout"), tx=sum("txns");
+              const cell=(l,v,c)=>h("div",{style:{flex:"1 1 110px",minWidth:100}},
+                h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,letterSpacing:1}},l),
+                h("div",{style:{fontSize:17,fontWeight:900,color:c||C.text}},v));
+              return h("div",{style:{background:"#fff",border:"1px solid "+C.border,
+                borderRadius:12,padding:"12px 14px",marginBottom:12,display:"flex",
+                gap:12,flexWrap:"wrap"}},
+                cell("DAYS",rows.length),
+                cell("DINE-IN",dI+(tx?" ("+Math.round(dI/tx*100)+"%)":"")),
+                cell("TAKEOUT",tO+(tx?" ("+Math.round(tO/tx*100)+"%)":""),C.primary),
+                cell("TOTAL TXNS",tx),
+                cell("NET SALES","₱"+peso(sum("net"))));
+            })(),
 
             rows.length===0
               ? h("div",{style:{background:"#fff",border:"1px dashed "+C.border,
