@@ -140,7 +140,7 @@
   .cutoff-foot .save-btn{width:auto;padding:8px 16px;font-size:12.5px;}
   .cutoff-foot .cp-status{font-size:11.5px;color:var(--muted);}
 </style>
-<!-- BUILD:20261005-095000 -->
+<!-- BUILD:20261009-090000 -->
 </head>
 <body>
 
@@ -1346,9 +1346,13 @@ async function buildAuditPlan(values){
     rows.push({id, pid, per, name: it.name||id, unit: it.unit||'',
                posNow, newStock, movedSince, countedBase,
                delta, cost, deltaValue: Math.round(delta*cost*100)/100,
+               // Charge value: priced with the Freezer Count rate (the same one the
+               // crew result uses), in freezer units. deltaValue stays as the POS cost value.
+               rate: itemRate(id),
+               chargeValue: Math.round((delta/per)*itemRate(id)*100)/100,
                wasteQty: (wasteBy[id]||{}).qty||0,
                wasteEntries: (wasteBy[id]||{}).entries||[],
-               wasteValue: Math.round(((wasteBy[id]||{}).qty||0)*per*cost*100)/100});
+               wasteValue: Math.round(((wasteBy[id]||{}).qty||0)*itemRate(id)*100)/100});
   });
   return {rows, unlinked, wasteBy};
 }
@@ -1361,43 +1365,49 @@ function showAuditPushPreview(plan){
       : (r.delta>0 ? '+'+fmt(r.delta) : fmt(r.delta));
     const moved = Math.abs(r.movedSince)>0.001
       ? `<br><small style="color:var(--muted);">POS moved ${fmt(Math.abs(r.movedSince))} ${escapeHtml(r.unit||'pc')} since this screen opened — your count overwrites it</small>` : '';
-    // Cost value of the adjustment, so a shortage/overage isn't just a raw
-    // quantity — the auditor sees the ₱ it represents.
-    const valueLine = (r.cost>0 && Math.abs(r.deltaValue)>=0.01)
-      ? `<br><small style="color:${r.deltaValue<0?'var(--danger)':'var(--muted)'};font-weight:700;">`
-        + `${peso(Math.abs(r.deltaValue))} ${r.deltaValue<0?'shortage':'overage'} value</small>` : '';
+    // Charge value (Freezer Count rate) is what the crew is charged; the POS
+    // cost value is shown beside it for reference.
+    const valueLine = (Math.abs(r.chargeValue)>=0.01)
+      ? `<br><small style="color:${r.chargeValue<0?'var(--danger)':'var(--muted)'};font-weight:700;">`
+        + `${peso(Math.abs(r.chargeValue))} ${r.chargeValue<0?'shortage charge':'overage credit'}</small>`
+        + ((r.cost>0 && Math.abs(r.deltaValue)>=0.01)
+            ? `<br><small style="color:var(--muted);">cost value ${peso(Math.abs(r.deltaValue))} (POS cost)</small>` : '')
+      : '';
     const wasteLine = r.wasteQty>0
       ? `<br><small style="color:#B45309;font-weight:700;">🗑️ Waste logged: ${fmt(r.wasteQty)} ${escapeHtml(r.unit||'pc')}`
         + (r.wasteValue>=0.01?` (${peso(r.wasteValue)})`:'') + `</small>`
-        + (r.deltaValue<0 && r.wasteValue>=0.01
-            ? `<br><small style="font-weight:700;color:${(-r.deltaValue-r.wasteValue)>0.01?'var(--danger)':'var(--ok,#15803D)'};">Shortage net of waste: ${peso(Math.max(0,-r.deltaValue-r.wasteValue))}</small>` : '')
+        + (r.chargeValue<0 && r.wasteValue>=0.01
+            ? `<br><small style="font-weight:700;color:${(-r.chargeValue-r.wasteValue)>0.01?'var(--danger)':'var(--ok,#15803D)'};">Charge net of waste: ${peso(Math.max(0,-r.chargeValue-r.wasteValue))}</small>` : '')
         + r.wasteEntries.map(e=>`<br><small style="color:var(--muted);">· ${fmt(e.qty)} — ${escapeHtml(e.reason)} · ${escapeHtml(e.by)} · ${escapeHtml(e.d)}${e.note?' · '+escapeHtml(e.note):''}</small>`).join('')
       : '';
     return `<div class="result-row"><div><strong>${escapeHtml(r.name)}</strong>${moved}${valueLine}${wasteLine}</div>`
       + `<div class="result-tag ${Math.abs(r.delta)<0.001?'tag-ok':(r.delta<0?'tag-short':'tag-over')}">`
       + `${fmt(r.posNow)} → ${fmt(r.newStock)} (${dir})</div></div>`;
   }).join('') : '<p class="sub">No linked items to push.</p>';
-  // Totals across every costed row: how much shortage value, how much
-  // overage value, and the net of the two (negative = net loss).
-  const totalShortage = plan.rows.reduce((s,r)=>s+(r.deltaValue<0?-r.deltaValue:0),0);
-  const totalOverage  = plan.rows.reduce((s,r)=>s+(r.deltaValue>0?r.deltaValue:0),0);
-  const net = totalOverage - totalShortage;
-  if(plan.rows.length && (totalShortage>=0.01 || totalOverage>=0.01)){
+  // Totals. CHARGE (Freezer Count rate) is what the crew is charged; POS cost
+  // totals are shown below it for reference.
+  const sumPos = (f)=>plan.rows.reduce((s,r)=>s+(r[f]>0?r[f]:0),0);
+  const sumNeg = (f)=>plan.rows.reduce((s,r)=>s+(r[f]<0?-r[f]:0),0);
+  const chShort = sumNeg('chargeValue'), chOver = sumPos('chargeValue');
+  const coShort = sumNeg('deltaValue'),  coOver = sumPos('deltaValue');
+  const net = chOver - chShort;
+  if(plan.rows.length && (chShort>=0.01 || chOver>=0.01)){
     list.innerHTML += `<div class="result-row" style="border-top:2px solid var(--border);margin-top:8px;padding-top:10px;">`
-      + `<div><strong>Total shortage value</strong></div>`
-      + `<div class="result-tag tag-short">${peso(totalShortage)}</div></div>`
-      + `<div class="result-row"><div><strong>Total overage value</strong></div>`
-      + `<div class="result-tag tag-over">${peso(totalOverage)}</div></div>`
-      + `<div class="result-row"><div><strong>Net</strong></div>`
-      + `<div class="result-tag ${net<0?'tag-short':'tag-ok'}">${net<0?'-':''}${peso(Math.abs(net))}</div></div>`;
+      + `<div><strong>Total shortage charge</strong></div>`
+      + `<div class="result-tag tag-short">${peso(chShort)}</div></div>`
+      + `<div class="result-row"><div><strong>Total overage credit</strong></div>`
+      + `<div class="result-tag tag-over">${peso(chOver)}</div></div>`
+      + `<div class="result-row"><div><strong>Net (charge)</strong></div>`
+      + `<div class="result-tag ${net<0?'tag-short':'tag-ok'}">${net<0?'-':''}${peso(Math.abs(net))}</div></div>`
+      + `<div class="result-row"><div><small style="color:var(--muted);">POS cost value — shortage ${peso(coShort)} · overage ${peso(coOver)} · net ${coOver-coShort<0?'-':''}${peso(Math.abs(coOver-coShort))}</small></div></div>`;
   }
   const totalWaste = plan.rows.reduce((s,r)=>s+(r.wasteValue||0),0);
   if(totalWaste>=0.01){
     list.innerHTML += `<div class="result-row"><div><strong>Total waste logged (since last audit)</strong></div>`
       + `<div class="result-tag tag-ok">${peso(totalWaste)}</div></div>`;
     // Waste only explains shortages, item by item — it can't cancel another item's overage.
-    const netShort = plan.rows.reduce((s,r)=>s+(r.deltaValue<0?Math.max(0,-r.deltaValue-(r.wasteValue||0)):0),0);
-    list.innerHTML += `<div class="result-row"><div><strong>Total shortage net of waste</strong></div>`
+    const netShort = plan.rows.reduce((s,r)=>s+(r.chargeValue<0?Math.max(0,-r.chargeValue-(r.wasteValue||0)):0),0);
+    list.innerHTML += `<div class="result-row"><div><strong>Total shortage charge net of waste</strong></div>`
       + `<div class="result-tag ${netShort>=0.01?'tag-short':'tag-ok'}">${peso(netShort)}</div></div>`;
   }
   const un = document.getElementById('auditPushUnlinked');
