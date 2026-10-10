@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261006-212500 -->
+<!-- BUILD:20261010-170000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -8711,7 +8711,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261006-212500";
+const BUILD = "20261010-170000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -14599,7 +14599,10 @@ function App(){
   const [repFrom,setRepFrom]=useState("");   // Reports date range
   const [repTo,setRepTo]=useState("");
   const [ordBr,setOrdBr]=useState("");
-  const [poForBranch,setPoForBranch]=useState("");   // Main placing an order on a branch's behalf
+  const [poForBranch,setPoForBranch]=useState("");
+  const [aoFrom,setAoFrom]=useState("");      // All Orders: date range + branch filter
+  const [aoTo,setAoTo]=useState("");
+  const [aoBranch,setAoBranch]=useState("");   // Main placing an order on a branch's behalf
   const [ordTot,setOrdTot]=useState(null);   // Reports: dine-in/takeout counted straight from orders
   const [zSel,setZSel]=useState("");                     // "" = live reading
   // A past date is not in the live arrays. The orders listener runs a 7-day
@@ -19156,7 +19159,9 @@ function App(){
           // Orders     = one branch, one day (service view, date-pickable)
           // All Orders = every branch, every date (owner's management view)
           const shown = page==="all_orders"
-            ? orders
+            ? orders.filter(o=>(!aoBranch||o.branch===aoBranch)
+                &&(!aoFrom||_dayOf(o)>=aoFrom)
+                &&(!aoTo||_dayOf(o)<=aoTo))
             : orders.filter(o=>o.branch===branchId
                 &&(ordDate==="all"||_dayOf(o)===_pick));
           // days that actually have orders for this branch, newest first
@@ -19223,9 +19228,41 @@ function App(){
           );
           return h("div",null,
           h(SectionHeader,{title:page==="all_orders"
-            ?"All Orders — "+orders.length+" total, all branches"
+            ?"All Orders — "+((aoBranch||aoFrom||aoTo)
+                ? shown.length+" of "+orders.length+" ("
+                  +(aoBranch?((branches.find(b=>b.id===aoBranch)||{}).full||aoBranch):"all branches")
+                  +((aoFrom||aoTo)?" \u00b7 "+(aoFrom||"start")+" \u2192 "+(aoTo||"now"):"")+")"
+                : orders.length+" total, all branches")
             :("Orders — "+curBranch.name+" · "
               +(ordDate==="all"?"all dates":_pick))}),
+
+          // All Orders filters: branch + date range. Everything is already
+          // loaded, so this narrows the list without another read.
+          page==="all_orders"&&h("div",{style:{display:"flex",gap:8,marginTop:10,marginBottom:4,
+            alignItems:"center",flexWrap:"wrap",background:"#fff",border:"1px solid "+C.border,
+            borderRadius:10,padding:"9px 13px"}},
+            h("span",{style:{fontSize:12,fontWeight:800,color:C.muted,letterSpacing:1}},"BRANCH"),
+            h("select",{value:aoBranch,onChange:e=>{setAoBranch(e.target.value);setOrdPage(1);},
+              style:{padding:"6px 10px",borderRadius:8,fontSize:13,outline:"none",
+                border:"1px solid "+(aoBranch?C.primary:C.border)}},
+              h("option",{value:""},"All branches"),
+              (branches||[]).map(b=>h("option",{key:b.id,value:b.id},b.full||b.name||b.id))),
+            h("span",{style:{fontSize:12,fontWeight:800,color:C.muted,letterSpacing:1,marginLeft:6}},"FROM"),
+            h("input",{type:"date",value:aoFrom,max:aoTo||_today,
+              onChange:e=>{setAoFrom(e.target.value);setOrdPage(1);},
+              style:{padding:"6px 10px",borderRadius:8,fontSize:13,outline:"none",
+                border:"1px solid "+(aoFrom?C.primary:C.border)}}),
+            h("span",{style:{fontSize:12,fontWeight:800,color:C.muted,letterSpacing:1}},"TO"),
+            h("input",{type:"date",value:aoTo,min:aoFrom||undefined,max:_today,
+              onChange:e=>{setAoTo(e.target.value);setOrdPage(1);},
+              style:{padding:"6px 10px",borderRadius:8,fontSize:13,outline:"none",
+                border:"1px solid "+(aoTo?C.primary:C.border)}}),
+            h("button",{onClick:()=>{const d=localDate();setAoFrom(d);setAoTo(d);setOrdPage(1);},
+              style:{padding:"6px 12px",borderRadius:8,fontSize:13,cursor:"pointer",
+                border:"1px solid "+C.border,background:"#fff"}},"Today"),
+            (aoBranch||aoFrom||aoTo)&&h("button",{onClick:()=>{setAoBranch("");setAoFrom("");setAoTo("");setOrdPage(1);},
+              style:{padding:"6px 12px",borderRadius:8,fontSize:13,cursor:"pointer",fontWeight:700,
+                border:"1px solid "+C.border,background:"#fff"}},"Clear")),
 
           pager,
 
@@ -19265,7 +19302,7 @@ function App(){
           ),
           h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
             shown.length===0&&h("div",{style:{textAlign:"center",padding:"32px",color:C.muted,fontSize:14}},
-              page==="all_orders"?"No orders on Firebase"
+              page==="all_orders"?((aoBranch||aoFrom||aoTo)?"No orders match these filters":"No orders on Firebase")
                 :(ordDate==="all"?"No orders on "+curBranch.name
                   :"No orders on "+_pick+" sa "+curBranch.name)),
             pageRows.map(o=>h("div",{key:o._docId||o.id,style:{display:"flex",alignItems:"flex-start",gap:9,padding:"9px 14px",borderBottom:"1px solid #f5f5f5"}},
