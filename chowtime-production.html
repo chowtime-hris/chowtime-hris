@@ -138,7 +138,7 @@ header.app .brand{flex:1 1 100%;}
 @media(min-width:700px){header.app .brand{flex:0 1 auto;}}
 @media print{#ctGate,#ctSignOut,#ctWho{display:none!important;}}
 </style>
-<!-- BUILD:20260802-234526 -->
+<!-- BUILD:20261013-140000 -->
 </head>
 <body>
 
@@ -270,6 +270,7 @@ async function loadPosPackInfo(){
           unit: d.unit || "",
           packUnit: d.packUnit || "",
           packSize: Number(d.packSize) || 0,
+          price: Number(d.price) || 0,
           name: d.name || id
         };
       }catch(e){ console.warn("pack info", code, e); }
@@ -321,11 +322,14 @@ async function postProductionToPOS(dateStr, products){
   // Both the links and the already-posted marker live in the POS project.
   let map = state.posMap || {};
   let posted = {};
+  let postedPrice = {};   // batch price last applied for this date, per code
   try{
     const dm = await fs.collection("settings").doc("production_map").get();
     if(dm.exists && dm.data() && dm.data().map){ map = dm.data().map; state.posMap = map; }
     const dp = await fs.collection("settings").doc("production_posted").get();
     if(dp.exists && dp.data() && dp.data()[dateStr]) posted = dp.data()[dateStr];
+    const dpp = await fs.collection("settings").doc("production_prices").get();
+    if(dpp.exists && dpp.data() && dpp.data()[dateStr]) postedPrice = dpp.data()[dateStr];
   }catch(e){ console.warn("bridge state:", e); }
   const done = [], skipped = [], failed = [];
 
@@ -349,17 +353,95 @@ async function postProductionToPOS(dateStr, products){
       ? Math.round(qty * 1000) / 1000
       : Math.round(qty * per * 1000) / 1000;
     const delta   = Math.round((wantPos - already) * 1000) / 1000;
-    if(delta === 0) continue;
+    // A price typed (or changed) later on a day that was already posted: the
+    // quantity is the same, so nothing moves in stock — only the price of that
+    // day's batch is set or corrected.
+    const bPrice = Number((products[code]||{}).price) || 0;
+    const needReprice = bPrice > 0 && already > 0 && (Number(postedPrice[code])||0) !== bPrice;
+    if(delta === 0 && !needReprice) continue;
     try{
       const ref = fs.collection("inventory").doc(itemId);
       const snap = await ref.get();
       if(!snap.exists){ failed.push(code+" (no such POS item)"); continue; }
       const prev = Number(snap.data().stock) || 0;
       const next = Math.round((prev + delta) * 1000) / 1000;
-      await ref.update({
+      const upd = {
         stock: next,
         lastRestocked: firebase.firestore.FieldValue.serverTimestamp()
-      });
+      };
+      // Batch price: only when a price was typed. priceLots is a FIFO list of
+      // selling prices (separate from the cost "lots"); POS reads it when a
+      // DR is issued. Stock that predates the first priceLot keeps the item's
+      // current price, so an opening lot is written for it first.
+      const refTag0 = "Production " + dateStr;
+      let plWork = Array.isArray(snap.data().priceLots) ? snap.data().priceLots.map(x=>Object.assign({},x)) : [];
+      let plTouched = false;
+      if(needReprice){
+        // Lots already written for this day just take the new price. If the day
+        // was posted with no price there is no lot yet: the part of it still on
+        // the shelf (never more than the untracked stock) becomes one, placed
+        // by date among the other lots. Units already sold stay as they were.
+        let hit = false;
+        plWork.forEach(l=>{
+          if(l.ref===refTag0 && (Number(l.remaining)||0)>0){ l.price = bPrice; hit = true; }
+        });
+        if(!hit){
+          const trk = plWork.reduce((a,l)=>a+(Number(l.remaining)||0),0);
+          const portion = Math.round(Math.min(already, Math.max(0, prev - trk)) * 1000) / 1000;
+          if(portion > 0){
+            const atT = Date.parse(dateStr + "T12:00:00+08:00") || Date.now();
+            let idx = plWork.findIndex(l=>(Number(l.at)||0) > atT);
+            if(idx < 0) idx = plWork.length;
+            plWork.splice(idx, 0, {qty:portion, remaining:portion, price:bPrice, ref:refTag0, at:atT});
+          }
+        }
+        plTouched = true;
+      }
+      if(bPrice > 0 && delta > 0){
+        const d0 = snap.data();
+        let pl = plWork;
+        const tracked = pl.reduce((a,l)=>a+(Number(l.remaining)||0),0);
+        const untracked = Math.round((prev - tracked) * 1000) / 1000;
+        if(untracked > 0 && Number(d0.price) > 0){
+          pl.unshift({qty:untracked, remaining:untracked, price:Number(d0.price), ref:"Opening", at:0});
+        }
+        const refTag = "Production " + dateStr;
+        const same = pl.find(l=>l.ref===refTag && Number(l.price)===bPrice && (Number(l.remaining)||0)>0);
+        if(same){
+          same.qty = Math.round((Number(same.qty)+delta)*1000)/1000;
+          same.remaining = Math.round((Number(same.remaining)+delta)*1000)/1000;
+        }else{
+          pl.push({qty:delta, remaining:delta, price:bPrice, ref:refTag, at:Date.now()});
+        }
+        plWork = pl; plTouched = true;
+      }else if(delta < 0 && plWork.length){
+        // Production was corrected downward: take it back from this day's lots
+        // first, then the newest.
+        let pl = plWork;
+        let need = -delta;
+        const refTag = "Production " + dateStr;
+        const order = pl.map((l,i)=>i).sort((a,b)=>{
+          const ra = pl[a].ref===refTag?1:0, rb = pl[b].ref===refTag?1:0;
+          return rb-ra || b-a;
+        });
+        for(const i of order){
+          if(need<=0) break;
+          const take = Math.min(need, Number(pl[i].remaining)||0);
+          pl[i].remaining = Math.round((Number(pl[i].remaining)-take)*1000)/1000;
+          need = Math.round((need-take)*1000)/1000;
+        }
+        plWork = pl; plTouched = true;
+      }
+      if(plTouched) upd.priceLots = plWork.filter(l=>(Number(l.remaining)||0)>0);
+      if(delta === 0){
+        // price-only change: leave stock and its log alone
+        await ref.update({priceLots: upd.priceLots || []});
+        postedPrice[code] = bPrice;
+        done.push(code + " batch price ₱" + bPrice);
+        continue;
+      }
+      await ref.update(upd);
+      if(bPrice > 0) postedPrice[code] = bPrice;
       await fs.collection("inventory_log").add({
         itemId: itemId,
         itemName: snap.data().name || itemId,
@@ -369,6 +451,7 @@ async function postProductionToPOS(dateStr, products){
         prevStock: prev,
         newStock: next,
         desc: "Production " + dateStr + " · " + code +
+              (bPrice>0 ? (" · batch price ₱" + bPrice) : "") +
               (alreadyBase
                 ? ((products[code]||{}).packs
                     ? (" · " + (products[code]||{}).packs + " pack"
@@ -404,6 +487,8 @@ async function postProductionToPOS(dateStr, products){
   try{
     await fs.collection("settings").doc("production_posted")
       .set({[dateStr]: posted}, {merge:true});
+    await fs.collection("settings").doc("production_prices")
+      .set({[dateStr]: postedPrice}, {merge:true});
   }catch(e){ console.warn("posted marker:", e); }
   return {ok:true, done, skipped, failed};
 }
@@ -694,7 +779,7 @@ let _entryDraft = null;
 
 function snapshotEntry(){
   const q = (sel)=>Array.from(document.querySelectorAll(sel));
-  const boxes = q('.batchPacks,.batchLoose,.batchQty,.caInput');
+  const boxes = q('.batchPacks,.batchLoose,.batchQty,.batchPrice,.caInput');
   if(!boxes.length) return null;
   const draft = { date: entryDate, values: {}, checks: {} };
   boxes.forEach(el=>{
@@ -935,7 +1020,13 @@ function renderEntry(main){
               <div style="font-size:10px;color:#5A5A5A">${(entryUnit(p.code)||'QTY').toUpperCase()}</div>
               <input type="number" min="0" step="any" style="width:100px" class="batchQty" data-code="${p.code}" value="${qty}" placeholder="0">
               <div style="font-size:11px;color:#6b5a3a;margin-top:3px" class="qtyHint" data-code="${p.code}">${entryHint(p.code, qty)}</div>
-            `}</td>
+            `}
+            ${SUPERVISOR_MODE ? '' : `
+              <div style="margin-top:6px;border-top:1px dashed #d9c9a3;padding-top:5px">
+                <div style="font-size:10px;color:#5A5A5A">BATCH PRICE (₱ per ${((state.posPack||{})[p.code]||{}).unit||'POS unit'}) — optional</div>
+                <input type="number" min="0" step="any" style="width:100px" class="batchPrice" data-code="${p.code}" value="${pd.price!=null?pd.price:''}" placeholder="same">
+                <div style="font-size:11px;color:#6b5a3a;margin-top:2px">${((state.posPack||{})[p.code]||{}).price?('Presyo ngayon sa MAIN: ₱'+((state.posPack||{})[p.code]||{}).price):''}</div>
+              </div>`}</td>
             <td>
               <div style="display:flex;flex-wrap:wrap;gap:8px">
               ${staffList.map(s=>`
@@ -1024,6 +1115,10 @@ function renderEntry(main){
     document.querySelectorAll('.caInput').forEach(i=>{ const v=Number(i.value)||0; if(v>0) data.ca[i.dataset.staff]=v; });
     state.products.forEach(p=>{
       const staffIds = Array.from(document.querySelectorAll(`.creditCheck[data-code="${p.code}"]:checked`)).map(c=>c.dataset.staff);
+      // The crew link has no price box. Whatever price the owner already set
+      // for this day is kept when the crew re-saves, not wiped.
+      const keepPrice = SUPERVISOR_MODE
+        ? (Number((((state.production[entryDate]||{}).products||{})[p.code]||{}).price)||0) : 0;
       if(usesPackEntry(p.code)){
         const per   = packSizeOfCode(p.code) || 1;
         const packs = Number((document.querySelector(`.batchPacks[data-code="${p.code}"]`)||{}).value)||0;
@@ -1033,10 +1128,14 @@ function renderEntry(main){
         // figure was reached, and posBase marks it as already converted.
         const qty = Math.round((packs*per + loose)*1000)/1000;
         data.products[p.code] = {qty, packs, loose, per, posBase:true, staff: staffIds};
+        const bp0 = keepPrice || Number((document.querySelector(`.batchPrice[data-code="${p.code}"]`)||{}).value)||0;
+        if(bp0>0) data.products[p.code].price = bp0;
       }else{
         const qtyEl = document.querySelector(`.batchQty[data-code="${p.code}"]`);
         const qty = Number(qtyEl ? qtyEl.value : 0)||0;
         data.products[p.code] = {qty, staff: staffIds};
+        const bp1 = keepPrice || Number((document.querySelector(`.batchPrice[data-code="${p.code}"]`)||{}).value)||0;
+        if(bp1>0) data.products[p.code].price = bp1;
       }
     });
     return data;

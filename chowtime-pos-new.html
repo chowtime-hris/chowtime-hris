@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261010-170000 -->
+<!-- BUILD:20261013-120000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -2237,9 +2237,19 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
   //
   // Prices are Non-VAT, so VAT is added on top rather than extracted. The
   // discount comes off first: VAT is due on what is actually charged.
+  // Estimate only: if MAIN holds a newer, higher-priced production batch, an
+  // order large enough to reach it is quoted at the blended price. The final
+  // price is fixed when the DR is issued.
+  const poPrice = (i)=>{
+    if(editPO) return Number(i.price)||0;
+    const q=Number(i.orderQty)||0;
+    if(!q||!Array.isArray(i.priceLots)||!i.priceLots.length) return Number(i.price)||0;
+    const sp=mainPriceSplit(i,q);
+    return sp.hasLots&&sp.total>0 ? sp.total/q : (Number(i.price)||0);
+  };
   const poTotals = (()=>{
     const subtotal = ordered.reduce((s,i)=>
-      s+(Number(i.price)||0)*(Number(i.orderQty)||0),0);
+      s+poPrice(i)*(Number(i.orderQty)||0),0);
     const disc = Math.min(Math.max(parseFloat(discount)||0,0),subtotal);
     const net  = subtotal-disc;
     const vat  = vatType==="vat" ? net*0.12 : 0;
@@ -2253,7 +2263,7 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
       branch:branchId,
       branchName:branches.find(b=>b.id===branchId)?.full||branchId,
        items:ordered.map(i=>({id:i.id,name:i.name,unit:i.unit,qty:i.orderQty,
-        note:i.note||"",price:Number(i.price)||0,
+        note:i.note||"",price:poPrice(i),
         cost:Number(i.cost)||0,   // Main's cost at order time, for margin
         packUnit:i.packUnit||"",packSize:Number(i.packSize)||0})),
       date:today,
@@ -2683,7 +2693,7 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
   const drNum = "DR-"+po.poNum?.replace("SO-","").replace("PO-","");
   const today = localDate();
 
-  const totalAmt = (po. items||[]).reduce((s,i)=>{
+  const totalAmtEst = (po. items||[]).reduce((s,i)=>{
     const qty = actualQtys[i.id]??i.qty;
     const price = prices[i.id]||0;
     return s + qty*price;
@@ -2691,19 +2701,30 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
 
   const issueDR = async()=>{
     if(!deliveryDate){showT("Set delivery date first","warn");return;}
+    // Batch pricing: read what MAIN holds now so each line is priced by the
+    // batch it actually comes out of.
+    const _md={};
+    for(const i of (po. items||[])){
+      try{const ds=await getDoc(doc(db,"inventory",i.id)); if(ds.exists())_md[i.id]=ds.data();}catch(e){}
+    }
+    const _q={};
+    (po. items||[]).forEach(i=>{_q[i.id]=drLineQuote(i,actualQtys[i.id]??i.qty,prices[i.id]||0,_md[i.id]);});
     const delivered = (po. items||[]).map(i=>({
       ...i,
       actualQty: actualQtys[i.id]??i.qty,
-      price: prices[i.id]||0,
+      price: _q[i.id].price,
+      batches: _q[i.id].batches||null,
+      pparts: _q[i.id].parts||null,
       // price stays per base unit — stock, lots and BOM all read it that way.
       // pricePack is the same figure stated as the branch ordered it, kept on
       // the line so the DR is not re-deriving it from an item that may have
       // been repriced since.
       pricePack: (Number(i.packSize)>1)
-        ? (prices[i.id]||0)*Number(i.packSize) : null,
-      total: (actualQtys[i.id]??i.qty)*(prices[i.id]||0),
+        ? _q[i.id].price*Number(i.packSize) : null,
+      total: _q[i.id].total,
       discrepancy: (actualQtys[i.id]??i.qty) - i.qty
     }));
+    const totalAmt = delivered.reduce((a,x)=>a+(Number(x.total)||0),0);
     const hasDisc = delivered.some(i=>i.discrepancy!==0);
     try{
       await updateDoc(doc(db,"advances",po._docId),{
@@ -2751,7 +2772,7 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
     const w = window.open("","_blank","width=420,height=700");
     if(!w)return;
     const  items = po. items||[];
-    const gross = totalAmt;
+    const gross = totalAmtEst;
     w.document.write(`<!DOCTYPE html><html><head><title>${drNum}</title>
     <style>*{margin:0;padding:0;box-sizing:border-box;}
     body{font-family:'Courier New',monospace;font-size:11px;padding:10px;max-width:400px;margin:0 auto;}
@@ -2938,7 +2959,7 @@ function DRIssueForm({po,db,user,showT,INIT_INVENTORY,advances,setAdvances}){
           padding:"10px 12px",background:"#f9f9f9",borderTop:"2px solid "+C.border}},
           h("div",{style:{fontSize:13,fontWeight:800,gridColumn:"1/5"}},"GROSS TOTAL"),
           h("div",{style:{fontSize:13,fontWeight:900,color:C.primary,textAlign:"right"}},
-            "₱"+peso(totalAmt))
+            "₱"+peso(totalAmtEst))
         )
       ),
 
@@ -7073,6 +7094,116 @@ function lotsAdd(lots,qty,price,ref,when){
   return list;
 }
 
+// ── BATCH SELLING PRICE (MAIN) ────────────────────────────────────────────
+// `priceLots` on a MAIN inventory doc is a FIFO list of SELLING prices
+// ({qty,remaining,price,ref,at}), written by the Production app when a batch is
+// posted with its own price. It is separate from `lots` (those are COST).
+// Stock older than the first priceLot ("untracked") sells at the item's own
+// current `price` and is always the oldest, so it goes first.
+// Lots can outgrow the real stock (a count correction, a sale made outside the
+// PO flow). When they do, the OLDEST lots are treated as gone, so the books
+// never promise a batch that is not on the shelf.
+function _plNorm(d){
+  d=d||{};
+  const lots=(Array.isArray(d.priceLots)?d.priceLots:[])
+    .filter(l=>(Number(l.remaining)||0)>0.0005).map(l=>Object.assign({},l));
+  let excess=lots.reduce((a,l)=>a+(Number(l.remaining)||0),0)-(Number(d.stock)||0);
+  while(excess>0.0005&&lots.length){
+    const l=lots[0], r=Number(l.remaining)||0;
+    if(r<=excess+0.0005){excess-=r;lots.shift();}
+    else{l.remaining=Math.round((r-excess)*1000)/1000;excess=0;}
+  }
+  return lots;
+}
+// Take qty from MAIN's price lots. If the DR already named the batches
+// (pparts: [{qty,price}]) those are taken first, so what leaves the shelf is
+// what the branch was invoiced for. Anything left over goes oldest-first.
+// Returns null when the item has no price lots. `taken` is what came out of
+// the lots (the untracked part needs no record: it simply returns to stock).
+function _plTake(d,qty,pparts){
+  const lots=_plNorm(d);
+  if(!lots.length) return null;
+  const base=Number(d.price)||0;
+  let untracked=Math.max(0,(Number(d.stock)||0)-lots.reduce((a,l)=>a+(Number(l.remaining)||0),0));
+  let need=Math.max(0,Number(qty)||0);
+  const taken=[];
+  const r3=x=>Math.round(x*1000)/1000;
+  const fromLot=(l,q)=>{
+    const t=Math.min(q,Number(l.remaining)||0); if(t<=0)return 0;
+    l.remaining=r3((Number(l.remaining)||0)-t);
+    taken.push({qty:t,price:Number(l.price)||0,ref:l.ref||"",at:l.at||0});
+    return t;
+  };
+  for(const part of (Array.isArray(pparts)?pparts:[])){
+    let want=Math.min(need,Number(part.qty)||0);
+    if(want<=0) continue;
+    if(untracked>0&&Number(part.price)===base){
+      const t=Math.min(want,untracked); untracked=r3(untracked-t); want=r3(want-t); need=r3(need-t);
+    }
+    for(const l of lots){
+      if(want<=0)break;
+      if(Number(l.price)!==Number(part.price)) continue;
+      const t=fromLot(l,want); want=r3(want-t); need=r3(need-t);
+    }
+  }
+  if(need>0&&untracked>0){const t=Math.min(need,untracked);need=r3(need-t);}
+  for(const l of lots){ if(need<=0)break; need=r3(need-fromLot(l,need)); }
+  return {lots:lots.filter(l=>(Number(l.remaining)||0)>0.0005),taken};
+}
+// Put qty back (newest-taken first). Returns the new list, or null if there is
+// nothing recorded to put back. The matching stock increment is the caller's.
+function _plRestore(d,taken,qty,ref){
+  if(!Array.isArray(taken)||!taken.length) return null;
+  const lots=_plNorm(d);
+  let left=Math.max(0,Number(qty)||0);
+  const back=[];
+  for(let k=taken.length-1;k>=0&&left>0;k--){
+    const t=Math.min(left,Number(taken[k].qty)||0); if(t<=0)continue;
+    back.unshift({qty:t,remaining:t,price:Number(taken[k].price)||0,
+      ref:taken[k].ref||ref||"",at:taken[k].at||Date.now()});
+    left=Math.round((left-t)*1000)/1000;
+  }
+  return back.length?back.concat(lots):null;
+}
+function mainPriceSplit(d,qty){
+  d=d||{};
+  const base=Number(d.price)||0;
+  let need=Math.max(0,Number(qty)||0);
+  const pl=_plNorm(d);
+  const tracked=pl.reduce((a,l)=>a+(Number(l.remaining)||0),0);
+  const parts=[];
+  const add=(q,pr)=>{
+    q=Math.round(q*1000)/1000; if(q<=0)return;
+    const last=parts[parts.length-1];
+    if(last&&Number(last.price)===Number(pr)) last.qty=Math.round((last.qty+q)*1000)/1000;
+    else parts.push({qty:q,price:Number(pr)||0});
+  };
+  const untracked=Math.max(0,(Number(d.stock)||0)-tracked);
+  if(untracked>0&&need>0){const t=Math.min(need,untracked);add(t,base);need-=t;}
+  for(const l of pl){
+    if(need<=0)break;
+    const t=Math.min(need,Number(l.remaining)||0);
+    add(t,l.price);need-=t;
+  }
+  if(need>0.0005){const lp=pl.length?pl[pl.length-1].price:base;add(need,lp);}
+  const total=Math.round(parts.reduce((a,x)=>a+x.qty*x.price,0)*100)/100;
+  return {parts,total,hasLots:pl.length>0};
+}
+// One DR line. A price the issuer typed over the PO price is respected as-is;
+// otherwise the batch split decides. With no priceLots anywhere this returns
+// exactly what the old code computed (qty × PO price).
+function drLineQuote(i,qty,price,mainDoc){
+  const q=Number(qty)||0, pr=Number(price)||0;
+  const plain={price:pr,total:q*pr,batches:null,parts:null,auto:false};
+  // price 0 = a follow-up / owed-delivery line: it must stay free of charge
+  if(!mainDoc||!q||!(Number(i&&i.price)>0)) return plain;
+  if(pr!==(Number(i&&i.price)||0)) return plain;
+  const sp=mainPriceSplit(mainDoc,q);
+  if(!sp.hasLots) return plain;
+  return {price:sp.total/q,total:sp.total,
+    batches:sp.parts.length>1?sp.parts:null,parts:sp.parts,auto:true};
+}
+
 // Consume qty oldest-first. Returns the new list and the cost of what was
 // taken, so the caller can record what that movement was actually worth.
 // A shortfall is reported rather than hidden: if the lots do not cover the
@@ -8503,6 +8634,7 @@ function renderDRDoc(po,cs,brs){
     prices[i.id]=Number(i.price)||0;
   });
   const total=items.reduce(function(a,i){
+    if(i.batches&&i.batches.length>1&&i.total!=null) return a+(Number(i.total)||0);
     return a+(((i.actualQty!=null?i.actualQty:i.qty)||0)*(Number(i.price)||0));},0);
   const deliveryDate=(po&&(po.deliveryDate||po.date))||"";
 
@@ -8514,7 +8646,7 @@ function renderDRDoc(po,cs,brs){
       if(!cats[cat])cats[cat]=[];
       const aq=actualQtys[i.id]!=null?actualQtys[i.id]:i.qty;
       const p=prices[i.id]||0;
-      cats[cat].push({...i,aq,p,lineTotal:aq*p});
+      cats[cat].push({...i,aq,p,lineTotal:(i.batches&&i.batches.length>1&&i.total!=null)?i.total:aq*p});
     });
     let  itemNo=1;
     let tableRows="";
@@ -8533,6 +8665,25 @@ function renderDRDoc(po,cs,brs){
         // printing a misleading "1 pack"
         const perPk = sz>1 ? (sz+" "+(i.unit||"")) : "—";
         const totPk = sz>1 ? (Math.round((i.aq/sz)*1000)/1000)+" "+pu : "—";
+        if(i.batches&&i.batches.length>1){
+          // one line per price batch, so the paper shows why the price differs
+          const _no=itemNo++;
+          i.batches.forEach((b,bi)=>{
+            const bPk = sz>1 ? (Math.round((b.qty/sz)*1000)/1000)+" "+pu : "—";
+            tableRows+=`<tr>
+          <td>${bi===0?_no:""}</td>
+          <td style="color:#5A5A5A;font-size:10px">${bi===0?(i.id||""):""}</td>
+          <td>${bi===0?cat:""}</td>
+          <td>${i.name}${bi===0?"":" (batch "+(bi+1)+")"}</td>
+          <td>${perPk}</td>
+          <td class="b">${bPk}</td>
+          <td class="b">${b.qty} ${i.unit||""}</td>
+          <td class="r">₱${peso(b.price)}</td>
+          <td class="r">₱${peso(Math.round(b.qty*b.price*100)/100)}</td>
+          <td>${bi===0?"Price differs by batch":"—"}</td>
+        </tr>`;
+          });
+        }else
         tableRows+=`<tr>
           <td>${ itemNo++}</td>
           <td style="color:#5A5A5A;font-size:10px">${i.id||""}</td>
@@ -8711,7 +8862,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261010-170000";
+const BUILD = "20261013-120000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -12271,6 +12422,7 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
   const [notes,setNotes]      = useState("");
   const [saving,setSaving]    = useState(false);
   const [mainStock,setMainStock] = useState(null);   // null = still loading
+  const [mainDocs,setMainDocs] = useState({});          // MAIN inventory docs, for batch pricing
 
   // Init from existing DR data if any
   useEffect(()=>{
@@ -12291,22 +12443,25 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
   useEffect(()=>{
     let alive=true;
     (async()=>{
-      const m={};
+      const m={}, md={};
       for(const i of (po. items||[])){
         if(!i.id)continue;
         try{
           const ds=await getDoc(doc(db,"inventory",i.id));
           m[i.id]=ds.exists()?(Number(ds.data().stock)||0):null;
+          if(ds.exists())md[i.id]=ds.data();
         }catch(e){ m[i.id]=null; }
       }
-      if(alive)setMainStock(m);
+      if(alive){setMainStock(m);setMainDocs(md);}
     })();
     return()=>{alive=false;};
   },[po._docId]);
 
   const  items = po. items||[];
-  const total =  items.reduce((s,i)=>
-    s+((prices[i.id]||0)*((actualQtys[i.id]!=null?actualQtys[i.id]:i.qty)||0)),0);
+  const quoteOf = (i)=>drLineQuote(i,
+    (actualQtys[i.id]!=null?actualQtys[i.id]:i.qty)||0,
+    prices[i.id]||0, mainDocs[i.id]);
+  const total =  items.reduce((s,i)=>s+quoteOf(i).total,0);
 
   const printDR = (cs)=>{
     const w=window.open("","_blank","width=800,height=900");
@@ -12316,8 +12471,10 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
       const cat=i.cat||i.category||"Others";
       if(!cats[cat])cats[cat]=[];
       const aq=actualQtys[i.id]!=null?actualQtys[i.id]:i.qty;
-      const p=prices[i.id]||0;
-      cats[cat].push({...i,aq,p,lineTotal:aq*p});
+      const p0=prices[i.id]||0;
+      const _qq=quoteOf(i);
+      const p=_qq.price;
+      cats[cat].push({...i,aq,p,batches:_qq.batches,lineTotal:_qq.total});
     });
     let  itemNo=1;
     let tableRows="";
@@ -12336,6 +12493,25 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
         // printing a misleading "1 pack"
         const perPk = sz>1 ? (sz+" "+(i.unit||"")) : "—";
         const totPk = sz>1 ? (Math.round((i.aq/sz)*1000)/1000)+" "+pu : "—";
+        if(i.batches&&i.batches.length>1){
+          // one line per price batch, so the paper shows why the price differs
+          const _no=itemNo++;
+          i.batches.forEach((b,bi)=>{
+            const bPk = sz>1 ? (Math.round((b.qty/sz)*1000)/1000)+" "+pu : "—";
+            tableRows+=`<tr>
+          <td>${bi===0?_no:""}</td>
+          <td style="color:#5A5A5A;font-size:10px">${bi===0?(i.id||""):""}</td>
+          <td>${bi===0?cat:""}</td>
+          <td>${i.name}${bi===0?"":" (batch "+(bi+1)+")"}</td>
+          <td>${perPk}</td>
+          <td class="b">${bPk}</td>
+          <td class="b">${b.qty} ${i.unit||""}</td>
+          <td class="r">₱${peso(b.price)}</td>
+          <td class="r">₱${peso(Math.round(b.qty*b.price*100)/100)}</td>
+          <td>${bi===0?"Price differs by batch":"—"}</td>
+        </tr>`;
+          });
+        }else
         tableRows+=`<tr>
           <td>${ itemNo++}</td>
           <td style="color:#5A5A5A;font-size:10px">${i.id||""}</td>
@@ -12495,17 +12671,29 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
   const issueDR = async()=>{
     setSaving(true);
     try{
+      // Re-read MAIN right now: the batch a line falls in depends on the
+      // stock at the moment of issue, not when the sheet was opened.
+      const _fresh={...mainDocs};
+      for(const i of items){
+        try{const ds=await getDoc(doc(db,"inventory",i.id)); if(ds.exists())_fresh[i.id]=ds.data();}catch(e){}
+      }
+      const _q={};
+      items.forEach(i=>{_q[i.id]=drLineQuote(i,
+        (actualQtys[i.id]!=null?actualQtys[i.id]:i.qty)||0,prices[i.id]||0,_fresh[i.id]);});
       const delivered =  items.map(i=>({
         ...i,
         actualQty: actualQtys[i.id]!=null?actualQtys[i.id]:i.qty,
-        price: prices[i.id]||0,
+        price: _q[i.id].price,
+        batches: _q[i.id].batches||null,
+        pparts: _q[i.id].parts||null,
         // per base unit, as everything downstream expects; the pack figure is
         // recorded beside it so the printed DR matches what was ordered.
         pricePack: (Number(i.packSize)>1)
-          ? (prices[i.id]||0)*Number(i.packSize) : null,
-        total: ((actualQtys[i.id]!=null?actualQtys[i.id]:i.qty)||0)*(prices[i.id]||0),
+          ? _q[i.id].price*Number(i.packSize) : null,
+        total: _q[i.id].total,
         discrepancy: ((actualQtys[i.id]!=null?actualQtys[i.id]:i.qty)||0)-(i.qty||0)
       }));
+      const total = Math.round(delivered.reduce((a,x)=>a+(Number(x.total)||0),0)*100)/100;
       const hasDisc = delivered.some(i=>i.discrepancy!==0);
       await updateDoc(doc(db,"advances",po._docId),{
         status:"processing",
@@ -12618,6 +12806,8 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
             h("div",{style:{fontSize:13,fontWeight:700,
               color:short?"#C62828":"inherit"}},i.name),
             h("div",{style:{fontSize:12,color:"#5A5A5A"}},i.unit||""),
+            (()=>{const bq=quoteOf(i);return bq.batches?h("div",{style:{fontSize:11,fontWeight:700,color:"#6A1B9A"}},
+              "Batch price: "+bq.batches.map(b=>b.qty+" @ ₱"+peso(b.price)).join(" + ")):null;})(),
             mainStock===null
               ? h("div",{style:{fontSize:11,color:"#999"}},"checking Main…")
               : have==null
@@ -12649,14 +12839,15 @@ function DRProcessModal({po,db,user,showT,onClose,companySettings={},branches=[]
           h("div",{style:{display:"flex",alignItems:"center",gap:3}},
             h("span",{style:{fontSize:13,color:"#5A5A5A"}},"₱"),
             h("input",{type:"number",onFocus:e=>e.target.select(),min:0,step:"0.01",
-              value:prices[i.id]||"",
+              value:(()=>{const bq=quoteOf(i);return bq.auto?(Math.round(bq.price*100)/100):(prices[i.id]||"");})(),
+              readOnly:!!quoteOf(i).batches,
               onChange:e=>setPrices(p=>({...p,[i.id]:parseFloat(e.target.value)||0})),
               placeholder:"0.00",
               style:{width:60,padding:"5px",border:"1px solid #ddd",borderRadius:6,
                 fontSize:13,fontWeight:700,outline:"none",textAlign:"right"}})
           ),
           h("div",{style:{fontSize:13,fontWeight:800,color:"#6A1B9A",textAlign:"right"}},
-            "₱"+peso((aq*(prices[i.id]||0))))
+            "₱"+peso(quoteOf(i).total))
         );
       }),
       // Total row
@@ -24667,9 +24858,14 @@ function App(){
                             const q=(it.actualQty!=null?it.actualQty:it.qty)||0;
                             if(!it.id||!(q>0))continue;
                             try{
-                              await updateDoc(doc(db,"inventory",it.id),{
+                              let _dl=null;
+                              try{
+                                const _ds=await getDoc(doc(db,"inventory",it.id));
+                                if(_ds.exists())_dl=_plRestore(_ds.data(),(d0.priceConsumed||{})[it.id],q,"Restore "+(po.poNum||""));
+                              }catch(e0){}
+                              await updateDoc(doc(db,"inventory",it.id),Object.assign({
                                 stock:increment(q),
-                                lastRestocked:serverTimestamp()});
+                                lastRestocked:serverTimestamp()},_dl?{priceLots:_dl}:{}));
                               await addDoc(collection(db,"inventory_log"),{
                                 itemId:it.id,itemName:it.name||it.id,unit:it.unit||"",
                                 type:"add",amount:q,
@@ -24765,6 +24961,9 @@ function App(){
                           :(i.actualQty!=null?i.actualQty:(i.qty||0));
                         return Object.assign({},i,{
                           qty:got, actualQty:got,
+                          // quantity changed, so the old batch split no longer fits
+                          ...((got!==Number(exp))?{batches:null,pparts:null,
+                            total:Math.round(got*(Number(i.price)||0)*100)/100}:{}),
                           orderedQty:(i.orderedQty!=null?i.orderedQty:i.qty),
                           issuedQty:exp,
                           correctedFrom:(got!==Number(exp))?exp:undefined
@@ -24866,8 +25065,13 @@ function App(){
                             const mcur=await getDoc(mref);
                             if(mcur.exists()){
                               const mprev=Number(mcur.data().stock)||0;
-                              await updateDoc(mref,{stock:increment(delta),
-                                lastRestocked:serverTimestamp()});
+                              // short delivery: the batch(es) go back; over
+                              // delivery: more comes out oldest-first
+                              let _al=null;
+                              if(delta>0) _al=_plRestore(mcur.data(),(_d.priceConsumed||{})[it.id],delta,"Return "+(po.poNum||""));
+                              else{const _t=_plTake(mcur.data(),-delta,null); if(_t)_al=_t.lots;}
+                              await updateDoc(mref,Object.assign({stock:increment(delta),
+                                lastRestocked:serverTimestamp()},_al?{priceLots:_al}:{}));
                               await addDoc(collection(db,"inventory_log"),{
                                 itemId:it.id,itemName:it.name||it.id,unit:it.unit||"",
                                 type:delta>0?"add":"deduct",amount:Math.abs(delta),
@@ -24971,12 +25175,13 @@ function App(){
                         for(const  item of _rows){
                           const qty= item.actualQty!=null? item.actualQty:( item.qty||0);
                           if(!qty)continue;
-                          let prev=null, _rawLots=null, _cat="", _psz=0;
+                          let prev=null, _rawLots=null, _cat="", _psz=0, _plDoc=null;
                           try{
                             const snap=await getDoc(doc(db,"inventory", item.id));
                             if(snap.exists()){
                               prev=Number(snap.data().stock)||0;
                               _rawLots=snap.data().lots;
+                              _plDoc=snap.data();
                               _cat=snap.data().cat||"";
                               _psz=packSizeOf(snap.data());
                             }
@@ -25013,11 +25218,13 @@ function App(){
                               shortBy:Math.round((qty-_shippable)*1000)/1000});
                             if(_shippable>0){
                               _plan.push({item: item,qty:_shippable,prev:prev,
-                                lots:lotsConsume(_rawLots,_shippable).lots});
+                                lots:lotsConsume(_rawLots,_shippable).lots,
+                                pl:_plDoc?_plTake(_plDoc,_shippable,item.pparts):null});
                             }
                           }else{
                             _plan.push({item: item,qty:qty,prev:prev,
-                              lots:lotsConsume(_rawLots,qty).lots});
+                              lots:lotsConsume(_rawLots,qty).lots,
+                              pl:_plDoc?_plTake(_plDoc,qty,item.pparts):null});
                           }
                         }
                         // Main is short on some items. Rather than block the
@@ -25099,12 +25306,12 @@ function App(){
                           }
                         }
                         for(const _p of _plan){
-                          const  item=_p.item, qty=_p.qty, prev=_p.prev, _plots=_p.lots;
+                          const  item=_p.item, qty=_p.qty, prev=_p.prev, _plots=_p.lots, _pplots=_p.pl?_p.pl.lots:null;
                           try{
                             await updateDoc(doc(db,"inventory", item.id),Object.assign({
                               stock:increment(-qty),
                               lastDeducted:serverTimestamp()
-                            }, _plots?{lots:_plots}:{}));
+                            }, _plots?{lots:_plots}:{}, _pplots?{priceLots:_pplots}:{}));
                           }catch(e){}
                           try{
                             await addDoc(collection(db,"inventory_log"),{
@@ -25132,6 +25339,11 @@ function App(){
                         // accounts for the full order.
                         await updateDoc(doc(db,"advances",po._docId),{
                           mainDeducted:true,stockIssued:true,stockShort:[],
+                          // which price batches left Main, so Revert / a short
+                          // delivery can put the same batches back
+                          priceConsumed:_plan.reduce((m,x)=>{
+                            if(x.pl&&x.pl.taken.length) m[x.item.id]=x.pl.taken;
+                            return m;},{}),
                           partialFilled:!!_shortPO,
                           followUpPO:_shortPO||null,
                           mainDeductedBy:user.name,
@@ -25227,14 +25439,17 @@ function App(){
                         let done=0;
                         for(const b of back){
                           try{
-                            let prev=null;
+                            let prev=null, _rl=null;
                             try{
                               const snap=await getDoc(doc(db,"inventory",b.id));
-                              if(snap.exists())prev=Number(snap.data().stock)||0;
+                              if(snap.exists()){
+                                prev=Number(snap.data().stock)||0;
+                                _rl=_plRestore(snap.data(),(po.priceConsumed||{})[b.id],b.qty,"Revert "+(po.poNum||""));
+                              }
                             }catch(e){}
-                            await updateDoc(doc(db,"inventory",b.id),{
+                            await updateDoc(doc(db,"inventory",b.id),Object.assign({
                               stock:increment(b.qty),
-                              lastAdjusted:serverTimestamp()});
+                              lastAdjusted:serverTimestamp()},_rl?{priceLots:_rl}:{}));
                             await addDoc(collection(db,"inventory_log"),{
                               itemId:b.id,itemName:b.name,unit:b.unit,
                               type:"add",amount:b.qty,
@@ -25252,6 +25467,7 @@ function App(){
                         }
                         await updateDoc(doc(db,"advances",po._docId),{
                           mainDeducted:false,stockIssued:false,stockShort:[],
+                          priceConsumed:{},
                           mainDeductedBy:null,mainDeductedAt:null,
                           mainRevertedBy:user.name,
                           mainRevertedAt:serverTimestamp(),
