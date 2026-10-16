@@ -115,7 +115,7 @@ tbody td{padding:9px 11px;}
 .modal-box h2{font-family:'Syne',sans-serif;font-size:18px;margin-bottom:16px;}
 @media(max-width:600px){nav.tabs{padding:5px 10px;}.kpi-value{font-size:20px;}.panel{padding:14px;}}
 </style>
-<!-- BUILD:20261016-205500 -->
+<!-- BUILD:20261016-211500 -->
 </head>
 <body>
 
@@ -3039,7 +3039,9 @@ function generatePayslip() {
     : `<div class="alert alert-warn" style="margin-bottom:12px;">⚠️ No DTR entries found for this period. Enter attendance in the DTR tab first.</div>`;
   const relNote = r.periodReleased
     ? ''
-    : `<div class="alert alert-warn" style="margin-bottom:12px;">⚠️ ${p ? p.label : pKey} is not released yet, so no loan deduction appears below — nothing has been charged and the Loans tab still reads Pending. Release this cut-off in the Payroll tab, then generate the payslip again.</div>`;
+    : ((r.loanLines||[]).some(x=>x.recorded)
+        ? `<div class="alert alert-warn" style="margin-bottom:12px;">⚠️ ${p ? p.label : pKey} is not released yet. Only loan deductions already recorded in the Loans tab appear below; any loan still Pending is not included. Release this cut-off in the Payroll tab, then generate the payslip again.</div>`
+        : `<div class="alert alert-warn" style="margin-bottom:12px;">⚠️ ${p ? p.label : pKey} is not released yet, so no loan deduction appears below — nothing has been charged and the Loans tab still reads Pending. Release this cut-off in the Payroll tab, then generate the payslip again.</div>`);
   document.getElementById('payslip-preview').innerHTML = dtrNote + relNote + `
     <div class="payslip-header">
       <div class="payslip-company">🍽️ ${settings.company}</div>
@@ -3504,6 +3506,7 @@ const LEDGER_ACTIONS = {
   'cutoff-deduction': {label:'Cut-off deduction', tag:'tag-orange'},
   'manual-deduction': {label:'Manual deduction',  tag:'tag-orange'},
   'balance-correction': {label:'Balance correction', tag:'tag-gray'},
+  'deduction-voided': {label:'Deduction voided', tag:'tag-gray'},
   'marked-paid':      {label:'Marked paid',       tag:'tag-green'},
   'balance-reset':    {label:'Balance reset',     tag:'tag-red'},
   'loan-deleted':     {label:'Loan deleted',      tag:'tag-red'},
@@ -4103,11 +4106,36 @@ function openLoanHistory(i){
       '<td><span class="tag ' + a.tag + '">' + a.label + '</span></td>' +
       '<td>' + (e.amount ? '\u20b1' + fmt(e.amount) : '\u2014') + '</td>' +
       '<td style="font-weight:600;">\u20b1' + fmt(e.after) + '</td>' +
-      '<td style="font-size:12px;color:var(--muted);">' + (e.note||'') + '</td></tr>';
+      '<td style="font-size:12px;color:var(--muted);">' + (e.note||'') +
+        ((e.action==='cutoff-deduction'||e.action==='manual-deduction') && e.period && !isPeriodReleased(e.period)
+          ? '<br><button class="btn btn-sm btn-secondary" style="margin-top:4px;" onclick="voidLedgerDeduction(' + i + ',' + e.ts + ')">\u21a9\ufe0f Void this deduction</button>' : '') +
+        '</td></tr>';
   }).join('') || '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--muted);">No movements recorded yet.</td></tr>';
   document.getElementById('loan-history-modal').style.display = 'block';
 }
 window.openLoanHistory = openLoanHistory;
+
+// Void ONE recorded deduction in a cut-off that is not released yet (e.g. a
+// duplicate). The row stays in the ledger as 'Deduction voided' so history is
+// kept, but it no longer counts as a payslip deduction. The loan balance is
+// NOT changed — correct it with Edit if needed.
+function voidLedgerDeduction(i, ts){
+  const l = loans[i]; if (!l) return;
+  const e = loanLedger.find(x => x.loanId === l.id && x.ts === ts &&
+            (x.action==='cutoff-deduction' || x.action==='manual-deduction'));
+  if (!e) { alert('Entry not found.'); return; }
+  if (isPeriodReleased(e.period)) { alert('That cut-off is already released.'); return; }
+  if (!confirm('Void this \u20b1' + fmt(e.amount) + ' deduction for ' + getPeriodLabel(e.period) + '?\n\n'
+    + 'It will no longer appear on the payslip. The entry stays in the ledger as "Deduction voided". '
+    + 'The loan balance is NOT changed (currently \u20b1' + fmt(loanBalanceOf(l)) + ').')) return;
+  e.note = (e.note ? e.note + ' \u2014 ' : '') + 'VOIDED ' + toLocalDateStr(new Date()) + ': not charged to payslip';
+  e.action = 'deduction-voided';
+  pushLedger();
+  openLoanHistory(i);
+  renderLoans();
+  showToastAdmin && showToastAdmin('\u2705 Deduction voided');
+}
+window.voidLedgerDeduction = voidLedgerDeduction;
 
 // ── Ledger tab ─────────────────────────────────────────────
 function setupLedger(){
