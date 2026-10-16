@@ -115,7 +115,7 @@ tbody td{padding:9px 11px;}
 .modal-box h2{font-family:'Syne',sans-serif;font-size:18px;margin-bottom:16px;}
 @media(max-width:600px){nav.tabs{padding:5px 10px;}.kpi-value{font-size:20px;}.panel{padding:14px;}}
 </style>
-<!-- BUILD:20260916-100000 -->
+<!-- BUILD:20261016-205500 -->
 </head>
 <body>
 
@@ -437,6 +437,11 @@ tbody td{padding:9px 11px;}
     <button class="btn btn-secondary" style="margin-bottom:14px;margin-left:8px;" onclick="deductLoanBalances()">💳 Manual Override — Deduct This Cut-off</button>
     <button class="btn btn-secondary" style="margin-bottom:14px;margin-left:8px;" onclick="showTab('ledger')">📒 View Ledger</button>
     <div id="loan-cutoff-banner"></div>
+    <div style="margin-bottom:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+      <label style="font-weight:600;font-size:13px;">👤 Crew:</label>
+      <select id="loan-emp-filter" onchange="renderLoans()" style="padding:8px 10px;border:1px solid var(--border,#ccc);border-radius:8px;min-width:200px;"><option value="">All crew</option></select>
+      <span id="loan-emp-summary" style="font-size:12px;color:var(--muted);"></span>
+    </div>
     <div class="table-wrap">
       <table>
         <thead><tr><th>Employee</th><th>Loan Type</th><th>Principal</th><th>Per Cut-off Ded.</th><th>Balance</th><th>Paid So Far</th><th>Start</th><th>This Cut-off</th><th>Status</th></tr></thead>
@@ -3028,7 +3033,7 @@ function generatePayslip() {
   const emp = employees.find(e=>e.id===id);
   if (!emp || !pKey) return;
   const p = getPeriodDetails(pKey);
-  const r = buildPayrollRow(emp, pKey, {preview:true});
+  const r = buildPayrollRow(emp, pKey, {preview:false});
   const dtrNote = r.hasDTR
     ? ''
     : `<div class="alert alert-warn" style="margin-bottom:12px;">⚠️ No DTR entries found for this period. Enter attendance in the DTR tab first.</div>`;
@@ -3105,7 +3110,24 @@ function renderLoans(){
   ensureLoanIds();
   const p = getPeriod();
   const pEnd = periodEndStr(p.key);
+  // Crew filter — options rebuilt from loans, selection preserved
+  const fSel = document.getElementById('loan-emp-filter');
+  const fVal = fSel ? fSel.value : '';
+  if (fSel) {
+    const seen = {};
+    loans.forEach(l => { if (l && l.emp) seen[l.emp] = l.empName || l.emp; });
+    const names = Object.keys(seen).sort((a,b)=>String(seen[a]).localeCompare(String(seen[b])));
+    fSel.innerHTML = '<option value="">All crew</option>' + names.map(id =>
+      `<option value="${id}"${id===fVal?' selected':''}>${seen[id]}</option>`).join('');
+    const sum = document.getElementById('loan-emp-summary');
+    if (sum) {
+      const mine = loans.filter(l => l && (!fVal || l.emp === fVal));
+      const owed = mine.reduce((a,l)=>a+loanBalanceOf(l),0);
+      sum.textContent = fVal ? `${mine.length} loan(s) · Total balance ₱${fmt(owed)}` : '';
+    }
+  }
   document.getElementById('loan-tbody').innerHTML=loans.map((l,i)=>{
+    if (fVal && (!l || l.emp !== fVal)) return '';
     const bal  = loanBalanceOf(l);
     const paid = Math.max(0, (+l.amount||0) - bal);
     const pct  = (+l.amount||0) > 0 ? Math.round(paid / (+l.amount) * 100) : 0;
