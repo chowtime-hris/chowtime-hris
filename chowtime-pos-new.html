@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261016-190000 -->
+<!-- BUILD:20261016-210000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -8867,7 +8867,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261016-190000";
+const BUILD = "20261016-210000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -14888,6 +14888,8 @@ function App(){
   const [poForBranch,setPoForBranch]=useState("");
   const [aoFrom,setAoFrom]=useState("");      // All Orders: date range + branch filter
   const [aoTo,setAoTo]=useState("");
+  const [aoPay,setAoPay]=useState("");         // All Orders: payment method filter
+  const [aoType,setAoType]=useState("");       // All Orders: dine-in / takeout / delivery
   const [aoOpen,setAoOpen]=useState(null);     // order whose details are expanded
   const [aoBranch,setAoBranch]=useState("");   // Main placing an order on a branch's behalf
   const [ordTot,setOrdTot]=useState(null);   // Reports: dine-in/takeout counted straight from orders
@@ -19448,7 +19450,14 @@ function App(){
           const shown = page==="all_orders"
             ? orders.filter(o=>(!aoBranch||o.branch===aoBranch)
                 &&(!aoFrom||_dayOf(o)>=aoFrom)
-                &&(!aoTo||_dayOf(o)<=aoTo))
+                &&(!aoTo||_dayOf(o)<=aoTo)
+                // a split bill counts under every method it was paid with
+                &&(!aoPay||(Array.isArray(o.payments)&&o.payments.length
+                    ?o.payments.some(x=>x&&String(x.method||"").toLowerCase()===aoPay&&(Number(x.amount)||0)>0)
+                    :String(o.payMethod||"cash").toLowerCase()===aoPay))
+                &&(!aoType||(aoType==="mixed"
+                    ?!!o.mixedType
+                    :String(o.orderType||"dine-in").toLowerCase()===aoType)))
             : orders.filter(o=>o.branch===branchId
                 &&(ordDate==="all"||_dayOf(o)===_pick));
           // days that actually have orders for this branch, newest first
@@ -19515,10 +19524,12 @@ function App(){
           );
           return h("div",null,
           h(SectionHeader,{title:page==="all_orders"
-            ?"All Orders — "+((aoBranch||aoFrom||aoTo)
+            ?"All Orders — "+((aoBranch||aoFrom||aoTo||aoPay||aoType)
                 ? shown.length+" of "+orders.length+" ("
                   +(aoBranch?((branches.find(b=>b.id===aoBranch)||{}).full||aoBranch):"all branches")
-                  +((aoFrom||aoTo)?" \u00b7 "+(aoFrom||"start")+" \u2192 "+(aoTo||"now"):"")+")"
+                  +((aoFrom||aoTo)?" \u00b7 "+(aoFrom||"start")+" \u2192 "+(aoTo||"now"):"")
+                  +(aoPay?" \u00b7 "+aoPay.toUpperCase():"")
+                  +(aoType?" \u00b7 "+aoType:"")+")"
                 : orders.length+" total, all branches")
             :("Orders — "+curBranch.name+" · "
               +(ordDate==="all"?"all dates":_pick))}),
@@ -19544,12 +19555,74 @@ function App(){
               onChange:e=>{setAoTo(e.target.value);setOrdPage(1);},
               style:{padding:"6px 10px",borderRadius:8,fontSize:13,outline:"none",
                 border:"1px solid "+(aoTo?C.primary:C.border)}}),
+            h("span",{style:{fontSize:12,fontWeight:800,color:C.muted,letterSpacing:1,marginLeft:6}},"BAYAD"),
+            h("select",{value:aoPay,onChange:e=>{setAoPay(e.target.value);setOrdPage(1);},
+              style:{padding:"6px 10px",borderRadius:8,fontSize:13,outline:"none",
+                border:"1px solid "+(aoPay?C.primary:C.border)}},
+              h("option",{value:""},"All payments"),
+              [["cash","💵 Cash"],["gcash","📱 GCash"],["maya","💳 Maya"],["bank","🏦 Bank"],
+               ["foodpanda","🐼 FoodPanda"],["grabfood","🟢 GrabFood"]].map(x=>h("option",{key:x[0],value:x[0]},x[1]))),
+            h("span",{style:{fontSize:12,fontWeight:800,color:C.muted,letterSpacing:1}},"TYPE"),
+            h("select",{value:aoType,onChange:e=>{setAoType(e.target.value);setOrdPage(1);},
+              style:{padding:"6px 10px",borderRadius:8,fontSize:13,outline:"none",
+                border:"1px solid "+(aoType?C.primary:C.border)}},
+              h("option",{value:""},"All types"),
+              [["dine-in","🍽️ Dine-in"],["takeout","🥡 Take-out"],["delivery","🛵 Delivery"],
+               ["mixed","🔀 Mixed (dine-in + T/O)"]].map(x=>h("option",{key:x[0],value:x[0]},x[1]))),
             h("button",{onClick:()=>{const d=localDate();setAoFrom(d);setAoTo(d);setOrdPage(1);},
               style:{padding:"6px 12px",borderRadius:8,fontSize:13,cursor:"pointer",
                 border:"1px solid "+C.border,background:"#fff"}},"Today"),
-            (aoBranch||aoFrom||aoTo)&&h("button",{onClick:()=>{setAoBranch("");setAoFrom("");setAoTo("");setOrdPage(1);},
+            (aoBranch||aoFrom||aoTo||aoPay||aoType)&&h("button",{onClick:()=>{setAoBranch("");setAoFrom("");setAoTo("");setAoPay("");setAoType("");setOrdPage(1);},
               style:{padding:"6px 12px",borderRadius:8,fontSize:13,cursor:"pointer",fontWeight:700,
                 border:"1px solid "+C.border,background:"#fff"}},"Clear")),
+
+          // Totals for exactly what the filters above are showing. Voided and
+          // cancelled orders are counted but kept out of the money.
+          page==="all_orders"&&(()=>{
+            const live=shown.filter(o=>o.status!=="void"&&o.status!=="cancelled");
+            const nVoid=shown.length-live.length;
+            const sales=live.reduce((a,o)=>a+(Number(o.total)||0),0);
+            const disc=live.reduce((a,o)=>a+(Number(o.discAmt)||0),0);
+            const pm={};
+            live.forEach(o=>{
+              const parts=(Array.isArray(o.payments)&&o.payments.length)
+                ? o.payments.filter(x=>x&&(Number(x.amount)||0)>0)
+                : [{method:o.payMethod||"cash",amount:Number(o.total)||0}];
+              parts.forEach(x=>{
+                const m=String(x.method||"cash").toLowerCase();
+                if(!pm[m])pm[m]={n:0,t:0};
+                pm[m].n++; pm[m].t+=Number(x.amount)||0;
+              });
+            });
+            const ty={};
+            live.forEach(o=>{
+              const t=o.mixedType?"mixed":String(o.orderType||"dine-in").toLowerCase();
+              if(!ty[t])ty[t]={n:0,t:0};
+              ty[t].n++; ty[t].t+=Number(o.total)||0;
+            });
+            const nm={cash:"💵 Cash",gcash:"📱 GCash",maya:"💳 Maya",bank:"🏦 Bank",foodpanda:"🐼 FoodPanda",grabfood:"🟢 GrabFood"};
+            const tn={"dine-in":"🍽️ Dine-in",takeout:"🥡 Take-out",delivery:"🛵 Delivery",mixed:"🔀 Mixed"};
+            const chip=(key,label,v,on)=>h("div",{key:key,style:{padding:"6px 10px",borderRadius:8,
+              border:"1px solid "+(on?C.primary:C.border),background:on?"#F3E9F7":"#fff",fontSize:12}},
+              h("div",{style:{fontWeight:700}},label),
+              h("div",null,v.n+" order"+(v.n===1?"":"s")+" · ₱"+peso(v.t)));
+            return h("div",{style:{background:"#fff",border:"1px solid "+C.border,borderRadius:10,
+              padding:"10px 13px",marginTop:8,marginBottom:4}},
+              h("div",{style:{display:"flex",gap:18,flexWrap:"wrap",alignItems:"baseline"}},
+                h("div",null,h("span",{style:{fontSize:11,fontWeight:800,color:C.muted,letterSpacing:1}},"ORDERS "),
+                  h("b",{style:{fontSize:16}},live.length)),
+                h("div",null,h("span",{style:{fontSize:11,fontWeight:800,color:C.muted,letterSpacing:1}},"TOTAL SALES "),
+                  h("b",{style:{fontSize:16,color:C.primary}},"₱"+peso(sales))),
+                disc>0&&h("div",null,h("span",{style:{fontSize:11,fontWeight:800,color:C.muted,letterSpacing:1}},"DISCOUNTS "),
+                  h("b",{style:{color:C.danger}},"₱"+peso(disc))),
+                nVoid>0&&h("div",{style:{color:C.danger,fontSize:12}},nVoid+" void/cancelled (hindi kasama sa total)")),
+              h("div",{style:{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}},
+                Object.keys(pm).sort((a,b)=>pm[b].t-pm[a].t).map(m=>chip("p"+m,nm[m]||m.toUpperCase(),pm[m],aoPay===m))),
+              h("div",{style:{display:"flex",gap:6,flexWrap:"wrap",marginTop:6}},
+                Object.keys(ty).sort((a,b)=>ty[b].t-ty[a].t).map(t=>chip("t"+t,tn[t]||t,ty[t],aoType===t))),
+              (aoPay&&pm[aoPay])&&h("div",{style:{fontSize:11,color:C.muted,marginTop:6}},
+                "Ang ₱ sa bawat Bayad ay ang halagang binayad gamit ang paraang iyon; ang TOTAL SALES ay buong halaga ng mga order."));
+          })(),
 
           pager,
 
@@ -19589,7 +19662,7 @@ function App(){
           ),
           h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
             shown.length===0&&h("div",{style:{textAlign:"center",padding:"32px",color:C.muted,fontSize:14}},
-              page==="all_orders"?((aoBranch||aoFrom||aoTo)?"No orders match these filters":"No orders on Firebase")
+              page==="all_orders"?((aoBranch||aoFrom||aoTo||aoPay||aoType)?"No orders match these filters":"No orders on Firebase")
                 :(ordDate==="all"?"No orders on "+curBranch.name
                   :"No orders on "+_pick+" sa "+curBranch.name)),
             pageRows.map(o=>{
