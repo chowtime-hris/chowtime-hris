@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261016-210000 -->
+<!-- BUILD:20261016-215000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -8867,7 +8867,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261016-210000";
+const BUILD = "20261016-215000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -21571,6 +21571,9 @@ function App(){
                     mainSnap.docs.forEach(d=>{mainMap[d.id]=d.data();});
                     const targets=(branches||[]).filter(b=>
                       b.id!=="ct-main"&&b.id!=="main");
+                    const lc=v=>String(v||"").trim().toLowerCase();
+                    const r4=x=>Math.round(x*10000)/10000;
+                    const r6=x=>Math.round(x*1000000)/1000000;
                     const jobs=[];
                     for(const b of targets){
                       const col="inventory_"+b.id;
@@ -21581,37 +21584,82 @@ function App(){
                         const m=mainMap[d.id]; if(!m)return;
                         const cd=d.data();
                         const mu=m.packUnit||"", ms=Number(m.packSize)||0;
-                        if((cd.packUnit||"")===mu
-                          &&(Number(cd.packSize)||0)===ms)return;
-                        jobs.push({col:col,id:d.id,packUnit:mu,packSize:ms,
-                          name:cd.name||d.id,branch:b.name||b.full||b.id,
-                          from:(cd.packUnit||"\u2014")+" / "+(Number(cd.packSize)||0),
-                          to:(mu||"\u2014")+" / "+ms});
+                        const packDiff=!((cd.packUnit||"")===mu
+                          &&(Number(cd.packSize)||0)===ms);
+                        // Branch still counts in Main's pack unit (e.g. "pack")
+                        // while Main now counts in its base unit (e.g. "g").
+                        const convert=ms>1&&lc(m.unit)&&lc(mu)
+                          &&lc(cd.unit)!==lc(m.unit)&&lc(cd.unit)===lc(mu);
+                        if(!packDiff&&!convert)return;
+                        const base={col:col,id:d.id,
+                          name:cd.name||d.id,branch:b.name||b.full||b.id};
+                        if(!convert){
+                          jobs.push(Object.assign(base,{
+                            upd:{packUnit:mu,packSize:ms},
+                            line:"pack "+(cd.packUnit||"\u2014")+" / "
+                              +(Number(cd.packSize)||0)+" \u2192 "+(mu||"\u2014")+" / "+ms}));
+                          return;
+                        }
+                        const stockTo=r4((Number(cd.stock)||0)*ms);
+                        const lots=Array.isArray(cd.lots)?cd.lots.map(l=>{
+                          const o=Object.assign({},l);
+                          if(o.qty!=null)o.qty=r4((Number(o.qty)||0)*ms);
+                          if(o.remaining!=null)o.remaining=r4((Number(o.remaining)||0)*ms);
+                          if(o.price!=null)o.price=r6((Number(o.price)||0)/ms);
+                          return o;
+                        }):null;
+                        jobs.push(Object.assign(base,{
+                          conv:true,f:ms,unitFrom:cd.unit||"",unitTo:m.unit,
+                          stockFrom:Number(cd.stock)||0,stockTo:stockTo,
+                          upd:Object.assign({
+                            unit:m.unit,stock:stockTo,
+                            price:r6((Number(cd.price)||0)/ms),
+                            cost:r6((Number(cd.cost)||0)/ms),
+                            minStock:r4((Number(cd.minStock)||0)*ms),
+                            packUnit:mu,packSize:ms,
+                            lastUpdated:serverTimestamp()
+                          },lots?{lots:lots}:{}),
+                          line:"CONVERT "+(Number(cd.stock)||0)+" "+(cd.unit||"")
+                            +" \u2192 "+stockTo+" "+m.unit
+                            +" (\u20b1"+r6((Number(cd.price)||0)/ms)+"/"+m.unit+")"}));
                       });
                     }
                     if(!jobs.length){
                       showT("Pareho na lahat sa Main \u2014 walang babaguhin","ok");
                       return;
                     }
-                    const prev=jobs.slice(0,8).map(j=>
-                      j.branch+": "+j.name+"   "+j.from+" \u2192 "+j.to).join("\n");
+                    const nConv=jobs.filter(j=>j.conv).length;
+                    const sorted=jobs.slice().sort((a,b)=>(b.conv?1:0)-(a.conv?1:0));
+                    const prev=sorted.slice(0,8).map(j=>
+                      j.branch+": "+j.name+"   "+j.line).join("\n");
                     if(!confirm(jobs.length+" item sa "+targets.length
-                      +" branch ang iaayon sa Main.\n\n"+prev
+                      +" branch ang iaayon sa Main"
+                      +(nConv?" ("+nConv+" ang may CONVERT ng unit/stock/presyo)":"")
+                      +".\n\n"+prev
                       +(jobs.length>8?"\n\u2026 at "+(jobs.length-8)+" pa":"")
-                      +"\n\nPack unit at pack size LANG ang mababago. "
-                      +"Hindi gagalawin ang stock, cost, at min stock."))return;
+                      +"\n\nPack lang ang mababago sa karamihan. Sa CONVERT: "
+                      +"pati unit, stock, presyo, cost, min stock at lots."))return;
                     let ok=0,bad=0;
                     for(const j of jobs){
                       try{
-                        await updateDoc(doc(db,j.col,j.id),{
-                          packUnit:j.packUnit,packSize:j.packSize,
-                          packAlignedAt:serverTimestamp(),
-                          packAlignedBy:user.name});
+                        await updateDoc(doc(db,j.col,j.id),Object.assign({},j.upd,
+                          {packAlignedAt:serverTimestamp(),packAlignedBy:user.name}));
+                        if(j.conv){
+                          try{
+                            await addDoc(collection(db,j.col.replace(/^inventory/,"inventory_log")),{
+                              itemId:j.id,itemName:j.name,unit:j.unitTo,type:"convert",
+                              amount:0,prevStock:j.stockFrom,newStock:j.stockTo,invCol:j.col,
+                              desc:"Unit converted to match Main: "+j.stockFrom+" "+j.unitFrom
+                                +" \u2192 "+j.stockTo+" "+j.unitTo+" (x"+j.f+")",
+                              source:"unit-convert",date:localDate(),
+                              by:user.name,at:serverTimestamp(),timestamp:serverTimestamp()});
+                          }catch(e2){ console.warn("convert log",j.id,e2); }
+                        }
                         ok++;
                       }catch(e1){ bad++; console.warn("align",j.id,e1); }
                     }
-                    showT(ok+" na-align sa Main"+(bad?"  \u00B7  "+bad+" bigo":""),
-                      bad?"warn":"ok");
+                    showT(ok+" na-align sa Main"+(nConv?" ("+nConv+" converted)":"")
+                      +(bad?"  \u00B7  "+bad+" bigo":""),bad?"warn":"ok");
                   }catch(e){
                     showT("Failed: "+String(e&&e.message||e).slice(0,60),"err");
                   }
