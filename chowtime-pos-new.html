@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261017-003000 -->
+<!-- BUILD:20261022-123500 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -7354,6 +7354,8 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
   const [ itemBomTab,setItemBomTab] = useState("variants");
   const [boms,setBoms]           = useState({});
   const [editBom,setEditBom]     = useState([]);
+  const [editToBom,setEditToBom] = useState([]);     // take-out extras of the open item/variant
+  const [editOrdBom,setEditOrdBom] = useState([]);   // per-order take-out extras
   const [saving,setSaving]       = useState(false);
   const [costTab,setCostTab]     = useState("bom");
   const [quickAdd,setQuickAdd]   = useState("");   // paste-a-recipe box
@@ -7435,6 +7437,51 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
     }catch(e){
       console.error("BOM save failed:",e);
       showT("BOM save failed: "+String((e&&e.code)||"")+" "+String((e&&e.message)||e).slice(0,90),"err");
+    }
+    setSaving(false);
+  };
+
+  // ── Take-out extras ─────────────────────────────────────
+  // Packaging that goes out only when a line is take-out (or delivery): the
+  // container sits on the meal, the cup lid on the set that includes a drink,
+  // so an order without a drink never deducts a lid. Stored on the same
+  // bom/<itemId> doc as the recipe, under <recipe key>__TOXTRA[__variant].
+  const getTOKey=(item,v)=>item.id+"__TOXTRA"+((!v||v==="default")?"":"__"+String(v).replace(/\s+/g,"_"));
+  const blankToRow=()=>({ingId:"",ingName:"",unit:"",qty:1,convFactor:1,markup:0});
+  useEffect(()=>{
+    if(!selItem||itemBomTab!=="toxtra")return;
+    const rows=(boms[selItem.id]&&boms[selItem.id][getTOKey(selItem,selVariant)])||[];
+    setEditToBom(rows.length?[...rows]:[blankToRow()]);
+  },[selItem&&selItem.id,selVariant,itemBomTab]);
+  useEffect(()=>{
+    if(costTab!=="orderx")return;
+    const rows=(boms["order_extras"]&&boms["order_extras"].takeout)||[];
+    setEditOrdBom(rows.length?[...rows]:[blankToRow()]);
+  },[costTab]);
+  const saveToBom=async()=>{
+    if(!selItem)return;
+    setSaving(true);
+    try{
+      const key=getTOKey(selItem,selVariant);
+      const rows=editToBom.filter(r=>r.ingId||r.ingName);
+      await setDoc(doc(db,"bom",selItem.id),
+        Object.assign({},boms[selItem.id]||{},{[key]:rows}),{merge:true});
+      showT("Take-out extras saved ✓");
+    }catch(e){
+      console.error("Take-out extras save failed:",e);
+      showT("Save failed: "+String((e&&e.code)||"")+" "+String((e&&e.message)||e).slice(0,90),"err");
+    }
+    setSaving(false);
+  };
+  const saveOrdBom=async()=>{
+    setSaving(true);
+    try{
+      const rows=editOrdBom.filter(r=>r.ingId||r.ingName);
+      await setDoc(doc(db,"bom","order_extras"),{takeout:rows},{merge:true});
+      showT("Per-order extras saved ✓");
+    }catch(e){
+      console.error("Order extras save failed:",e);
+      showT("Save failed: "+String((e&&e.code)||"")+" "+String((e&&e.message)||e).slice(0,90),"err");
     }
     setSaving(false);
   };
@@ -7820,7 +7867,7 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
     // ══ PRODUCTS TAB ══════════════════════════════════════
     mainTab==="products"&&h("div",null,
       h("div",{style:{display:"flex",gap:8,marginBottom:10}},
-        [["bom","BOM Editor"],["costing","Costing Report"]].map(([id,lbl])=>
+        [["bom","BOM Editor"],["orderx","\uD83E\uDD61 Per-order extras"],["costing","Costing Report"]].map(([id,lbl])=>
           h("button",{key:id,onClick:()=>setCostTab(id),
             style:{padding:"5px 14px",borderRadius:7,border:"none",cursor:"pointer",
               fontSize:13,fontWeight:costTab===id?700:400,
@@ -7872,7 +7919,7 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
                 background:"#fafafa",display:"flex",justifyContent:"space-between",alignItems:"center"}},
                 h("div",{style:{fontSize:13,fontWeight:900}},selItem.name),
                 h("div",{style:{display:"flex",gap:4}},
-                  [["variants","Variants/Base"],["options","Item Options"]].map(([id,lbl])=>
+                  [["variants","Variants/Base"],["options","Item Options"],["toxtra","\uD83E\uDD61 Take-out extras"]].map(([id,lbl])=>
                     h("button",{key:id,
                       onClick:()=>{setItemBomTab(id);setSelItemOpt(null);},
                       style:{padding:"4px 12px",borderRadius:6,border:"none",cursor:"pointer",
@@ -7895,6 +7942,26 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
                 ),
                 h("div",{style:{padding:"14px 16px"}},
                   BOMEditor({rows:editBom,setRows:setEditBom,onSave:saveBOM,saving:saving}))
+              ),
+              // Take-out extras sub-tab
+               itemBomTab==="toxtra"&&h("div",null,
+                variantList(selItem).length>1&&h("div",{style:{display:"flex",gap:4,
+                  padding:"8px 16px",borderBottom:"1px solid "+C.border,background:"#f9f9f9"}},
+                  variantList(selItem).map(v=>
+                    h("button",{key:v,onClick:()=>{setSelVar(v);},
+                      style:{padding:"4px 10px",borderRadius:6,border:"none",cursor:"pointer",
+                        fontSize:13,fontWeight:700,
+                        background:selVariant===v?C.primary:"#eee",
+                        color:selVariant===v?"#fff":C.text}},
+                      v==="default"?"Base":v))
+                ),
+                h("div",{style:{padding:"10px 16px",background:"#FFF8E1",fontSize:12,
+                  color:"#6D4C00",borderBottom:"1px solid "+C.border,lineHeight:1.5}},
+                  "Ibabawas LANG kapag take-out (o delivery) ang line na ito, kada pirasong T/O. "
+                  +"Ilagay dito ang packaging na kasama sa item na ito \u2014 halimbawa lalagyan; "
+                  +"cup lid kung ang set na ito ay may drink. Walang laman = walang ibabawas."),
+                h("div",{style:{padding:"14px 16px"}},
+                  BOMEditor({rows:editToBom,setRows:setEditToBom,onSave:saveToBom,saving:saving}))
               ),
               // Item Options sub-tab
                itemBomTab==="options"&&h("div",{style:{display:"grid",gridTemplateColumns:"200px 1fr",minHeight:300}},
@@ -7956,6 +8023,18 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
                 )
               )
             )
+      ),
+      // Per-order take-out extras
+      costTab==="orderx"&&h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
+        h("div",{style:{padding:"11px 16px",borderBottom:"1px solid "+C.border,fontSize:14,fontWeight:800}},
+          "\uD83E\uDD61 Take-out extras \u2014 kada order"),
+        h("div",{style:{padding:"10px 16px",background:"#FFF8E1",fontSize:12,color:"#6D4C00",
+          borderBottom:"1px solid "+C.border,lineHeight:1.5}},
+          "Ibabawas ISANG BESES kada order na may kahit isang take-out o delivery na piraso, "
+          +"kahit ilan ang laman \u2014 halimbawa plastic bag, kutsara/tinidor, tissue. "
+          +"Ang packaging na kada piraso (lalagyan, cup lid) ay ilagay sa Take-out extras ng mismong item."),
+        h("div",{style:{padding:"14px 16px"}},
+          BOMEditor({rows:editOrdBom,setRows:setEditOrdBom,onSave:saveOrdBom,saving:saving}))
       ),
       // Costing Report
       costTab==="costing"&&h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
@@ -8870,7 +8949,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261017-003000";
+const BUILD = "20261022-123500";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -10214,6 +10293,11 @@ async function performVoid(db, args){
           const ib=bomData[it.id]||{};
           await giveBack(ib[vKey]||ib[it.id]||[], it.qty||1,
             v!=="default"?v:"", it.name||it.id);
+          const _tq=Number(it.toQty)||0;
+          if(_tq>0){
+            const xk=it.id+"__TOXTRA"+((!v||v==="default")?"":"__"+String(v).replace(/\s+/g,"_"));
+            await giveBack(ib[xk]||ib[it.id+"__TOXTRA"]||[], _tq, "Take-out", it.name||it.id);
+          }
         }
       for(const ref of (it.optionRefs||[])){
         if(!ref.groupId||!ref.choiceId)continue;
@@ -16287,6 +16371,43 @@ function App(){
         const fallbackVariants=[];  // variants deducted using the base recipe
         let totalDeductions = 0;
 
+        // Take-out packaging. Same deduction as a recipe row, logged as a
+        // normal sale so a full void gives it back from the log.
+        const applyExtraRows=async(xrows,mult,tag,menuName)=>{
+          for(const row of (xrows||[])){
+            if(!row.ingId||!row.qty)continue;
+            const xAmt=((row.qty||0)*(mult||1))/(row.convFactor||1);
+            const xCol=invColFor(branchId);
+            try{
+              const bd=await getDoc(doc(db,xCol,row.ingId));
+              if(!bd.exists()){ missingIngs.push(row.ingName||row.ingId); continue; }
+              const xprev=Number(bd.data().stock)||0;
+              const xr=lotsConsume(bd.data().lots,xAmt);
+              await updateDoc(doc(db,xCol,row.ingId),Object.assign({
+                stock:increment(-xAmt),lastDeducted:serverTimestamp()
+              },xr.lots?{lots:xr.lots}:{}));
+              totalDeductions++;
+              await addDoc(collection(db,logCol),{
+                itemId:row.ingId,itemName:row.ingName||row.ingId,
+                unit:row.unit||"",type:"deduct",amount:-xAmt,
+                cogs:xr.cost,date:localDate(),
+                timestamp:serverTimestamp(),at:serverTimestamp(),
+                convFactor:row.convFactor||1,invCol:xCol,
+                prevStock:xprev,
+                newStock:Math.round((xprev-xAmt)*1000)/1000,
+                desc:"Deducted at "+(curBranch&&curBranch.full||branchId)+": "
+                  +(Math.round(xAmt*1000)/1000)+" "+(row.unit||"")
+                  +" for order "+ord.id+" ("+tag+" \u00B7 "+menuName+")",
+                source:"sales",ref:ord.id,transactionId:ord.id,orderId:ord.id,
+                menuItem:menuName,takeoutExtra:true,
+                branch:branchId,
+                reason:"Order: "+ord.id+" \u2014 "+tag+" ["+menuName+"]",
+                by:user.name
+              });
+            }catch(ex){console.warn("Take-out extras deduct failed",row.ingId,ex);}
+          }
+        };
+
         for(const cartItem of cart){
           const  itemId = cartItem.id;
           const variant = cartItem.variant||"default";
@@ -16301,6 +16422,14 @@ function App(){
           const usedFallback = (variant!=="default") && !itemBOM[vKey] && !!itemBOM[ itemId];
           if(usedFallback) fallbackVariants.push(cartItem.name+" – "+variant);
           const rows =  itemBOM[vKey]|| itemBOM[ itemId]||[];
+
+          // Take-out packaging for the pieces of this line that go out.
+          const _toQ=lineTOQty(cartItem);
+          if(_toQ>0){
+            const _xk=itemId+"__TOXTRA"+((!variant||variant==="default")?"":"__"+variant.replace(/\s+/g,"_"));
+            const _xr=itemBOM[_xk]||itemBOM[itemId+"__TOXTRA"]||[];
+            if(_xr.length)await applyExtraRows(_xr,_toQ,"Take-out packaging",cartItem.name);
+          }
 
           for(const row of rows){
             if(!row.ingId||!row.qty)continue;
@@ -16370,6 +16499,12 @@ function App(){
               });
             }catch(e2){console.warn("BOM deduct failed for",row.ingId,e2);}
           }
+        }
+
+        // Once per order that has any take-out / delivery piece: bag, cutlery, tissue
+        if(toCount>0){
+          const _oe=((bomData["order_extras"]||{}).takeout)||[];
+          if(_oe.length)await applyExtraRows(_oe,1,"Take-out (per order)","Order "+ord.id);
         }
 
         // ── Item-level option BOMs (bom/<itemId> keys like id__opt_<grp>__<choice>)
@@ -24524,7 +24659,9 @@ function App(){
 
                 // Same recovery on the branch side: a manager can fix their own
                 // stock without waiting for the owner to notice.
-                (po.status==="completed"||po.status==="discrepancy")
+                // Not for `discrepancy`: those are settled by Approve shortage,
+                // which posts the agreed quantities. Offering both posted a PO twice.
+                (po.status==="completed")
                   &&!po.stockPosted&&((po.receivedItems||[]).length>0)
                   &&h("div",{style:{margin:"0 16px 10px",background:"#FFF3E0",
                     border:"1px solid #FFCC80",borderRadius:8,padding:"9px 11px",
@@ -25092,7 +25229,7 @@ function App(){
 
                   // Recovery for POs received before the receive path wrote to
                   // inventory. Shows only where the goods were never credited.
-                  (st==="completed"||st==="discrepancy")&&!po.stockPosted
+                  (st==="completed")&&!po.stockPosted
                     &&((po.receivedItems||[]).length>0)&&h("div",{
                     style:{width:"100%",background:"#FFF3E0",
                       border:"1px solid #FFCC80",borderRadius:8,
