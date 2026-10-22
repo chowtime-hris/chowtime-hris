@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261022-123500 -->
+<!-- BUILD:20261022-125000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -7369,6 +7369,9 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
   const [selGroup,setSelGroup]   = useState(null);
   const [selChoice,setSelChoice] = useState(null);
   const [editOptBom,setEditOptBom] = useState([]);
+  const [optToMode,setOptToMode] = useState(false);      // option editors: recipe vs take-out extras
+  const [editOptToBom,setEditOptToBom] = useState([]);
+  const [editItemOptToBom,setEditItemOptToBom] = useState([]);
   const [savingOpt,setSavingOpt] = useState(false);
   // New group/choice form
   const [newGrpName,setNewGrpName]   = useState("");
@@ -7485,6 +7488,62 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
     }
     setSaving(false);
   };
+
+  // ── Take-out extras for option choices ──────────────────
+  // Same idea as items: packaging that goes out only with a take-out piece,
+  // kept under <recipe key>__TOXTRA on the same doc as the choice's recipe.
+  useEffect(()=>{
+    if(!optToMode||!selChoice||!selGroup)return;
+    const d="optgrp_"+selGroup.id;
+    const rows=(boms[d]&&boms[d][selChoice.key+"__TOXTRA"])||[];
+    setEditOptToBom(rows.length?[...rows]:[blankToRow()]);
+  },[optToMode,selChoice&&selChoice.key]);
+  useEffect(()=>{
+    if(!optToMode||!selItemOpt||!selItem)return;
+    const rows=(boms[selItem.id]&&boms[selItem.id][selItemOpt.key+"__TOXTRA"])||[];
+    setEditItemOptToBom(rows.length?[...rows]:[blankToRow()]);
+  },[optToMode,selItemOpt&&selItemOpt.key]);
+  const saveOptTo=async()=>{
+    if(!selChoice||!selGroup)return;
+    setSavingOpt(true);
+    try{
+      const docId="optgrp_"+selGroup.id;
+      const rows=editOptToBom.filter(r=>r.ingId||r.ingName);
+      await setDoc(doc(db,"bom",docId),
+        Object.assign({},boms[docId]||{},{[selChoice.key+"__TOXTRA"]:rows}),{merge:true});
+      showT(selChoice.label+" take-out extras saved ✓");
+    }catch(e){
+      console.error("Option take-out extras save failed:",e);
+      showT("Save failed: "+String((e&&e.code)||"")+" "+String((e&&e.message)||e).slice(0,90),"err");
+    }
+    setSavingOpt(false);
+  };
+  const saveItemOptTo=async()=>{
+    if(!selItem||!selItemOpt)return;
+    setSavingItemOpt(true);
+    try{
+      const rows=editItemOptToBom.filter(r=>r.ingId||r.ingName);
+      await setDoc(doc(db,"bom",selItem.id),
+        Object.assign({},boms[selItem.id]||{},{[selItemOpt.key+"__TOXTRA"]:rows}),{merge:true});
+      showT("Take-out extras saved ✓");
+    }catch(e){
+      console.error("Item option take-out extras save failed:",e);
+      showT("Save failed: "+String((e&&e.code)||"")+" "+String((e&&e.message)||e).slice(0,90),"err");
+    }
+    setSavingItemOpt(false);
+  };
+  const ToBar=()=>h("div",{style:{display:"flex",gap:6,padding:"8px 12px",
+    borderBottom:"1px solid "+C.border,background:"#f9f9f9"}},
+    [[false,"Recipe"],[true,"\uD83E\uDD61 Take-out extras"]].map(([v,lbl])=>
+      h("button",{key:String(v),onClick:()=>setOptToMode(v),
+        style:{padding:"4px 12px",borderRadius:6,border:"none",cursor:"pointer",
+          fontSize:13,fontWeight:700,
+          background:optToMode===v?C.primary:"#eee",
+          color:optToMode===v?"#fff":C.text}},lbl)));
+  const ToNote=()=>optToMode&&h("div",{style:{padding:"8px 12px",background:"#FFF8E1",
+    fontSize:12,color:"#6D4C00",borderBottom:"1px solid "+C.border,lineHeight:1.5}},
+    "Ibabawas LANG kapag take-out (o delivery) ang item na may option na ito \u2014 "
+    +"halimbawa cup + lid ng drink na pinili. Walang laman = walang ibabawas.");
 
   // selGroup is a snapshot captured on click — it never refreshes when the
   // onSnapshot listener updates `groups`. Reading choices from it means edits
@@ -7981,6 +8040,7 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
                             onClick:()=>{
                               const rows=(boms[selItem.id]&&boms[selItem.id][key])||[];
                               setSelItemOpt({key,optLabel:opt.label,choiceLabel:ch.label});
+                              setOptToMode(false);
                               setEditItemOptBom(rows.length?[...rows]:[{ingId:"",ingName:"",unit:"",qty:1,convFactor:1,markup:0}]);
                             },
                             style:{padding:"7px 14px",cursor:"pointer",
@@ -8004,8 +8064,10 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
                         h("div",{style:{padding:"8px 12px",background:"#F3E9F7",fontSize:13,
                           fontWeight:700,color:C.primary,borderBottom:"1px solid "+C.border}},
                           selItemOpt.optLabel+" → "+selItemOpt.choiceLabel),
+                        ToBar(),ToNote(),
                         h("div",{style:{padding:"10px 12px"}},
-                          BOMEditor({
+                          optToMode?BOMEditor({rows:editItemOptToBom,setRows:setEditItemOptToBom,
+                            saving:savingItemOpt,onSave:saveItemOptTo}):BOMEditor({
                             rows:editItemOptBom,setRows:setEditItemOptBom,saving:savingItemOpt,
                             onSave:async()=>{
                               setSavingItemOpt(true);
@@ -8326,6 +8388,7 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
                               const k="optgrp_"+selGroup.id+"__"+ch.id;
                               const rows=(boms[bomDocId2]&&boms[bomDocId2][k])||[];
                               setSelChoice({...ch,key:k,groupName:selGroup.name});
+                              setOptToMode(false);
                               setEditOptBom(rows.length?[...rows]:[{ingId:"",ingName:"",unit:"",qty:1,convFactor:1,markup:0}]);
                             }},
                           h("div",null,
@@ -8373,8 +8436,10 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
                   h("div",{style:{fontSize:12,color:C.muted,marginTop:2}},
                     "Deducted from inventory whenever this option is ordered")
                 ),
+                ToBar(),ToNote(),
                 h("div",{style:{padding:"12px 16px"}},
-                  BOMEditor({
+                  optToMode?BOMEditor({rows:editOptToBom,setRows:setEditOptToBom,
+                    saving:savingOpt,onSave:saveOptTo}):BOMEditor({
                     rows:editOptBom,setRows:setEditOptBom,saving:savingOpt,
                     onSave:saveOptBOM
                   })
@@ -8949,7 +9014,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261022-123500";
+const BUILD = "20261022-125000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -10328,6 +10393,19 @@ async function performVoid(db, args){
         }
         const mult=ref.free?(ref.qty||1):((ref.qty||1)*(it.qty||1));
         await giveBack(rows, mult, ref.label, it.name||"");
+        {
+          const _tq2=Number(it.toQty)||0;
+          if(_tq2>0){
+            let xr=(d["optgrp_"+ref.groupId+"__"+ref.choiceId+"__TOXTRA"])||[];
+            if(!xr.length){
+              const iDoc3=(it.id&&bomData[it.id])||{};
+              xr=iDoc3[it.id+"__opt_"+ref.groupId+"__"+ref.choiceId+"__TOXTRA"]||[];
+            }
+            const full2=(it.qty||1);
+            const m2=ref.free?((ref.qty||1)*(_tq2/full2)):((ref.qty||1)*_tq2);
+            if(xr.length)await giveBack(xr, m2, "Take-out "+ref.label, it.name||"");
+          }
+        }
       }
       }
     }else{
@@ -16544,6 +16622,27 @@ function App(){
             })();
             // freebie qty already counts every free unit; paid options scale with line qty
             const mult=ref.free?(ref.qty||1):((ref.qty||1)*(cartItem.qty||1));
+            // Take-out packaging of this choice (e.g. cup + lid of the drink picked)
+            {
+              const _xrows=(function(){
+                const gr=bomCache[docId][docId+"__"+ref.choiceId+"__TOXTRA"]||[];
+                if(gr.length) return gr;
+                const iDoc2=bomData[cartItem.id]||{};
+                const ex2=iDoc2[cartItem.id+"__opt_"+ref.groupId+"__"+ref.choiceId+"__TOXTRA"];
+                if(ex2&&ex2.length) return ex2;
+                const suf2="__"+ref.choiceId+"__TOXTRA";
+                for(const k2 of Object.keys(iDoc2)){
+                  if(k2.indexOf("__opt_")>-1&&k2.slice(-suf2.length)===suf2&&(iDoc2[k2]||[]).length) return iDoc2[k2];
+                }
+                return [];
+              })();
+              const _lineTO=lineTOQty(cartItem);
+              if(_lineTO>0&&_xrows.length){
+                const _full=hasPicks(cartItem)?pickTot(cartItem):(cartItem.qty||1);
+                const _oMult=ref.free?((ref.qty||1)*(_lineTO/(_full||1))):((ref.qty||1)*_lineTO);
+                await applyExtraRows(_xrows,_oMult,"Take-out packaging",cartItem.name+" \u2192 "+ref.label);
+              }
+            }
             for(const row of rows){
               if(!row.ingId||!row.qty)continue;
               const actualDeduct=((row.qty||0)*mult)/(row.convFactor||1);
