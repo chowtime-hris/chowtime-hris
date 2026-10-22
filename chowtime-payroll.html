@@ -115,7 +115,7 @@ tbody td{padding:9px 11px;}
 .modal-box h2{font-family:'Syne',sans-serif;font-size:18px;margin-bottom:16px;}
 @media(max-width:600px){nav.tabs{padding:5px 10px;}.kpi-value{font-size:20px;}.panel{padding:14px;}}
 </style>
-<!-- BUILD:20261016-211500 -->
+<!-- BUILD:20261022-120500 -->
 </head>
 <body>
 
@@ -4621,6 +4621,9 @@ function branchList(){
   const set={};
   Object.keys(branchSchedules||{}).forEach(n=>{ if(n)set[n]=1; });
   Object.keys(branchGeo||{}).forEach(n=>{ if(n)set[n]=1; });
+  // The POS is the master list of branches (mirrored into posBranches), so a
+  // branch added there is selectable here before it has any employee/schedule.
+  (typeof posBranches!=='undefined'&&posBranches||[]).forEach(b=>{ if(b&&b.name)set[b.name]=1; });
   (employees||[]).forEach(e=>{ if(e&&e.branch)set[e.branch]=1; });
   (kioskLog||[]).forEach(e=>{ if(e&&e.branch)set[e.branch]=1; });
   if(branchCfg&&branchCfg.name)set[branchCfg.name]=1;
