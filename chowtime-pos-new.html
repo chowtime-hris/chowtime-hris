@@ -9014,7 +9014,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261023-200800";
+const BUILD = "20261024-120000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -10951,8 +10951,10 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
 }
 
 // ─── SALES ANALYTICS + EXPORT ────────────────────────────
-function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inventory=[]}){
+function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inventory=[],branches=[]}){
   const [tab,setTab]       = useState("general");
+  const [anBranch,setAnBranch] = useState("");
+  const [itemSort,setItemSort] = useState("qty");
   const [period,setPeriod] = useState("today");
   const [dateFrom,setFrom] = useState(localDate());
   const [dateTo,setTo]     = useState(localDate());
@@ -10989,6 +10991,7 @@ function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inve
   const filtOrders = orders.filter(o=>{
     if(o.status==="voided"||o.status==="void"||o.status==="cancelled")return false;
     if(!_seeAll&&o.branch!==branchId)return false;
+    if(_seeAll&&anBranch&&o.branch!==anBranch)return false;
     return inPeriod(o.date||"");
   });
 
@@ -11009,7 +11012,7 @@ function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inve
     return()=>{alive=false;};
   },[branchId,_seeAll]);
 
-  const periodRolls=rollups.filter(r=>inPeriod(r.date)&&r.date!==today);
+  const periodRolls=rollups.filter(r=>inPeriod(r.date)&&r.date!==today&&(!_seeAll||!anBranch||r.branch===anBranch));
   // Days already rolled up come from the saved record; every other day in the
   // period still comes from live orders. Using rollups as an either/or meant a
   // day with sales but no rollup vanished from the totals entirely.
@@ -11020,6 +11023,7 @@ function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inve
   const liveRest=filtOrders.filter(o=>!rollDates.has((o.branch||branchId)+"|"+(o.date||"")));
   const todayOrders=orders.filter(o=>(o.date||"")===today
     &&(_seeAll||o.branch===branchId)
+    &&(!_seeAll||!anBranch||o.branch===anBranch)
     &&o.status!=="void"&&o.status!=="voided"&&o.status!=="cancelled");
   const useRollups=period!=="today"&&periodRolls.length>0;
 
@@ -11060,7 +11064,7 @@ function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inve
     filtOrders.forEach(o=>(o. items||[]).forEach(i=>
       addItem(i.name,i.cat||i.category,i.qty||1,i.lineTotal||0)));
   }
-  const  itemList=Object.values( itemMap).sort((a,b)=>b.rev-a.rev);
+  const  itemList=Object.values( itemMap).sort((a,b)=>itemSort==="qty"?((b.qty-a.qty)||(b.rev-a.rev)):((b.rev-a.rev)||(b.qty-a.qty)));
 
   // Category breakdown
   const catMap={};
@@ -11182,7 +11186,12 @@ function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inve
     h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}},
       h("div",null,
         h("div",{style:{fontSize:17,fontWeight:900}},"📊 Sales Analytics"),
-        h("div",{style:{fontSize:13,color:C.muted}},(_seeAll?"ALL BRANCHES":(branchId||"").toUpperCase())+" · "+today)
+        h("div",{style:{fontSize:13,color:C.muted}},(_seeAll?(anBranch?((branches.find(b=>b.id===anBranch)||{}).full||anBranch):"ALL BRANCHES"):(branchId||"").toUpperCase())+" · "+today)
+      ),
+      _seeAll&&h("select",{value:anBranch,onChange:e=>setAnBranch(e.target.value),
+        style:{padding:"7px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontWeight:700,background:"#fff",marginRight:8}},
+        h("option",{value:""},"All branches"),
+        branches.map(b=>h("option",{key:b.id,value:b.id},b.full||b.name||b.id))
       ),
       h("button",{onClick:exportCSV,
         style:{padding:"7px 14px",background:C.success,border:"none",borderRadius:8,
@@ -11283,6 +11292,14 @@ function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inve
 
     // ── ITEM TAB ──
     tab===" item"&&h("div",null,
+      h("div",{style:{display:"flex",gap:6,marginBottom:10,alignItems:"center"}},
+        h("span",{style:{fontSize:13,color:C.muted}},"Ayos ayon sa:"),
+        [["qty","Dami"],["rev","Kita (₱)"]].map(([id,l])=>h("button",{key:id,onClick:()=>setItemSort(id),
+          style:{padding:"6px 14px",borderRadius:20,fontSize:13,cursor:"pointer",
+            border:"1px solid "+(itemSort===id?C.primary:C.border),
+            background:itemSort===id?C.primary:"#fff",color:itemSort===id?"#fff":C.muted,
+            fontWeight:itemSort===id?700:400}},l))
+      ),
       h("div",{style:{background:"#fff",borderRadius:12,border:"1px solid "+C.border,overflow:"hidden"}},
         h("div",{style:{display:"grid",gridTemplateColumns:"2fr 80px 80px 100px 80px",
           padding:"8px 16px",background:"#fafafa",borderBottom:"1px solid "+C.border}},
@@ -23740,7 +23757,7 @@ function App(){
 
         // ══ ANALYTICS ══
         page==="analytics"&&h(AnalyticsPage,{
-          orders,branchId,curBranch,user,db,showT,advances,inventory,
+          orders,branchId,curBranch,user,db,showT,advances,inventory,branches,
           key:"analytics_"+branchId
         }),
 
