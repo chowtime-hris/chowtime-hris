@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261022-125000 -->
+<!-- BUILD:20261023-200800 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -9014,7 +9014,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261022-125000";
+const BUILD = "20261023-200800";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -24942,7 +24942,7 @@ function App(){
                 &&(k[1]==="forpay"
                     ? (a.status==="processing"&&a.paymentStatus!=="Paid")
                     : a.status===k[1])).length;
-              const tab=(k[1]==="forpay")?"paid":k[1];
+              const tab=k[1];
               const on=(poFilter===tab);
               return h("div",{key:k[1],
                 onClick:()=>setPoFilter(on?"all":tab),
@@ -24954,7 +24954,7 @@ function App(){
 
           // Filter tabs
           h("div",{style:{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}},
-            [["all","All"],["received_by_main","New POs"],["processing","Processing"],
+            [["all","All"],["received_by_main","New POs"],["processing","Processing"],["forpay","For Payment"],
              ["paid","Paid"],["discrepancy","Discrepancy"],["completed","Completed"]].map(([s,lbl])=>
               h("button",{key:s,onClick:()=>setPoFilter(s),
                 style:{padding:"5px 14px",borderRadius:20,fontSize:13,cursor:"pointer",
@@ -24969,7 +24969,7 @@ function App(){
           (function(){
             const rows=advances
               .filter(a=>a._type==="po"&&poInRange(a,poFrom,poTo)&&(!poBranch||a.branch===poBranch)
-                &&(poFilter==="all"||a.status===poFilter))
+                &&(poFilter==="all"||(poFilter==="forpay"?(a.status==="processing"&&a.paymentStatus!=="Paid"):a.status===poFilter)))
               .sort((a,b)=>(b.timestamp?.seconds||0)-(a.timestamp?.seconds||0));
             const COLS="150px 128px 100px 100px 96px 112px 116px 96px 96px 46px";
             const HEAD=["BRANCH","PO NUMBER","TOTAL","PAID","BALANCE","PAYMENT",
@@ -25088,7 +25088,7 @@ function App(){
           // the actions and the discrepancy report stay where they were.
           h("div",{id:"po-detail-panel",style:{display:"grid",gap:10}},
             advances
-            .filter(a=>a._type==="po"&&(poFilter==="all"||a.status===poFilter))
+            .filter(a=>a._type==="po"&&(poFilter==="all"||(poFilter==="forpay"?(a.status==="processing"&&a.paymentStatus!=="Paid"):a.status===poFilter)))
             .filter(a=>a._docId===poOpen)
             .map(po=>{
               const st=po.status||"pending";
@@ -26236,7 +26236,7 @@ function App(){
                 )
               );
             }),
-            advances.filter(a=>a._type==="po"&&(poFilter==="all"||a.status===poFilter)).length===0&&
+            advances.filter(a=>a._type==="po"&&(poFilter==="all"||(poFilter==="forpay"?(a.status==="processing"&&a.paymentStatus!=="Paid"):a.status===poFilter))).length===0&&
               h("div",{style:{padding:"30px",textAlign:"center",color:C.muted,
                 background:"#fff",borderRadius:12,border:"1px solid "+C.border}},
                 "No POs for this filter")
