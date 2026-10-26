@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261026-103000 -->
+<!-- BUILD:20261026-104500 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -7804,8 +7804,17 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
           ingredients.map(x=>h("option",{key:x.id,value:x.id},x.name+(x.unit?" ("+x.unit+")":"")))
         ),
         h("input",{type:"number",onFocus:e=>e.target.select(),min:0,step:"0.01",
-          defaultValue:row.qty||"",key:"qty-"+i+"-"+row.ingId,
-          onBlur:e=>{const u=[...rows];u[i]={...u[i],qty:parseFloat(e.target.value)||0};setRows(u);},
+          defaultValue:row.qty||"",key:"qty-"+i+"-"+row.ingId+"-"+row.deductUnit+"-"+row.qty,
+          onBlur:e=>{
+            const val=parseFloat(e.target.value)||0;
+            const u=[...rows];
+            // Typed while "pack" is the chosen unit — the number is a pack
+            // count, so fold it into base-unit pc right away instead of
+            // waiting for a separate "Convert" click.
+            if(usesPack) u[i]={...u[i],qty:val*pSz,deductUnit:baseU,convUnit:baseU,convFactor:1};
+            else u[i]={...u[i],qty:val};
+            setRows(u);
+          },
           style:{padding:"5px",border:"1px solid "+C.border,borderRadius:6,fontSize:13,outline:"none",textAlign:"center",width:"100%"}}),
         (pSz>0&&pU)
           ? h("select",{value:usedU||baseU,key:"unitsel-"+i+"-"+row.ingId,
@@ -9015,7 +9024,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261026-103000";
+const BUILD = "20261026-104500";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
