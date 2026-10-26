@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261026-105800 -->
+<!-- BUILD:20261026-130000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -9024,7 +9024,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261026-105800";
+const BUILD = "20261026-130000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -14972,6 +14972,12 @@ function App(){
   // branch passes it. A period table built on that would be wrong and look
   // right, so the period is queried directly here instead.
   const [plWide,setPlWide]=useState(null);   // {key,loading,expenses,pos,err}
+  // Same problem as plWide above, on the Dashboard: "This month" and longer
+  // presets read against the shared rolling-window orders array, which only
+  // reaches back if the on-demand backfill happened to land first — silently
+  // showing a week's worth of orders as if it were the whole month. A direct
+  // query for exactly the chosen range, same shape as plWide, fixes that.
+  const [dashWide,setDashWide]=useState(null);   // {key,loading,orders,err}
   // Cost of goods and stock value are per-branch collections — one query per
   // branch, every time. Kept behind a button: on Blaze that is eight reads of
   // a whole inventory, and nobody wants to pay for it on every page open.
@@ -16857,6 +16863,32 @@ function App(){
     return ()=>{dead=true;};
   },[user,page,plRange,plFrom,plTo]);
 
+  // ── DASHBOARD: PERIOD FETCH ──────────────────────────────
+  // Mirrors plWide above — a direct query for exactly the chosen range, so
+  // "This month" etc. never silently falls back to whatever the rolling
+  // window happened to already have.
+  useEffect(()=>{
+    if(!user)return;
+    if(page!=="dashboard"){ return; }
+    const R=rangeFor(dashRange,dashFrom,dashTo);
+    const key=R.from+".."+R.to;
+    let dead=false;
+    setDashWide({key:key,loading:true});
+    (async()=>{
+      try{
+        const snap=await getDocs(query(collection(db,"orders"),
+          where("date",">=",R.from),where("date","<=",R.to)));
+        if(dead)return;
+        setDashWide({key:key,loading:false,
+          orders:snap.docs.map(d=>({...d.data(),_docId:d.id}))});
+      }catch(e){
+        if(dead)return;
+        setDashWide({key:key,loading:false,err:String((e&&e.message)||e)});
+      }
+    })();
+    return ()=>{dead=true;};
+  },[user,page,dashRange,dashFrom,dashTo]);
+
   // Cost of goods + stock value for every branch. Button-driven on purpose.
   const loadPlStock=async(bids,R,skipCogs)=>{
     const key=R.from+".."+R.to;
@@ -18472,9 +18504,14 @@ function App(){
         // ══ DASHBOARD (Owner) ══
         page==="dashboard"&&(function(){
           const R=rangeFor(dashRange,dashFrom,dashTo);
-          // Pull in any days older than the live window before reading totals.
-          if(window.__ctEnsureOrders)window.__ctEnsureOrders(R.from,R.to);
-          const scoped=orders.filter(o=>inRange(o,R))
+          // Same fix as Branch P&L: a direct query for exactly this range,
+          // not the rolling window + on-demand backfill, which silently read
+          // "This month" as whatever the backfill happened to have fetched.
+          const _dwKey=R.from+".."+R.to;
+          const _dw=(dashWide&&dashWide.key===_dwKey&&!dashWide.loading&&!dashWide.err)
+                   ?dashWide:null;
+          const dashOrders=_dw?_dw.orders:orders;
+          const scoped=dashOrders.filter(o=>inRange(o,R))
             .filter(o=>!dashBranch||o.branch===dashBranch);
           const sales=scoped.reduce((a,o)=>a+(o.total||0),0);
           const txns=scoped.length;
@@ -18611,8 +18648,8 @@ function App(){
             // with neither of them saying so, which invited the reader to
             // decide one of them was wrong.
             h(Stat,{label:"PO Collections · all time",
-              value:"₱"+advances.filter(a=>a._type==="po"&&a.paymentStatus==="Paid")
-                .reduce((s,a)=>s+poValue(a),0).toLocaleString(),
+              value:"₱"+peso(advances.filter(a=>a._type==="po"&&a.paymentStatus==="Paid")
+                .reduce((s,a)=>s+poValue(a),0)),
               sub:"every commissary payment ever received",icon:"💰",color:C.success})
           ),
 
@@ -18626,10 +18663,10 @@ function App(){
               h("div",{style:{background:C.bg,border:"1px solid "+C.border,borderRadius:10,padding:"12px"}},
                 h("div",{style:{fontSize:12,color:C.muted,fontWeight:700,marginBottom:4}},"🛒 WALK-IN POS SALES"),
                 h("div",{style:{fontSize:22,fontWeight:900,color:C.primary}},
-                  "₱"+orders.filter(o=>o.branch==="ct-main"&&
+                  "₱"+peso(orders.filter(o=>o.branch==="ct-main"&&
                     o.status!=="void"&&o.status!=="cancelled"&&
                     o.date===localDate())
-                    .reduce((s,o)=>s+(o.total||0),0).toLocaleString()),
+                    .reduce((s,o)=>s+(o.total||0),0))),
                 h("div",{style:{fontSize:12,color:C.muted}},
                   orders.filter(o=>o.branch==="ct-main"&&
                     o.date===localDate()).length+" transactions today")
@@ -18652,7 +18689,7 @@ function App(){
                   });
                   return [
                     h("div",{key:"v",style:{fontSize:22,fontWeight:900,color:C.primary}},
-                      "₱"+paid.reduce((s,a)=>s+poValue(a),0).toLocaleString()),
+                      "₱"+peso(paid.reduce((s,a)=>s+poValue(a),0))),
                     h("div",{key:"n",style:{fontSize:12,color:C.muted}},
                       paid.length+" PO"+(paid.length===1?"":"s")+" paid in this period")
                   ];
@@ -18662,10 +18699,10 @@ function App(){
               h("div",{style:{background:C.bg,border:"1px solid "+C.border,borderRadius:10,padding:"12px"}},
                 h("div",{style:{fontSize:12,color:C.muted,fontWeight:700,marginBottom:4}},"🏭 WHOLESALE/FRANCHISEE"),
                 h("div",{style:{fontSize:22,fontWeight:900,color:C.primary}},
-                  "₱"+orders.filter(o=>o.branch==="ct-main"&&
+                  "₱"+peso(orders.filter(o=>o.branch==="ct-main"&&
                     (o.priceType==="wholesale"||o.priceType==="franchisee")&&
                     o.date===localDate())
-                    .reduce((s,o)=>s+(o.subtotal||0),0).toLocaleString()),
+                    .reduce((s,o)=>s+(o.subtotal||0),0))),
                 h("div",{style:{fontSize:12,color:C.muted}},"Special price type orders")
               )
             )
@@ -18688,7 +18725,7 @@ function App(){
               // "who is carrying the week" rather than listing stores in the
               // order they happen to be stored in.
               branches.slice().map(function(b){
-                const bOrders=orders.filter(function(o){
+                const bOrders=dashOrders.filter(function(o){
                   return o.branch===b.id&&inRange(o,R);
                 });
                 const bSales=bOrders.reduce(function(s,o){return s+(o.total||0);},0);
@@ -18697,10 +18734,12 @@ function App(){
                 return {b:b,sales:bSales,tx:bTx,avg:bAvg};
               }).sort(function(x,y){return y.sales-x.sales;}).map(function(row){
                 const b=row.b, bSales=row.sales;
+                // Today specifically — always inside the live window, so this
+                // one stays on the shared array rather than waiting on dashWide.
                 const bPending=orders.filter(function(o){
                   return o.branch===b.id&&o.date===localDate()&&o.status==="pending";
                 }).length;
-                const allBranchSales=orders.filter(function(o){return inRange(o,R);})
+                const allBranchSales=dashOrders.filter(function(o){return inRange(o,R);})
                   .reduce(function(s,o){return s+(o.total||0);},0);
                 const pct=allBranchSales>0?Math.round(bSales/allBranchSales*100):0;
                 return h("div",{key:b.id,
