@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261028-224500 -->
+<!-- BUILD:20261028-230000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -6730,7 +6730,7 @@ function DateRangeBar({from,to,setFrom,setTo,note,allLabel}){
           color:active?C.primary:C.text,
           fontWeight:active?800:500,cursor:"pointer"}},o[0]);
     }),
-    h(MonthPicker,{onPick:function(r){setFrom(r.from);setTo(r.to);}}),
+    h(MonthPicker,{onPick:function(r){setFrom(r.from);setTo(r.to);},from:from,to:to}),
     h("input",{type:"date",value:from,
       onChange:function(e){setFrom(e.target.value);
         if(!to)setTo(localDate());},
@@ -7334,14 +7334,27 @@ function monthRangeOf(key){
   const bIso=localDate(b);
   return {from:localDate(a),to:(bIso>today?today:bIso)};
 }
-function MonthPicker({onPick,months}){
-  return h("select",{value:"",
-    onChange:e=>{ if(!e.target.value)return; onPick(monthRangeOf(e.target.value)); e.target.value=""; },
+function MonthPicker({onPick,months,from,to,active}){
+  // Shows which month is picked instead of always resetting to the
+  // placeholder — but only while the page is actually in "pick a month"
+  // mode (active), so it doesn't show a stale month while Today/This Week
+  // is what's really on screen.
+  const isActive = active===undefined ? true : active;
+  const keys = monthKeyList(months);
+  const selected = (isActive && from && to)
+    ? (keys.find(function(k){
+        const r=monthRangeOf(k); return r.from===from && r.to===to;
+      }) || "")
+    : "";
+  return h("select",{value:selected,
+    onChange:e=>{ if(!e.target.value)return; onPick(monthRangeOf(e.target.value)); },
     style:{padding:"5px 11px",borderRadius:20,fontSize:12,
-      border:"1px solid "+C.border,background:"#fff",color:C.text,
-      fontWeight:500,cursor:"pointer"}},
+      border:"1px solid "+(selected?C.primary:C.border),
+      background:selected?"#F3E9F7":"#fff",
+      color:selected?C.primary:C.text,
+      fontWeight:selected?800:500,cursor:"pointer"}},
     h("option",{value:""},"📅 Pick a month…"),
-    monthKeyList(months).map(k=>h("option",{key:k,value:k},monthLabel(k)))
+    keys.map(k=>h("option",{key:k,value:k},monthLabel(k)))
   );
 }
 
@@ -9058,7 +9071,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261028-224500";
+const BUILD = "20261028-230000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -11253,7 +11266,8 @@ function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inve
             color:period===id?"#fff":C.muted,
             fontWeight:period===id?700:400}},lbl)
       ),
-      h(MonthPicker,{onPick:r=>{setPeriod("custom");setFrom(r.from);setTo(r.to);}}),
+      h(MonthPicker,{onPick:r=>{setPeriod("custom");setFrom(r.from);setTo(r.to);},
+        from:dateFrom,to:dateTo,active:period==="custom"}),
       period==="custom"&&h("div",{style:{display:"flex",gap:6,alignItems:"center"}},
         h("input",{type:"date",value:dateFrom,onChange:e=>setFrom(e.target.value),
           style:{padding:"5px 8px",border:"1px solid "+C.border,borderRadius:7,fontSize:13,outline:"none"}}),
@@ -14305,7 +14319,7 @@ function InvLogPage({db,user,branchId,branches,showT}){
               color:active?C.primary:C.text,
               fontWeight:active?800:500,cursor:"pointer"}},o[0]);
         }),
-      h(MonthPicker,{onPick:function(r){setLgFrom(r.from);setLgTo(r.to);}}),
+      h(MonthPicker,{onPick:function(r){setLgFrom(r.from);setLgTo(r.to);},from:lgFrom,to:lgTo}),
       h("input",{type:"date",value:lgFrom,
         onChange:function(e){setLgFrom(e.target.value);
           if(!lgTo)setLgTo(localDate());},
@@ -18597,7 +18611,8 @@ function App(){
                   border:"1px solid "+(dashRange===k?C.primary:C.border),
                   background:dashRange===k?C.primary+"18":"#fff",
                   color:dashRange===k?C.primary:C.text}},lbl)),
-              h(MonthPicker,{onPick:r=>{setDashRange("custom");setDashFrom(r.from);setDashTo(r.to);}}),
+              h(MonthPicker,{onPick:r=>{setDashRange("custom");setDashFrom(r.from);setDashTo(r.to);},
+                from:dashFrom,to:dashTo,active:dashRange==="custom"}),
               h("div",{style:{flex:1}}),
               h("select",{value:dashBranch,
                 onChange:e=>setDashBranch(e.target.value),
@@ -23361,7 +23376,8 @@ function App(){
                     border:"1px solid "+(plRange===k?C.primary:C.border),
                     background:plRange===k?C.primary+"18":"#fff",
                     color:plRange===k?C.primary:C.text}},lbl)),
-                h(MonthPicker,{onPick:r=>{setPlRange("custom");setPlFrom(r.from);setPlTo(r.to);}})),
+                h(MonthPicker,{onPick:r=>{setPlRange("custom");setPlFrom(r.from);setPlTo(r.to);},
+                  from:plFrom,to:plTo,active:plRange==="custom"})),
               plRange==="custom"&&h("div",{style:{display:"flex",gap:8,
                 marginTop:9,alignItems:"center",flexWrap:"wrap"}},
                 h("span",{style:{fontSize:12,color:C.muted}},"From"),
