@@ -699,6 +699,7 @@ tbody td{padding:9px 11px;}
       </div>
       <button class="btn btn-secondary" onclick="renderWeeklySchedule()">🔄 Refresh</button>
       <button class="btn btn-secondary" onclick="copyWeekToMonth()">📋 Copy week to month</button>
+      <button class="btn btn-danger" onclick="resetScheduleMonth()">🗑️ Reset schedule</button>
       <button class="btn btn-secondary" onclick="printMonthSchedule()">🖨️ Print month</button>
       <button class="btn btn-primary" onclick="printSchedule()">🖨️ Print</button>
     </div>
@@ -1882,11 +1883,23 @@ function loadDTREditor() {
           : (assigned && assigned.id) ? assigned.id : '';
         let opts = '<option value="">— follow schedule —</option>'
           + '<option value="REST"'+(curId==='REST'?' selected':'')+'>😴 Rest Day</option>';
-        defs.forEach(function(sd){
-          if(!sd || !sd.id) return;
-          opts += '<option value="'+sd.id+'"'+(curId===sd.id?' selected':'')+'>'
-            + (sd.name||sd.id) + (sd.start&&sd.end?(' ('+sd.start+'–'+sd.end+')'):'') + '</option>';
-        });
+        // Only shifts for this employee's own branch, plus chain-wide ones —
+        // same rule the Weekly Schedule View already follows. Without this,
+        // every store's shifts showed up here no matter which branch the
+        // employee belonged to.
+        const empBranch = emp && emp.branch || '';
+        defs.filter(function(sd){
+            // Keep the currently-assigned shift visible even if it's from
+            // another branch (e.g. the employee was later moved branches),
+            // so the dropdown never silently shows the wrong thing selected.
+            return !sd.branch || sd.branch===empBranch || sd.id===curId;
+          })
+          .forEach(function(sd){
+            if(!sd || !sd.id) return;
+            opts += '<option value="'+sd.id+'"'+(curId===sd.id?' selected':'')+'>'
+              + (sd.name||sd.id) + (sd.start&&sd.end?(' ('+sd.start+'–'+sd.end+')'):'')
+              + (sd.branch?(' · '+sd.branch):'') + '</option>';
+          });
         return '<select class="dtr-select" style="padding:3px;border:1px solid var(--border);border-radius:5px;font-size:11px;" '
           + 'onchange="quickEditShift(\''+empId+'\',\''+dateStr+'\',this.value,\''
           + ((emp&&emp.name)||'').replace(/'/g,"") + '\')">' + opts + '</select>';
@@ -2409,12 +2422,17 @@ function copyWeekToMonth(){
     });
   });
 
-  // Whole month, minus the source week itself and minus anything already past.
-  // Days that have been and gone are history and are never rewritten.
+  // Only days AFTER the source week, minus anything already past. Weeks that
+  // come BEFORE the source week (even if still upcoming) are left alone —
+  // copying a week you just edited should only push that pattern forward,
+  // never rewrite weeks earlier in the month that were already set on
+  // purpose. Days that have been and gone are history and are never
+  // rewritten either.
   const targets=[];
   for(let day=1; day<=lastDay; day++){
     const d=midnight(new Date(year,month,day));
     if(d < today) continue;
+    if(d < start) continue;
     if(srcKeys.has(toLocalDateStr(d))) continue;
     targets.push(d);
   }
@@ -2425,7 +2443,7 @@ function copyWeekToMonth(){
       +'Crew: '+crew.length+(bFilter&&bFilter!=='__none'?' in '+bFilter:'')+'\n'
       +'Days to fill: '+targets.length+' ('+toLocalDateStr(targets[0])+' to '+toLocalDateStr(targets[targets.length-1])+')\n\n'
       +'This replaces what is currently set on those days.\n'
-      +'Past days are never touched.')) return;
+      +'Only days AFTER this week are touched — earlier weeks and past days are never touched.')) return;
 
   let written=0, cleared=0;
   crew.forEach(e=>{
@@ -2446,6 +2464,81 @@ function copyWeekToMonth(){
   renderShiftAssignment(); renderWeeklySchedule();
 }
 window.copyWeekToMonth = copyWeekToMonth;
+
+// Clears a month's worth of day-specific schedule overrides for the branch
+// currently selected in the Weekly Schedule View, so it can be set up fresh
+// instead of editing on top of whatever's already there. Only ever touches
+// today and later — past days stay exactly as recorded. "Clear" here means
+// delete the override, which lets the employee's rotation/fixed pattern
+// (or blank, if they have none) show through again — it does not delete
+// the employee's shift assignment itself.
+function resetScheduleMonth(){
+  const weekInput=document.getElementById('sched-view-week')||document.getElementById('shift-week');
+  const base = weekInput && weekInput.value
+    ? new Date(weekInput.value+'T00:00:00') : new Date();
+  const start = midnight(getMonday(base));
+
+  const brSel=document.getElementById('sched-view-branch');
+  const bFilter = brSel ? brSel.value : '';
+  const crew = bFilter==='__none' ? employees.filter(e=>e&&!e.branch)
+             : (bFilter ? employees.filter(e=>e&&e.branch===bFilter) : employees.filter(e=>e&&e.id));
+  if(!crew.length){ alert('No crew in this view.'); return; }
+
+  // Same "which month" question copyWeekToMonth asks, for a week that
+  // straddles two months.
+  const monthsInWeek = [];
+  const srcDates = Array.from({length:7},(_,i)=>{const d=new Date(start);d.setDate(d.getDate()+i);return midnight(d);});
+  srcDates.forEach(d=>{
+    const key = d.getFullYear()+'-'+d.getMonth();
+    if(!monthsInWeek.some(m=>m.key===key))
+      monthsInWeek.push({key, year:d.getFullYear(), month:d.getMonth(),
+        label:d.toLocaleDateString('en-PH',{month:'long',year:'numeric'})});
+  });
+  let target = monthsInWeek[0];
+  if(monthsInWeek.length > 1){
+    const choice = prompt(
+      'This week covers more than one month. Which month should be reset?\n\n'
+      + monthsInWeek.map((m,i)=>(i+1)+') '+m.label).join('\n')
+      + '\n\nType the number:', String(monthsInWeek.length));
+    const idx = parseInt(choice,10) - 1;
+    if(isNaN(idx) || !monthsInWeek[idx]) return;
+    target = monthsInWeek[idx];
+  }
+  const year=target.year, month=target.month;
+  const lastDay=new Date(year,month+1,0).getDate();
+  const today=midnight(new Date());
+
+  const targets=[];
+  for(let day=1; day<=lastDay; day++){
+    const d=midnight(new Date(year,month,day));
+    if(d < today) continue;
+    targets.push(d);
+  }
+  if(!targets.length){ alert('No upcoming days left in this month to reset.'); return; }
+
+  const label=new Date(year,month,1).toLocaleDateString('en-PH',{month:'long',year:'numeric'});
+  if(!confirm('Reset the schedule for '+label+'?\n\n'
+      +'Crew: '+crew.length+(bFilter&&bFilter!=='__none'?' in '+bFilter:'')+'\n'
+      +'Days to clear: '+targets.length+' ('+toLocalDateStr(targets[0])+' to '+toLocalDateStr(targets[targets.length-1])+')\n\n'
+      +'This clears every day-specific entry on those days so you can set them up again from scratch.\n'
+      +'Crew with a rotation/fixed pattern will show that pattern again instead of blank.\n'
+      +'Past days are never touched.')) return;
+
+  let cleared=0;
+  crew.forEach(e=>{
+    const a=empShifts[e.id];
+    if(!a || !a.dates) return;
+    targets.forEach(d=>{
+      const key=toLocalDateStr(d);
+      if(a.dates[key]!==undefined){ delete a.dates[key]; cleared++; }
+    });
+  });
+  save('empShifts',empShifts);
+  syncShiftsToFirebase();
+  showToastAdmin && showToastAdmin('✅ Reset '+targets.length+' days · '+cleared+' entries cleared');
+  renderShiftAssignment(); renderWeeklySchedule();
+}
+window.resetScheduleMonth = resetScheduleMonth;
 
 // Month view on paper. The existing print dumped the weekly grid including its
 // dropdowns, which is unreadable once printed.
