@@ -1883,14 +1883,13 @@ function loadDTREditor() {
       ? assignedShift : null;
     const c = computeDTRRow(entry, schedule);
     const isAuto = entry.auto;
-    // Actual-time-in version of the same labor-cost check the Weekly Schedule
-    // View does on the plan: did a Straight-duty crew member ALSO have
-    // someone else from the same branch actually clock in that day?
-    const dutyWarn = actualDutyWarningForDate(dateStr, emp.branch, periodKey);
-    const rowBg = dutyWarn ? 'background:#FFF3F3;' : (isSun ? 'background:#fff0ec;' : '');
+    // The same-day duty-overlap warning lives only in the Weekly Schedule
+    // View now — once a schedule is set there, it's the approved plan, so
+    // DTR Editor does not re-flag it.
+    const rowBg = isSun ? 'background:#fff0ec;' : '';
 
     rows += `<tr style="${rowBg}">
-      <td${dutyWarn?` title="⚠️ Same-day duty overlap at ${escapeHtmlSafe(emp.branch||'')}: `+dutyWarn.map(t=>escapeHtmlSafe(t.emp)+' ('+t.type+')').join(' + ')+' — check labor cost"':''}>${dateStr}${dutyWarn?' ⚠️':''}</td>
+      <td>${dateStr}</td>
       <td style="${isSun?'color:var(--red);font-weight:700;':''}">${dayName}</td>
       <td><input class="dtr-input" type="time" value="${entry.in||''}"
           onchange="adminEditDTR('${dateStr}','in',this.value,'${empId}','${periodKey}')"
@@ -2133,11 +2132,24 @@ function renderShiftDefs() {
   if(!tbody) return;
   const defs = getShiftDefs();
   if(!defs.length){
-    tbody.innerHTML='<tr><td colspan="9" style="text-align:center;padding:16px;color:var(--muted);">No shifts yet. Click "+ Add Shift".</td></tr>';
+    tbody.innerHTML='<tr><td colspan="10" style="text-align:center;padding:16px;color:var(--muted);">No shifts yet. Click "+ Add Shift".</td></tr>';
     return;
   }
-  tbody.innerHTML=defs.map((s,i)=>`
-    <tr>
+  // Group by branch so a long list reads one store at a time — chain-wide
+  // shifts (no branch set) come first. Row actions still use each shift's
+  // ORIGINAL index in `defs`, not its position within the group, since
+  // openShiftModal/deleteShiftDef index straight into shiftDefs.
+  const groups = {}, order = [];
+  defs.forEach((s,i)=>{
+    const key = s.branch || '';
+    if(!groups[key]){ groups[key]=[]; order.push(key); }
+    groups[key].push(i);
+  });
+  order.sort((a,b)=> a===''?-1 : (b===''?1 : a.localeCompare(b)));
+
+  const rowHtml = i => {
+    const s = defs[i];
+    return `<tr>
       <td><strong>${s.name}</strong></td>
       <td><span style="background:${s.color};color:${badgeInk(s.color)};padding:2px 10px;border-radius:20px;font-size:12px;font-weight:600;">${s.label||s.name}</span></td>
       <td>${s.start}</td><td>${s.end}</td><td>${s.bstart}</td><td>${s.bend}</td><td>${s.grace}min</td>
@@ -2147,7 +2159,14 @@ function renderShiftDefs() {
         <button class="btn btn-sm btn-secondary" onclick="openShiftModal(${i})">✏️</button>
         <button class="btn btn-sm btn-danger" onclick="deleteShiftDef(${i})">🗑</button>
       </td>
-    </tr>`).join('');
+    </tr>`;
+  };
+
+  tbody.innerHTML = order.map(key=>{
+    const label = key || '🌐 All Branches (Chain-wide)';
+    const header = `<tr><td colspan="10" style="background:var(--bg);font-size:11px;font-weight:800;letter-spacing:1px;color:var(--muted);padding:8px 10px;text-transform:uppercase;">${label} <span style="font-weight:600;letter-spacing:0;text-transform:none;">(${groups[key].length})</span></td></tr>`;
+    return header + groups[key].map(rowHtml).join('');
+  }).join('');
 }
 
 function openEmpShiftModal(empId) {
@@ -2463,28 +2482,6 @@ function computeScheduledDutyWarnings(weekDates, emps){
   });
   return warnings;
 }
-// DTR Editor version of the same check, but on ACTUAL time-ins rather than
-// the schedule: did more than one person from the same branch really punch
-// in that day, with at least one of them on a Straight (which should have
-// covered the whole day alone)?
-function actualDutyWarningForDate(dateStr, branch, periodKey){
-  if(!branch || !periodKey) return null;
-  const crew = (employees||[]).filter(e=>e && e.id && e.branch===branch);
-  if(crew.length<2) return null;
-  const dow = new Date(dateStr+'T00:00:00').getDay();
-  const onDuty = [];
-  crew.forEach(e=>{
-    const entry = getDTREntry(periodKey, e.id, dateStr);
-    const hasIn = entry && entry.in && String(entry.in).includes(':');
-    if(!hasIn) return;
-    const s = getEmpShiftForDay(e.id, dow, dateStr);
-    if(!s || s==='REST' || s==='OFF') return;
-    onDuty.push({emp: e.name, type: inferShiftType(s)});
-  });
-  const straightCount = onDuty.filter(t=>t.type==='straight').length;
-  return (straightCount>=1 && onDuty.length>1) ? onDuty : null;
-}
-
 function escapeHtmlSafe(s){
   return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
