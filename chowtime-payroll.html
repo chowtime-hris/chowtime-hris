@@ -706,6 +706,30 @@ tbody td{padding:9px 11px;}
     <div id="weekly-schedule-wrap"></div>
   </div>
 
+  <!-- Shift Switch Requests -->
+  <div class="panel">
+    <div class="panel-title"><span>🔁</span> Shift Switch Requests</div>
+    <div class="alert alert-info">A requested shift change only takes effect for that one day, and only once Approved here. Nothing changes on its own.</div>
+    <div style="display:flex;gap:12px;margin-bottom:14px;flex-wrap:wrap;align-items:flex-end;">
+      <div class="form-group">
+        <label>Status</label>
+        <select id="ssr-filter-status" onchange="renderSwitchRequests()" style="min-width:140px;">
+          <option value="pending">Pending</option>
+          <option value="all">All</option>
+          <option value="approved">Approved</option>
+          <option value="rejected">Rejected</option>
+        </select>
+      </div>
+      <button class="btn btn-primary" onclick="openSwitchRequestModal()">+ New Request</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Employee</th><th>Date</th><th>Current Shift</th><th>Requested Shift</th><th>Note</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody id="ssr-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
 </div>
 
 <!-- Shift Definition Modal -->
@@ -791,6 +815,34 @@ tbody td{padding:9px 11px;}
     <div style="display:flex;gap:10px;margin-top:16px;">
       <button class="btn btn-primary" onclick="saveEmpShift()">💾 Save</button>
       <button class="btn btn-secondary" onclick="closeModal('emp-shift-modal')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Shift Switch Request Modal -->
+<div id="switch-request-modal" class="modal-bg" style="display:none;">
+  <div class="modal">
+    <div class="modal-title">🔁 New Shift Switch Request</div>
+    <div class="form-grid">
+      <div class="form-group"><label>Employee</label>
+        <select id="ssr-emp" onchange="ssrRefreshShiftInfo()"><option value="">— Select —</option></select>
+      </div>
+      <div class="form-group"><label>Date</label>
+        <input type="date" id="ssr-date" onchange="ssrRefreshShiftInfo()">
+      </div>
+      <div class="form-group"><label>Current Shift</label>
+        <input id="ssr-current" disabled placeholder="— pick employee & date —">
+      </div>
+      <div class="form-group"><label>Requested Shift</label>
+        <select id="ssr-requested"></select>
+      </div>
+      <div class="form-group" style="grid-column:1/-1;"><label>Note (optional)</label>
+        <input id="ssr-note" placeholder="e.g. swap with Rachel, personal matter">
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:16px;">
+      <button class="btn btn-primary" onclick="submitSwitchRequest()">📨 Submit Request</button>
+      <button class="btn btn-secondary" onclick="closeModal('switch-request-modal')">Cancel</button>
     </div>
   </div>
 </div>
@@ -1208,6 +1260,7 @@ let employees = load('employees') || [];
 let incentiveData = load('incentiveData') || {}; // declared early — used in buildPayrollRow
 let shiftDefs  = load('shiftDefs') || [];  // declared early — used in getDTRTotals/getEmpShiftForDay
 let empShifts  = load('empShifts') || {};  // declared early — used in getEmpShiftForDay
+let shiftSwitchRequests = load('shiftSwitchRequests') || {};  // keyed by request id
 let leaves     = load('leaves')    || [];
 let loans      = load('loans')     || [];
 let _loanSaving = false; // prevents Firebase listener from overwriting during save
@@ -2066,7 +2119,7 @@ function renderShiftDefs() {
   tbody.innerHTML=defs.map((s,i)=>`
     <tr>
       <td><strong>${s.name}</strong></td>
-      <td><span style="background:${s.color};color:#111111;padding:2px 10px;border-radius:20px;font-size:12px;font-weight:600;">${s.label||s.name}</span></td>
+      <td><span style="background:${s.color};color:${badgeInk(s.color)};padding:2px 10px;border-radius:20px;font-size:12px;font-weight:600;">${s.label||s.name}</span></td>
       <td>${s.start}</td><td>${s.end}</td><td>${s.bstart}</td><td>${s.bend}</td><td>${s.grace}min</td>
       <td>${s.prep||0}min</td>
       <td><div style="width:20px;height:20px;border-radius:50%;background:${s.color};display:inline-block;"></div></td>
@@ -2540,6 +2593,178 @@ function resetScheduleMonth(){
 }
 window.resetScheduleMonth = resetScheduleMonth;
 
+// ── Shift Switch Requests ──────────────────────────────────────────
+// A request only ever describes an intent. Nothing on the actual schedule
+// changes until an admin explicitly approves it — approving writes to
+// empShifts[].dates for that ONE date only, same as the quick-edit dropdown.
+let _ssrSaving = false;
+function syncSwitchRequestsToFirebase(){
+  if(window._fbDB && window._fbFns){
+    _ssrSaving = true;
+    window._fbFns.set(window._fbFns.ref(window._fbDB,'shiftSwitchRequests'), shiftSwitchRequests)
+      .then(()=>{ setTimeout(()=>{_ssrSaving=false;}, 4000); })
+      .catch(e=>{ _ssrSaving=false; alert('⚠ Request did NOT save — it will revert on refresh.\n\n'+((e&&e.message)||e)); });
+  }
+}
+
+function openSwitchRequestModal(){
+  const empSel = document.getElementById('ssr-emp');
+  if(empSel){
+    empSel.innerHTML = '<option value="">— Select —</option>'
+      + employees.filter(e=>e&&e.id).map(e=>`<option value="${e.id}">${e.name}${e.branch?' · '+e.branch:''}</option>`).join('');
+  }
+  const dateInput = document.getElementById('ssr-date');
+  if(dateInput) dateInput.value = toLocalDateStr(new Date());
+  const note = document.getElementById('ssr-note'); if(note) note.value = '';
+  ssrRefreshShiftInfo();
+  document.getElementById('switch-request-modal').style.display = 'flex';
+}
+window.openSwitchRequestModal = openSwitchRequestModal;
+
+// Updates the "Current Shift" readout and the "Requested Shift" option list
+// whenever the employee or date changes in the New Request modal.
+function ssrRefreshShiftInfo(){
+  const empId = document.getElementById('ssr-emp')?.value || '';
+  const dateStr = document.getElementById('ssr-date')?.value || '';
+  const curBox = document.getElementById('ssr-current');
+  const reqSel = document.getElementById('ssr-requested');
+  const emp = employees.find(e=>e.id===empId);
+  if(!emp || !dateStr){
+    if(curBox) curBox.value = '';
+    if(reqSel) reqSel.innerHTML = '<option value="">— pick employee & date first —</option>';
+    return;
+  }
+  const d = new Date(dateStr+'T00:00:00');
+  const assigned = getEmpShiftForDay(empId, d.getDay(), dateStr);
+  let curLabel = '— Off —';
+  if(assigned === 'REST') curLabel = '😴 Rest Day';
+  else if(assigned && assigned.id) curLabel = (assigned.label||'')+' '+assigned.name+' ('+assigned.start+'–'+assigned.end+')';
+  if(curBox) curBox.value = curLabel;
+
+  const defs = getShiftDefs();
+  const empBranch = emp.branch || '';
+  let opts = '<option value="REST">😴 Rest Day</option><option value="">— Off —</option>';
+  defs.filter(sd=>!sd.branch || sd.branch===empBranch).forEach(sd=>{
+    opts += `<option value="${sd.id}">${sd.label||''} ${sd.name} (${sd.start}–${sd.end})</option>`;
+  });
+  if(reqSel) reqSel.innerHTML = opts;
+}
+window.ssrRefreshShiftInfo = ssrRefreshShiftInfo;
+
+function submitSwitchRequest(){
+  const empId = document.getElementById('ssr-emp')?.value || '';
+  const dateStr = document.getElementById('ssr-date')?.value || '';
+  const requested = document.getElementById('ssr-requested')?.value;
+  const note = document.getElementById('ssr-note')?.value.trim() || '';
+  const emp = employees.find(e=>e.id===empId);
+  if(!emp){ alert('Pick an employee.'); return; }
+  if(!dateStr){ alert('Pick a date.'); return; }
+  if(requested === undefined || requested === null){ alert('Pick the requested shift.'); return; }
+
+  const defs = getShiftDefs();
+  const reqDef = requested==='REST' ? null : defs.find(s=>s.id===requested);
+  const requestedLabel = requested==='REST' ? '😴 Rest Day'
+    : (requested==='' ? '— Off —'
+    : (reqDef ? (reqDef.label||'')+' '+reqDef.name+' ('+reqDef.start+'–'+reqDef.end+')' : requested));
+
+  const id = 'ssr_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
+  shiftSwitchRequests[id] = {
+    id, empId, empName: emp.name, branch: emp.branch||'',
+    dateStr, requestedShift: requested, requestedLabel,
+    currentShiftLabel: document.getElementById('ssr-current')?.value || '',
+    note, status: 'pending',
+    requestedAt: new Date().toISOString()
+  };
+  save('shiftSwitchRequests', shiftSwitchRequests);
+  syncSwitchRequestsToFirebase();
+  closeModal('switch-request-modal');
+  showToastAdmin && showToastAdmin('📨 Request submitted — pending approval');
+  renderSwitchRequests();
+}
+window.submitSwitchRequest = submitSwitchRequest;
+
+function approveSwitchRequest(id){
+  const r = shiftSwitchRequests[id];
+  if(!r || r.status!=='pending') return;
+  if(!confirm('Approve this switch?\n\n'+r.empName+' — '+r.dateStr+'\n'
+      +r.currentShiftLabel+' → '+r.requestedLabel
+      +(r.note?'\n\nNote: '+r.note:'')
+      +'\n\nThis updates the schedule for that ONE day only.')) return;
+  const approver = (load('ssrApproverName')||prompt('Your name (for the approval log):','')||'Admin').trim()||'Admin';
+  save('ssrApproverName', approver);
+
+  // Apply to that single date only — identical to the quick-edit dropdown.
+  if(!empShifts[r.empId]) empShifts[r.empId] = {type:'rotation',rotation:{},restDay:null,dates:{}};
+  if(!empShifts[r.empId].dates) empShifts[r.empId].dates = {};
+  empShifts[r.empId].dates[r.dateStr] = r.requestedShift;
+  save('empShifts', empShifts);
+  syncShiftsToFirebase();
+
+  r.status = 'approved';
+  r.resolvedAt = new Date().toISOString();
+  r.resolvedBy = approver;
+  save('shiftSwitchRequests', shiftSwitchRequests);
+  syncSwitchRequestsToFirebase();
+
+  showToastAdmin && showToastAdmin('✅ Approved — schedule updated for '+r.dateStr);
+  renderSwitchRequests(); renderShiftAssignment(); renderWeeklySchedule();
+}
+window.approveSwitchRequest = approveSwitchRequest;
+
+function rejectSwitchRequest(id){
+  const r = shiftSwitchRequests[id];
+  if(!r || r.status!=='pending') return;
+  if(!confirm('Reject this switch request from '+r.empName+' for '+r.dateStr+'?\n\nNothing on the schedule changes.')) return;
+  const approver = (load('ssrApproverName')||prompt('Your name (for the log):','')||'Admin').trim()||'Admin';
+  save('ssrApproverName', approver);
+  r.status = 'rejected';
+  r.resolvedAt = new Date().toISOString();
+  r.resolvedBy = approver;
+  save('shiftSwitchRequests', shiftSwitchRequests);
+  syncSwitchRequestsToFirebase();
+  showToastAdmin && showToastAdmin('🚫 Request rejected');
+  renderSwitchRequests();
+}
+window.rejectSwitchRequest = rejectSwitchRequest;
+
+function renderSwitchRequests(){
+  const tbody = document.getElementById('ssr-tbody');
+  if(!tbody) return;
+  const filter = document.getElementById('ssr-filter-status')?.value || 'pending';
+  let list = Object.values(shiftSwitchRequests||{}).filter(r=>r && r.id);
+  if(filter !== 'all') list = list.filter(r=>r.status===filter);
+  // Newest request first, but pending always floats to the top when viewing "All".
+  list.sort((a,b)=>{
+    if(filter==='all'){
+      const pa = a.status==='pending'?0:1, pb = b.status==='pending'?0:1;
+      if(pa!==pb) return pa-pb;
+    }
+    return (b.requestedAt||'').localeCompare(a.requestedAt||'');
+  });
+  if(!list.length){
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:16px;color:var(--muted);">No '+(filter==='all'?'':filter+' ')+'requests.</td></tr>';
+    return;
+  }
+  const statusBadge = r => r.status==='pending'
+    ? '<span style="background:#fff3cd;color:#8a6d00;padding:2px 8px;border-radius:9px;font-size:11px;font-weight:700;">⏳ Pending</span>'
+    : r.status==='approved'
+    ? '<span style="background:#d4edda;color:var(--green);padding:2px 8px;border-radius:9px;font-size:11px;font-weight:700;">✅ Approved</span>'
+    : '<span style="background:#fde8e6;color:var(--red);padding:2px 8px;border-radius:9px;font-size:11px;font-weight:700;">🚫 Rejected</span>';
+  tbody.innerHTML = list.map(r=>`<tr>
+    <td><strong>${r.empName}</strong>${r.branch?'<div style="font-size:10px;color:var(--muted);">'+r.branch+'</div>':''}</td>
+    <td style="font-size:12px;">${r.dateStr}</td>
+    <td style="font-size:12px;color:var(--muted);">${r.currentShiftLabel||'—'}</td>
+    <td style="font-size:12px;font-weight:600;">${r.requestedLabel||'—'}</td>
+    <td style="font-size:11px;color:var(--muted);max-width:160px;">${r.note||'—'}</td>
+    <td>${statusBadge(r)}${r.status!=='pending'?'<div style="font-size:10px;color:var(--muted);margin-top:2px;">'+(r.resolvedBy||'')+'</div>':''}</td>
+    <td>${r.status==='pending'
+        ? `<button class="btn btn-sm btn-primary" onclick="approveSwitchRequest('${r.id}')">✓ Approve</button>
+           <button class="btn btn-sm btn-danger" style="margin-left:4px;" onclick="rejectSwitchRequest('${r.id}')">✕ Reject</button>`
+        : '—'}</td>
+  </tr>`).join('');
+}
+window.renderSwitchRequests = renderSwitchRequests;
+
 // Month view on paper. The existing print dumped the weekly grid including its
 // dropdowns, which is unreadable once printed.
 function printMonthSchedule(){
@@ -2636,6 +2861,7 @@ function setupShifts() {
   renderShiftDefs();
   renderShiftAssignment();
   renderWeeklySchedule();
+  renderSwitchRequests();
 }
 window.openShiftModal=openShiftModal;window.saveShiftDef=saveShiftDef;window.deleteShiftDef=deleteShiftDef;
 window.openEmpShiftModal=openEmpShiftModal;window.toggleRotationFields=toggleRotationFields;
@@ -5448,6 +5674,16 @@ onValue(ref(db,'empShifts'), snap => {
     save('empShifts', empShifts);
     const active = document.querySelector('.page.active');
     if (active?.id === 'page-shifts') { renderShiftAssignment(); renderWeeklySchedule(); }
+  }
+});
+onValue(ref(db,'shiftSwitchRequests'), snap => {
+  if (typeof _ssrSaving!=='undefined' && _ssrSaving) return;  // don't clobber a write in flight
+  const data = snap.val();
+  if (data) {
+    shiftSwitchRequests = data;
+    save('shiftSwitchRequests', shiftSwitchRequests);
+    const active = document.querySelector('.page.active');
+    if (active?.id === 'page-shifts') renderSwitchRequests();
   }
 });
 
