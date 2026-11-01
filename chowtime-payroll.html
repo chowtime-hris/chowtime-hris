@@ -753,15 +753,15 @@ tbody td{padding:9px 11px;}
       <div class="form-group"><label>Grace Period (min)</label><input type="number" id="shift-grace" value="5" min="0" max="30"></div>
       <div class="form-group"><label>Prep Time (min) <span style="font-size:11px;color:var(--muted);">Unpaid pre-shift</span></label>
         <input type="number" id="shift-prep" value="0" min="0" max="120" placeholder="e.g. 30"></div>
-      <div class="form-group"><label>Color</label>
-        <select id="shift-color">
-          <option value="#2D7D3A">🟢 Green (Morning)</option>
-          <option value="#6A1B9A">🔵 Blue (Mid)</option>
-          <option value="#6A1B9A">🟠 Orange (Afternoon)</option>
-          <option value="#7a5500">🟤 Brown (Evening)</option>
-          <option value="#5a2d82">🟣 Purple (Night)</option>
-          <option value="#C0392B">🔴 Red (Graveyard)</option>
+      <div class="form-group"><label>Shift Type</label>
+        <select id="shift-type">
+          <option value="opening">🟢 Opening</option>
+          <option value="closing">🟣 Closing</option>
+          <option value="straight">🟠 Straight</option>
         </select>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px;">
+          Sets the badge color AND tells DTR the break rule: Straight = no 1-hour
+          break deducted, paid start to end. Opening/Closing = 1-hour break as usual.</div>
       </div>
     </div>
     <div style="display:flex;gap:10px;margin-top:16px;">
@@ -1328,9 +1328,10 @@ function computeDTRRow(entry, shiftSched) {
   const prepStart   = shiftStart - prepMinsSet; // when prep starts e.g. 08:30
 
   // ── STRAIGHT SHIFT: no break deduction, paid start to end ────────
-  // Check by shift name OR by missing break fields
-  const shiftName   = (s.name || s.label || '').toUpperCase();
-  const isStraight  = shiftName.includes('STRAIGHT') || shiftName.includes('NONSTOP') || shiftName.includes('NO BREAK');
+  // The shift's own Shift Type field is authoritative; inferShiftType() only
+  // falls back to reading the name/label for shifts saved before that field
+  // existed, so this never silently reclassifies anything.
+  const isStraight  = inferShiftType(s) === 'straight';
   // Non-straight shifts always carry a 1-hour unpaid break, whether or not the
   // shift record has explicit break fields — opening and closing both include it.
   const hasBrk    = !isStraight;
@@ -1882,10 +1883,14 @@ function loadDTREditor() {
       ? assignedShift : null;
     const c = computeDTRRow(entry, schedule);
     const isAuto = entry.auto;
-    const rowBg = isSun ? 'background:#fff0ec;' : '';
+    // Actual-time-in version of the same labor-cost check the Weekly Schedule
+    // View does on the plan: did a Straight-duty crew member ALSO have
+    // someone else from the same branch actually clock in that day?
+    const dutyWarn = actualDutyWarningForDate(dateStr, emp.branch, periodKey);
+    const rowBg = dutyWarn ? 'background:#FFF3F3;' : (isSun ? 'background:#fff0ec;' : '');
 
     rows += `<tr style="${rowBg}">
-      <td>${dateStr}</td>
+      <td${dutyWarn?` title="⚠️ Same-day duty overlap at ${escapeHtmlSafe(emp.branch||'')}: `+dutyWarn.map(t=>escapeHtmlSafe(t.emp)+' ('+t.type+')').join(' + ')+' — check labor cost"':''}>${dateStr}${dutyWarn?' ⚠️':''}</td>
       <td style="${isSun?'color:var(--red);font-weight:700;':''}">${dayName}</td>
       <td><input class="dtr-input" type="time" value="${entry.in||''}"
           onchange="adminEditDTR('${dateStr}','in',this.value,'${empId}','${periodKey}')"
@@ -1897,7 +1902,7 @@ function loadDTREditor() {
           onchange="adminEditDTR('${dateStr}','bend',this.value,'${empId}','${periodKey}')"
           style="background:#fff8e1;border:1px solid #f0a500;border-radius:5px;padding:4px;font-size:12px;"></td>
       <td style="background:#fff8e1;color:var(--muted);text-align:center;font-size:12px;">${
-        schedule && ((schedule.name||schedule.label||'').toUpperCase().includes('STRAIGHT')) ? '0h straight' : '1h auto'
+        schedule && inferShiftType(schedule)==='straight' ? '0h straight' : '1h auto'
       }</td>
       <td><input class="dtr-input" type="time" value="${entry.out||''}"
           onchange="adminEditDTR('${dateStr}','out',this.value,'${empId}','${periodKey}')"
@@ -2027,6 +2032,20 @@ function toLocalDateStr(d) {
   return `${y}-${m}-${day}`;
 }
 
+// Shift type now drives both the badge color and the DTR break rule — see
+// computeDTRRow. Older shift records saved before this field existed have no
+// .type, so inferShiftType() falls back to reading it off the name/label the
+// same way computeDTRRow always has, instead of silently defaulting them all
+// to "opening" and changing their pay.
+const SHIFT_TYPE_COLORS = {opening:'#2D7D3A', closing:'#6A1B9A', straight:'#C9970C'};
+function inferShiftType(s){
+  if(s && (s.type==='opening'||s.type==='closing'||s.type==='straight')) return s.type;
+  const n = ((s&&(s.name||s.label))||'').toUpperCase();
+  if(n.includes('STRAIGHT')||n.includes('NONSTOP')||n.includes('NO BREAK')) return 'straight';
+  if(n.includes('CLOS')) return 'closing';
+  return 'opening';
+}
+
 function openShiftModal(idx) {
   // Make sure modal elements exist
   const modal = document.getElementById('shift-modal');
@@ -2044,7 +2063,7 @@ function openShiftModal(idx) {
   document.getElementById('shift-bend').value   = s.bend   || '13:00';
   document.getElementById('shift-grace').value  = s.grace  || 5;
   document.getElementById('shift-prep').value   = s.prep   || 0;
-  document.getElementById('shift-color').value  = s.color  || '#2D7D3A';
+  document.getElementById('shift-type').value   = inferShiftType(s);
   // Scope. A shift with no branch is chain-wide; one with a branch only ever
   // appears for that branch, so the assignment dropdown stops offering another
   // store's hours.
@@ -2072,9 +2091,10 @@ function saveShiftDef() {
     bend:  document.getElementById('shift-bend').value,
     grace: +document.getElementById('shift-grace').value||5,
     prep:  +document.getElementById('shift-prep').value ||0,
-    color: document.getElementById('shift-color').value,
+    type:  document.getElementById('shift-type').value || 'opening',
     branch:(document.getElementById('shift-branch')||{}).value || '',
   };
+  s.color = SHIFT_TYPE_COLORS[s.type] || SHIFT_TYPE_COLORS.opening;
   if(!s.name) return alert('Shift name is required.');
   if(editingShiftIdx>=0) shiftDefs[editingShiftIdx]=s; else shiftDefs.push(s);
   save('shiftDefs',shiftDefs); syncShiftsToFirebase();
@@ -2309,14 +2329,6 @@ function renderWeeklySchedule() {
   const weekDates=Array.from({length:7},(_,i)=>{const d=new Date(weekStart);d.setDate(d.getDate()+i);return d;});
   const fmt=d=>d.toLocaleDateString('en-PH',{month:'short',day:'numeric'});
   const fmtDay=d=>['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()];
-  let html=`<div style="overflow-x:auto;"><table style="min-width:700px;border-collapse:collapse;width:100%;">
-    <thead><tr style="background:var(--dark);color:#fff;">
-      <th style="padding:10px 14px;text-align:left;min-width:140px;">Employee</th>
-      ${weekDates.map(d=>`<th style="padding:10px 8px;text-align:center;min-width:90px;">
-        <div style="font-size:10px;opacity:.7;">${fmtDay(d)}</div>
-        <div style="font-size:13px;font-weight:700;">${fmt(d)}</div>
-      </th>`).join('')}
-    </tr></thead><tbody>`;
   const defs = getShiftDefs();
   const selectedBranch = document.getElementById('sched-view-branch')?.value || '';
 
@@ -2340,6 +2352,26 @@ function renderWeeklySchedule() {
     : (selectedBranch
         ? employees.filter(emp => emp && emp.branch === selectedBranch)
         : employees);
+
+  // Scheduled-duty cost warning: a branch should normally run on either one
+  // Opening + one Closing, or one Straight shift alone. A Straight on the
+  // schedule alongside ANY other duty the same day is extra labor nobody
+  // asked for, so flag it here — before the day even happens — rather than
+  // only after it shows up as actual hours paid.
+  const dutyWarnings = computeScheduledDutyWarnings(weekDates, filteredEmps);
+
+  let html=`<div style="overflow-x:auto;"><table style="min-width:700px;border-collapse:collapse;width:100%;">
+    <thead><tr style="background:var(--dark);color:#fff;">
+      <th style="padding:10px 14px;text-align:left;min-width:140px;">Employee</th>
+      ${weekDates.map(d=>{
+        const w = dutyWarnings[toLocalDateStr(d)];
+        return `<th style="padding:10px 8px;text-align:center;min-width:90px;${w?'background:#7a1f1f;':''}"${
+          w?` title="⚠️ ${w.map(x=>x.branch+': '+x.typesOnDuty.map(t=>t.emp+' ('+t.type+')').join(' + ')).join(' | ')} — labor cost check"`:''
+        }>
+        <div style="font-size:10px;opacity:.7;">${fmtDay(d)}</div>
+        <div style="font-size:13px;font-weight:700;">${fmt(d)}${w?' ⚠️':''}</div>
+      </th>`;}).join('')}
+    </tr></thead><tbody>`;
 
   if(selectedBranch && !filteredEmps.length){
     html += `<tr><td colspan="${weekDates.length+1}" style="padding:18px;text-align:center;color:var(--muted);font-size:13px;">
@@ -2385,7 +2417,76 @@ function renderWeeklySchedule() {
   });
   html+=`</tbody></table></div>
     <div style="margin-top:10px;font-size:11px;color:var(--muted);">Week of ${fmt(weekStart)} – ${fmt(weekDates[6])} · ${filteredEmps.length} employees</div>`;
+
+  const warnDates = Object.keys(dutyWarnings).sort();
+  if(warnDates.length){
+    html += `<div style="margin-top:12px;background:#FFF3F3;border:1px solid #F5B5B5;border-radius:10px;padding:10px 14px;">
+      <div style="font-size:13px;font-weight:800;color:#B91C1C;margin-bottom:6px;">⚠️ Possible excess labor cost — same-day duty overlap</div>
+      ${warnDates.map(ds=>dutyWarnings[ds].map(w=>
+        `<div style="font-size:12px;color:#7A1F1F;padding:2px 0;">${ds} · <strong>${escapeHtmlSafe(w.branch)}</strong> — `
+        +w.typesOnDuty.map(t=>escapeHtmlSafe(t.emp)+' ('+t.type+')').join(' + ')+'</div>'
+      ).join('')).join('')}
+      <div style="font-size:11px;color:#7A1F1F;margin-top:4px;">A Straight duty already covers the day by itself — check if the other duty here is really needed.</div>
+    </div>`;
+  }
+
   wrap.innerHTML=html;
+}
+
+// A branch's duty for a day should normally be either one Opening + one
+// Closing, or one Straight alone. Straight paired with ANY other duty that
+// same day is redundant coverage — flag it so it gets a second look before
+// it quietly becomes extra payroll cost.
+function computeScheduledDutyWarnings(weekDates, emps){
+  const byBranch = {};
+  (emps||[]).forEach(e=>{
+    if(!e || !e.id) return;
+    const b = e.branch || '(no branch)';
+    (byBranch[b] = byBranch[b] || []).push(e);
+  });
+  const warnings = {};
+  weekDates.forEach(date=>{
+    const dow = date.getDay();
+    const dateStr = toLocalDateStr(date);
+    const flagged = [];
+    Object.keys(byBranch).forEach(branch=>{
+      const typesOnDuty = [];
+      byBranch[branch].forEach(emp=>{
+        const s = getEmpShiftForDay(emp.id, dow, dateStr);
+        if(!s || s==='REST' || s==='OFF') return;
+        typesOnDuty.push({emp: emp.name, type: inferShiftType(s)});
+      });
+      const straightCount = typesOnDuty.filter(t=>t.type==='straight').length;
+      if(straightCount>=1 && typesOnDuty.length>1) flagged.push({branch, typesOnDuty});
+    });
+    if(flagged.length) warnings[dateStr] = flagged;
+  });
+  return warnings;
+}
+// DTR Editor version of the same check, but on ACTUAL time-ins rather than
+// the schedule: did more than one person from the same branch really punch
+// in that day, with at least one of them on a Straight (which should have
+// covered the whole day alone)?
+function actualDutyWarningForDate(dateStr, branch, periodKey){
+  if(!branch || !periodKey) return null;
+  const crew = (employees||[]).filter(e=>e && e.id && e.branch===branch);
+  if(crew.length<2) return null;
+  const dow = new Date(dateStr+'T00:00:00').getDay();
+  const onDuty = [];
+  crew.forEach(e=>{
+    const entry = getDTREntry(periodKey, e.id, dateStr);
+    const hasIn = entry && entry.in && String(entry.in).includes(':');
+    if(!hasIn) return;
+    const s = getEmpShiftForDay(e.id, dow, dateStr);
+    if(!s || s==='REST' || s==='OFF') return;
+    onDuty.push({emp: e.name, type: inferShiftType(s)});
+  });
+  const straightCount = onDuty.filter(t=>t.type==='straight').length;
+  return (straightCount>=1 && onDuty.length>1) ? onDuty : null;
+}
+
+function escapeHtmlSafe(s){
+  return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
 function quickEditShift(empId, dateStr, value, empName) {
@@ -3194,7 +3295,7 @@ function loadDTR() { // loadDTR — loads DTR for selected employee and period
           placeholder="${settings.bend||'13:00'}"
           onchange="saveDTRField('${dateStr}','bend',this.value,'${empId}','${periodKey}')" /></td>
       <td style="background:#fff8e1;color:var(--muted);text-align:center;font-size:12px;">${
-        shiftSched && ((shiftSched.name||shiftSched.label||'').toUpperCase().includes('STRAIGHT')) ? '0h straight' : '1h auto'
+        shiftSched && inferShiftType(shiftSched)==='straight' ? '0h straight' : '1h auto'
       }</td>
       <td><input class="dtr-input" type="time" value="${entry.out||''}"
           ${entry.auto?'style="color:var(--muted);" title="Auto clock-out"':''}
