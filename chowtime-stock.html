@@ -1360,7 +1360,19 @@ async function buildAuditPlan(values){
 function showAuditPushPreview(plan){
   const card = document.getElementById('auditPushCard');
   const list = document.getElementById('auditPushList');
-  list.innerHTML = plan.rows.length ? plan.rows.map(r=>{
+
+  // What waste-aware charge this row actually works out to — shortage minus
+  // the waste logged against it, never below zero. An overage row has no
+  // charge to begin with, so it passes through as-is.
+  const rowNetCharge = r => r.chargeValue<0 ? Math.max(0,-r.chargeValue-(r.wasteValue||0)) : 0;
+
+  const catOf = r => {
+    const it = items[r.id];
+    const c = it && it.category ? String(it.category).trim() : '';
+    return c || 'Uncategorized';
+  };
+
+  const renderRow = r => {
     const dir = Math.abs(r.delta)<0.001 ? 'no change'
       : (r.delta>0 ? '+'+fmt(r.delta) : fmt(r.delta));
     const moved = Math.abs(r.movedSince)>0.001
@@ -1377,38 +1389,77 @@ function showAuditPushPreview(plan){
       ? `<br><small style="color:#B45309;font-weight:700;">🗑️ Waste logged: ${fmt(r.wasteQty)} ${escapeHtml(r.unit||'pc')}`
         + (r.wasteValue>=0.01?` (${peso(r.wasteValue)})`:'') + `</small>`
         + (r.chargeValue<0 && r.wasteValue>=0.01
-            ? `<br><small style="font-weight:700;color:${(-r.chargeValue-r.wasteValue)>0.01?'var(--danger)':'var(--ok,#15803D)'};">Charge net of waste: ${peso(Math.max(0,-r.chargeValue-r.wasteValue))}</small>` : '')
+            ? `<br><small style="font-weight:700;color:${rowNetCharge(r)>0.01?'var(--danger)':'var(--ok,#15803D)'};">Charge net of waste: ${peso(rowNetCharge(r))}</small>` : '')
         + r.wasteEntries.map(e=>`<br><small style="color:var(--muted);">· ${fmt(e.qty)} — ${escapeHtml(e.reason)} · ${escapeHtml(e.by)} · ${escapeHtml(e.d)}${e.note?' · '+escapeHtml(e.note):''}</small>`).join('')
       : '';
     return `<div class="result-row"><div><strong>${escapeHtml(r.name)}</strong>${moved}${valueLine}${wasteLine}</div>`
       + `<div class="result-tag ${Math.abs(r.delta)<0.001?'tag-ok':(r.delta<0?'tag-short':'tag-over')}">`
       + `${fmt(r.posNow)} → ${fmt(r.newStock)} (${dir})</div></div>`;
-  }).join('') : '<p class="sub">No linked items to push.</p>';
-  // Totals. CHARGE (Freezer Count rate) is what the crew is charged; POS cost
-  // totals are shown below it for reference.
+  };
+
+  if(!plan.rows.length){
+    list.innerHTML = '<p class="sub">No linked items to push.</p>';
+  } else {
+    // Group by category, each with its own waste-netted subtotal, so a long
+    // list reads a section at a time instead of one undifferentiated pile.
+    const groups = {}, catOrder = [];
+    plan.rows.forEach(r=>{
+      const c = catOf(r);
+      if(!groups[c]){ groups[c]=[]; catOrder.push(c); }
+      groups[c].push(r);
+    });
+    catOrder.sort((a,b)=> a==='Uncategorized' ? 1 : (b==='Uncategorized' ? -1 : a.localeCompare(b)));
+
+    list.innerHTML = catOrder.map(cat=>{
+      const rows = groups[cat];
+      const catShort = rows.reduce((s,r)=>s+(r.chargeValue<0?-r.chargeValue:0),0);
+      const catOver  = rows.reduce((s,r)=>s+(r.chargeValue>0?r.chargeValue:0),0);
+      const catWaste = rows.reduce((s,r)=>s+(r.wasteValue||0),0);
+      const catNetShort = rows.reduce((s,r)=>s+rowNetCharge(r),0);
+      const catNet = catOver - catNetShort;
+      const header = `<div class="result-row" style="background:var(--bg);margin-top:10px;">`
+        + `<div style="font-size:11px;font-weight:800;letter-spacing:1px;color:var(--muted);text-transform:uppercase;">${escapeHtml(cat)}</div></div>`;
+      const body = rows.map(renderRow).join('');
+      // Per-category net — same waste-aware math as the grand total, just
+      // scoped to this category's rows.
+      const footer = `<div class="result-row" style="border-top:1px solid var(--border);padding-top:8px;">`
+        + `<div><strong>${escapeHtml(cat)} net${catWaste>=0.01?' (net of waste)':''}</strong></div>`
+        + `<div class="result-tag ${catNet<0?'tag-short':'tag-ok'}">${catNet<0?'-':''}${peso(Math.abs(catNet))}</div></div>`
+        + (catWaste>=0.01
+            ? `<div class="result-row"><div><small style="color:var(--muted);">shortage ${peso(catShort)} · overage credit ${peso(catOver)} · waste logged ${peso(catWaste)}</small></div></div>`
+            : (catShort>=0.01||catOver>=0.01
+                ? `<div class="result-row"><div><small style="color:var(--muted);">shortage ${peso(catShort)} · overage credit ${peso(catOver)}</small></div></div>`
+                : ''));
+      return header + body + footer;
+    }).join('');
+  }
+
+  // Grand totals across every category. CHARGE (Freezer Count rate, net of
+  // waste) is what the crew is actually charged; POS cost totals are shown
+  // below it for reference.
   const sumPos = (f)=>plan.rows.reduce((s,r)=>s+(r[f]>0?r[f]:0),0);
   const sumNeg = (f)=>plan.rows.reduce((s,r)=>s+(r[f]<0?-r[f]:0),0);
   const chShort = sumNeg('chargeValue'), chOver = sumPos('chargeValue');
   const coShort = sumNeg('deltaValue'),  coOver = sumPos('deltaValue');
-  const net = chOver - chShort;
+  const totalWaste = plan.rows.reduce((s,r)=>s+(r.wasteValue||0),0);
+  const netShort = plan.rows.reduce((s,r)=>s+rowNetCharge(r),0);
+  const net = chOver - netShort;
   if(plan.rows.length && (chShort>=0.01 || chOver>=0.01)){
-    list.innerHTML += `<div class="result-row" style="border-top:2px solid var(--border);margin-top:8px;padding-top:10px;">`
-      + `<div><strong>Total shortage charge</strong></div>`
+    list.innerHTML += `<div class="result-row" style="border-top:2px solid var(--border);margin-top:14px;padding-top:10px;">`
+      + `<div><strong>OVERALL — all categories</strong></div></div>`
+      + `<div class="result-row"><div><strong>Total shortage charge</strong></div>`
       + `<div class="result-tag tag-short">${peso(chShort)}</div></div>`
+      + (totalWaste>=0.01
+          ? `<div class="result-row"><div><strong>Total waste logged (since last audit)</strong></div>`
+            + `<div class="result-tag tag-ok">${peso(totalWaste)}</div></div>`
+            + `<div class="result-row"><div><strong>Total shortage charge net of waste</strong></div>`
+            + `<div class="result-tag ${netShort>=0.01?'tag-short':'tag-ok'}">${peso(netShort)}</div></div>`
+          : '')
       + `<div class="result-row"><div><strong>Total overage credit</strong></div>`
       + `<div class="result-tag tag-over">${peso(chOver)}</div></div>`
-      + `<div class="result-row"><div><strong>Net (charge)</strong></div>`
+      + `<div class="result-row"><div><strong>Net (charge, net of waste)</strong></div>`
       + `<div class="result-tag ${net<0?'tag-short':'tag-ok'}">${net<0?'-':''}${peso(Math.abs(net))}</div></div>`
       + `<div class="result-row"><div><small style="color:var(--muted);">POS cost value — shortage ${peso(coShort)} · overage ${peso(coOver)} · net ${coOver-coShort<0?'-':''}${peso(Math.abs(coOver-coShort))}</small></div></div>`;
-  }
-  const totalWaste = plan.rows.reduce((s,r)=>s+(r.wasteValue||0),0);
-  if(totalWaste>=0.01){
-    list.innerHTML += `<div class="result-row"><div><strong>Total waste logged (since last audit)</strong></div>`
-      + `<div class="result-tag tag-ok">${peso(totalWaste)}</div></div>`;
-    // Waste only explains shortages, item by item — it can't cancel another item's overage.
-    const netShort = plan.rows.reduce((s,r)=>s+(r.chargeValue<0?Math.max(0,-r.chargeValue-(r.wasteValue||0)):0),0);
-    list.innerHTML += `<div class="result-row"><div><strong>Total shortage charge net of waste</strong></div>`
-      + `<div class="result-tag ${netShort>=0.01?'tag-short':'tag-ok'}">${peso(netShort)}</div></div>`;
   }
   const un = document.getElementById('auditPushUnlinked');
   un.innerHTML = plan.unlinked.length
