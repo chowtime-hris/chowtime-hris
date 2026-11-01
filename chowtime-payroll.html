@@ -268,7 +268,13 @@ tbody td{padding:9px 11px;}
     <div class="alert alert-warn">
       ⚠️ Admin use only. Edit any employee's attendance for any date. Changes sync to all branches instantly.
     </div>
-    <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;align-items:flex-end;">
+    <div style="display:flex;gap:8px;margin-bottom:14px;">
+      <button type="button" class="btn" id="editor-mode-emp-btn" onclick="setDTREditorMode('emp')"
+        style="font-weight:700;">👤 Per Employee</button>
+      <button type="button" class="btn" id="editor-mode-branch-btn" onclick="setDTREditorMode('branch')"
+        style="font-weight:700;">🏬 Per Branch (Compare Time In)</button>
+    </div>
+    <div id="editor-emp-controls" style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;align-items:flex-end;">
       <div class="form-group">
         <label>Employee</label>
         <select id="editor-emp" onchange="loadDTREditor()" style="min-width:200px;"></select>
@@ -276,6 +282,16 @@ tbody td{padding:9px 11px;}
       <div class="form-group">
         <label>Pay Period</label>
         <select id="editor-period" onchange="loadDTREditor()"></select>
+      </div>
+    </div>
+    <div id="editor-branch-controls" style="display:none;gap:12px;margin-bottom:16px;flex-wrap:wrap;align-items:flex-end;">
+      <div class="form-group">
+        <label>Branch</label>
+        <select id="editor-branch" onchange="loadDTRBranchView()" style="min-width:200px;"></select>
+      </div>
+      <div class="form-group">
+        <label>Pay Period</label>
+        <select id="editor-branch-period" onchange="loadDTRBranchView()"></select>
       </div>
     </div>
     <div class="table-wrap" id="editor-tbody-wrap">
@@ -291,6 +307,12 @@ tbody td{padding:9px 11px;}
           <th>Holiday</th><th>Holiday Pay</th><th>Deduction</th><th>Shift</th><th>Status</th>
         </tr></thead>
         <tbody id="editor-tbody"></tbody>
+      </table>
+    </div>
+    <div class="table-wrap" id="editor-branch-tbody-wrap" style="display:none;">
+      <table>
+        <thead id="editor-branch-thead"></thead>
+        <tbody id="editor-branch-tbody"></tbody>
       </table>
     </div>
     <div style="margin-top:14px;display:flex;gap:14px;flex-wrap:wrap;" id="editor-summary"></div>
@@ -1852,7 +1874,106 @@ function setupDTREditor() {
   const debugDate = document.getElementById('debug-date');
   if (debugDate && !debugDate.value) debugDate.value = toLocalDateStr(new Date());
 
+  const brSel = document.getElementById('editor-branch');
+  if (brSel) {
+    const keepBr = brSel.value;
+    const names = branchNamesSafe();
+    brSel.innerHTML = '<option value="">— Select Branch —</option>'
+      + names.map(n=>'<option value="'+n.replace(/"/g,'&quot;')+'">'+n+'</option>').join('');
+    if (names.includes(keepBr)) brSel.value = keepBr;
+  }
+  const brPerSel = document.getElementById('editor-branch-period');
+  if (brPerSel) {
+    const curBP = brPerSel.value || getPeriod().key;
+    brPerSel.innerHTML = yearPe.map(k => `<option value="${k}">${getPeriodLabel(k)}</option>`).join('');
+    brPerSel.value = yearPe.includes(curBP) ? curBP : getPeriod().key;
+  }
+
   if (empSel.value) loadDTREditor();
+  if (brSel && brSel.value) loadDTRBranchView();
+  if (!document.getElementById('editor-mode-emp-btn')?.dataset.inited) {
+    setDTREditorMode('emp');
+    const b = document.getElementById('editor-mode-emp-btn');
+    if (b) b.dataset.inited = '1';
+  }
+}
+
+// Toggle between the single-employee DTR editor and the per-branch
+// Time In comparison grid. Both read/write the same dtrData — this is
+// just a different view of it.
+function setDTREditorMode(mode) {
+  const empBtn = document.getElementById('editor-mode-emp-btn');
+  const brBtn = document.getElementById('editor-mode-branch-btn');
+  const empControls = document.getElementById('editor-emp-controls');
+  const brControls = document.getElementById('editor-branch-controls');
+  const empWrap = document.getElementById('editor-tbody-wrap');
+  const brWrap = document.getElementById('editor-branch-tbody-wrap');
+  const isEmp = mode !== 'branch';
+  if (empBtn) empBtn.style.background = isEmp ? 'var(--primary)' : '';
+  if (empBtn) empBtn.style.color = isEmp ? '#fff' : '';
+  if (brBtn) brBtn.style.background = !isEmp ? 'var(--primary)' : '';
+  if (brBtn) brBtn.style.color = !isEmp ? '#fff' : '';
+  if (empControls) empControls.style.display = isEmp ? 'flex' : 'none';
+  if (brControls) brControls.style.display = isEmp ? 'none' : 'flex';
+  if (empWrap) empWrap.style.display = isEmp ? '' : 'none';
+  if (brWrap) brWrap.style.display = isEmp ? 'none' : '';
+  if (!isEmp) loadDTRBranchView();
+}
+
+// Per-branch Time In comparison grid: rows = dates in the period,
+// columns = every employee of the selected branch. Lets Norman eyeball
+// who's late / inconsistent vs their branch-mates on the same day.
+function loadDTRBranchView() {
+  const branch = document.getElementById('editor-branch')?.value;
+  const periodKey = document.getElementById('editor-branch-period')?.value;
+  const thead = document.getElementById('editor-branch-thead');
+  const tbody = document.getElementById('editor-branch-tbody');
+  if (!thead || !tbody) return;
+  if (!branch || !periodKey) {
+    thead.innerHTML = '';
+    tbody.innerHTML = '';
+    return;
+  }
+  const p = getPeriodDetails(periodKey);
+  if (!p) return;
+  const branchEmps = employees.filter(e => (e.branch||'') === branch)
+    .sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  if (!branchEmps.length) {
+    thead.innerHTML = '';
+    tbody.innerHTML = '<tr><td style="padding:16px;color:var(--muted);">No employees found for this branch.</td></tr>';
+    return;
+  }
+
+  thead.innerHTML = '<tr><th>Date</th><th>Day</th>'
+    + branchEmps.map(e=>'<th>'+e.name+'</th>').join('') + '</tr>';
+
+  const days_abbr = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  let rows = '';
+  for (let d = p.start; d <= p.end; d++) {
+    const dt = new Date(p.year, p.month, d);
+    const dateStr = `${p.year}-${String(p.month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const dayName = days_abbr[dt.getDay()];
+    const isSun = dt.getDay() === 0;
+    const rowBg = isSun ? 'background:#fff0ec;' : '';
+    let cells = '';
+    branchEmps.forEach(emp=>{
+      const entry = getDTREntry(periodKey, emp.id, dateStr);
+      const assignedShift = getEmpShiftForDay(emp.id, dt.getDay(), dateStr);
+      const isRest = assignedShift === 'REST' || assignedShift === 'OFF';
+      const c = computeDTRRow(entry, (assignedShift && !isRest) ? assignedShift : null);
+      const lateBg = (c.late>0) ? 'background:#fde8e6;' : '';
+      cells += `<td style="${lateBg}">`
+        + `<input class="dtr-input" type="time" value="${entry.in||''}"
+            onchange="adminEditDTR('${dateStr}','in',this.value,'${emp.id}','${periodKey}');loadDTRBranchView();"
+            style="border:1px solid #6A1B9A;border-radius:5px;padding:4px;font-size:12px;width:92px;">`
+        + (c.late>0 ? `<div style="color:var(--red);font-size:10px;font-weight:700;">${c.late}m late</div>` : (isRest ? `<div style="color:var(--muted);font-size:10px;">REST</div>` : ''))
+        + `</td>`;
+    });
+    rows += `<tr style="${rowBg}"><td>${dateStr}</td>`
+      + `<td style="${isSun?'color:var(--red);font-weight:700;':''}">${dayName}</td>`
+      + cells + `</tr>`;
+  }
+  tbody.innerHTML = rows;
 }
 
 function loadDTREditor() {
