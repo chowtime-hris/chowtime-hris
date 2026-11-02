@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261102-224900 -->
+<!-- BUILD:20261102-230200 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -9071,7 +9071,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261102-224900";
+const BUILD = "20261102-230200";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -15006,6 +15006,8 @@ function App(){
   const [invViewData,setInvViewData]=useState([]);        // that branch's stock
   const [copyMinFrom,setCopyMinFrom]=useState("");        // source branch for "copy low stock meter"
   const [copyMinBusy,setCopyMinBusy]=useState(false);
+  const [copyMinPicker,setCopyMinPicker]=useState(false); // show branch checklist for bulk copy
+  const [copyMinTargets,setCopyMinTargets]=useState({});  // branchId -> checked
   const [dashRange,setDashRange]=useState("today");      // dashboard period
   const [dashFrom,setDashFrom]=useState(localDate());
   const [dashTo,setDashTo]=useState(localDate());
@@ -21863,80 +21865,28 @@ function App(){
                 h("option",{value:""},"🏭 MAIN (commissary)"),
                 branches.filter(b=>b.id!=="ct-main").map(b=>
                   h("option",{key:b.id,value:b.id},"🏪 "+b.full))),
-              // Bulk setup: push Main's low-stock meter (minStock) to EVERY
-              // branch in one go — for rolling out new stores without
-              // opening each one's inventory tab first.
-              !invView&&(user.role==="owner"||user.role==="commissary")&&h("button",{
-                disabled:copyMinBusy,
-                onClick:async()=>{
-                  try{
-                    setCopyMinBusy(true);
-                    const srcMap={};
-                    inventory.forEach(it=>{srcMap[it.id]=Number(it.minStock)||0;});
-                    const targets=(branches||[]).filter(b=>
-                      b.id!=="ct-main"&&b.id!=="main");
-                    const perBranch=[];   // {branch,name,changes:[]}
-                    let totalChanges=0;
-                    for(const b of targets){
-                      const col="inventory_"+b.id;
-                      let snap=null;
-                      try{ snap=await getDocs(collection(db,col)); }
-                      catch(e0){ continue; }
-                      const changes=[];
-                      snap.docs.forEach(d=>{
-                        if(!(d.id in srcMap))return;
-                        const cd=d.data()||{};
-                        const from=Number(cd.minStock)||0;
-                        const to=srcMap[d.id];
-                        if(from!==to)changes.push({id:d.id,
-                          name:cd.name||d.id,from:from,to:to});
-                      });
-                      if(changes.length){
-                        perBranch.push({branch:b,col:col,changes:changes});
-                        totalChanges+=changes.length;
-                      }
-                    }
-                    if(!totalChanges){
-                      showT("Pareho na sa lahat ng branch — walang babaguhin","ok");
-                      return;
-                    }
-                    const lines=perBranch.map(pb=>
-                      pb.branch.full+" — "+pb.changes.length+" item"
-                      +(pb.changes.length>1?"s":""));
-                    if(!confirm("Kopyahin ang low stock meter (min stock) ng MAIN "
-                      +"papunta sa "+perBranch.length+" branch:\n\n"+lines.join("\n")
-                      +"\n\nTotal "+totalChanges+" item(s) magbabago. Stock on hand, "
-                      +"cost, presyo — hindi magagalaw. Min stock lang."))
-                      return;
-                    let ok=0,bad=0;
-                    for(const pb of perBranch){
-                      for(const c of pb.changes){
-                        try{
-                          await updateDoc(doc(db,pb.col,c.id),{
-                            minStock:c.to,
-                            minStockCopiedFrom:"MAIN (commissary)",
-                            minStockCopiedBy:user.name,
-                            minStockCopiedAt:serverTimestamp()
-                          });
-                          ok++;
-                        }catch(e){ bad++; console.warn("bulk copy minStock",c.id,e); }
-                      }
-                    }
-                    showT(ok+" item min stock na-copy sa "+perBranch.length
-                      +" branch mula sa MAIN"+(bad?"  ·  "+bad+" bigo":""),
-                      bad?"warn":"ok");
-                  }catch(e){
-                    showT("Failed: "+String(e&&e.message||e).slice(0,60),"err");
-                  }finally{
-                    setCopyMinBusy(false);
+              // Bulk setup: push whichever branch is being viewed (or Main)
+              // out as the low-stock meter (minStock) template to whichever
+              // OTHER branches Norman picks — e.g. use a real branch like
+              // WPAN as the source instead of Main, whose min stock levels
+              // are commissary/supplier-sized and too big for a store.
+              (user.role==="owner"||user.role==="commissary")&&h("button",{
+                onClick:()=>{
+                  if(!copyMinPicker){
+                    const init={};
+                    (branches||[]).filter(b=>b.id!=="ct-main"&&b.id!=="main"
+                      &&b.id!==invView)
+                      .forEach(b=>{init[b.id]=true;});
+                    setCopyMinTargets(init);
                   }
+                  setCopyMinPicker(v=>!v);
                 },
                 style:{padding:"7px 12px",borderRadius:7,fontSize:13,fontWeight:700,
-                  cursor:copyMinBusy?"default":"pointer",
-                  border:"1px solid "+C.border,
-                  background:copyMinBusy?"#F3F3F3":"#fff",
-                  color:copyMinBusy?C.muted:C.text}},
-                copyMinBusy?"Copying...":"📋 Copy low stock to ALL branches"),
+                  cursor:"pointer",
+                  border:"1px solid "+(copyMinPicker?C.primary:C.border),
+                  background:copyMinPicker?"#F3E9F7":"#fff",
+                  color:copyMinPicker?C.primary:C.text}},
+                "📋 Copy low stock to branches..."),
               // Copy another branch's low-stock meter (minStock reorder
               // points) onto the branch being viewed — only makes sense
               // once a specific branch is selected above.
@@ -22532,6 +22482,124 @@ function App(){
                       background:C.warning,color:"#fff",fontWeight:800,
                       fontSize:12,cursor:"pointer"}},
                     "Rebuild lots from POs"))
+              );
+            })(),
+
+            copyMinPicker&&(function(){
+              const srcName=invView?((branches.find(b=>b.id===invView)||{}).full||invView)
+                :"MAIN (commissary)";
+              const targets=(branches||[]).filter(b=>b.id!=="ct-main"&&b.id!=="main"
+                &&b.id!==invView);
+              const nPicked=targets.filter(b=>copyMinTargets[b.id]).length;
+              return h("div",{style:{background:"#F3E9F7",
+                border:"1px solid "+C.primary,borderRadius:10,padding:"12px 14px",
+                marginBottom:10}},
+                h("div",{style:{fontSize:13,fontWeight:800,color:C.primary,
+                  marginBottom:8}},"Piliin ang branch na papuntahan ng low stock meter ng "+srcName+":"),
+                h("div",{style:{display:"flex",gap:10,flexWrap:"wrap",marginBottom:10}},
+                  targets.map(b=>h("label",{key:b.id,style:{display:"flex",
+                    gap:5,alignItems:"center",fontSize:13,cursor:"pointer",
+                    background:"#fff",border:"1px solid "+C.border,
+                    borderRadius:7,padding:"5px 10px"}},
+                    h("input",{type:"checkbox",checked:!!copyMinTargets[b.id],
+                      onChange:e=>setCopyMinTargets(p=>Object.assign({},p,
+                        {[b.id]:e.target.checked}))}),
+                    "🏪 "+b.full))),
+                h("div",{style:{display:"flex",gap:8}},
+                  h("button",{
+                    onClick:()=>setCopyMinTargets(()=>{
+                      const all={}; targets.forEach(b=>{all[b.id]=true;}); return all;
+                    }),
+                    style:{padding:"6px 10px",borderRadius:7,fontSize:12,
+                      border:"1px solid "+C.border,background:"#fff",
+                      cursor:"pointer"}},"Lahat"),
+                  h("button",{
+                    onClick:()=>setCopyMinTargets({}),
+                    style:{padding:"6px 10px",borderRadius:7,fontSize:12,
+                      border:"1px solid "+C.border,background:"#fff",
+                      cursor:"pointer"}},"Walang pili"),
+                  h("button",{
+                    disabled:!nPicked||copyMinBusy,
+                    onClick:async()=>{
+                      try{
+                        setCopyMinBusy(true);
+                        const srcMap={};
+                        const srcList=invView?
+                          (invViewData.length?invViewData:
+                            (await getDocs(collection(db,invColFor(invView)))).docs.map(d=>
+                              Object.assign({id:d.id},d.data())))
+                          :inventory;
+                        srcList.forEach(it=>{srcMap[it.id]=Number(it.minStock)||0;});
+                        const picked=targets.filter(b=>copyMinTargets[b.id]);
+                        const perBranch=[];
+                        let totalChanges=0;
+                        for(const b of picked){
+                          const col="inventory_"+b.id;
+                          let snap=null;
+                          try{ snap=await getDocs(collection(db,col)); }
+                          catch(e0){ continue; }
+                          const changes=[];
+                          snap.docs.forEach(d=>{
+                            if(!(d.id in srcMap))return;
+                            const cd=d.data()||{};
+                            const from=Number(cd.minStock)||0;
+                            const to=srcMap[d.id];
+                            if(from!==to)changes.push({id:d.id,
+                              name:cd.name||d.id,from:from,to:to});
+                          });
+                          if(changes.length){
+                            perBranch.push({branch:b,col:col,changes:changes});
+                            totalChanges+=changes.length;
+                          }
+                        }
+                        if(!totalChanges){
+                          showT("Pareho na sa napiling branch — walang babaguhin","ok");
+                          return;
+                        }
+                        const lines=perBranch.map(pb=>
+                          pb.branch.full+" — "+pb.changes.length+" item"
+                          +(pb.changes.length>1?"s":""));
+                        if(!confirm("Kopyahin ang low stock meter (min stock) ng "
+                          +srcName+" papunta sa "+perBranch.length+" branch:\n\n"
+                          +lines.join("\n")
+                          +"\n\nTotal "+totalChanges+" item(s) magbabago. Stock on hand, "
+                          +"cost, presyo — hindi magagalaw. Min stock lang."))
+                          return;
+                        let ok=0,bad=0;
+                        for(const pb of perBranch){
+                          for(const c of pb.changes){
+                            try{
+                              await updateDoc(doc(db,pb.col,c.id),{
+                                minStock:c.to,
+                                minStockCopiedFrom:srcName,
+                                minStockCopiedBy:user.name,
+                                minStockCopiedAt:serverTimestamp()
+                              });
+                              ok++;
+                            }catch(e){ bad++; console.warn("bulk copy minStock",c.id,e); }
+                          }
+                        }
+                        showT(ok+" item min stock na-copy sa "+perBranch.length
+                          +" branch mula sa "+srcName+(bad?"  ·  "+bad+" bigo":""),
+                          bad?"warn":"ok");
+                        setCopyMinPicker(false);
+                      }catch(e){
+                        showT("Failed: "+String(e&&e.message||e).slice(0,60),"err");
+                      }finally{
+                        setCopyMinBusy(false);
+                      }
+                    },
+                    style:{padding:"6px 14px",borderRadius:7,fontSize:12,
+                      fontWeight:700,cursor:(!nPicked||copyMinBusy)?"default":"pointer",
+                      border:"none",
+                      background:(!nPicked||copyMinBusy)?"#D8C2E8":C.primary,
+                      color:"#fff"}},
+                    copyMinBusy?"Copying...":"📋 Copy sa "+nPicked+" branch"),
+                  h("button",{
+                    onClick:()=>setCopyMinPicker(false),
+                    style:{padding:"6px 10px",borderRadius:7,fontSize:12,
+                      border:"none",background:"none",color:C.muted,
+                      cursor:"pointer",textDecoration:"underline"}},"Cancel"))
               );
             })(),
 
