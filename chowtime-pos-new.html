@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261030-213500 -->
+<!-- BUILD:20261102-224900 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -9071,7 +9071,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261030-213500";
+const BUILD = "20261102-224900";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -15004,6 +15004,8 @@ function App(){
   const [zHistAll,setZHistAll]=useState([]);             // every branch, for Reports
   const [invView,setInvView]=useState("");               // "" = Main; else a branch id
   const [invViewData,setInvViewData]=useState([]);        // that branch's stock
+  const [copyMinFrom,setCopyMinFrom]=useState("");        // source branch for "copy low stock meter"
+  const [copyMinBusy,setCopyMinBusy]=useState(false);
   const [dashRange,setDashRange]=useState("today");      // dashboard period
   const [dashFrom,setDashFrom]=useState(localDate());
   const [dashTo,setDashTo]=useState(localDate());
@@ -21861,6 +21863,155 @@ function App(){
                 h("option",{value:""},"🏭 MAIN (commissary)"),
                 branches.filter(b=>b.id!=="ct-main").map(b=>
                   h("option",{key:b.id,value:b.id},"🏪 "+b.full))),
+              // Bulk setup: push Main's low-stock meter (minStock) to EVERY
+              // branch in one go — for rolling out new stores without
+              // opening each one's inventory tab first.
+              !invView&&(user.role==="owner"||user.role==="commissary")&&h("button",{
+                disabled:copyMinBusy,
+                onClick:async()=>{
+                  try{
+                    setCopyMinBusy(true);
+                    const srcMap={};
+                    inventory.forEach(it=>{srcMap[it.id]=Number(it.minStock)||0;});
+                    const targets=(branches||[]).filter(b=>
+                      b.id!=="ct-main"&&b.id!=="main");
+                    const perBranch=[];   // {branch,name,changes:[]}
+                    let totalChanges=0;
+                    for(const b of targets){
+                      const col="inventory_"+b.id;
+                      let snap=null;
+                      try{ snap=await getDocs(collection(db,col)); }
+                      catch(e0){ continue; }
+                      const changes=[];
+                      snap.docs.forEach(d=>{
+                        if(!(d.id in srcMap))return;
+                        const cd=d.data()||{};
+                        const from=Number(cd.minStock)||0;
+                        const to=srcMap[d.id];
+                        if(from!==to)changes.push({id:d.id,
+                          name:cd.name||d.id,from:from,to:to});
+                      });
+                      if(changes.length){
+                        perBranch.push({branch:b,col:col,changes:changes});
+                        totalChanges+=changes.length;
+                      }
+                    }
+                    if(!totalChanges){
+                      showT("Pareho na sa lahat ng branch — walang babaguhin","ok");
+                      return;
+                    }
+                    const lines=perBranch.map(pb=>
+                      pb.branch.full+" — "+pb.changes.length+" item"
+                      +(pb.changes.length>1?"s":""));
+                    if(!confirm("Kopyahin ang low stock meter (min stock) ng MAIN "
+                      +"papunta sa "+perBranch.length+" branch:\n\n"+lines.join("\n")
+                      +"\n\nTotal "+totalChanges+" item(s) magbabago. Stock on hand, "
+                      +"cost, presyo — hindi magagalaw. Min stock lang."))
+                      return;
+                    let ok=0,bad=0;
+                    for(const pb of perBranch){
+                      for(const c of pb.changes){
+                        try{
+                          await updateDoc(doc(db,pb.col,c.id),{
+                            minStock:c.to,
+                            minStockCopiedFrom:"MAIN (commissary)",
+                            minStockCopiedBy:user.name,
+                            minStockCopiedAt:serverTimestamp()
+                          });
+                          ok++;
+                        }catch(e){ bad++; console.warn("bulk copy minStock",c.id,e); }
+                      }
+                    }
+                    showT(ok+" item min stock na-copy sa "+perBranch.length
+                      +" branch mula sa MAIN"+(bad?"  ·  "+bad+" bigo":""),
+                      bad?"warn":"ok");
+                  }catch(e){
+                    showT("Failed: "+String(e&&e.message||e).slice(0,60),"err");
+                  }finally{
+                    setCopyMinBusy(false);
+                  }
+                },
+                style:{padding:"7px 12px",borderRadius:7,fontSize:13,fontWeight:700,
+                  cursor:copyMinBusy?"default":"pointer",
+                  border:"1px solid "+C.border,
+                  background:copyMinBusy?"#F3F3F3":"#fff",
+                  color:copyMinBusy?C.muted:C.text}},
+                copyMinBusy?"Copying...":"📋 Copy low stock to ALL branches"),
+              // Copy another branch's low-stock meter (minStock reorder
+              // points) onto the branch being viewed — only makes sense
+              // once a specific branch is selected above.
+              invView&&(user.role==="owner"||user.role==="commissary")&&h("div",{
+                style:{display:"flex",gap:5,alignItems:"center"}},
+                h("select",{value:copyMinFrom,onChange:e=>setCopyMinFrom(e.target.value),
+                  style:{padding:"7px 10px",borderRadius:7,fontSize:13,outline:"none",
+                    cursor:"pointer",border:"1px solid "+C.border,background:"#fff"}},
+                  h("option",{value:""},"Copy low stock from..."),
+                  h("option",{value:"main"},"🏭 MAIN (commissary)"),
+                  branches.filter(b=>b.id!=="ct-main"&&b.id!==invView).map(b=>
+                    h("option",{key:b.id,value:b.id},"🏪 "+b.full))),
+                h("button",{
+                  disabled:!copyMinFrom||copyMinBusy,
+                  onClick:async()=>{
+                    try{
+                      setCopyMinBusy(true);
+                      const srcId=copyMinFrom;
+                      const srcCol=invColFor(srcId);
+                      const dstCol=invColFor(invView);
+                      const srcSnap=await getDocs(collection(db,srcCol));
+                      const srcMap={};
+                      srcSnap.docs.forEach(d=>{srcMap[d.id]=Number((d.data()||{}).minStock)||0;});
+                      const dstItems=invViewData.length?invViewData:
+                        (await getDocs(collection(db,dstCol))).docs.map(d=>
+                          Object.assign({id:d.id},d.data()));
+                      const srcName=srcId==="main"?"MAIN (commissary)":
+                        ((branches.find(b=>b.id===srcId)||{}).full||srcId);
+                      const dstName=(branches.find(b=>b.id===invView)||{}).full||invView;
+                      const changes=[];
+                      dstItems.forEach(it=>{
+                        if(!(it.id in srcMap))return;   // item not on source branch
+                        const from=Number(it.minStock)||0;
+                        const to=srcMap[it.id];
+                        if(from!==to)changes.push({id:it.id,name:it.name||it.id,from:from,to:to});
+                      });
+                      if(!changes.length){
+                        showT("Pareho na — walang ibang min stock sa "+srcName,"ok");
+                        return;
+                      }
+                      const lines=changes.slice(0,10).map(c=>
+                        "  • "+c.name+": "+c.from+" → "+c.to);
+                      if(!confirm("Kopyahin ang low stock meter (min stock) ng "
+                        +srcName+" papunta sa "+dstName+"?\n\n"
+                        +changes.length+" item(s) magbabago:\n"+lines.join("\n")
+                        +(changes.length>10?"\n  …at "+(changes.length-10)+" pa":"")
+                        +"\n\nStock on hand, cost, price — hindi magagalaw. Min stock lang."))
+                        return;
+                      let ok=0,bad=0;
+                      for(const c of changes){
+                        try{
+                          await updateDoc(doc(db,dstCol,c.id),{
+                            minStock:c.to,
+                            minStockCopiedFrom:srcName,
+                            minStockCopiedBy:user.name,
+                            minStockCopiedAt:serverTimestamp()
+                          });
+                          ok++;
+                        }catch(e){ bad++; console.warn("copy minStock",c.id,e); }
+                      }
+                      showT(ok+" item min stock na-copy mula sa "+srcName
+                        +(bad?"  ·  "+bad+" bigo":""),bad?"warn":"ok");
+                      setCopyMinFrom("");
+                    }catch(e){
+                      showT("Failed: "+String(e&&e.message||e).slice(0,60),"err");
+                    }finally{
+                      setCopyMinBusy(false);
+                    }
+                  },
+                  style:{padding:"7px 12px",borderRadius:7,fontSize:13,fontWeight:700,
+                    cursor:(!copyMinFrom||copyMinBusy)?"default":"pointer",
+                    border:"1px solid "+C.border,
+                    background:(!copyMinFrom||copyMinBusy)?"#F3F3F3":C.primary,
+                    color:(!copyMinFrom||copyMinBusy)?C.muted:"#fff"}},
+                  copyMinBusy?"Copying...":"📋 Copy")),
               h("div",{style:{position:"relative"}},h("span",{style:{position:"absolute",left:8,top:"50%",transform:"translateY(-50%)",fontSize:13,color:C.muted}},"🔍"),h("input",{value:invSrch,onChange:e=>setInvSrch(e.target.value),placeholder:"Search...",style:{padding:"7px 9px 7px 26px",border:"1px solid "+C.border,borderRadius:7,fontSize:13,outline:"none",width:150}})),
               (function(){
                 const catSrc=invView?invViewData:inventory;
