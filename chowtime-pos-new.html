@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261104-185000 -->
+<!-- BUILD:20261104-191500 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -9078,7 +9078,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261104-185000";
+const BUILD = "20261104-191500";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -21534,8 +21534,9 @@ function App(){
                 +"araw bukas ang branch."),
               h("div",{style:{display:"flex",gap:10,flexWrap:"wrap",
                 marginBottom:14}},
-                (branches||[]).filter(b=>b.id!=="ct-main").map(b=>
-                  h("div",{key:b.id,style:{background:"#fff",
+                (branches||[]).filter(b=>b.id!=="ct-main").map(b=>{
+                  const rv=Number(rent[b.id])||0;
+                  return h("div",{key:b.id,style:{background:"#fff",
                     border:"1px solid "+C.border,borderRadius:8,
                     padding:"6px 10px"}},
                     h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,
@@ -21545,7 +21546,15 @@ function App(){
                       onChange:e=>setRent(b.id,e.target.value===""?"":Number(e.target.value)),
                       placeholder:"₱/buwan",
                       style:{width:100,padding:"4px 6px",textAlign:"right",
-                        border:"1px solid "+C.border,borderRadius:6,fontSize:13}}))) ),
+                        border:"1px solid "+C.border,borderRadius:6,fontSize:13}}),
+                    // Preview of what this actually becomes per day — this is
+                    // the number Norman catches a daily-rate-typed-as-monthly
+                    // mistake with, before it ever gets generated.
+                    rv>0&&h("div",{style:{fontSize:10,color:C.muted,
+                      marginTop:3,textAlign:"right"}},
+                      "= ₱"+peso(Math.round(rv/30*100)/100)+"/araw (30d) · ₱"
+                      +peso(Math.round(rv/31*100)/100)+"/araw (31d)"));
+                })),
               h("div",{style:{fontSize:13,fontWeight:800,color:C.primary,
                 marginBottom:8}},"Ibang bills — flat na buwanang halaga, per branch:"),
               !items.length&&h("div",{style:{fontSize:13,color:C.muted,
@@ -23863,6 +23872,12 @@ function App(){
             // whatever was deducted. Net pay plus what was handed out early
             // comes back to gross. It WOULD double if wages were ever entered
             // gross — the one thing to keep an eye on.
+            // Not added to EXPENSES — Norman confirmed the Salary figure
+            // already recorded as an expense is sometimes entered GROSS, not
+            // net of what was advanced, so adding CA/loan again on top of it
+            // double-counts. Left unused on the row rather than removed
+            // outright, so a future fix (recording Salary as net pay) has
+            // somewhere to plug the figure back in.
             const bCA=Math.round(((_w&&_w.cas)||[])
               .filter(function(r){
                 return r.branch===bid
@@ -23872,7 +23887,7 @@ function App(){
               .reduce(function(a,r){return a+(Number(r.amount)||0);},0)*100)/100;
             const bExp=Math.round((((_w&&_w.expenses)||[])
               .filter(function(e){return e.branch===bid;})
-              .reduce(function(a,e){return a+(Number(e.amount)||0);},0)+bCA)*100)/100;
+              .reduce(function(a,e){return a+(Number(e.amount)||0);},0))*100)/100;
             // Rent and Electricity/Water, when posted by "⚡ Generate Fixed
             // Expenses", are recorded at their base amount only — the way
             // Norman's own spreadsheet works, VAT 12% and the 2307
@@ -23917,18 +23932,21 @@ function App(){
             const bCogs=(bMoveCogs!=null)?bMoveCogs:bBomCogs;
             // Same formula as the single-branch statement's "Left after
             // branch costs": sales minus cost of goods minus every branch
-            // expense (which already includes CA/loan, and — once Fixed
-            // Expenses are generated — the recurring bills too). Needs cost
-            // of goods loaded first, same as that column; until then this
-            // stays a dash rather than a number that leaves out COGS.
+            // expense (and — once Fixed Expenses are generated — the
+            // recurring bills too). CA/loan is NOT added on top — the
+            // Salary figure already recorded as an expense is sometimes
+            // entered gross, already short whatever was advanced, so adding
+            // it again would double it. Needs cost of goods loaded first,
+            // same as that column; until then this stays a dash rather than
+            // a number that leaves out COGS.
             const bNet=(bCogs!=null)
               ?Math.round((bSales-bCogs-bExp-bVatMarkup)*100)/100 : null;
             // GROSS PROFIT is Sales minus Cost of Goods only — before any
             // expense, same line as Norman's spreadsheet. FIXED is every
             // bill posted through "⚡ Generate Fixed Expenses" (its base
             // amount, VAT/2307 counted separately above); DAILY is
-            // everything else — day-to-day purchases, salaries, and CA/loan
-            // — so the two always add back up to EXPENSES.
+            // everything else — day-to-day purchases, salaries, and other
+            // branch expenses — so the two always add back up to EXPENSES.
             const bGrossProfit=(bCogs!=null)
               ?Math.round((bSales-bCogs)*100)/100:null;
             const bExpFixed=Math.round(bFixedExp.reduce(function(a,e){
@@ -24193,11 +24211,8 @@ function App(){
                    color:r.grossProfit==null?C.muted
                      :(r.grossProfit>=0?C.text:C.danger)}),
                 cell(money(r.po),{color:r.po>0?C.text:C.muted}),
-                h("div",{style:{textAlign:"right"}},
-                  h("div",{style:{fontSize:13,
-                    color:r.expDaily>0?C.text:C.muted}},money(r.expDaily)),
-                  r.ca>0?h("div",{style:{fontSize:10,color:C.muted}},
-                    "incl. CA/loan "+money(r.ca)):null),
+                cell(money(r.expDaily),
+                  {color:r.expDaily>0?C.text:C.muted}),
                 h("div",{style:{textAlign:"right"}},
                   h("div",{style:{fontSize:13,
                     color:r.expFixed>0?C.text:C.muted}},money(r.expFixed)),
@@ -24331,9 +24346,13 @@ function App(){
               +"Z-Reading calls Gross Sales. Purchases and expenses follow the "
               +"period above. "
               +"GROSS PROFIT is SALES minus COST OF GOODS, before any expense. "
-              +"DAILY OPEX is day-to-day purchases, salaries, and cash "
-              +"advances/loans. MONTHLY FIXED is the bills posted through "
-              +"⚡ Generate Fixed Expenses — Rent, CUSA, Aircon, Electricity, "
+              +"DAILY OPEX is every branch expense except the recurring "
+              +"bills below — day-to-day purchases, salaries, and so on — "
+              +"exactly as posted on the Expenses page. Cash advances/loans "
+              +"are NOT added on top, since Salary is sometimes posted gross "
+              +"and already short whatever was advanced. MONTHLY FIXED is "
+              +"the bills posted through ⚡ Generate Fixed Expenses — Rent, "
+              +"CUSA, Aircon, Electricity, "
               +"Water, POS, Exhaust Cleaning, Internet — plus their VAT/2307 "
               +"markup, shown underneath. Both are counted on the day "
               +"released or billed. COST OF GOODS is "
