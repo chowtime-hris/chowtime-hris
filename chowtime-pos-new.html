@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261104-141800 -->
+<!-- BUILD:20261104-160000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -525,7 +525,7 @@ const DISCS = [
   {id:"promo",label:"Promo/Other",    rate:0.10},
   {id:"custom",label:"Custom %",      rate:0, custom:true},
 ];
-const EXPENSE_CATS = ["Utilities","Supplies","Repairs","Salaries","Transport","Marketing","Others"];
+const EXPENSE_CATS = ["Rent","Utilities","Supplies","Repairs","Salaries","Transport","Marketing","Others"];
 
 // ─── UTILITIES ───────────────────────────────────────────
 function ss(obj){return JSON.parse(JSON.stringify(obj,(_,v)=>v===undefined?null:v));}
@@ -8756,6 +8756,13 @@ function lastDayOf(mk){
   return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")
     +"-"+String(d.getDate()).padStart(2,"0");
 }
+// How many days a "YYYY-MM" month has — 28 to 31. Rent is a monthly figure
+// divided by this, so the daily rate changes with the month the way an
+// actual lease does.
+function daysInMonth(mk){
+  const y=Number(String(mk).slice(0,4)), m=Number(String(mk).slice(5,7));
+  return new Date(y,m,0).getDate();
+}
 function dayBefore(dstr){
   const d=new Date(dstr+"T00:00:00");
   d.setDate(d.getDate()-1);
@@ -9071,7 +9078,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261104-141800";
+const BUILD = "20261104-160000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -15030,6 +15037,48 @@ function App(){
     setPlBranchSel(next);
     try{ localStorage.setItem("plBranchSel",JSON.stringify(next)); }catch(e){}
   };
+  // Fixed/recurring expenses (CUSA, Electricity, Water, etc.) — a per-branch
+  // amount template owner sets up once, then "generates" into real expense
+  // rows for whichever month, instead of retyping the same-ish bills by hand
+  // every cutoff. `fixedRemote` is what's saved; `fixedDraft` is the editable
+  // copy so a Firestore update mid-typing can't overwrite what's on screen —
+  // it is only taken from fixedRemote when the setup panel is (re)opened.
+  // `rent` is kept apart from `amounts` on purpose: rent is a monthly figure
+  // that gets divided by that month's day count and multiplied by the days
+  // the branch actually operated, so it changes between a 28/30/31-day month
+  // and whenever a branch wasn't open the whole month — the other bills
+  // (CUSA, Electricity, Water, etc.) just post their flat monthly amount.
+  const [fixedRemote,setFixedRemote]=useState({items:[],amounts:{},rent:{}});
+  const [fixedDraft,setFixedDraft]=useState(null);
+  const [fixedSetupOpen,setFixedSetupOpen]=useState(false);
+  const [fixedSaving,setFixedSaving]=useState(false);
+  const [fixedGenOpen,setFixedGenOpen]=useState(false);
+  const [fixedGenMonth,setFixedGenMonth]=useState(()=>localDate().slice(0,7));
+  const [fixedGenBranches,setFixedGenBranches]=useState({});
+  const [fixedGenDays,setFixedGenDays]=useState({});    // branchId -> operating days this month, for rent proration
+  const [fixedGenBusy,setFixedGenBusy]=useState(false);
+  useEffect(()=>{
+    const unsub=onSnapshot(doc(db,"settings","fixedExpenses"),snap=>{
+      const d=snap.exists()?snap.data():{};
+      setFixedRemote({items:Array.isArray(d.items)?d.items:[],
+        amounts:d.amounts||{},rent:d.rent||{}});
+    },onErr("fixedExpenses"));
+    return()=>unsub();
+  },[]);
+  // Tax (3%) and Sinking Fund (10%) are both taken on Operating Income —
+  // confirmed against Norman's own tracked figures. Sinking Fund and the
+  // Tita Lorna profit share are each optional, remembered locally so the
+  // on/off choice survives a refresh.
+  const [plSinkOn,setPlSinkOn]=useState(()=>{
+    try{ return localStorage.getItem("plSinkOn")!=="0"; }catch(e){ return true; }
+  });
+  const [plShareOn,setPlShareOn]=useState(()=>{
+    try{ return localStorage.getItem("plShareOn")!=="0"; }catch(e){ return true; }
+  });
+  const setPlSinkOnPersist=(v)=>{ setPlSinkOn(v);
+    try{ localStorage.setItem("plSinkOn",v?"1":"0"); }catch(e){} };
+  const setPlShareOnPersist=(v)=>{ setPlShareOn(v);
+    try{ localStorage.setItem("plShareOn",v?"1":"0"); }catch(e){} };
   // Chain-wide P&L. Sales come from `orders`, which the owner already holds
   // for every branch — but expenses and POs do not: their listeners are a
   // bare limit(100), which Firestore fills with an ARBITRARY hundred once a
@@ -16979,6 +17028,32 @@ function App(){
           const iv=await getDocs(collection(db,invColFor(bid)));
           out.value=invValueOf(iv.docs.map(d=>d.data()));
         }catch(e){ out.valueErr=String((e&&e.message)||e); }
+        // Opening/closing stock value — the same "opening inventory +
+        // purchases − ending inventory" method the single-branch statement
+        // already uses, now read for every branch instead of only the one
+        // the owner happens to be signed in as. Daily snapshots are auto-
+        // captured (see saveStockSnapshot), so this is usually just reading
+        // what is already there, not asking anyone to count anything.
+        try{
+          const ss=await getDocs(query(collection(db,"stock_snapshots"),
+            where("branch","==",bid)));
+          const snapRows=[];
+          ss.docs.forEach(function(d){
+            const v=d.data()||{};
+            const day=v.date||(v.month?lastDayOf(v.month):null);
+            if(!day)return;
+            snapRows.push({date:day,value:Number(v.value)||0});
+          });
+          const openSnap=snapshotOn(snapRows,dayBefore(R.from));
+          const closeSnap=snapshotOn(snapRows,R.to);
+          out.openValue=openSnap?openSnap.value:null;
+          out.openDate=openSnap?openSnap.date:null;
+          // "Today" is the live reading just taken above; a finished period
+          // uses whatever was captured by its last day and nothing later.
+          const isCurrentPeriod=(R.to>=localDate());
+          out.closeValue=isCurrentPeriod?out.value
+            :(closeSnap?closeSnap.value:null);
+        }catch(e){ out.snapErr=String((e&&e.message)||e); }
         by[bid]=out;
       }
       setPlStock({key:key,loading:false,by:by});
@@ -21348,6 +21423,319 @@ function App(){
           return h("div",null,
           h(SectionHeader,{title:"Expenses",action:()=>setModal("add_exp"),actionLabel:"Add Expense"}),
 
+          // ── FIXED/RECURRING EXPENSES (CUSA, Electricity, Water, etc.) ──
+          // Owner sets one amount per branch per bill here, then "generates"
+          // them into real expense rows for whichever month — instead of
+          // retyping roughly-the-same figures every cutoff.
+          user.role==="owner"&&h("div",{style:{display:"flex",gap:8,
+            marginBottom:10,flexWrap:"wrap"}},
+            h("button",{
+              onClick:()=>{
+                if(!fixedSetupOpen){
+                  const base=JSON.parse(JSON.stringify(fixedRemote));
+                  // First time anyone opens this: seed the usual bills so
+                  // there's something to fill in instead of a blank table.
+                  // Rent is not in this list — it has its own field below.
+                  if(!(base.items||[]).length){
+                    base.items=["CUSA","Aircon","Electricity","Water","POS",
+                      "Exhaust Cleaning","Internet"].map(function(nm,i){
+                        return {id:"fx_default_"+i,name:nm,cat:"Utilities"};
+                      });
+                  }
+                  setFixedDraft(base);
+                }
+                setFixedSetupOpen(v=>!v); setFixedGenOpen(false);
+              },
+              style:{padding:"7px 13px",borderRadius:8,fontSize:13,fontWeight:700,
+                cursor:"pointer",
+                border:"1px solid "+(fixedSetupOpen?C.primary:C.border),
+                background:fixedSetupOpen?"#F3E9F7":"#fff",
+                color:fixedSetupOpen?C.primary:C.text}},
+              "⚙️ Fixed Expenses Setup"),
+            h("button",{
+              onClick:()=>{
+                if(!fixedGenOpen){
+                  const init={};
+                  (branches||[]).filter(b=>b.id!=="ct-main").forEach(b=>{init[b.id]=true;});
+                  setFixedGenBranches(init);
+                  const dInit={};
+                  const dim=daysInMonth(fixedGenMonth);
+                  (branches||[]).filter(b=>b.id!=="ct-main").forEach(b=>{dInit[b.id]=dim;});
+                  setFixedGenDays(dInit);
+                }
+                setFixedGenOpen(v=>!v); setFixedSetupOpen(false);
+              },
+              disabled:!fixedRemote.items.length&&!Object.keys(fixedRemote.rent||{}).length,
+              style:{padding:"7px 13px",borderRadius:8,fontSize:13,fontWeight:700,
+                cursor:(fixedRemote.items.length||Object.keys(fixedRemote.rent||{}).length)?"pointer":"not-allowed",
+                border:"1px solid "+(fixedGenOpen?C.primary:C.border),
+                background:fixedGenOpen?"#F3E9F7":((fixedRemote.items.length||Object.keys(fixedRemote.rent||{}).length)?"#fff":"#F5F5F5"),
+                color:fixedGenOpen?C.primary:((fixedRemote.items.length||Object.keys(fixedRemote.rent||{}).length)?C.text:C.muted)}},
+              "⚡ Generate Fixed Expenses"+((!fixedRemote.items.length&&!Object.keys(fixedRemote.rent||{}).length)
+                ?" (mag-setup muna)":""))),
+
+          fixedSetupOpen&&fixedDraft&&(function(){
+            const items=fixedDraft.items||[];
+            const amts=fixedDraft.amounts||{};
+            const setAmt=(bid,itemId,v)=>{
+              const next=JSON.parse(JSON.stringify(fixedDraft));
+              next.amounts=next.amounts||{};
+              next.amounts[bid]=next.amounts[bid]||{};
+              next.amounts[bid][itemId]=v;
+              setFixedDraft(next);
+            };
+            const addItem=()=>{
+              const name=(prompt("Pangalan ng bagong fixed bill (hal. CUSA, Electricity, Water, Internet):")||"").trim();
+              if(!name)return;
+              const next=JSON.parse(JSON.stringify(fixedDraft));
+              next.items=next.items||[];
+              next.items.push({id:"fx_"+Date.now()+"_"+Math.random().toString(36).slice(2,6),
+                name:name,cat:"Utilities"});
+              setFixedDraft(next);
+            };
+            const removeItem=(itemId)=>{
+              if(!confirm("Tanggalin ang bill na ito sa setup? (Hindi magagalaw ang mga naka-generate na expense dati)"))return;
+              const next=JSON.parse(JSON.stringify(fixedDraft));
+              next.items=(next.items||[]).filter(it=>it.id!==itemId);
+              setFixedDraft(next);
+            };
+            const rent=fixedDraft.rent||{};
+            const setRent=(bid,v)=>{
+              const next=JSON.parse(JSON.stringify(fixedDraft));
+              next.rent=next.rent||{};
+              next.rent[bid]=v;
+              setFixedDraft(next);
+            };
+            return h("div",{style:{background:"#F3E9F7",
+              border:"1px solid "+C.primary,borderRadius:10,padding:"12px 14px",
+              marginBottom:12}},
+              h("div",{style:{fontSize:13,fontWeight:800,color:C.primary,
+                marginBottom:4}},"🏠 Rent — buwanang halaga per branch:"),
+              h("div",{style:{fontSize:11,color:C.muted,marginBottom:8}},
+                "Hinahati ito sa bilang ng araw ng buwan tapos imu-multiply sa "
+                +"operating days — ibang halaga depende sa buwan at kung ilang "
+                +"araw bukas ang branch."),
+              h("div",{style:{display:"flex",gap:10,flexWrap:"wrap",
+                marginBottom:14}},
+                (branches||[]).filter(b=>b.id!=="ct-main").map(b=>
+                  h("div",{key:b.id,style:{background:"#fff",
+                    border:"1px solid "+C.border,borderRadius:8,
+                    padding:"6px 10px"}},
+                    h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,
+                      marginBottom:3}},b.name||b.full||b.id),
+                    h("input",{type:"number",onFocus:e=>e.target.select(),
+                      value:rent[b.id]!=null?rent[b.id]:"",
+                      onChange:e=>setRent(b.id,e.target.value===""?"":Number(e.target.value)),
+                      placeholder:"₱/buwan",
+                      style:{width:100,padding:"4px 6px",textAlign:"right",
+                        border:"1px solid "+C.border,borderRadius:6,fontSize:13}}))) ),
+              h("div",{style:{fontSize:13,fontWeight:800,color:C.primary,
+                marginBottom:8}},"Ibang bills — flat na buwanang halaga, per branch:"),
+              !items.length&&h("div",{style:{fontSize:13,color:C.muted,
+                marginBottom:10}},"Wala pang naka-setup na bill. Mag-dagdag sa ibaba."),
+              items.length>0&&h("div",{style:{overflowX:"auto",marginBottom:10}},
+                h("table",{style:{borderCollapse:"collapse",fontSize:13,
+                  background:"#fff",borderRadius:8,overflow:"hidden"}},
+                  h("thead",null,h("tr",null,
+                    h("th",{style:{padding:"8px 10px",textAlign:"left",
+                      fontSize:11,color:C.muted,borderBottom:"1px solid "+C.border}},
+                      "BRANCH"),
+                    items.map(it=>h("th",{key:it.id,style:{padding:"8px 10px",
+                      textAlign:"center",fontSize:11,color:C.muted,
+                      borderBottom:"1px solid "+C.border,whiteSpace:"nowrap"}},
+                      it.name,
+                      h("div",null,h("button",{onClick:()=>removeItem(it.id),
+                        style:{border:"none",background:"none",color:C.danger,
+                          fontSize:10,cursor:"pointer",padding:0,marginTop:2}},
+                        "✕ tanggalin")))),
+                    h("th",{style:{padding:"8px 10px",borderBottom:"1px solid "+C.border}}))),
+                  h("tbody",null,
+                    (branches||[]).filter(b=>b.id!=="ct-main").map(b=>
+                      h("tr",{key:b.id},
+                        h("td",{style:{padding:"7px 10px",fontWeight:700,
+                          whiteSpace:"nowrap",borderBottom:"1px solid #f5f5f5"}},
+                          b.name||b.full||b.id),
+                        items.map(it=>h("td",{key:it.id,style:{padding:"5px 8px",
+                          borderBottom:"1px solid #f5f5f5"}},
+                          h("input",{type:"number",onFocus:e=>e.target.select(),
+                            value:(amts[b.id]&&amts[b.id][it.id])!=null?amts[b.id][it.id]:"",
+                            onChange:e=>setAmt(b.id,it.id,e.target.value===""?"":Number(e.target.value)),
+                            placeholder:"0",
+                            style:{width:90,padding:"4px 6px",textAlign:"right",
+                              border:"1px solid "+C.border,borderRadius:6,fontSize:13}})))))
+                  ))),
+              h("div",{style:{display:"flex",gap:8,alignItems:"center"}},
+                h("button",{onClick:addItem,
+                  style:{padding:"6px 10px",borderRadius:7,fontSize:12,
+                    border:"1px solid "+C.border,background:"#fff",
+                    cursor:"pointer"}},"+ Dagdag na bill"),
+                h("button",{
+                  disabled:fixedSaving,
+                  onClick:async()=>{
+                    try{
+                      setFixedSaving(true);
+                      await setDoc(doc(db,"settings","fixedExpenses"),{
+                        items:fixedDraft.items||[],
+                        amounts:fixedDraft.amounts||{},
+                        rent:fixedDraft.rent||{},
+                        updatedBy:user.name,updatedAt:serverTimestamp()
+                      });
+                      showT("Na-save ang Fixed Expenses setup ✓","ok");
+                      setFixedSetupOpen(false);
+                    }catch(e){ showT("Failed: "+String(e&&e.message||e).slice(0,60),"err"); }
+                    finally{ setFixedSaving(false); }
+                  },
+                  style:{padding:"6px 14px",borderRadius:7,fontSize:12,
+                    fontWeight:700,cursor:fixedSaving?"wait":"pointer",border:"none",
+                    background:fixedSaving?"#D8C2E8":C.primary,color:"#fff"}},
+                  fixedSaving?"Saving...":"💾 I-save ang Setup"),
+                h("button",{onClick:()=>setFixedSetupOpen(false),
+                  style:{padding:"6px 10px",borderRadius:7,fontSize:12,
+                    border:"none",background:"none",color:C.muted,
+                    cursor:"pointer",textDecoration:"underline"}},"Isara")));
+          })(),
+
+          fixedGenOpen&&(function(){
+            const items=fixedRemote.items||[];
+            const amts=fixedRemote.amounts||{};
+            const rent=fixedRemote.rent||{};
+            const dim=daysInMonth(fixedGenMonth);
+            const targets=(branches||[]).filter(b=>b.id!=="ct-main"
+              &&fixedGenBranches[b.id]);
+            // What would actually post: skip branch+bill with no amount set,
+            // and skip anything already generated for this month so re-opening
+            // this panel never creates a duplicate.
+            const already={};
+            expenses.forEach(e=>{ if(e.fixedGenKey)already[e.fixedGenKey]=true; });
+            const plan=[];
+            targets.forEach(b=>{
+              items.forEach(it=>{
+                const amt=Number((amts[b.id]||{})[it.id])||0;
+                if(amt<=0)return;
+                const key=b.id+"_"+it.id+"_"+fixedGenMonth;
+                plan.push({branch:b,desc:it.name,cat:it.cat||"Utilities",
+                  amount:amt,key:key,dup:!!already[key]});
+              });
+              // Rent: monthly ÷ days in this month × operating days — a full
+              // month's worth of operating days gives back the flat monthly
+              // figure; fewer days (branch closed part of the month) gives
+              // less.
+              const monthlyRent=Number(rent[b.id])||0;
+              if(monthlyRent>0){
+                const opDays=Math.max(0,Math.min(dim,
+                  Number(fixedGenDays[b.id])!=null&&fixedGenDays[b.id]!==""
+                    ?Number(fixedGenDays[b.id]):dim));
+                const rentAmt=Math.round((monthlyRent/dim)*opDays*100)/100;
+                if(rentAmt>0){
+                  const key=b.id+"_rent_"+fixedGenMonth;
+                  plan.push({branch:b,
+                    desc:"Rent ("+opDays+"/"+dim+" days)",cat:"Rent",
+                    amount:rentAmt,key:key,dup:!!already[key]});
+                }
+              }
+            });
+            const toPost=plan.filter(p=>!p.dup);
+            const dupCount=plan.length-toPost.length;
+            const total=toPost.reduce((s,p)=>s+p.amount,0);
+            return h("div",{style:{background:"#F3E9F7",
+              border:"1px solid "+C.primary,borderRadius:10,padding:"12px 14px",
+              marginBottom:12}},
+              h("div",{style:{display:"flex",gap:10,flexWrap:"wrap",
+                alignItems:"center",marginBottom:10}},
+                h("div",{style:{fontSize:13,fontWeight:800,color:C.primary}},
+                  "Generate para sa buwan:"),
+                h("input",{type:"month",value:fixedGenMonth,
+                  onChange:e=>{
+                    const mk=e.target.value;
+                    setFixedGenMonth(mk);
+                    const nd=daysInMonth(mk);
+                    setFixedGenDays(p=>{
+                      const next=Object.assign({},p);
+                      Object.keys(next).forEach(function(bid){
+                        // Only reset a day count that was still the default
+                        // (full month) — a manually-typed figure is kept.
+                        if(next[bid]===dim)next[bid]=nd;
+                      });
+                      return next;
+                    });
+                  },
+                  style:{padding:"6px 9px",borderRadius:7,fontSize:13,
+                    border:"1px solid "+C.border}})),
+              h("div",{style:{fontSize:12,fontWeight:800,color:C.muted,
+                marginBottom:6}},"Piliin ang branch at operating days ("+dim
+                +" araw ang "+fixedGenMonth+"):"),
+              h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",
+                marginBottom:10}},
+                (branches||[]).filter(b=>b.id!=="ct-main").map(b=>
+                  h("div",{key:b.id,style:{display:"flex",gap:6,
+                    alignItems:"center",fontSize:13,
+                    background:"#fff",border:"1px solid "+C.border,
+                    borderRadius:7,padding:"5px 10px"}},
+                    h("label",{style:{display:"flex",gap:5,
+                      alignItems:"center",cursor:"pointer"}},
+                      h("input",{type:"checkbox",checked:!!fixedGenBranches[b.id],
+                        onChange:e=>setFixedGenBranches(p=>Object.assign({},p,
+                          {[b.id]:e.target.checked}))}),
+                      "🏪 "+(b.name||b.full||b.id)),
+                    (Number(rent[b.id])>0)&&h("input",{type:"number",
+                      onFocus:e=>e.target.select(),
+                      value:fixedGenDays[b.id]!=null?fixedGenDays[b.id]:dim,
+                      min:0,max:dim,
+                      onChange:e=>setFixedGenDays(p=>Object.assign({},p,
+                        {[b.id]:e.target.value})),
+                      title:"Operating days (for Rent proration)",
+                      style:{width:48,padding:"3px 5px",textAlign:"center",
+                        border:"1px solid "+C.border,borderRadius:6,
+                        fontSize:12}}))) ),
+              h("div",{style:{fontSize:13,marginBottom:10}},
+                toPost.length
+                  ?(toPost.length+" expense(s) ang igegenerate, total ₱"+peso(total)
+                    +(dupCount?("  ·  "+dupCount+" na-generate na dati sa buwang ito (lalaktawan)"):""))
+                  :(dupCount
+                    ?("Pareho na — lahat ng "+dupCount+" naka-generate na para sa buwang ito")
+                    :"Walang amount na naka-set para sa napiling branch — pumunta sa Fixed Expenses Setup muna.")),
+              h("div",{style:{display:"flex",gap:8}},
+                h("button",{
+                  disabled:!toPost.length||fixedGenBusy,
+                  onClick:async()=>{
+                    try{
+                      setFixedGenBusy(true);
+                      if(!confirm("I-post bilang Expenses ang "+toPost.length
+                        +" bill(s), total ₱"+peso(total)+", petsa "+fixedGenMonth+"-01?"))
+                        { setFixedGenBusy(false); return; }
+                      let ok=0,bad=0;
+                      for(const p of toPost){
+                        try{
+                          await addDoc(collection(db,"expenses"),{
+                            branch:p.branch.id,cat:p.cat,
+                            desc:p.desc+" (fixed, auto-generated)",
+                            amount:p.amount,date:fixedGenMonth+"-01",
+                            status:"approved",approvedBy:user.name,
+                            approvedAt:serverTimestamp(),
+                            by:user.name,enteredOn:serverTimestamp(),
+                            fixedGenKey:p.key,autoFixed:true
+                          });
+                          ok++;
+                        }catch(e){ bad++; console.warn("fixed gen",p.key,e); }
+                      }
+                      showT(ok+" fixed expense(s) na-post"+(bad?"  ·  "+bad+" bigo":""),
+                        bad?"warn":"ok");
+                      setFixedGenOpen(false);
+                    }catch(e){ showT("Failed: "+String(e&&e.message||e).slice(0,60),"err"); }
+                    finally{ setFixedGenBusy(false); }
+                  },
+                  style:{padding:"7px 16px",borderRadius:7,fontSize:13,
+                    fontWeight:700,cursor:(!toPost.length||fixedGenBusy)?"default":"pointer",
+                    border:"none",
+                    background:(!toPost.length||fixedGenBusy)?"#D8C2E8":C.primary,
+                    color:"#fff"}},
+                  fixedGenBusy?"Posting...":"⚡ I-generate"),
+                h("button",{onClick:()=>setFixedGenOpen(false),
+                  style:{padding:"7px 10px",borderRadius:7,fontSize:12,
+                    border:"none",background:"none",color:C.muted,
+                    cursor:"pointer",textDecoration:"underline"}},"Isara")));
+          })(),
+
           h("div",{style:{display:"flex",gap:8,marginBottom:12,alignItems:"center",
             flexWrap:"wrap"}},
             // The owner reads every branch here, which is the point — but with
@@ -23466,9 +23854,30 @@ function App(){
               .reduce(function(a,po){return a+poValue(po);},0)*100)/100;
             const st=(_sKey&&_sKey.by)?_sKey.by[bid]:null;
             const mc=manualSrc?manualCogsFor(bOrders):null;
+            // Opening stock + purchases − ending stock, same priority order
+            // as the single-branch statement: the movement figure is the
+            // actual cost when a reading exists on both ends of the period;
+            // the BOM/manual figure is only the fallback for a branch that
+            // has no snapshot yet (or the period is too new to have one).
+            const bHasMove=!!(st&&st.openValue!=null&&st.closeValue!=null);
+            const bMoveCogs=bHasMove
+              ?Math.round((st.openValue+bPO-st.closeValue)*100)/100:null;
+            const bBomCogs=manualSrc?mc.cogs:(st?st.cogs:null);
+            const bCogs=(bMoveCogs!=null)?bMoveCogs:bBomCogs;
+            // Same formula as the single-branch statement's "Left after
+            // branch costs": sales minus cost of goods minus every branch
+            // expense (which already includes CA/loan, and — once Fixed
+            // Expenses are generated — the recurring bills too). Needs cost
+            // of goods loaded first, same as that column; until then this
+            // stays a dash rather than a number that leaves out COGS.
+            const bNet=(bCogs!=null)
+              ?Math.round((bSales-bCogs-bExp)*100)/100 : null;
             return {b:b,sales:bSales,gross:bGross,disc:bDisc,
               exp:bExp,ca:bCA,po:bPO,txns:bOrders.length,
-              cogs:manualSrc?mc.cogs:(st?st.cogs:null),
+              cogs:bCogs,cogsFromMove:bMoveCogs!=null,
+              openValue:st?st.openValue:null,
+              openDate:st?st.openDate:null,
+              net:bNet,
               uncosted:manualSrc?mc.missing:(st?st.uncosted:0),
               value:st?st.value:null};
           }).sort(function(x,y){return y.sales-x.sales;});
@@ -23489,10 +23898,16 @@ function App(){
             a.sales+=r.sales; a.exp+=r.exp; a.po+=r.po; a.txns+=r.txns;
             if(r.cogs!=null){a.cogs+=r.cogs; a.anyCogs=true;}
             if(r.value!=null){a.value+=r.value; a.anyValue=true;}
+            if(r.net!=null)a.net+=r.net; else a.netIncomplete=true;
             return a;
-          },{sales:0,exp:0,po:0,txns:0,cogs:0,value:0,anyCogs:false,anyValue:false});
+          },{sales:0,exp:0,po:0,txns:0,cogs:0,net:0,value:0,
+             anyCogs:false,anyValue:false,netIncomplete:false});
+          // A total is only trustworthy once every row has it — one branch
+          // still missing cost of goods would otherwise understate the sum
+          // and look like a real (lower) figure instead of a partial one.
+          const allNet=wideRows.length>0&&!wTot.netIncomplete;
 
-          const COLW="1fr 106px 100px 100px 100px 104px";
+          const COLW="1fr 106px 100px 100px 100px 104px 110px";
           const cell=(v,style)=>h("div",{style:Object.assign(
             {fontSize:13,textAlign:"right"},style||{})},v);
           const money=(v)=>"₱"+peso(v);
@@ -23576,7 +23991,8 @@ function App(){
             h("div",{style:{display:"grid",gridTemplateColumns:COLW,gap:8,
               padding:"8px 14px",background:"#fafafa",
               borderBottom:"1px solid "+C.border}},
-              ["BRANCH","SALES","COST OF GOODS","PURCHASED","EXPENSES","ITEM VALUE"]
+              ["BRANCH","SALES","COST OF GOODS","PURCHASED","EXPENSES",
+               "ITEM VALUE","NET INCOME"]
                 .map((hh,i)=>h("div",{key:hh,style:{fontSize:10,fontWeight:700,
                   color:C.muted,letterSpacing:1,
                   textAlign:i?"right":"left"}},hh))),
@@ -23600,10 +24016,14 @@ function App(){
                   h("div",{style:{fontSize:13,
                     color:r.cogs==null?C.muted:C.text}},
                     r.cogs==null?"—":money(r.cogs)),
-                  (r.cogs!=null&&r.uncosted>0)
-                    ? h("div",{style:{fontSize:10,color:C.warning}},
-                        r.uncosted+" uncosted")
-                    : null),
+                  r.cogsFromMove
+                    ? h("div",{style:{fontSize:10,color:C.muted}},
+                        "opening "+money(r.openValue)
+                        +(r.openDate?(" ("+r.openDate+")"):""))
+                    : ((r.cogs!=null&&r.uncosted>0)
+                        ? h("div",{style:{fontSize:10,color:C.warning}},
+                            r.uncosted+" uncosted")
+                        : null)),
                 cell(money(r.po),{color:r.po>0?C.text:C.muted}),
                 h("div",{style:{textAlign:"right"}},
                   h("div",{style:{fontSize:13,
@@ -23611,7 +24031,14 @@ function App(){
                   r.ca>0?h("div",{style:{fontSize:10,color:C.muted}},
                     "incl. CA/loan "+money(r.ca)):null),
                 cell(r.value==null?"—":money(r.value),
-                  {color:r.value==null?C.muted:C.info})
+                  {color:r.value==null?C.muted:C.info}),
+                // Sales − cost of goods − expenses. The real take-home figure
+                // Norman is after — needs cost of goods loaded first (the
+                // button above), same as that column, so it is a dash until
+                // then rather than a number quietly missing COGS.
+                cell(r.net==null?"—":money(r.net),
+                  {fontWeight:800,
+                   color:r.net==null?C.muted:(r.net>=0?C.success:C.danger)})
               );
             }),
             h("div",{style:{display:"grid",gridTemplateColumns:COLW,gap:8,
@@ -23623,7 +24050,77 @@ function App(){
               cell(money(wTot.po),{fontWeight:800}),
               cell(money(wTot.exp),{fontWeight:800}),
               cell(wTot.anyValue?money(wTot.value):"—",
-                {fontWeight:800,color:C.info})),
+                {fontWeight:800,color:C.info}),
+              cell(allNet?money(wTot.net):"—",
+                {fontWeight:900,color:allNet?(wTot.net>=0?C.success:C.danger):C.muted})),
+
+            // ── COMPANY SUMMARY: tax, sinking fund, Tita Lorna's share ──
+            // Tax and Sinking Fund are both taken on OPERATING INCOME (same
+            // figure as the NET INCOME total above, before tax/sinking fund/
+            // sharing) — confirmed against Norman's own tracked numbers, not
+            // against Sales. Tita Lorna's share runs on what's left AFTER
+            // tax and sinking fund, and she shares a loss too, same as a
+            // profit, so this is never floored at zero.
+            (function(){
+              const opInc=allNet?wTot.net:null;
+              const tax=opInc!=null?Math.round(opInc*0.03*100)/100:null;
+              const sink=(opInc!=null&&plSinkOn)
+                ?Math.round(opInc*0.10*100)/100:(opInc!=null?0:null);
+              const netAfter=opInc!=null
+                ?Math.round((opInc-tax-sink)*100)/100:null;
+              const share=(netAfter!=null&&plShareOn)
+                ?Math.round(netAfter*0.30*100)/100:(netAfter!=null?0:null);
+              const commi=Math.round(wTot.po*0.30*100)/100;
+              const srow=(label,val,opts)=>{
+                opts=opts||{};
+                return h("div",{key:label,style:{display:"flex",
+                  justifyContent:"space-between",alignItems:"center",
+                  padding:"6px 14px",
+                  borderTop:opts.rule?("1px solid "+C.border):"none",
+                  background:opts.bg||"transparent"}},
+                  h("div",{style:{fontSize:13,
+                    fontWeight:opts.big?800:600,
+                    color:opts.sub?C.muted:C.text}},label),
+                  h("div",{style:{display:"flex",gap:8,alignItems:"center"}},
+                    opts.toggle!=null&&h("label",{style:{display:"flex",
+                      gap:4,alignItems:"center",fontSize:11,color:C.muted,
+                      cursor:"pointer"}},
+                      h("input",{type:"checkbox",checked:opts.toggle,
+                        onChange:opts.onToggle}),"isama"),
+                    h("div",{style:{fontSize:opts.big?15:13,
+                      fontWeight:opts.big?900:700,minWidth:100,
+                      textAlign:"right",
+                      color:opts.color||C.text}},
+                      val==null?"—":((val<0?"−":"")+money(Math.abs(val))))));
+              };
+              return h("div",{style:{borderTop:"2px solid "+C.border}},
+                srow("OPERATING INCOME",opInc,{rule:true,big:true}),
+                srow("Tax (3% of Operating Income)",tax!=null?-tax:null,
+                  {color:C.danger}),
+                srow("Sinking Fund (10% of Operating Income)",
+                  sink?-sink:(opInc!=null?0:null),
+                  {color:C.danger,toggle:plSinkOn,
+                   onToggle:e=>setPlSinkOnPersist(e.target.checked)}),
+                srow("NET INCOME",netAfter,{rule:true,big:true,
+                  color:netAfter!=null?(netAfter>=0?C.success:C.danger):C.muted}),
+                srow("Net Income Sharing — Tita Lorna (30%)",
+                  netAfter!=null?share:null,
+                  {color:(share||0)>=0?C.text:C.danger,
+                   toggle:plShareOn,
+                   onToggle:e=>setPlShareOnPersist(e.target.checked)}),
+                srow("Commi Income (30% of Purchases)",commi,
+                  {rule:true,sub:true,color:C.info}),
+                h("div",{style:{padding:"0 14px 9px",fontSize:11,
+                  color:C.muted}},
+                  "Reference lang ang Commi Income — hindi ito ibinabawas o "
+                  +"idinadagdag sa NET INCOME sa itaas."),
+                !allNet&&h("div",{style:{padding:"9px 14px",fontSize:11,
+                  color:C.warning}},
+                  "Dash kasi hindi pa kumpleto ang COST OF GOODS sa lahat ng "
+                  +"kasamang branch — i-tap ang \"📦 Load cost of goods & "
+                  +"stock value\" sa itaas."));
+            })(),
+
             _orphans.length?h("div",{style:{padding:"10px 14px",
               background:C.warning+"14",borderTop:"1px solid "+C.warning,
               fontSize:12,lineHeight:1.6}},
@@ -23647,12 +24144,23 @@ function App(){
               +"period above. "
               +"EXPENSES includes cash advances and cash loans released to "
               +"crew, counted on the day they were released. COST OF GOODS is "
+              +"opening stock value + purchases − ending stock value when a "
+              +"branch has a snapshot on both ends of the period (shown as "
+              +"\"opening ₱… (date)\" under the figure) — the same method as "
+              +"the single-branch statement. A branch with no snapshot yet "
+              +"falls back to "
               +(manualSrc
-                 ? "the cost set on each menu item, so it needs no loading."
-                 : "read from the BOM at FIFO prices, one collection per "
-                   +"branch, so it waits for the button.")
+                 ? "the cost set on each menu item."
+                 : "the BOM at FIFO prices.")
+              +" Opening values are captured automatically once a day, so "
+              +"this fills itself in over time without anyone counting "
+              +"anything by hand."
               +" ITEM VALUE is the stock on the shelf right now — a reading "
-              +"of today, not of the period, whichever dates are chosen.",
+              +"of today, not of the period, whichever dates are chosen. "
+              +"NET INCOME is SALES minus COST OF GOODS minus EXPENSES — "
+              +"shows a dash until cost of goods is loaded for every branch "
+              +"in the list, so the total is never short by a branch that "
+              +"just hasn't been read yet.",
               _wErr?h("div",{style:{color:C.danger,marginTop:4}},
                 "Could not load this period — "+String(_wErr).slice(0,90)):null,
               _sKey&&_sKey.err?h("div",{style:{color:C.danger,marginTop:4}},
