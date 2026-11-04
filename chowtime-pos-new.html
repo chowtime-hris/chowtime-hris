@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261104-174500 -->
+<!-- BUILD:20261104-182800 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -9078,7 +9078,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261104-174500";
+const BUILD = "20261104-182800";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -23720,18 +23720,32 @@ function App(){
           const cogsFinal = (src==="manual") ? manualCogs : fifoCogs;
           const uncostedList=Object.keys(uncostedNames);
 
-          const exp=expenses
+          const periodExp=expenses
             .filter(e=>e.branch===branchId
-              &&String(e.date||"")>=R.from&&String(e.date||"")<=R.to)
+              &&String(e.date||"")>=R.from&&String(e.date||"")<=R.to);
+          const exp=periodExp
             .reduce((a,e)=>a+(Number(e.amount)||0),0);
           const expRows={};
-          expenses
-            .filter(e=>e.branch===branchId
-              &&String(e.date||"")>=R.from&&String(e.date||"")<=R.to)
-            .forEach(e=>{
+          periodExp.forEach(e=>{
               const k=e.category||e.type||"Other";
               expRows[k]=(expRows[k]||0)+(Number(e.amount)||0);
             });
+          // Same Daily vs Fixed split, and the same VAT/2307 markup, as the
+          // "All branches" table — bills posted through "⚡ Generate Fixed
+          // Expenses" never get VAT or the withholding tax entered as a
+          // separate expense, so it's added here on top of the base amount.
+          const fixedExpItems=periodExp.filter(e=>e.autoFixed);
+          const expFixed=Math.round(fixedExpItems
+            .reduce((a,e)=>a+(Number(e.amount)||0),0)*100)/100;
+          const expDaily=Math.round((exp-expFixed)*100)/100;
+          const rentBase=fixedExpItems.filter(e=>e.cat==="Rent")
+            .reduce((a,e)=>a+(Number(e.amount)||0),0);
+          const elecWaterBase=fixedExpItems.filter(e=>{
+              const d=String(e.desc||"");
+              return d.indexOf("Electricity")===0||d.indexOf("Water")===0;
+            }).reduce((a,e)=>a+(Number(e.amount)||0),0);
+          const expVat=Math.round(
+            (rentBase*0.17+elecWaterBase*0.12)*100)/100;
 
           // ── Cost of goods the second way: what actually left the shelf.
           //
@@ -23772,7 +23786,7 @@ function App(){
           // and becomes a check, shown apart from the arithmetic.
           const cogsUsed=(moveCogs!=null)?moveCogs:cogsFinal;
           const gross=sales-cogsUsed;
-          const left=gross-exp;
+          const left=gross-exp-expVat;
           const pct=(v)=>sales>0?((v/sales)*100).toFixed(1)+"%":"—";
 
           const line=(label,value,opts)=>{
@@ -24478,8 +24492,13 @@ function App(){
                   borderTop:"1px solid "+C.border}},"EXPENSES"),
                 Object.keys(expRows).sort((a,b)=>expRows[b]-expRows[a])
                   .map(k=>line(k,-expRows[k],{sub:true}))),
-              line("Total expenses",-exp,{rule:true,
-                color:exp>0?C.danger:C.muted}),
+              line("Daily Operating Expenses & Purchases",-expDaily,
+                {sub:true}),
+              line("Monthly Fixed Expenses",-expFixed,{sub:true}),
+              expVat>0&&line("+ VAT 12% / 2307 Withholding 5% (Rent, "
+                +"Electricity, Water)",-expVat,{sub:true}),
+              line("Total expenses",-(exp+expVat),{rule:true,
+                color:(exp+expVat)>0?C.danger:C.muted}),
 
               line("Left after branch costs",left,{big:true,rule:true,
                 color:left>=0?C.success:C.danger})),
