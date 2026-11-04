@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261104-170500 -->
+<!-- BUILD:20261104-174500 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -9078,7 +9078,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261104-170500";
+const BUILD = "20261104-174500";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -23909,9 +23909,22 @@ function App(){
             // stays a dash rather than a number that leaves out COGS.
             const bNet=(bCogs!=null)
               ?Math.round((bSales-bCogs-bExp-bVatMarkup)*100)/100 : null;
+            // GROSS PROFIT is Sales minus Cost of Goods only — before any
+            // expense, same line as Norman's spreadsheet. FIXED is every
+            // bill posted through "⚡ Generate Fixed Expenses" (its base
+            // amount, VAT/2307 counted separately above); DAILY is
+            // everything else — day-to-day purchases, salaries, and CA/loan
+            // — so the two always add back up to EXPENSES.
+            const bGrossProfit=(bCogs!=null)
+              ?Math.round((bSales-bCogs)*100)/100:null;
+            const bExpFixed=Math.round(bFixedExp.reduce(function(a,e){
+              return a+(Number(e.amount)||0);},0)*100)/100;
+            const bExpDaily=Math.round((bExp-bExpFixed)*100)/100;
             return {b:b,sales:bSales,gross:bGross,disc:bDisc,
-              exp:bExp,ca:bCA,vat:bVatMarkup,po:bPO,txns:bOrders.length,
+              exp:bExp,expDaily:bExpDaily,expFixed:bExpFixed,
+              ca:bCA,vat:bVatMarkup,po:bPO,txns:bOrders.length,
               cogs:bCogs,cogsFromMove:bMoveCogs!=null,
+              grossProfit:bGrossProfit,
               openValue:st?st.openValue:null,
               openDate:st?st.openDate:null,
               net:bNet,
@@ -23933,19 +23946,23 @@ function App(){
 
           const wTot=wideRows.reduce(function(a,r){
             a.sales+=r.sales; a.exp+=r.exp; a.vat+=r.vat||0;
+            a.expDaily+=r.expDaily||0; a.expFixed+=r.expFixed||0;
             a.po+=r.po; a.txns+=r.txns;
-            if(r.cogs!=null){a.cogs+=r.cogs; a.anyCogs=true;}
+            if(r.cogs!=null){
+              a.cogs+=r.cogs; a.grossProfit+=r.grossProfit; a.anyCogs=true;
+            }
             if(r.value!=null){a.value+=r.value; a.anyValue=true;}
             if(r.net!=null)a.net+=r.net; else a.netIncomplete=true;
             return a;
-          },{sales:0,exp:0,vat:0,po:0,txns:0,cogs:0,net:0,value:0,
+          },{sales:0,exp:0,vat:0,expDaily:0,expFixed:0,po:0,txns:0,cogs:0,
+             grossProfit:0,net:0,value:0,
              anyCogs:false,anyValue:false,netIncomplete:false});
           // A total is only trustworthy once every row has it — one branch
           // still missing cost of goods would otherwise understate the sum
           // and look like a real (lower) figure instead of a partial one.
           const allNet=wideRows.length>0&&!wTot.netIncomplete;
 
-          const COLW="1fr 106px 100px 100px 100px 104px 110px";
+          const COLW="180px 106px 100px 100px 100px 112px 100px 110px";
           const cell=(v,style)=>h("div",{style:Object.assign(
             {fontSize:13,textAlign:"right"},style||{})},v);
           const money=(v)=>"₱"+peso(v);
@@ -24114,12 +24131,16 @@ function App(){
                   style:{padding:"6px 10px",borderRadius:7,fontSize:12,
                     border:"none",background:"none",color:C.muted,
                     cursor:"pointer",textDecoration:"underline"}},"Isara"))),
+            // Table scrolls sideways on a tablet rather than squeezing 8
+            // columns into the screen width.
+            h("div",{style:{overflowX:"auto"}},
+            h("div",{style:{minWidth:908}},
             // Header
             h("div",{style:{display:"grid",gridTemplateColumns:COLW,gap:8,
               padding:"8px 14px",background:"#fafafa",
               borderBottom:"1px solid "+C.border}},
-              ["BRANCH","SALES","COST OF GOODS","PURCHASED","EXPENSES",
-               "ITEM VALUE","NET INCOME"]
+              ["BRANCH","SALES","COST OF GOODS","GROSS PROFIT","PURCHASED",
+               "EXPENSES","ITEM VALUE","NET INCOME"]
                 .map((hh,i)=>h("div",{key:hh,style:{fontSize:10,fontWeight:700,
                   color:C.muted,letterSpacing:1,
                   textAlign:i?"right":"left"}},hh))),
@@ -24151,14 +24172,22 @@ function App(){
                         ? h("div",{style:{fontSize:10,color:C.warning}},
                             r.uncosted+" uncosted")
                         : null)),
+                // Sales minus cost of goods, before any expense — same line
+                // as "GROSS PROFIT" in Norman's spreadsheet.
+                cell(r.grossProfit==null?"—":money(r.grossProfit),
+                  {fontWeight:700,
+                   color:r.grossProfit==null?C.muted
+                     :(r.grossProfit>=0?C.text:C.danger)}),
                 cell(money(r.po),{color:r.po>0?C.text:C.muted}),
                 h("div",{style:{textAlign:"right"}},
                   h("div",{style:{fontSize:13,
                     color:r.exp>0?C.text:C.muted}},money(r.exp)),
-                  r.ca>0?h("div",{style:{fontSize:10,color:C.muted}},
-                    "incl. CA/loan "+money(r.ca)):null,
-                  r.vat>0?h("div",{style:{fontSize:10,color:C.muted}},
-                    "+VAT/2307 "+money(r.vat)+" (sa Net Income)"):null),
+                  h("div",{style:{fontSize:10,color:C.muted}},
+                    "Daily OpEx "+money(r.expDaily)
+                    +(r.ca>0?" (incl. CA/loan "+money(r.ca)+")":"")),
+                  r.expFixed>0?h("div",{style:{fontSize:10,color:C.muted}},
+                    "Monthly Fixed "+money(r.expFixed)
+                    +(r.vat>0?" +VAT/2307 "+money(r.vat):"")):null),
                 cell(r.value==null?"—":money(r.value),
                   {color:r.value==null?C.muted:C.info}),
                 // Sales − cost of goods − expenses. The real take-home figure
@@ -24176,12 +24205,19 @@ function App(){
               h("div",{style:{fontSize:13,fontWeight:900}},"TOTAL"),
               cell(money(wTot.sales),{fontWeight:900,color:C.primary}),
               cell(wTot.anyCogs?money(wTot.cogs):"—",{fontWeight:800}),
+              cell(wTot.anyCogs?money(wTot.grossProfit):"—",{fontWeight:800}),
               cell(money(wTot.po),{fontWeight:800}),
-              cell(money(wTot.exp),{fontWeight:800}),
+              h("div",{style:{textAlign:"right"}},
+                h("div",{style:{fontSize:13,fontWeight:800}},money(wTot.exp)),
+                h("div",{style:{fontSize:10,color:C.muted}},
+                  "Daily OpEx "+money(wTot.expDaily)
+                  +"  ·  Monthly Fixed "+money(wTot.expFixed)
+                  +(wTot.vat>0?" +VAT/2307 "+money(wTot.vat):""))),
               cell(wTot.anyValue?money(wTot.value):"—",
                 {fontWeight:800,color:C.info}),
               cell(allNet?money(wTot.net):"—",
                 {fontWeight:900,color:allNet?(wTot.net>=0?C.success:C.danger):C.muted})),
+            )),
 
             // ── COMPANY SUMMARY: tax, sinking fund, profit share ──
             // Tax and Sinking Fund are both taken on OPERATING INCOME (same
@@ -24231,13 +24267,14 @@ function App(){
               };
               return h("div",{style:{borderTop:"2px solid "+C.border}},
                 srow("OPERATING INCOME",opInc,{rule:true,big:true}),
-                srow("Tax ("+taxPct+"% of Operating Income)",
+                srow("Net Income TAX ("+taxPct+"%)",
                   tax!=null?-tax:null,{color:C.danger}),
-                srow("Sinking Fund ("+sinkPct+"% of Operating Income)",
+                srow("Net SINKING FUNDS ("+sinkPct+"%)",
                   sink?-sink:(opInc!=null?0:null),
                   {color:C.danger,toggle:plSinkOn,
                    onToggle:e=>setPlSinkOnPersist(e.target.checked)}),
-                srow("NET INCOME",netAfter,{rule:true,big:true,
+                srow("NET INCOME after taxed and sinking fund",netAfter,
+                  {rule:true,big:true,
                   color:netAfter!=null?(netAfter>=0?C.success:C.danger):C.muted}),
                 srow("Net Income Sharing — "+shareName+" ("+sharePct+"%)",
                   netAfter!=null?share:null,
@@ -24278,8 +24315,12 @@ function App(){
               +"under it is gross and the discount taken off, which is what a "
               +"Z-Reading calls Gross Sales. Purchases and expenses follow the "
               +"period above. "
-              +"EXPENSES includes cash advances and cash loans released to "
-              +"crew, counted on the day they were released. COST OF GOODS is "
+              +"GROSS PROFIT is SALES minus COST OF GOODS, before any expense. "
+              +"EXPENSES is split into Daily OpEx (day-to-day purchases, "
+              +"salaries, and cash advances/loans) and Monthly Fixed (bills "
+              +"posted through ⚡ Generate Fixed Expenses — Rent, CUSA, "
+              +"Aircon, Electricity, Water, POS, Exhaust Cleaning, Internet), "
+              +"counted on the day released or billed. COST OF GOODS is "
               +"opening stock value + purchases − ending stock value when a "
               +"branch has a snapshot on both ends of the period (shown as "
               +"\"opening ₱… (date)\" under the figure) — the same method as "
@@ -24293,12 +24334,15 @@ function App(){
               +"anything by hand."
               +" ITEM VALUE is the stock on the shelf right now — a reading "
               +"of today, not of the period, whichever dates are chosen. "
-              +"NET INCOME is SALES minus COST OF GOODS minus EXPENSES, minus "
-              +"VAT 12% and the 2307 withholding tax 5% on Rent, and VAT 12% "
-              +"on Electricity + Water — matching Norman's own spreadsheet, "
+              +"OPERATING INCOME (the NET INCOME column above) is GROSS "
+              +"PROFIT minus Daily OpEx minus Monthly Fixed, minus VAT 12% "
+              +"and the 2307 withholding tax 5% on Rent, and VAT 12% on "
+              +"Electricity + Water — matching Norman's own spreadsheet, "
               +"these never get posted as a separate expense so they're added "
               +"in here instead, only for bills posted through ⚡ Generate "
-              +"Fixed Expenses. "
+              +"Fixed Expenses. Net Income TAX and Net SINKING FUNDS, both "
+              +"below, run on this Operating Income, giving NET INCOME after "
+              +"taxed and sinking fund. "
               +"Shows a dash until cost of goods is loaded for every branch "
               +"in the list, so the total is never short by a branch that "
               +"just hasn't been read yet.",
