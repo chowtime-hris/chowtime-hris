@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261104-163000 -->
+<!-- BUILD:20261104-170500 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -9078,7 +9078,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261104-163000";
+const BUILD = "20261104-170500";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -23859,6 +23859,26 @@ function App(){
             const bExp=Math.round((((_w&&_w.expenses)||[])
               .filter(function(e){return e.branch===bid;})
               .reduce(function(a,e){return a+(Number(e.amount)||0);},0)+bCA)*100)/100;
+            // Rent and Electricity/Water, when posted by "⚡ Generate Fixed
+            // Expenses", are recorded at their base amount only — the way
+            // Norman's own spreadsheet works, VAT 12% and the 2307
+            // withholding tax 5% (rent only) sit on top of that base and are
+            // never paid out as a separate expense, so they are added here
+            // rather than written into the expense record itself. Matches
+            // every branch TAB in his reference workbook except the old
+            // "All branches" summary tab, which double-counted Electricity —
+            // a bug he asked fixed, not replicated.
+            const bFixedExp=(((_w&&_w.expenses)||[]))
+              .filter(function(e){return e.branch===bid&&e.autoFixed;});
+            const bRentBase=bFixedExp.filter(function(e){
+                return e.cat==="Rent";
+              }).reduce(function(a,e){return a+(Number(e.amount)||0);},0);
+            const bElecWaterBase=bFixedExp.filter(function(e){
+                const d=String(e.desc||"");
+                return d.indexOf("Electricity")===0||d.indexOf("Water")===0;
+              }).reduce(function(a,e){return a+(Number(e.amount)||0);},0);
+            const bVatMarkup=Math.round(
+              (bRentBase*0.17+bElecWaterBase*0.12)*100)/100;
             // Same test the single-branch statement uses, so the two agree.
             const bPO=Math.round(((_w&&_w.pos)||[])
               .filter(function(a){
@@ -23888,9 +23908,9 @@ function App(){
             // of goods loaded first, same as that column; until then this
             // stays a dash rather than a number that leaves out COGS.
             const bNet=(bCogs!=null)
-              ?Math.round((bSales-bCogs-bExp)*100)/100 : null;
+              ?Math.round((bSales-bCogs-bExp-bVatMarkup)*100)/100 : null;
             return {b:b,sales:bSales,gross:bGross,disc:bDisc,
-              exp:bExp,ca:bCA,po:bPO,txns:bOrders.length,
+              exp:bExp,ca:bCA,vat:bVatMarkup,po:bPO,txns:bOrders.length,
               cogs:bCogs,cogsFromMove:bMoveCogs!=null,
               openValue:st?st.openValue:null,
               openDate:st?st.openDate:null,
@@ -23912,12 +23932,13 @@ function App(){
             .reduce(function(a,o){return a+(Number(o.total)||0);},0)*100)/100;
 
           const wTot=wideRows.reduce(function(a,r){
-            a.sales+=r.sales; a.exp+=r.exp; a.po+=r.po; a.txns+=r.txns;
+            a.sales+=r.sales; a.exp+=r.exp; a.vat+=r.vat||0;
+            a.po+=r.po; a.txns+=r.txns;
             if(r.cogs!=null){a.cogs+=r.cogs; a.anyCogs=true;}
             if(r.value!=null){a.value+=r.value; a.anyValue=true;}
             if(r.net!=null)a.net+=r.net; else a.netIncomplete=true;
             return a;
-          },{sales:0,exp:0,po:0,txns:0,cogs:0,net:0,value:0,
+          },{sales:0,exp:0,vat:0,po:0,txns:0,cogs:0,net:0,value:0,
              anyCogs:false,anyValue:false,netIncomplete:false});
           // A total is only trustworthy once every row has it — one branch
           // still missing cost of goods would otherwise understate the sum
@@ -24135,7 +24156,9 @@ function App(){
                   h("div",{style:{fontSize:13,
                     color:r.exp>0?C.text:C.muted}},money(r.exp)),
                   r.ca>0?h("div",{style:{fontSize:10,color:C.muted}},
-                    "incl. CA/loan "+money(r.ca)):null),
+                    "incl. CA/loan "+money(r.ca)):null,
+                  r.vat>0?h("div",{style:{fontSize:10,color:C.muted}},
+                    "+VAT/2307 "+money(r.vat)+" (sa Net Income)"):null),
                 cell(r.value==null?"—":money(r.value),
                   {color:r.value==null?C.muted:C.info}),
                 // Sales − cost of goods − expenses. The real take-home figure
@@ -24181,7 +24204,8 @@ function App(){
               const netAfter=opInc!=null
                 ?Math.round((opInc-tax-sink)*100)/100:null;
               const share=(netAfter!=null&&plShareOn)
-                ?Math.round(netAfter*(sharePct/100)*100)/100:(netAfter!=null?0:null);
+                ?Math.round((netAfter*(sharePct/100)-sink)*100)/100
+                :(netAfter!=null?0:null);
               const commi=Math.round(wTot.po*0.30*100)/100;
               const srow=(label,val,opts)=>{
                 opts=opts||{};
@@ -24269,8 +24293,13 @@ function App(){
               +"anything by hand."
               +" ITEM VALUE is the stock on the shelf right now — a reading "
               +"of today, not of the period, whichever dates are chosen. "
-              +"NET INCOME is SALES minus COST OF GOODS minus EXPENSES — "
-              +"shows a dash until cost of goods is loaded for every branch "
+              +"NET INCOME is SALES minus COST OF GOODS minus EXPENSES, minus "
+              +"VAT 12% and the 2307 withholding tax 5% on Rent, and VAT 12% "
+              +"on Electricity + Water — matching Norman's own spreadsheet, "
+              +"these never get posted as a separate expense so they're added "
+              +"in here instead, only for bills posted through ⚡ Generate "
+              +"Fixed Expenses. "
+              +"Shows a dash until cost of goods is loaded for every branch "
               +"in the list, so the total is never short by a branch that "
               +"just hasn't been read yet.",
               _wErr?h("div",{style:{color:C.danger,marginTop:4}},
