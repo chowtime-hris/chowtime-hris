@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261104-160000 -->
+<!-- BUILD:20261104-163000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -9078,7 +9078,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261104-160000";
+const BUILD = "20261104-163000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -15079,6 +15079,23 @@ function App(){
     try{ localStorage.setItem("plSinkOn",v?"1":"0"); }catch(e){} };
   const setPlShareOnPersist=(v)=>{ setPlShareOn(v);
     try{ localStorage.setItem("plShareOn",v?"1":"0"); }catch(e){} };
+  // Tax %, Sinking Fund %, the profit-share recipient's name and their % —
+  // all editable here instead of hardcoded, so a change in the split or who
+  // gets it never needs a code change. `plSettings` is what's saved;
+  // `plSettingsDraft` is the editable copy, only loaded from `plSettings`
+  // when the settings panel is opened, same pattern as Fixed Expenses Setup.
+  const PL_SETTINGS_DEFAULT={taxPct:3,sinkPct:10,sharePct:30,shareName:"Partner"};
+  const [plSettings,setPlSettingsState]=useState(PL_SETTINGS_DEFAULT);
+  const [plSettingsDraft,setPlSettingsDraft]=useState(null);
+  const [plSettingsOpen,setPlSettingsOpen]=useState(false);
+  const [plSettingsSaving,setPlSettingsSaving]=useState(false);
+  useEffect(()=>{
+    const unsub=onSnapshot(doc(db,"settings","companyPL"),snap=>{
+      const d=snap.exists()?snap.data():{};
+      setPlSettingsState(Object.assign({},PL_SETTINGS_DEFAULT,d));
+    },onErr("companyPL"));
+    return()=>unsub();
+  },[]);
   // Chain-wide P&L. Sales come from `orders`, which the owner already holds
   // for every branch — but expenses and POs do not: their listeners are a
   // bare limit(100), which Firestore fills with an ARBITRARY hundred once a
@@ -23933,6 +23950,17 @@ function App(){
                   background:plPicker?"#F3E9F7":"#fff",
                   color:plPicker?C.primary:C.text}},
                 "☑️ Piliin ang branch"),
+              user.role==="owner"&&h("button",{
+                onClick:()=>{
+                  if(!plSettingsOpen)setPlSettingsDraft(Object.assign({},plSettings));
+                  setPlSettingsOpen(v=>!v);
+                },
+                style:{padding:"7px 13px",borderRadius:8,fontSize:12,
+                  fontWeight:700,cursor:"pointer",
+                  border:"1px solid "+(plSettingsOpen?C.primary:C.border),
+                  background:plSettingsOpen?"#F3E9F7":"#fff",
+                  color:plSettingsOpen?C.primary:C.text}},
+                "⚙️ P&L Settings"),
               h("button",{
                 onClick:()=>loadPlStock((branches||[]).map(b=>b.id),R,manualSrc),
                 disabled:!!(_sKey&&_sKey.loading),
@@ -23984,6 +24012,84 @@ function App(){
                     cursor:"pointer"}},"Walang pili"),
                 h("button",{
                   onClick:()=>setPlPicker(false),
+                  style:{padding:"6px 10px",borderRadius:7,fontSize:12,
+                    border:"none",background:"none",color:C.muted,
+                    cursor:"pointer",textDecoration:"underline"}},"Isara"))),
+
+            plSettingsOpen&&plSettingsDraft&&h("div",{style:{padding:"11px 14px",
+              borderBottom:"1px solid "+C.border,background:"#F3E9F7"}},
+              h("div",{style:{fontSize:12,fontWeight:800,color:C.primary,
+                marginBottom:8}},
+                "Tax, Sinking Fund at Profit Sharing — i-edit kung sino/magkano:"),
+              h("div",{style:{display:"flex",gap:10,flexWrap:"wrap",
+                marginBottom:10}},
+                h("div",null,
+                  h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,
+                    marginBottom:3}},"TAX %"),
+                  h("input",{type:"number",onFocus:e=>e.target.select(),
+                    value:plSettingsDraft.taxPct,
+                    onChange:e=>setPlSettingsDraft(p=>Object.assign({},p,
+                      {taxPct:e.target.value===""?"":Number(e.target.value)})),
+                    style:{width:70,padding:"5px 7px",textAlign:"right",
+                      border:"1px solid "+C.border,borderRadius:6,
+                      fontSize:13,background:"#fff"}})),
+                h("div",null,
+                  h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,
+                    marginBottom:3}},"SINKING FUND %"),
+                  h("input",{type:"number",onFocus:e=>e.target.select(),
+                    value:plSettingsDraft.sinkPct,
+                    onChange:e=>setPlSettingsDraft(p=>Object.assign({},p,
+                      {sinkPct:e.target.value===""?"":Number(e.target.value)})),
+                    style:{width:70,padding:"5px 7px",textAlign:"right",
+                      border:"1px solid "+C.border,borderRadius:6,
+                      fontSize:13,background:"#fff"}})),
+                h("div",null,
+                  h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,
+                    marginBottom:3}},"SHARE RECIPIENT NAME"),
+                  h("input",{type:"text",onFocus:e=>e.target.select(),
+                    value:plSettingsDraft.shareName,
+                    onChange:e=>setPlSettingsDraft(p=>Object.assign({},p,
+                      {shareName:e.target.value})),
+                    placeholder:"hal. Tita Lorna",
+                    style:{width:160,padding:"5px 7px",
+                      border:"1px solid "+C.border,borderRadius:6,
+                      fontSize:13,background:"#fff"}})),
+                h("div",null,
+                  h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,
+                    marginBottom:3}},"SHARE %"),
+                  h("input",{type:"number",onFocus:e=>e.target.select(),
+                    value:plSettingsDraft.sharePct,
+                    onChange:e=>setPlSettingsDraft(p=>Object.assign({},p,
+                      {sharePct:e.target.value===""?"":Number(e.target.value)})),
+                    style:{width:70,padding:"5px 7px",textAlign:"right",
+                      border:"1px solid "+C.border,borderRadius:6,
+                      fontSize:13,background:"#fff"}}))),
+              h("div",{style:{display:"flex",gap:8}},
+                h("button",{
+                  disabled:plSettingsSaving,
+                  onClick:async()=>{
+                    try{
+                      setPlSettingsSaving(true);
+                      await setDoc(doc(db,"settings","companyPL"),{
+                        taxPct:Number(plSettingsDraft.taxPct)||0,
+                        sinkPct:Number(plSettingsDraft.sinkPct)||0,
+                        sharePct:Number(plSettingsDraft.sharePct)||0,
+                        shareName:String(plSettingsDraft.shareName||"").trim()
+                          ||"Partner",
+                        updatedBy:user.name,updatedAt:serverTimestamp()
+                      });
+                      showT("Na-save ang P&L settings ✓","ok");
+                      setPlSettingsOpen(false);
+                    }catch(e){ showT("Failed: "+String(e&&e.message||e).slice(0,60),"err"); }
+                    finally{ setPlSettingsSaving(false); }
+                  },
+                  style:{padding:"6px 14px",borderRadius:7,fontSize:12,
+                    fontWeight:700,cursor:plSettingsSaving?"wait":"pointer",
+                    border:"none",
+                    background:plSettingsSaving?"#D8C2E8":C.primary,
+                    color:"#fff"}},
+                  plSettingsSaving?"Saving...":"💾 I-save"),
+                h("button",{onClick:()=>setPlSettingsOpen(false),
                   style:{padding:"6px 10px",borderRadius:7,fontSize:12,
                     border:"none",background:"none",color:C.muted,
                     cursor:"pointer",textDecoration:"underline"}},"Isara"))),
@@ -24054,22 +24160,28 @@ function App(){
               cell(allNet?money(wTot.net):"—",
                 {fontWeight:900,color:allNet?(wTot.net>=0?C.success:C.danger):C.muted})),
 
-            // ── COMPANY SUMMARY: tax, sinking fund, Tita Lorna's share ──
+            // ── COMPANY SUMMARY: tax, sinking fund, profit share ──
             // Tax and Sinking Fund are both taken on OPERATING INCOME (same
             // figure as the NET INCOME total above, before tax/sinking fund/
             // sharing) — confirmed against Norman's own tracked numbers, not
-            // against Sales. Tita Lorna's share runs on what's left AFTER
-            // tax and sinking fund, and she shares a loss too, same as a
-            // profit, so this is never floored at zero.
+            // against Sales. The profit share runs on what's left AFTER tax
+            // and sinking fund, and shares a loss too, same as a profit, so
+            // this is never floored at zero. Every percentage and the
+            // recipient's name come from "⚙️ P&L Settings" above, not from
+            // code, so a change never needs a new build.
             (function(){
+              const taxPct=Number(plSettings.taxPct)||0;
+              const sinkPct=Number(plSettings.sinkPct)||0;
+              const sharePct=Number(plSettings.sharePct)||0;
+              const shareName=plSettings.shareName||"Partner";
               const opInc=allNet?wTot.net:null;
-              const tax=opInc!=null?Math.round(opInc*0.03*100)/100:null;
+              const tax=opInc!=null?Math.round(opInc*(taxPct/100)*100)/100:null;
               const sink=(opInc!=null&&plSinkOn)
-                ?Math.round(opInc*0.10*100)/100:(opInc!=null?0:null);
+                ?Math.round(opInc*(sinkPct/100)*100)/100:(opInc!=null?0:null);
               const netAfter=opInc!=null
                 ?Math.round((opInc-tax-sink)*100)/100:null;
               const share=(netAfter!=null&&plShareOn)
-                ?Math.round(netAfter*0.30*100)/100:(netAfter!=null?0:null);
+                ?Math.round(netAfter*(sharePct/100)*100)/100:(netAfter!=null?0:null);
               const commi=Math.round(wTot.po*0.30*100)/100;
               const srow=(label,val,opts)=>{
                 opts=opts||{};
@@ -24095,15 +24207,15 @@ function App(){
               };
               return h("div",{style:{borderTop:"2px solid "+C.border}},
                 srow("OPERATING INCOME",opInc,{rule:true,big:true}),
-                srow("Tax (3% of Operating Income)",tax!=null?-tax:null,
-                  {color:C.danger}),
-                srow("Sinking Fund (10% of Operating Income)",
+                srow("Tax ("+taxPct+"% of Operating Income)",
+                  tax!=null?-tax:null,{color:C.danger}),
+                srow("Sinking Fund ("+sinkPct+"% of Operating Income)",
                   sink?-sink:(opInc!=null?0:null),
                   {color:C.danger,toggle:plSinkOn,
                    onToggle:e=>setPlSinkOnPersist(e.target.checked)}),
                 srow("NET INCOME",netAfter,{rule:true,big:true,
                   color:netAfter!=null?(netAfter>=0?C.success:C.danger):C.muted}),
-                srow("Net Income Sharing — Tita Lorna (30%)",
+                srow("Net Income Sharing — "+shareName+" ("+sharePct+"%)",
                   netAfter!=null?share:null,
                   {color:(share||0)>=0?C.text:C.danger,
                    toggle:plShareOn,
