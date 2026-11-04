@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261104-194500 -->
+<!-- BUILD:20261104-200500 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -8780,14 +8780,18 @@ function daysBetweenInclusive(a,b){
 }
 // Every fixed bill — Rent and the ones in Fixed Expenses Setup — read
 // straight off the Setup for whatever date range the P&L asks, no Expense
-// record needed. Each bill is its monthly Setup figure ÷ the days in that
-// calendar month, × the days of the requested range that fall in that
-// month — the same proration Rent always used, now applied to every bill,
-// and split across a month boundary when the range crosses one.
+// record needed, split across a month boundary when the range crosses one.
+// Rent is a flat 30-day figure: its daily rate is always monthlyRent÷30,
+// so a 31-day month adds one extra day on top of the flat amount rather
+// than spreading the same total over 31 days (and a short month like
+// February comes out under it) — per Norman: "sa rent 2500 ang rent for
+// 30days pag 31 add sya". The other Setup items (CUSA, Electricity, Water,
+// etc.) still prorate by the calendar month's real day count.
 function fixedExpensesFor(fixedRemote,bid,from,to){
   const items=(fixedRemote&&fixedRemote.items)||[];
   const amts=((fixedRemote&&fixedRemote.amounts)||{})[bid]||{};
   const monthlyRent=Number(((fixedRemote&&fixedRemote.rent)||{})[bid])||0;
+  const RENT_DIM=30;
   let base=0, rentBase=0, elecWaterBase=0;
   let mk=monthKey(from);
   const mkTo=monthKey(to);
@@ -8801,7 +8805,7 @@ function fixedExpensesFor(fixedRemote,bid,from,to){
     const days=daysBetweenInclusive(segFrom,segTo);
     if(days>0){
       if(monthlyRent>0){
-        const seg=Math.round((monthlyRent/dim)*days*100)/100;
+        const seg=Math.round((monthlyRent/RENT_DIM)*days*100)/100;
         base+=seg; rentBase+=seg;
       }
       items.forEach(function(it){
@@ -9128,7 +9132,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261104-194500";
+const BUILD = "20261104-200500";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -21553,9 +21557,9 @@ function App(){
               h("div",{style:{fontSize:13,fontWeight:800,color:C.primary,
                 marginBottom:4}},"🏠 Rent — buwanang halaga per branch:"),
               h("div",{style:{fontSize:11,color:C.muted,marginBottom:8}},
-                "Hinahati ito sa bilang ng araw ng buwan tapos imu-multiply sa "
-                +"operating days — ibang halaga depende sa buwan at kung ilang "
-                +"araw bukas ang branch."),
+                "Flat na 30 araw ang basehan — ÷30 palagi, hindi ÷ sa bilang ng "
+                +"araw ng buwan. Kaya sa buwang 31 araw, idadagdag ang 1 extra "
+                +"araw sa itaas ng buwanang halaga."),
               h("div",{style:{display:"flex",gap:10,flexWrap:"wrap",
                 marginBottom:14}},
                 (branches||[]).filter(b=>b.id!=="ct-main").map(b=>{
@@ -21571,13 +21575,15 @@ function App(){
                       placeholder:"₱/buwan",
                       style:{width:100,padding:"4px 6px",textAlign:"right",
                         border:"1px solid "+C.border,borderRadius:6,fontSize:13}}),
-                    // Preview of what this actually becomes per day — this is
-                    // the number Norman catches a daily-rate-typed-as-monthly
-                    // mistake with, before it ever gets generated.
+                    // Preview of what this actually becomes — the number
+                    // Norman catches a daily-rate-typed-as-monthly mistake
+                    // with, before it ever reaches the P&L. Daily rate is
+                    // always ÷30; a 31-day month adds one more day on top.
                     rv>0&&h("div",{style:{fontSize:10,color:C.muted,
                       marginTop:3,textAlign:"right"}},
-                      "= ₱"+peso(Math.round(rv/30*100)/100)+"/araw (30d) · ₱"
-                      +peso(Math.round(rv/31*100)/100)+"/araw (31d)"));
+                      "= ₱"+peso(Math.round(rv/30*100)/100)+"/araw · ₱"
+                      +peso(Math.round(rv*100)/100)+" (30d) · ₱"
+                      +peso(Math.round((rv/30*31)*100)/100)+" (31d)"));
                 })),
               h("div",{style:{fontSize:13,fontWeight:800,color:C.primary,
                 marginBottom:8}},"Ibang bills — flat na buwanang halaga, per branch:"),
@@ -23861,18 +23867,19 @@ function App(){
             if(r.cogs!=null){
               a.cogs+=r.cogs; a.grossProfit+=r.grossProfit; a.anyCogs=true;
             }
+            if(r.openValue!=null){a.openValue+=r.openValue; a.anyOpen=true;}
             if(r.value!=null){a.value+=r.value; a.anyValue=true;}
             if(r.net!=null)a.net+=r.net; else a.netIncomplete=true;
             return a;
           },{sales:0,exp:0,vat:0,expDaily:0,expFixed:0,po:0,txns:0,cogs:0,
-             grossProfit:0,net:0,value:0,
-             anyCogs:false,anyValue:false,netIncomplete:false});
+             grossProfit:0,net:0,value:0,openValue:0,
+             anyCogs:false,anyValue:false,anyOpen:false,netIncomplete:false});
           // A total is only trustworthy once every row has it — one branch
           // still missing cost of goods would otherwise understate the sum
           // and look like a real (lower) figure instead of a partial one.
           const allNet=wideRows.length>0&&!wTot.netIncomplete;
 
-          const COLW="180px 106px 100px 100px 100px 108px 118px 100px 110px";
+          const COLW="180px 106px 110px 100px 100px 100px 108px 118px 100px 110px";
           const cell=(v,style)=>h("div",{style:Object.assign(
             {fontSize:13,textAlign:"right"},style||{})},v);
           const money=(v)=>"₱"+peso(v);
@@ -24041,16 +24048,16 @@ function App(){
                   style:{padding:"6px 10px",borderRadius:7,fontSize:12,
                     border:"none",background:"none",color:C.muted,
                     cursor:"pointer",textDecoration:"underline"}},"Isara"))),
-            // Table scrolls sideways on a tablet rather than squeezing 9
+            // Table scrolls sideways on a tablet rather than squeezing 10
             // columns into the screen width.
             h("div",{style:{overflowX:"auto"}},
-            h("div",{style:{minWidth:978}},
+            h("div",{style:{minWidth:1096}},
             // Header
             h("div",{style:{display:"grid",gridTemplateColumns:COLW,gap:8,
               padding:"8px 14px",background:"#fafafa",
               borderBottom:"1px solid "+C.border}},
-              ["BRANCH","SALES","COST OF GOODS","GROSS PROFIT","PURCHASED",
-               "DAILY OPEX","MONTHLY FIXED","ITEM VALUE","NET INCOME"]
+              ["BRANCH","SALES","OPENING STOCK","COST OF GOODS","GROSS PROFIT",
+               "PURCHASED","DAILY OPEX","MONTHLY FIXED","ITEM VALUE","NET INCOME"]
                 .map((hh,i)=>h("div",{key:hh,style:{fontSize:10,fontWeight:700,
                   color:C.muted,letterSpacing:1,
                   textAlign:i?"right":"left"}},hh))),
@@ -24072,16 +24079,18 @@ function App(){
                 // ₱0.00 means it was read and there was nothing to cost.
                 h("div",{style:{textAlign:"right"}},
                   h("div",{style:{fontSize:13,
+                    color:r.openValue==null?C.muted:C.text}},
+                    r.openValue==null?"—":money(r.openValue)),
+                  r.openDate?h("div",{style:{fontSize:10,color:C.muted}},
+                    r.openDate):null),
+                h("div",{style:{textAlign:"right"}},
+                  h("div",{style:{fontSize:13,
                     color:r.cogs==null?C.muted:C.text}},
                     r.cogs==null?"—":money(r.cogs)),
-                  r.cogsFromMove
-                    ? h("div",{style:{fontSize:10,color:C.muted}},
-                        "opening "+money(r.openValue)
-                        +(r.openDate?(" ("+r.openDate+")"):""))
-                    : ((r.cogs!=null&&r.uncosted>0)
-                        ? h("div",{style:{fontSize:10,color:C.warning}},
-                            r.uncosted+" uncosted")
-                        : null)),
+                  (r.cogs!=null&&r.uncosted>0)
+                    ? h("div",{style:{fontSize:10,color:C.warning}},
+                        r.uncosted+" uncosted")
+                    : null),
                 // Sales minus cost of goods, before any expense — same line
                 // as "GROSS PROFIT" in Norman's spreadsheet.
                 cell(r.grossProfit==null?"—":money(r.grossProfit),
@@ -24112,6 +24121,7 @@ function App(){
               borderTop:"1px solid "+C.border,alignItems:"center"}},
               h("div",{style:{fontSize:13,fontWeight:900}},"TOTAL"),
               cell(money(wTot.sales),{fontWeight:900,color:C.primary}),
+              cell(wTot.anyOpen?money(wTot.openValue):"—",{fontWeight:800}),
               cell(wTot.anyCogs?money(wTot.cogs):"—",{fontWeight:800}),
               cell(wTot.anyCogs?money(wTot.grossProfit):"—",{fontWeight:800}),
               cell(money(wTot.po),{fontWeight:800}),
@@ -24233,12 +24243,14 @@ function App(){
               +"Electricity, Water, POS, Exhaust Cleaning, Internet — read "
               +"straight from that Setup and pro-rated by days, plus VAT/2307 "
               +"markup, shown underneath. Both are counted on the day "
-              +"released or billed. COST OF GOODS is "
-              +"opening stock value + purchases − ending stock value when a "
-              +"branch has a snapshot on both ends of the period (shown as "
-              +"\"opening ₱… (date)\" under the figure) — the same method as "
-              +"the single-branch statement. A branch with no snapshot yet "
-              +"falls back to "
+              +"released or billed. OPENING STOCK is the branch's stock value "
+              +"as of the day before the period starts — captured "
+              +"automatically once a day, with the date it was read shown "
+              +"under it. COST OF GOODS is "
+              +"OPENING STOCK + PURCHASED − ending stock value, when a "
+              +"branch has a snapshot on both ends of the period — the same "
+              +"method as the single-branch statement. A branch with no "
+              +"snapshot yet falls back to "
               +(manualSrc
                  ? "the cost set on each menu item."
                  : "the BOM at FIFO prices.")
