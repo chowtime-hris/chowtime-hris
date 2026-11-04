@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261104-191500 -->
+<!-- BUILD:20261104-194500 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -8769,6 +8769,56 @@ function dayBefore(dstr){
   return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")
     +"-"+String(d.getDate()).padStart(2,"0");
 }
+function nextMonthKey(mk){
+  const y=Number(String(mk).slice(0,4)), m=Number(String(mk).slice(5,7));
+  const d=new Date(y,m,1);
+  return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
+}
+function daysBetweenInclusive(a,b){
+  const da=new Date(a+"T00:00:00"), db=new Date(b+"T00:00:00");
+  return Math.round((db-da)/86400000)+1;
+}
+// Every fixed bill — Rent and the ones in Fixed Expenses Setup — read
+// straight off the Setup for whatever date range the P&L asks, no Expense
+// record needed. Each bill is its monthly Setup figure ÷ the days in that
+// calendar month, × the days of the requested range that fall in that
+// month — the same proration Rent always used, now applied to every bill,
+// and split across a month boundary when the range crosses one.
+function fixedExpensesFor(fixedRemote,bid,from,to){
+  const items=(fixedRemote&&fixedRemote.items)||[];
+  const amts=((fixedRemote&&fixedRemote.amounts)||{})[bid]||{};
+  const monthlyRent=Number(((fixedRemote&&fixedRemote.rent)||{})[bid])||0;
+  let base=0, rentBase=0, elecWaterBase=0;
+  let mk=monthKey(from);
+  const mkTo=monthKey(to);
+  let guard=0;
+  while(mk<=mkTo&&guard<60){
+    guard++;
+    const dim=daysInMonth(mk);
+    const monStart=mk+"-01", monEnd=lastDayOf(mk);
+    const segFrom=(monStart>from)?monStart:from;
+    const segTo=(monEnd<to)?monEnd:to;
+    const days=daysBetweenInclusive(segFrom,segTo);
+    if(days>0){
+      if(monthlyRent>0){
+        const seg=Math.round((monthlyRent/dim)*days*100)/100;
+        base+=seg; rentBase+=seg;
+      }
+      items.forEach(function(it){
+        const amt=Number(amts[it.id])||0;
+        if(amt<=0)return;
+        const seg=Math.round((amt/dim)*days*100)/100;
+        base+=seg;
+        const nm=String(it.name||"");
+        if(nm.indexOf("Electricity")===0||nm.indexOf("Water")===0)
+          elecWaterBase+=seg;
+      });
+    }
+    mk=nextMonthKey(mk);
+  }
+  const vat=Math.round((rentBase*0.17+elecWaterBase*0.12)*100)/100;
+  return {base:Math.round(base*100)/100,vat:vat};
+}
 // The reading that was in force on a given day: the newest one taken on or
 // before it.
 function snapshotOn(list,day){
@@ -9078,7 +9128,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261104-191500";
+const BUILD = "20261104-194500";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -15052,11 +15102,6 @@ function App(){
   const [fixedDraft,setFixedDraft]=useState(null);
   const [fixedSetupOpen,setFixedSetupOpen]=useState(false);
   const [fixedSaving,setFixedSaving]=useState(false);
-  const [fixedGenOpen,setFixedGenOpen]=useState(false);
-  const [fixedGenMonth,setFixedGenMonth]=useState(()=>localDate().slice(0,7));
-  const [fixedGenBranches,setFixedGenBranches]=useState({});
-  const [fixedGenDays,setFixedGenDays]=useState({});    // branchId -> operating days this month, for rent proration
-  const [fixedGenBusy,setFixedGenBusy]=useState(false);
   useEffect(()=>{
     const unsub=onSnapshot(doc(db,"settings","fixedExpenses"),snap=>{
       const d=snap.exists()?snap.data():{};
@@ -21461,35 +21506,14 @@ function App(){
                   }
                   setFixedDraft(base);
                 }
-                setFixedSetupOpen(v=>!v); setFixedGenOpen(false);
+                setFixedSetupOpen(v=>!v);
               },
               style:{padding:"7px 13px",borderRadius:8,fontSize:13,fontWeight:700,
                 cursor:"pointer",
                 border:"1px solid "+(fixedSetupOpen?C.primary:C.border),
                 background:fixedSetupOpen?"#F3E9F7":"#fff",
                 color:fixedSetupOpen?C.primary:C.text}},
-              "⚙️ Fixed Expenses Setup"),
-            h("button",{
-              onClick:()=>{
-                if(!fixedGenOpen){
-                  const init={};
-                  (branches||[]).filter(b=>b.id!=="ct-main").forEach(b=>{init[b.id]=true;});
-                  setFixedGenBranches(init);
-                  const dInit={};
-                  const dim=daysInMonth(fixedGenMonth);
-                  (branches||[]).filter(b=>b.id!=="ct-main").forEach(b=>{dInit[b.id]=dim;});
-                  setFixedGenDays(dInit);
-                }
-                setFixedGenOpen(v=>!v); setFixedSetupOpen(false);
-              },
-              disabled:!fixedRemote.items.length&&!Object.keys(fixedRemote.rent||{}).length,
-              style:{padding:"7px 13px",borderRadius:8,fontSize:13,fontWeight:700,
-                cursor:(fixedRemote.items.length||Object.keys(fixedRemote.rent||{}).length)?"pointer":"not-allowed",
-                border:"1px solid "+(fixedGenOpen?C.primary:C.border),
-                background:fixedGenOpen?"#F3E9F7":((fixedRemote.items.length||Object.keys(fixedRemote.rent||{}).length)?"#fff":"#F5F5F5"),
-                color:fixedGenOpen?C.primary:((fixedRemote.items.length||Object.keys(fixedRemote.rent||{}).length)?C.text:C.muted)}},
-              "⚡ Generate Fixed Expenses"+((!fixedRemote.items.length&&!Object.keys(fixedRemote.rent||{}).length)
-                ?" (mag-setup muna)":""))),
+              "⚙️ Fixed Expenses Setup")),
 
           fixedSetupOpen&&fixedDraft&&(function(){
             const items=fixedDraft.items||[];
@@ -21617,147 +21641,6 @@ function App(){
                   fixedSaving?"Saving...":"💾 I-save ang Setup"),
                 h("button",{onClick:()=>setFixedSetupOpen(false),
                   style:{padding:"6px 10px",borderRadius:7,fontSize:12,
-                    border:"none",background:"none",color:C.muted,
-                    cursor:"pointer",textDecoration:"underline"}},"Isara")));
-          })(),
-
-          fixedGenOpen&&(function(){
-            const items=fixedRemote.items||[];
-            const amts=fixedRemote.amounts||{};
-            const rent=fixedRemote.rent||{};
-            const dim=daysInMonth(fixedGenMonth);
-            const targets=(branches||[]).filter(b=>b.id!=="ct-main"
-              &&fixedGenBranches[b.id]);
-            // What would actually post: skip branch+bill with no amount set,
-            // and skip anything already generated for this month so re-opening
-            // this panel never creates a duplicate.
-            const already={};
-            expenses.forEach(e=>{ if(e.fixedGenKey)already[e.fixedGenKey]=true; });
-            const plan=[];
-            targets.forEach(b=>{
-              items.forEach(it=>{
-                const amt=Number((amts[b.id]||{})[it.id])||0;
-                if(amt<=0)return;
-                const key=b.id+"_"+it.id+"_"+fixedGenMonth;
-                plan.push({branch:b,desc:it.name,cat:it.cat||"Utilities",
-                  amount:amt,key:key,dup:!!already[key]});
-              });
-              // Rent: monthly ÷ days in this month × operating days — a full
-              // month's worth of operating days gives back the flat monthly
-              // figure; fewer days (branch closed part of the month) gives
-              // less.
-              const monthlyRent=Number(rent[b.id])||0;
-              if(monthlyRent>0){
-                const opDays=Math.max(0,Math.min(dim,
-                  Number(fixedGenDays[b.id])!=null&&fixedGenDays[b.id]!==""
-                    ?Number(fixedGenDays[b.id]):dim));
-                const rentAmt=Math.round((monthlyRent/dim)*opDays*100)/100;
-                if(rentAmt>0){
-                  const key=b.id+"_rent_"+fixedGenMonth;
-                  plan.push({branch:b,
-                    desc:"Rent ("+opDays+"/"+dim+" days)",cat:"Rent",
-                    amount:rentAmt,key:key,dup:!!already[key]});
-                }
-              }
-            });
-            const toPost=plan.filter(p=>!p.dup);
-            const dupCount=plan.length-toPost.length;
-            const total=toPost.reduce((s,p)=>s+p.amount,0);
-            return h("div",{style:{background:"#F3E9F7",
-              border:"1px solid "+C.primary,borderRadius:10,padding:"12px 14px",
-              marginBottom:12}},
-              h("div",{style:{display:"flex",gap:10,flexWrap:"wrap",
-                alignItems:"center",marginBottom:10}},
-                h("div",{style:{fontSize:13,fontWeight:800,color:C.primary}},
-                  "Generate para sa buwan:"),
-                h("input",{type:"month",value:fixedGenMonth,
-                  onChange:e=>{
-                    const mk=e.target.value;
-                    setFixedGenMonth(mk);
-                    const nd=daysInMonth(mk);
-                    setFixedGenDays(p=>{
-                      const next=Object.assign({},p);
-                      Object.keys(next).forEach(function(bid){
-                        // Only reset a day count that was still the default
-                        // (full month) — a manually-typed figure is kept.
-                        if(next[bid]===dim)next[bid]=nd;
-                      });
-                      return next;
-                    });
-                  },
-                  style:{padding:"6px 9px",borderRadius:7,fontSize:13,
-                    border:"1px solid "+C.border}})),
-              h("div",{style:{fontSize:12,fontWeight:800,color:C.muted,
-                marginBottom:6}},"Piliin ang branch at operating days ("+dim
-                +" araw ang "+fixedGenMonth+"):"),
-              h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",
-                marginBottom:10}},
-                (branches||[]).filter(b=>b.id!=="ct-main").map(b=>
-                  h("div",{key:b.id,style:{display:"flex",gap:6,
-                    alignItems:"center",fontSize:13,
-                    background:"#fff",border:"1px solid "+C.border,
-                    borderRadius:7,padding:"5px 10px"}},
-                    h("label",{style:{display:"flex",gap:5,
-                      alignItems:"center",cursor:"pointer"}},
-                      h("input",{type:"checkbox",checked:!!fixedGenBranches[b.id],
-                        onChange:e=>setFixedGenBranches(p=>Object.assign({},p,
-                          {[b.id]:e.target.checked}))}),
-                      "🏪 "+(b.name||b.full||b.id)),
-                    (Number(rent[b.id])>0)&&h("input",{type:"number",
-                      onFocus:e=>e.target.select(),
-                      value:fixedGenDays[b.id]!=null?fixedGenDays[b.id]:dim,
-                      min:0,max:dim,
-                      onChange:e=>setFixedGenDays(p=>Object.assign({},p,
-                        {[b.id]:e.target.value})),
-                      title:"Operating days (for Rent proration)",
-                      style:{width:48,padding:"3px 5px",textAlign:"center",
-                        border:"1px solid "+C.border,borderRadius:6,
-                        fontSize:12}}))) ),
-              h("div",{style:{fontSize:13,marginBottom:10}},
-                toPost.length
-                  ?(toPost.length+" expense(s) ang igegenerate, total ₱"+peso(total)
-                    +(dupCount?("  ·  "+dupCount+" na-generate na dati sa buwang ito (lalaktawan)"):""))
-                  :(dupCount
-                    ?("Pareho na — lahat ng "+dupCount+" naka-generate na para sa buwang ito")
-                    :"Walang amount na naka-set para sa napiling branch — pumunta sa Fixed Expenses Setup muna.")),
-              h("div",{style:{display:"flex",gap:8}},
-                h("button",{
-                  disabled:!toPost.length||fixedGenBusy,
-                  onClick:async()=>{
-                    try{
-                      setFixedGenBusy(true);
-                      if(!confirm("I-post bilang Expenses ang "+toPost.length
-                        +" bill(s), total ₱"+peso(total)+", petsa "+fixedGenMonth+"-01?"))
-                        { setFixedGenBusy(false); return; }
-                      let ok=0,bad=0;
-                      for(const p of toPost){
-                        try{
-                          await addDoc(collection(db,"expenses"),{
-                            branch:p.branch.id,cat:p.cat,
-                            desc:p.desc+" (fixed, auto-generated)",
-                            amount:p.amount,date:fixedGenMonth+"-01",
-                            status:"approved",approvedBy:user.name,
-                            approvedAt:serverTimestamp(),
-                            by:user.name,enteredOn:serverTimestamp(),
-                            fixedGenKey:p.key,autoFixed:true
-                          });
-                          ok++;
-                        }catch(e){ bad++; console.warn("fixed gen",p.key,e); }
-                      }
-                      showT(ok+" fixed expense(s) na-post"+(bad?"  ·  "+bad+" bigo":""),
-                        bad?"warn":"ok");
-                      setFixedGenOpen(false);
-                    }catch(e){ showT("Failed: "+String(e&&e.message||e).slice(0,60),"err"); }
-                    finally{ setFixedGenBusy(false); }
-                  },
-                  style:{padding:"7px 16px",borderRadius:7,fontSize:13,
-                    fontWeight:700,cursor:(!toPost.length||fixedGenBusy)?"default":"pointer",
-                    border:"none",
-                    background:(!toPost.length||fixedGenBusy)?"#D8C2E8":C.primary,
-                    color:"#fff"}},
-                  fixedGenBusy?"Posting...":"⚡ I-generate"),
-                h("button",{onClick:()=>setFixedGenOpen(false),
-                  style:{padding:"7px 10px",borderRadius:7,fontSize:12,
                     border:"none",background:"none",color:C.muted,
                     cursor:"pointer",textDecoration:"underline"}},"Isara")));
           })(),
@@ -23729,9 +23612,16 @@ function App(){
           const cogsFinal = (src==="manual") ? manualCogs : fifoCogs;
           const uncostedList=Object.keys(uncostedNames);
 
+          // Daily OpEx only. Fixed bills (Rent + Setup items) used to live
+          // in this same collection once "⚡ Generate Fixed Expenses" posted
+          // them, tagged autoFixed:true; now the P&L reads those straight
+          // from the Setup instead (below), so any old autoFixed entry
+          // already in Firestore is excluded here — otherwise a stale
+          // Generated bill would be counted twice.
           const periodExp=expenses
             .filter(e=>e.branch===branchId
-              &&String(e.date||"")>=R.from&&String(e.date||"")<=R.to);
+              &&String(e.date||"")>=R.from&&String(e.date||"")<=R.to
+              &&!e.autoFixed);
           const exp=periodExp
             .reduce((a,e)=>a+(Number(e.amount)||0),0);
           const expRows={};
@@ -23739,22 +23629,14 @@ function App(){
               const k=e.category||e.type||"Other";
               expRows[k]=(expRows[k]||0)+(Number(e.amount)||0);
             });
-          // Same Daily vs Fixed split, and the same VAT/2307 markup, as the
-          // "All branches" table — bills posted through "⚡ Generate Fixed
-          // Expenses" never get VAT or the withholding tax entered as a
-          // separate expense, so it's added here on top of the base amount.
-          const fixedExpItems=periodExp.filter(e=>e.autoFixed);
-          const expFixed=Math.round(fixedExpItems
-            .reduce((a,e)=>a+(Number(e.amount)||0),0)*100)/100;
-          const expDaily=Math.round((exp-expFixed)*100)/100;
-          const rentBase=fixedExpItems.filter(e=>e.cat==="Rent")
-            .reduce((a,e)=>a+(Number(e.amount)||0),0);
-          const elecWaterBase=fixedExpItems.filter(e=>{
-              const d=String(e.desc||"");
-              return d.indexOf("Electricity")===0||d.indexOf("Water")===0;
-            }).reduce((a,e)=>a+(Number(e.amount)||0),0);
-          const expVat=Math.round(
-            (rentBase*0.17+elecWaterBase*0.12)*100)/100;
+          const expDaily=Math.round(exp*100)/100;
+          // Rent + every Fixed Expenses Setup item, read directly from the
+          // Setup and prorated by days — no "⚡ Generate" step needed any
+          // more. Same VAT 12% / 2307 Withholding 5% markup as the "All
+          // branches" table.
+          const fixedResult=fixedExpensesFor(fixedRemote,branchId,R.from,R.to);
+          const expFixed=fixedResult.base;
+          const expVat=fixedResult.vat;
 
           // ── Cost of goods the second way: what actually left the shelf.
           //
@@ -23795,7 +23677,7 @@ function App(){
           // and becomes a check, shown apart from the arithmetic.
           const cogsUsed=(moveCogs!=null)?moveCogs:cogsFinal;
           const gross=sales-cogsUsed;
-          const left=gross-exp-expVat;
+          const left=gross-exp-expFixed-expVat;
           const pct=(v)=>sales>0?((v/sales)*100).toFixed(1)+"%":"—";
 
           const line=(label,value,opts)=>{
@@ -23885,29 +23767,25 @@ function App(){
                   &&(r.status==="approved"||r.status==="released");
               })
               .reduce(function(a,r){return a+(Number(r.amount)||0);},0)*100)/100;
+            // Daily OpEx only — day-to-day purchases, salaries and other
+            // hand-entered branch expenses. Fixed bills (Rent + Setup items)
+            // used to live in this same collection once "⚡ Generate Fixed
+            // Expenses" posted them, tagged autoFixed:true; now the P&L
+            // reads those straight from the Setup instead (below), so any
+            // old autoFixed entry already in Firestore is skipped here —
+            // otherwise a stale Generated bill would be counted twice: once
+            // as a leftover Expense row, once from the Setup.
             const bExp=Math.round((((_w&&_w.expenses)||[])
-              .filter(function(e){return e.branch===bid;})
+              .filter(function(e){return e.branch===bid&&!e.autoFixed;})
               .reduce(function(a,e){return a+(Number(e.amount)||0);},0))*100)/100;
-            // Rent and Electricity/Water, when posted by "⚡ Generate Fixed
-            // Expenses", are recorded at their base amount only — the way
-            // Norman's own spreadsheet works, VAT 12% and the 2307
-            // withholding tax 5% (rent only) sit on top of that base and are
-            // never paid out as a separate expense, so they are added here
-            // rather than written into the expense record itself. Matches
-            // every branch TAB in his reference workbook except the old
-            // "All branches" summary tab, which double-counted Electricity —
-            // a bug he asked fixed, not replicated.
-            const bFixedExp=(((_w&&_w.expenses)||[]))
-              .filter(function(e){return e.branch===bid&&e.autoFixed;});
-            const bRentBase=bFixedExp.filter(function(e){
-                return e.cat==="Rent";
-              }).reduce(function(a,e){return a+(Number(e.amount)||0);},0);
-            const bElecWaterBase=bFixedExp.filter(function(e){
-                const d=String(e.desc||"");
-                return d.indexOf("Electricity")===0||d.indexOf("Water")===0;
-              }).reduce(function(a,e){return a+(Number(e.amount)||0);},0);
-            const bVatMarkup=Math.round(
-              (bRentBase*0.17+bElecWaterBase*0.12)*100)/100;
+            // Rent + every Fixed Expenses Setup item, read directly from the
+            // Setup and prorated by days — no "⚡ Generate" step needed any
+            // more. VAT 12% and the 2307 withholding tax 5% (rent only) sit
+            // on top of the base, same as Norman's own spreadsheet; never
+            // paid out as a separate expense, so added here rather than
+            // folded into the base amount.
+            const bFixed=fixedExpensesFor(fixedRemote,bid,R.from,R.to);
+            const bVatMarkup=bFixed.vat;
             // Same test the single-branch statement uses, so the two agree.
             const bPO=Math.round(((_w&&_w.pos)||[])
               .filter(function(a){
@@ -23932,28 +23810,28 @@ function App(){
             const bCogs=(bMoveCogs!=null)?bMoveCogs:bBomCogs;
             // Same formula as the single-branch statement's "Left after
             // branch costs": sales minus cost of goods minus every branch
-            // expense (and — once Fixed Expenses are generated — the
-            // recurring bills too). CA/loan is NOT added on top — the
+            // expense, the Setup's recurring bills, and the VAT/2307
+            // markup on top of them. CA/loan is NOT added on top — the
             // Salary figure already recorded as an expense is sometimes
             // entered gross, already short whatever was advanced, so adding
             // it again would double it. Needs cost of goods loaded first,
             // same as that column; until then this stays a dash rather than
             // a number that leaves out COGS.
             const bNet=(bCogs!=null)
-              ?Math.round((bSales-bCogs-bExp-bVatMarkup)*100)/100 : null;
+              ?Math.round((bSales-bCogs-bExp-bFixed.base-bVatMarkup)*100)/100
+              : null;
             // GROSS PROFIT is Sales minus Cost of Goods only — before any
-            // expense, same line as Norman's spreadsheet. FIXED is every
-            // bill posted through "⚡ Generate Fixed Expenses" (its base
-            // amount, VAT/2307 counted separately above); DAILY is
-            // everything else — day-to-day purchases, salaries, and other
-            // branch expenses — so the two always add back up to EXPENSES.
+            // expense, same line as Norman's spreadsheet. FIXED is Rent +
+            // every Fixed Expenses Setup item, prorated straight from the
+            // Setup (VAT/2307 counted separately above); DAILY is the
+            // day-to-day Expenses — purchases, salaries, other branch costs
+            // — so the two always add back up to EXPENSES.
             const bGrossProfit=(bCogs!=null)
               ?Math.round((bSales-bCogs)*100)/100:null;
-            const bExpFixed=Math.round(bFixedExp.reduce(function(a,e){
-              return a+(Number(e.amount)||0);},0)*100)/100;
-            const bExpDaily=Math.round((bExp-bExpFixed)*100)/100;
+            const bExpFixed=bFixed.base;
+            const bExpDaily=bExp;
             return {b:b,sales:bSales,gross:bGross,disc:bDisc,
-              exp:bExp,expDaily:bExpDaily,expFixed:bExpFixed,
+              exp:bExpDaily+bExpFixed,expDaily:bExpDaily,expFixed:bExpFixed,
               ca:bCA,vat:bVatMarkup,po:bPO,txns:bOrders.length,
               cogs:bCogs,cogsFromMove:bMoveCogs!=null,
               grossProfit:bGrossProfit,
@@ -24351,9 +24229,9 @@ function App(){
               +"exactly as posted on the Expenses page. Cash advances/loans "
               +"are NOT added on top, since Salary is sometimes posted gross "
               +"and already short whatever was advanced. MONTHLY FIXED is "
-              +"the bills posted through ⚡ Generate Fixed Expenses — Rent, "
-              +"CUSA, Aircon, Electricity, "
-              +"Water, POS, Exhaust Cleaning, Internet — plus their VAT/2307 "
+              +"Rent plus every bill in Fixed Expenses Setup — CUSA, Aircon, "
+              +"Electricity, Water, POS, Exhaust Cleaning, Internet — read "
+              +"straight from that Setup and pro-rated by days, plus VAT/2307 "
               +"markup, shown underneath. Both are counted on the day "
               +"released or billed. COST OF GOODS is "
               +"opening stock value + purchases − ending stock value when a "
@@ -24518,8 +24396,8 @@ function App(){
               line("Monthly Fixed Expenses",-expFixed,{sub:true}),
               expVat>0&&line("+ VAT 12% / 2307 Withholding 5% (Rent, "
                 +"Electricity, Water)",-expVat,{sub:true}),
-              line("Total expenses",-(exp+expVat),{rule:true,
-                color:(exp+expVat)>0?C.danger:C.muted}),
+              line("Total expenses",-(exp+expFixed+expVat),{rule:true,
+                color:(exp+expFixed+expVat)>0?C.danger:C.muted}),
 
               line("Left after branch costs",left,{big:true,rule:true,
                 color:left>=0?C.success:C.danger})),
