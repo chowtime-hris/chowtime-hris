@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261104-115000 -->
+<!-- BUILD:20261104-141800 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -9071,7 +9071,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261104-115000";
+const BUILD = "20261104-141800";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -15017,6 +15017,19 @@ function App(){
   const [plRange,setPlRange]=useState("month");          // P&L period
   const [plFrom,setPlFrom]=useState(localDate());
   const [plTo,setPlTo]=useState(localDate());
+  // Which branches show in the "All branches" P&L table/TOTAL. Missing from
+  // the map = included (so old sessions with nothing saved still show
+  // everyone); only an explicit false hides a branch. Remembered locally so
+  // it survives a refresh instead of resetting every time the page opens.
+  const [plBranchSel,setPlBranchSel]=useState(()=>{
+    try{ return JSON.parse(localStorage.getItem("plBranchSel")||"{}"); }
+    catch(e){ return {}; }
+  });
+  const [plPicker,setPlPicker]=useState(false);
+  const setPlBranchSelPersist=(next)=>{
+    setPlBranchSel(next);
+    try{ localStorage.setItem("plBranchSel",JSON.stringify(next)); }catch(e){}
+  };
   // Chain-wide P&L. Sales come from `orders`, which the owner already holds
   // for every branch — but expenses and POs do not: their listeners are a
   // bare limit(100), which Firestore fills with an ARBITRARY hundred once a
@@ -23403,7 +23416,10 @@ function App(){
             return {cogs:Math.round(total*100)/100,missing:missing};
           };
 
-          const wideRows=(!wideOK)?[]:(branches||[]).map(function(b){
+          const plIncluded=function(bid){ return plBranchSel[bid]!==false; };
+          const wideRows=(!wideOK)?[]:(branches||[]).filter(function(b){
+            return plIncluded(b.id);
+          }).map(function(b){
             const bid=b.id;
             const bOrders=plOrders.filter(function(o){
               return o.branch===bid&&inRange(o,R);
@@ -23488,10 +23504,20 @@ function App(){
               display:"flex",justifyContent:"space-between",alignItems:"center",
               flexWrap:"wrap",gap:8}},
               h("div",null,
-                h("div",{style:{fontSize:13,fontWeight:800}},"🏪 All branches"),
+                h("div",{style:{fontSize:13,fontWeight:800}},
+                  "🏪 All branches"+(wideRows.length<(branches||[]).length
+                    ?(" ("+wideRows.length+"/"+(branches||[]).length+")"):"")),
                 h("div",{style:{fontSize:11,color:C.muted,marginTop:1}},
                   (R.from===R.to?R.from:(R.from+" → "+R.to))
                   +(_wLoading?"  ·  loading…":""))),
+              h("button",{
+                onClick:()=>setPlPicker(v=>!v),
+                style:{padding:"7px 13px",borderRadius:8,fontSize:12,
+                  fontWeight:700,cursor:"pointer",
+                  border:"1px solid "+(plPicker?C.primary:C.border),
+                  background:plPicker?"#F3E9F7":"#fff",
+                  color:plPicker?C.primary:C.text}},
+                "☑️ Piliin ang branch"),
               h("button",{
                 onClick:()=>loadPlStock((branches||[]).map(b=>b.id),R,manualSrc),
                 disabled:!!(_sKey&&_sKey.loading),
@@ -23504,6 +23530,48 @@ function App(){
                   :(_sKey?"↻ Refresh stock value"
                     :(manualSrc?"📦 Load stock value"
                               :"📦 Load cost of goods & stock value")))),
+            plPicker&&h("div",{style:{padding:"11px 14px",
+              borderBottom:"1px solid "+C.border,background:"#F3E9F7"}},
+              h("div",{style:{fontSize:12,fontWeight:800,color:C.primary,
+                marginBottom:8}},"Piliin ang branch na isasama sa listahan at TOTAL:"),
+              h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",
+                marginBottom:10}},
+                (branches||[]).map(function(b){
+                  const checked=plIncluded(b.id);
+                  return h("label",{key:b.id,style:{display:"flex",gap:5,
+                    alignItems:"center",fontSize:13,cursor:"pointer",
+                    background:"#fff",border:"1px solid "+C.border,
+                    borderRadius:7,padding:"5px 10px"}},
+                    h("input",{type:"checkbox",checked:checked,
+                      onChange:function(e){
+                        const next=Object.assign({},plBranchSel);
+                        next[b.id]=e.target.checked;
+                        setPlBranchSelPersist(next);
+                      }}),
+                    "🏪 "+(b.name||b.full||b.id));
+                })),
+              h("div",{style:{display:"flex",gap:8}},
+                h("button",{
+                  onClick:function(){
+                    const all={}; (branches||[]).forEach(function(b){all[b.id]=true;});
+                    setPlBranchSelPersist(all);
+                  },
+                  style:{padding:"6px 10px",borderRadius:7,fontSize:12,
+                    border:"1px solid "+C.border,background:"#fff",
+                    cursor:"pointer"}},"Lahat"),
+                h("button",{
+                  onClick:function(){
+                    const none={}; (branches||[]).forEach(function(b){none[b.id]=false;});
+                    setPlBranchSelPersist(none);
+                  },
+                  style:{padding:"6px 10px",borderRadius:7,fontSize:12,
+                    border:"1px solid "+C.border,background:"#fff",
+                    cursor:"pointer"}},"Walang pili"),
+                h("button",{
+                  onClick:()=>setPlPicker(false),
+                  style:{padding:"6px 10px",borderRadius:7,fontSize:12,
+                    border:"none",background:"none",color:C.muted,
+                    cursor:"pointer",textDecoration:"underline"}},"Isara"))),
             // Header
             h("div",{style:{display:"grid",gridTemplateColumns:COLW,gap:8,
               padding:"8px 14px",background:"#fafafa",
