@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261104-200500 -->
+<!-- BUILD:20261104-201500 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -9132,7 +9132,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261104-200500";
+const BUILD = "20261104-201500";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -15133,7 +15133,8 @@ function App(){
   // gets it never needs a code change. `plSettings` is what's saved;
   // `plSettingsDraft` is the editable copy, only loaded from `plSettings`
   // when the settings panel is opened, same pattern as Fixed Expenses Setup.
-  const PL_SETTINGS_DEFAULT={taxPct:3,sinkPct:10,sharePct:30,shareName:"Partner"};
+  const PL_SETTINGS_DEFAULT={taxPct:3,sinkPct:10,sharePct:30,shareName:"Partner",
+    commiPct:30};
   const [plSettings,setPlSettingsState]=useState(PL_SETTINGS_DEFAULT);
   const [plSettingsDraft,setPlSettingsDraft]=useState(null);
   const [plSettingsOpen,setPlSettingsOpen]=useState(false);
@@ -23836,9 +23837,14 @@ function App(){
               ?Math.round((bSales-bCogs)*100)/100:null;
             const bExpFixed=bFixed.base;
             const bExpDaily=bExp;
+            // Commi Income — reference only, never deducted from or added to
+            // NET INCOME. % comes from "⚙️ P&L Settings" (COMMI %), not
+            // hardcoded, so a change never needs a new build.
+            const bCommi=Math.round(bPO*((Number(plSettings.commiPct)||0)/100)
+              *100)/100;
             return {b:b,sales:bSales,gross:bGross,disc:bDisc,
               exp:bExpDaily+bExpFixed,expDaily:bExpDaily,expFixed:bExpFixed,
-              ca:bCA,vat:bVatMarkup,po:bPO,txns:bOrders.length,
+              ca:bCA,vat:bVatMarkup,po:bPO,commi:bCommi,txns:bOrders.length,
               cogs:bCogs,cogsFromMove:bMoveCogs!=null,
               grossProfit:bGrossProfit,
               openValue:st?st.openValue:null,
@@ -23863,7 +23869,7 @@ function App(){
           const wTot=wideRows.reduce(function(a,r){
             a.sales+=r.sales; a.exp+=r.exp; a.vat+=r.vat||0;
             a.expDaily+=r.expDaily||0; a.expFixed+=r.expFixed||0;
-            a.po+=r.po; a.txns+=r.txns;
+            a.po+=r.po; a.commi+=r.commi||0; a.txns+=r.txns;
             if(r.cogs!=null){
               a.cogs+=r.cogs; a.grossProfit+=r.grossProfit; a.anyCogs=true;
             }
@@ -23871,15 +23877,15 @@ function App(){
             if(r.value!=null){a.value+=r.value; a.anyValue=true;}
             if(r.net!=null)a.net+=r.net; else a.netIncomplete=true;
             return a;
-          },{sales:0,exp:0,vat:0,expDaily:0,expFixed:0,po:0,txns:0,cogs:0,
-             grossProfit:0,net:0,value:0,openValue:0,
+          },{sales:0,exp:0,vat:0,expDaily:0,expFixed:0,po:0,commi:0,txns:0,
+             cogs:0,grossProfit:0,net:0,value:0,openValue:0,
              anyCogs:false,anyValue:false,anyOpen:false,netIncomplete:false});
           // A total is only trustworthy once every row has it — one branch
           // still missing cost of goods would otherwise understate the sum
           // and look like a real (lower) figure instead of a partial one.
           const allNet=wideRows.length>0&&!wTot.netIncomplete;
 
-          const COLW="180px 106px 110px 100px 100px 100px 108px 118px 100px 110px";
+          const COLW="180px 106px 110px 100px 100px 100px 100px 108px 118px 100px 110px";
           const cell=(v,style)=>h("div",{style:Object.assign(
             {fontSize:13,textAlign:"right"},style||{})},v);
           const money=(v)=>"₱"+peso(v);
@@ -24018,6 +24024,16 @@ function App(){
                       {sharePct:e.target.value===""?"":Number(e.target.value)})),
                     style:{width:70,padding:"5px 7px",textAlign:"right",
                       border:"1px solid "+C.border,borderRadius:6,
+                      fontSize:13,background:"#fff"}})),
+                h("div",null,
+                  h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,
+                    marginBottom:3}},"COMMI %  (of Purchases)"),
+                  h("input",{type:"number",onFocus:e=>e.target.select(),
+                    value:plSettingsDraft.commiPct,
+                    onChange:e=>setPlSettingsDraft(p=>Object.assign({},p,
+                      {commiPct:e.target.value===""?"":Number(e.target.value)})),
+                    style:{width:70,padding:"5px 7px",textAlign:"right",
+                      border:"1px solid "+C.border,borderRadius:6,
                       fontSize:13,background:"#fff"}}))),
               h("div",{style:{display:"flex",gap:8}},
                 h("button",{
@@ -24031,6 +24047,7 @@ function App(){
                         sharePct:Number(plSettingsDraft.sharePct)||0,
                         shareName:String(plSettingsDraft.shareName||"").trim()
                           ||"Partner",
+                        commiPct:Number(plSettingsDraft.commiPct)||0,
                         updatedBy:user.name,updatedAt:serverTimestamp()
                       });
                       showT("Na-save ang P&L settings ✓","ok");
@@ -24048,16 +24065,17 @@ function App(){
                   style:{padding:"6px 10px",borderRadius:7,fontSize:12,
                     border:"none",background:"none",color:C.muted,
                     cursor:"pointer",textDecoration:"underline"}},"Isara"))),
-            // Table scrolls sideways on a tablet rather than squeezing 10
+            // Table scrolls sideways on a tablet rather than squeezing 11
             // columns into the screen width.
             h("div",{style:{overflowX:"auto"}},
-            h("div",{style:{minWidth:1096}},
+            h("div",{style:{minWidth:1204}},
             // Header
             h("div",{style:{display:"grid",gridTemplateColumns:COLW,gap:8,
               padding:"8px 14px",background:"#fafafa",
               borderBottom:"1px solid "+C.border}},
               ["BRANCH","SALES","OPENING STOCK","COST OF GOODS","GROSS PROFIT",
-               "PURCHASED","DAILY OPEX","MONTHLY FIXED","ITEM VALUE","NET INCOME"]
+               "PURCHASED","COMMI INCOME","DAILY OPEX","MONTHLY FIXED",
+               "ITEM VALUE","NET INCOME"]
                 .map((hh,i)=>h("div",{key:hh,style:{fontSize:10,fontWeight:700,
                   color:C.muted,letterSpacing:1,
                   textAlign:i?"right":"left"}},hh))),
@@ -24098,6 +24116,7 @@ function App(){
                    color:r.grossProfit==null?C.muted
                      :(r.grossProfit>=0?C.text:C.danger)}),
                 cell(money(r.po),{color:r.po>0?C.text:C.muted}),
+                cell(money(r.commi),{color:r.commi>0?C.info:C.muted}),
                 cell(money(r.expDaily),
                   {color:r.expDaily>0?C.text:C.muted}),
                 h("div",{style:{textAlign:"right"}},
@@ -24125,6 +24144,7 @@ function App(){
               cell(wTot.anyCogs?money(wTot.cogs):"—",{fontWeight:800}),
               cell(wTot.anyCogs?money(wTot.grossProfit):"—",{fontWeight:800}),
               cell(money(wTot.po),{fontWeight:800}),
+              cell(money(wTot.commi),{fontWeight:800,color:C.info}),
               cell(money(wTot.expDaily),{fontWeight:800}),
               h("div",{style:{textAlign:"right"}},
                 h("div",{style:{fontSize:13,fontWeight:800}},
@@ -24160,7 +24180,6 @@ function App(){
               const share=(netAfter!=null&&plShareOn)
                 ?Math.round((netAfter*(sharePct/100)-sink)*100)/100
                 :(netAfter!=null?0:null);
-              const commi=Math.round(wTot.po*0.30*100)/100;
               const srow=(label,val,opts)=>{
                 opts=opts||{};
                 return h("div",{key:label,style:{display:"flex",
@@ -24199,12 +24218,6 @@ function App(){
                   {color:(share||0)>=0?C.text:C.danger,
                    toggle:plShareOn,
                    onToggle:e=>setPlShareOnPersist(e.target.checked)}),
-                srow("Commi Income (30% of Purchases)",commi,
-                  {rule:true,sub:true,color:C.info}),
-                h("div",{style:{padding:"0 14px 9px",fontSize:11,
-                  color:C.muted}},
-                  "Reference lang ang Commi Income — hindi ito ibinabawas o "
-                  +"idinadagdag sa NET INCOME sa itaas."),
                 !allNet&&h("div",{style:{padding:"9px 14px",fontSize:11,
                   color:C.warning}},
                   "Dash kasi hindi pa kumpleto ang COST OF GOODS sa lahat ng "
@@ -24259,6 +24272,10 @@ function App(){
               +"anything by hand."
               +" ITEM VALUE is the stock on the shelf right now — a reading "
               +"of today, not of the period, whichever dates are chosen. "
+              +"COMMI INCOME is "+(Number(plSettings.commiPct)||0)+"% of "
+              +"PURCHASED (the % is set in \"⚙️ P&L Settings\" above) — "
+              +"reference lang, hindi ito ibinabawas o idinadagdag sa NET "
+              +"INCOME. "
               +"OPERATING INCOME (the NET INCOME column above) is GROSS "
               +"PROFIT minus Daily OpEx minus Monthly Fixed, minus VAT 12% "
               +"and the 2307 withholding tax 5% on Rent, and VAT 12% on "
