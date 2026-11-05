@@ -140,7 +140,7 @@
   .cutoff-foot .save-btn{width:auto;padding:8px 16px;font-size:12.5px;}
   .cutoff-foot .cp-status{font-size:11.5px;color:var(--muted);}
 </style>
-<!-- BUILD:20261105-233000 -->
+<!-- BUILD:20261106-000500 -->
 </head>
 <body>
 
@@ -177,8 +177,6 @@
   </div>
   <p style="text-align:center;margin:-6px 0 16px;">
     <a href="#" onclick="revealAddBranch();return false;" style="font-size:12px;color:var(--muted);">Owner: + Add New Branch</a>
-    &nbsp;·&nbsp;
-    <a href="#" onclick="revealAutoAuditSettings();return false;" style="font-size:12px;color:var(--muted);">⚙️ Auto-Audit Settings</a>
   </p>
   <div class="card" id="addBranchGate" style="display:none;">
     <label>Master Password</label>
@@ -193,15 +191,6 @@
     <label>Branch name</label>
     <input id="newBranchName" placeholder="e.g. Chowtime West Front">
     <button class="btn-primary" style="margin-top:12px;" onclick="addBranch()">Add Branch</button>
-  </div>
-  <div class="card" id="autoAuditSettingsForm" style="display:none;">
-    <h2>⚙️ Auto-Audit Settings</h2>
-    <p class="sub">Kapag naka-ON, ang crew's CLOSE checkpoint count sa ika-15 at huling araw ng buwan ay awtomatikong ia-apply sa POS stock, isang oras pagkatapos ma-submit — walang kailangang buksan pa ang Auditor Count. Para ito sa LAHAT ng branch, iisa lang ang switch.</p>
-    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-      <input type="checkbox" id="autoAuditToggle" onchange="saveAutoAuditToggle()">
-      <span>Paganahin ang automatic na pag-push (lahat ng branch)</span>
-    </label>
-    <p class="hint" id="autoAuditStatus"></p>
   </div>
 </main>
 
@@ -842,21 +831,7 @@ function connectFirebase(){
 }
 
 /* ---------- BRANCH PICKER ---------- */
-// Which panel to reveal once the master password checks out — the same
-// gate is shared by "+ Add Branch" and "⚙️ Auto-Audit Settings" so there is
-// only one password prompt to maintain.
-let _masterGateIntent = 'addBranch';
 function revealAddBranch(){
-  _masterGateIntent = 'addBranch';
-  document.getElementById('autoAuditSettingsForm').style.display = 'none';
-  document.getElementById('addBranchGate').style.display = 'block';
-  document.getElementById('masterPasswordInput').value = '';
-  document.getElementById('masterPasswordStatus').textContent = '';
-  document.getElementById('addBranchGate').scrollIntoView({behavior:'smooth', block:'center'});
-}
-function revealAutoAuditSettings(){
-  _masterGateIntent = 'autoAudit';
-  document.getElementById('addBranchForm').style.display = 'none';
   document.getElementById('addBranchGate').style.display = 'block';
   document.getElementById('masterPasswordInput').value = '';
   document.getElementById('masterPasswordStatus').textContent = '';
@@ -866,46 +841,12 @@ function checkMasterPassword(){
   const entered = document.getElementById('masterPasswordInput').value;
   if(entered === MASTER_BRANCH_PASSWORD){
     document.getElementById('addBranchGate').style.display = 'none';
-    if(_masterGateIntent === 'autoAudit'){
-      loadAutoAuditToggle();
-      document.getElementById('autoAuditSettingsForm').style.display = 'block';
-      document.getElementById('autoAuditSettingsForm').scrollIntoView({behavior:'smooth', block:'center'});
-    } else {
-      document.getElementById('addBranchForm').style.display = 'block';
-      document.getElementById('addBranchForm').scrollIntoView({behavior:'smooth', block:'center'});
-    }
+    document.getElementById('addBranchForm').style.display = 'block';
+    document.getElementById('addBranchForm').scrollIntoView({behavior:'smooth', block:'center'});
   } else {
     document.getElementById('masterPasswordStatus').textContent = 'Incorrect password.';
     document.getElementById('masterPasswordInput').value = '';
   }
-}
-// Global, not per-branch — lives outside branches/ so the one switch covers
-// every branch's auto-push at once. Missing (never set) reads as ON, since
-// that's the behavior this shipped with; only an explicit OFF stops it.
-function loadAutoAuditToggle(){
-  db.ref('globalSettings/autoAuditEnabled').once('value').then(snap=>{
-    const enabled = snap.exists() ? (snap.val() !== false) : true;
-    document.getElementById('autoAuditToggle').checked = enabled;
-    document.getElementById('autoAuditStatus').textContent = '';
-  });
-}
-function saveAutoAuditToggle(){
-  const on = document.getElementById('autoAuditToggle').checked;
-  const statusEl = document.getElementById('autoAuditStatus');
-  // Turning it ON also resets the "since" floor to today — so switching it
-  // off for a while and back on never sweeps in whatever audit dates fell
-  // during the time it was off.
-  const writes = [db.ref('globalSettings/autoAuditEnabled').set(on)];
-  if(on) writes.push(db.ref('globalSettings/autoAuditSince').set(todayStr()));
-  Promise.all(writes).then(()=>{
-    statusEl.style.color = 'var(--good)';
-    statusEl.textContent = on
-      ? '✓ Naka-ON — simula ngayon, ika-15/huling araw mula ngayon pasulong lang ang ia-apply, hindi na bumabalik sa nakaraan.'
-      : '✓ Naka-OFF — hindi na awtomatikong magpu-push ang alinmang branch hanggang buksan mo ulit ito.';
-  }).catch(e=>{
-    statusEl.style.color = 'var(--danger)';
-    statusEl.textContent = 'Hindi na-save: '+e.message;
-  });
 }
 function loadBranchList(){
   db.ref('branchList').once('value').then(snap=>{
@@ -995,10 +936,7 @@ function selectBranch(code){
       document.getElementById('roleBranchName').textContent = currentBranchName;
       showMain('mainRole');
     }
-    // Silent — doesn't block or touch the screen the person is on. Runs once
-    // per branch per app-open; autoPushCrewClose()'s own guards make a
-    // second run on the same date a no-op.
-    loadPosStock().then(()=>checkAutoAuditDates());
+    loadPosStock();
   });
 }
 
@@ -1655,155 +1593,6 @@ function finalizeAudit(values, auditorName, plan){
     statusEl.style.color = 'var(--danger)';
     statusEl.textContent = '✗ Error: '+e.message;
   });
-}
-
-/* ===== AUTOMATIC BI-MONTHLY AUDIT PUSH (15th + last day of month) ========
-   Norman wants the freezer count that already happens every day — the
-   crew's own 'close' checkpoint — to become the OFFICIAL POS stock figure
-   on these two dates automatically, without anyone opening Auditor Count.
-   No human reviews the numbers first: this is the crew's own count, same
-   one they submit every closing shift, just promoted straight to the POS
-   on these two dates instead of staying a comparison-only checkpoint.
-   It writes exactly what a human Auditor Count submission writes (POS
-   stock, Inv. Log entry, audits/ record, baseline reset) — see
-   finalizeAuditHeadless() below — so it shows up the same way in the
-   owner's Daily Audit / history views, tagged auto:true and "Auto — Crew
-   Closing Count" so it's never mistaken for a human-reviewed audit.     */
-
-// Same writes as finalizeAudit(), minus every DOM touch — this can run with
-// nobody on the Auditor Count screen, or even the app, open to watch it.
-async function finalizeAuditHeadless(values, auditorName, plan, dateStr){
-  const fs = posDB();
-  const invCol = posInvCollection(POS_BRANCH);
-  const logCol = invCol.replace(/^inventory/, 'inventory_log');
-  const pushed = {}, failed = {};
-  const auditTimestamp = Date.now();
-  for(const r of plan.rows){
-    try{
-      await fs.collection(invCol).doc(r.pid).set({
-        stock: r.newStock,
-        lastAudit: firebase.firestore.FieldValue.serverTimestamp()
-      }, {merge:true});
-      await fs.collection(logCol).add({
-        itemId: r.pid, itemName: r.name, unit: r.unit,
-        type: 'adjust', amount: r.delta,
-        prevStock: r.posNow, newStock: r.newStock,
-        desc: 'Freezer audit (auto — crew closing count)',
-        source: 'AUDIT_AUTO', ref: 'audit-'+auditTimestamp,
-        branch: POS_BRANCH, by: auditorName,
-        date: dateStr,
-        timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-        at: firebase.firestore.FieldValue.serverTimestamp()
-      });
-      pushed[r.id] = {posItemId: r.pid, prevStock: r.posNow, newStock: r.newStock,
-                      delta: r.delta, movedSince: r.movedSince};
-    }catch(e){
-      failed[r.id] = (e && e.message) || 'write failed';
-      console.warn('auto audit POS push failed', r.pid, e);
-    }
-  }
-  const baselineSnap = await bref('varianceBaseline').once('value');
-  const baselines = baselineSnap.val() || {};
-  const auditItems = {};
-  Object.entries(values).forEach(([id, v])=>{
-    const priorBaseline = baselineValue(baselines[id]);
-    const variance = v.pos - v.freezer;
-    auditItems[id] = {pos: v.pos, freezer: v.freezer, priorBaseline, variance};
-    if(v.packs !== undefined){
-      auditItems[id].packs = v.packs;
-      auditItems[id].loose = v.loose;
-      auditItems[id].packSize = v.packSize;
-    }
-    if(pushed[id]) auditItems[id].posAdjust = pushed[id];
-    if(failed[id]) auditItems[id].posAdjustError = failed[id];
-  });
-  const resettable = Object.keys(values).filter(id=>!failed[id]);
-  const payload = { items: auditItems, auditedBy: auditorName, timestamp: auditTimestamp,
-                    posBranch: POS_BRANCH, posPushed: Object.keys(pushed).length,
-                    posFailed: Object.keys(failed).length, auto: true };
-  await Promise.all([
-    bref('audits/'+dateStr+'/'+auditTimestamp).set(payload),
-    ...resettable.map(id => writeBaselineIfNewer(id, 0, auditTimestamp))
-  ]);
-  return {pushed, failed, auditItems};
-}
-
-// How long to sit on a submitted close count before it becomes the POS's
-// official figure — gives the crew a window to notice and fix a mistake
-// before the shortage charge applies. A date that is still too fresh is
-// simply skipped for now; the 10-day catch-up window in
-// checkAutoAuditDates() brings it back once the hour is up.
-const AUTO_PUSH_DELAY_MS = 60*60*1000;
-
-// Pushes dateStr's crew 'close' checkpoint to POS, unless there is nothing
-// to push, this date was already audited (by a human OR by this same
-// automatic push — audits/{date} existing at all is enough to skip, so a
-// human audit always wins and a repeat check never double-pushes), the
-// close count is not yet an hour old, or the owner switched this off.
-async function autoPushCrewClose(dateStr){
-  if(!POS_BRANCH) return;
-  try{
-    const enabledSnap = await db.ref('globalSettings/autoAuditEnabled').once('value');
-    if(enabledSnap.exists() && enabledSnap.val() === false) return;
-
-    // Never reaches further back than the day this was switched on. Without
-    // this, the very first time the feature runs — or the first run after
-    // being off a while — its own 10-day catch-up window would reach into
-    // dates from before the owner ever turned it on and push those too,
-    // which is exactly the "bakit may nag-auto kahit hindi pa 15/katapusan"
-    // surprise this fixes. First-ever run (no marker yet) sets today as the
-    // floor and pushes nothing retroactively; it only ever acts on dates
-    // from here forward.
-    const sinceSnap = await db.ref('globalSettings/autoAuditSince').once('value');
-    if(!sinceSnap.exists()){
-      await db.ref('globalSettings/autoAuditSince').set(todayStr());
-      return;
-    }
-    if(dateStr < sinceSnap.val()) return;
-
-    const [closeSnap, existingAuditSnap] = await Promise.all([
-      bref('counts/'+dateStr+'/close').once('value'),
-      bref('audits/'+dateStr).once('value')
-    ]);
-    const closeRec = closeSnap.val();
-    if(!closeRec || !closeRec.items || !Object.keys(closeRec.items).length) return;
-    if(existingAuditSnap.exists()) return;
-    const sinceSubmitted = Date.now() - (Number(closeRec.timestamp)||0);
-    if(sinceSubmitted < AUTO_PUSH_DELAY_MS) return;
-    const values = {};
-    Object.entries(closeRec.items).forEach(([id,v])=>{
-      values[id] = {pos: Number(v.pos)||0, freezer: Number(v.freezer)||0};
-      if(v.packs !== undefined){
-        values[id].packs = v.packs; values[id].loose = v.loose; values[id].packSize = v.packSize;
-      }
-    });
-    if(!POS_READY) await loadPosStock();
-    const plan = await buildAuditPlan(values);
-    if(!plan.rows.length) return;
-    await finalizeAuditHeadless(values, 'Auto — Crew Closing Count', plan, dateStr);
-    toast('📤 Awtomatikong na-push ang closing count ng '+dateStr+' sa POS stock.');
-  }catch(e){ console.warn('autoPushCrewClose failed', dateStr, e); }
-}
-
-// Checked on every branch load — no one has to visit each branch by hand.
-// Whoever opens that branch next (crew doing their own daily checkpoint,
-// not just the owner) fires this automatically. Looks back over the last
-// 10 days, not just yesterday, so a branch that stays quiet for a while
-// around an audit date still catches up next time anyone opens it, instead
-// of silently missing its push because the gap was longer than a day.
-function checkAutoAuditDates(){
-  if(!POS_BRANCH) return;
-  const today = new Date();
-  for(let off=0; off<=10; off++){
-    const d = new Date(today); d.setDate(d.getDate()-off);
-    const dd = d.getDate();
-    const lastDay = new Date(d.getFullYear(), d.getMonth()+1, 0).getDate();
-    if(dd === 15 || dd === lastDay){
-      const ds = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')
-        +'-'+String(dd).padStart(2,'0');
-      autoPushCrewClose(ds);
-    }
-  }
 }
 
 function enterOwner(){
