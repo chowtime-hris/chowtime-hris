@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261104-201500 -->
+<!-- BUILD:20261109-074500 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -9132,7 +9132,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261104-201500";
+const BUILD = "20261109-074500";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -15146,6 +15146,26 @@ function App(){
     },onErr("companyPL"));
     return()=>unsub();
   },[]);
+  // Read-only history of a branch's daily stock_snapshots docs — the same
+  // collection the COGS "opening/ending stock" figures are read from. Lets
+  // Norman see exactly which date's reading is behind an odd-looking
+  // Cost of Goods / Opening Stock figure, from the tablet, no Firebase
+  // Console needed.
+  const [snapHistOpen,setSnapHistOpen]=useState(false);
+  const [snapHistBranch,setSnapHistBranch]=useState(null);
+  const [snapHistRows,setSnapHistRows]=useState([]);
+  const [snapHistLoading,setSnapHistLoading]=useState(false);
+  async function loadSnapHist(bid){
+    setSnapHistBranch(bid); setSnapHistLoading(true);
+    try{
+      const ss=await getDocs(query(collection(db,"stock_snapshots"),
+        where("branch","==",bid)));
+      const rows=ss.docs.map(d=>Object.assign({},d.data(),{_id:d.id}));
+      rows.sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")));
+      setSnapHistRows(rows);
+    }catch(e){ setSnapHistRows([]); }
+    finally{ setSnapHistLoading(false); }
+  }
   // Chain-wide P&L. Sales come from `orders`, which the owner already holds
   // for every branch — but expenses and POs do not: their listeners are a
   // bare limit(100), which Firestore fills with an ARBITRARY hundred once a
@@ -23922,6 +23942,19 @@ function App(){
                   background:plSettingsOpen?"#F3E9F7":"#fff",
                   color:plSettingsOpen?C.primary:C.text}},
                 "⚙️ P&L Settings"),
+              user.role==="owner"&&h("button",{
+                onClick:()=>{
+                  const willOpen=!snapHistOpen;
+                  setSnapHistOpen(willOpen);
+                  if(willOpen&&!snapHistBranch&&(branches||[]).length)
+                    loadSnapHist(branches[0].id);
+                },
+                style:{padding:"7px 13px",borderRadius:8,fontSize:12,
+                  fontWeight:700,cursor:"pointer",
+                  border:"1px solid "+(snapHistOpen?C.primary:C.border),
+                  background:snapHistOpen?"#F3E9F7":"#fff",
+                  color:snapHistOpen?C.primary:C.text}},
+                "📈 Stock Snapshots"),
               h("button",{
                 onClick:()=>loadPlStock((branches||[]).map(b=>b.id),R,manualSrc),
                 disabled:!!(_sKey&&_sKey.loading),
@@ -24065,6 +24098,64 @@ function App(){
                   style:{padding:"6px 10px",borderRadius:7,fontSize:12,
                     border:"none",background:"none",color:C.muted,
                     cursor:"pointer",textDecoration:"underline"}},"Isara"))),
+
+            snapHistOpen&&h("div",{style:{padding:"11px 14px",
+              borderBottom:"1px solid "+C.border,background:"#F3E9F7"}},
+              h("div",{style:{fontSize:12,fontWeight:800,color:C.primary,
+                marginBottom:8}},
+                "📈 Daily stock_snapshots — para makita kung aling petsa ang "
+                +"ginamit bilang Opening/Ending Stock, at kung may masyadong "
+                +"tumalon na value."),
+              h("div",{style:{display:"flex",gap:6,flexWrap:"wrap",
+                marginBottom:10}},
+                (branches||[]).map(function(b){
+                  const active=snapHistBranch===b.id;
+                  return h("button",{key:b.id,
+                    onClick:()=>loadSnapHist(b.id),
+                    style:{padding:"5px 11px",borderRadius:20,fontSize:12,
+                      border:"1px solid "+(active?C.primary:C.border),
+                      background:active?C.primary:"#fff",
+                      color:active?"#fff":C.text,fontWeight:active?700:500,
+                      cursor:"pointer"}},
+                    b.name||b.full||b.id);
+                })),
+              snapHistLoading?h("div",{style:{padding:"14px",textAlign:"center",
+                color:C.muted,fontSize:13}},"Loading…"):
+              h("div",{style:{background:"#fff",borderRadius:9,
+                border:"1px solid "+C.border,overflow:"hidden"}},
+                h("div",{style:{display:"grid",
+                  gridTemplateColumns:"110px 1fr 70px 80px 110px",
+                  padding:"7px 12px",background:"#f5f5f5",
+                  fontSize:11,fontWeight:700,color:C.muted,letterSpacing:1}},
+                  "DATE","VALUE","ITEMS","AUTO?","BY / TAKEN ON"),
+                snapHistRows.length===0&&h("div",{style:{padding:"18px",
+                  textAlign:"center",color:C.muted,fontSize:13}},
+                  snapHistBranch?"Walang snapshot para sa branch na ito.":""),
+                snapHistRows.map(function(s,i){
+                  return h("div",{key:s._id||i,style:{display:"grid",
+                    gridTemplateColumns:"110px 1fr 70px 80px 110px",
+                    padding:"7px 12px",alignItems:"center",
+                    borderTop:i?"1px solid #f5f5f5":"none",
+                    background:i%2?"#fafafa":"#fff"}},
+                    h("div",{style:{fontSize:12,fontWeight:700}},s.date||"—"),
+                    h("div",{style:{fontSize:13,fontWeight:700,
+                      textAlign:"right",paddingRight:10}},
+                      "₱"+peso(Number(s.value)||0)),
+                    h("div",{style:{fontSize:12,color:C.muted,
+                      textAlign:"right",paddingRight:10}},s.itemCount||0),
+                    h("div",{style:{fontSize:11,
+                      color:s.auto?C.muted:C.primary}},
+                      s.auto?"auto":"manual"),
+                    h("div",{style:{fontSize:11,color:C.muted}},
+                      (s.by||"—")+(s.takenOn&&s.takenOn!==s.date
+                        ?" ("+s.takenOn+")":"")));
+                })),
+              h("div",{style:{marginTop:8}},
+                h("button",{onClick:()=>setSnapHistOpen(false),
+                  style:{padding:"6px 10px",borderRadius:7,fontSize:12,
+                    border:"none",background:"none",color:C.muted,
+                    cursor:"pointer",textDecoration:"underline"}},"Isara"))),
+
             // Table scrolls sideways on a tablet rather than squeezing 11
             // columns into the screen width.
             h("div",{style:{overflowX:"auto"}},
