@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261109-074500 -->
+<!-- BUILD:20261109-083600 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -9132,7 +9132,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261109-074500";
+const BUILD = "20261109-083600";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -15155,8 +15155,14 @@ function App(){
   const [snapHistBranch,setSnapHistBranch]=useState(null);
   const [snapHistRows,setSnapHistRows]=useState([]);
   const [snapHistLoading,setSnapHistLoading]=useState(false);
+  const [snapEditId,setSnapEditId]=useState(null);
+  const [snapEditVal,setSnapEditVal]=useState("");
+  const [snapEditSaving,setSnapEditSaving]=useState(false);
+  const [snapDelFrom,setSnapDelFrom]=useState("");
+  const [snapDelTo,setSnapDelTo]=useState("");
   async function loadSnapHist(bid){
     setSnapHistBranch(bid); setSnapHistLoading(true);
+    setSnapEditId(null);
     try{
       const ss=await getDocs(query(collection(db,"stock_snapshots"),
         where("branch","==",bid)));
@@ -15165,6 +15171,31 @@ function App(){
       setSnapHistRows(rows);
     }catch(e){ setSnapHistRows([]); }
     finally{ setSnapHistLoading(false); }
+  }
+  // Manual correction, for when a reading was clearly broken (wrong cost on
+  // an item that month, a double count, etc.) — Norman decides the number,
+  // this just writes it. Keeps the doc id (same branch_date key) so nothing
+  // else has to change; tags who/when corrected it for the trail.
+  async function saveSnapEdit(bid,docId,newVal){
+    setSnapEditSaving(true);
+    try{
+      await setDoc(doc(db,"stock_snapshots",docId),{
+        value:Math.round((Number(newVal)||0)*100)/100,
+        correctedBy:user.name, correctedAt:serverTimestamp()
+      },{merge:true});
+      setSnapEditId(null);
+      await loadSnapHist(bid);
+      showT("Na-correct ang snapshot ✓","ok");
+    }catch(e){ showT("Failed: "+String(e&&e.message||e).slice(0,60),"err"); }
+    finally{ setSnapEditSaving(false); }
+  }
+  async function deleteSnapRow(bid,docId,dateStr){
+    if(!confirm("Tanggalin ang snapshot ng "+dateStr+"? Babalik sa pinakamalapit na naunang reading ang Opening/Ending Stock sa petsang ito."))return;
+    try{
+      await deleteDoc(doc(db,"stock_snapshots",docId));
+      await loadSnapHist(bid);
+      showT("Tinanggal ✓","ok");
+    }catch(e){ showT("Failed: "+String(e&&e.message||e).slice(0,60),"err"); }
   }
   // Chain-wide P&L. Sales come from `orders`, which the owner already holds
   // for every branch — but expenses and POs do not: their listeners are a
@@ -24119,28 +24150,77 @@ function App(){
                       cursor:"pointer"}},
                     b.name||b.full||b.id);
                 })),
+              snapHistBranch&&h("div",{style:{display:"flex",gap:6,
+                flexWrap:"wrap",alignItems:"center",marginBottom:10,
+                padding:"8px 10px",background:"#fff",borderRadius:8,
+                border:"1px solid "+C.border}},
+                h("span",{style:{fontSize:11,fontWeight:700,color:C.muted}},
+                  "🗑️ Burahin ang hanay:"),
+                h("input",{type:"date",value:snapDelFrom,
+                  onChange:e=>setSnapDelFrom(e.target.value),
+                  style:{padding:"4px 7px",border:"1px solid "+C.border,
+                    borderRadius:6,fontSize:12}}),
+                h("span",{style:{fontSize:12,color:C.muted}},"→"),
+                h("input",{type:"date",value:snapDelTo,
+                  onChange:e=>setSnapDelTo(e.target.value),
+                  style:{padding:"4px 7px",border:"1px solid "+C.border,
+                    borderRadius:6,fontSize:12}}),
+                h("button",{
+                  disabled:!snapDelFrom||!snapDelTo,
+                  onClick:async()=>{
+                    const hits=snapHistRows.filter(s=>
+                      s.date>=snapDelFrom&&s.date<=snapDelTo);
+                    if(!hits.length){ showT("Walang snapshot sa saklaw na iyon","err"); return; }
+                    if(!confirm("Tanggalin ang "+hits.length+" snapshot ("
+                      +snapDelFrom+" → "+snapDelTo+") ng "+snapHistBranch+"?"))return;
+                    try{
+                      for(const s of hits) await deleteDoc(doc(db,"stock_snapshots",s._id));
+                      await loadSnapHist(snapHistBranch);
+                      showT(hits.length+" snapshot tinanggal ✓","ok");
+                    }catch(e){ showT("Failed: "+String(e&&e.message||e).slice(0,60),"err"); }
+                  },
+                  style:{padding:"5px 12px",borderRadius:7,fontSize:12,
+                    fontWeight:700,border:"none",cursor:"pointer",
+                    background:(!snapDelFrom||!snapDelTo)?"#eee":C.danger,
+                    color:(!snapDelFrom||!snapDelTo)?C.muted:"#fff"}},
+                  "Tanggalin ang hanay")),
               snapHistLoading?h("div",{style:{padding:"14px",textAlign:"center",
                 color:C.muted,fontSize:13}},"Loading…"):
               h("div",{style:{background:"#fff",borderRadius:9,
                 border:"1px solid "+C.border,overflow:"hidden"}},
                 h("div",{style:{display:"grid",
-                  gridTemplateColumns:"110px 1fr 70px 80px 110px",
+                  gridTemplateColumns:"100px 1fr 60px 65px 100px 90px",
                   padding:"7px 12px",background:"#f5f5f5",
                   fontSize:11,fontWeight:700,color:C.muted,letterSpacing:1}},
-                  "DATE","VALUE","ITEMS","AUTO?","BY / TAKEN ON"),
+                  "DATE","VALUE","ITEMS","AUTO?","BY / TAKEN ON",""),
                 snapHistRows.length===0&&h("div",{style:{padding:"18px",
                   textAlign:"center",color:C.muted,fontSize:13}},
                   snapHistBranch?"Walang snapshot para sa branch na ito.":""),
                 snapHistRows.map(function(s,i){
+                  const editing=snapEditId===s._id;
                   return h("div",{key:s._id||i,style:{display:"grid",
-                    gridTemplateColumns:"110px 1fr 70px 80px 110px",
+                    gridTemplateColumns:"100px 1fr 60px 65px 100px 90px",
                     padding:"7px 12px",alignItems:"center",
                     borderTop:i?"1px solid #f5f5f5":"none",
-                    background:i%2?"#fafafa":"#fff"}},
+                    background:editing?"#FFF8E1":(i%2?"#fafafa":"#fff")}},
                     h("div",{style:{fontSize:12,fontWeight:700}},s.date||"—"),
-                    h("div",{style:{fontSize:13,fontWeight:700,
-                      textAlign:"right",paddingRight:10}},
-                      "₱"+peso(Number(s.value)||0)),
+                    editing
+                      ?h("div",{style:{display:"flex",gap:4,
+                          justifyContent:"flex-end",paddingRight:6}},
+                          h("span",{style:{fontSize:13,color:C.muted}},"₱"),
+                          h("input",{type:"number",autoFocus:true,
+                            onFocus:e=>e.target.select(),
+                            value:snapEditVal,
+                            onChange:e=>setSnapEditVal(e.target.value),
+                            style:{width:100,padding:"4px 6px",
+                              border:"1px solid "+C.primary,borderRadius:6,
+                              fontSize:13,textAlign:"right"}}))
+                      :h("div",{style:{fontSize:13,fontWeight:700,
+                          textAlign:"right",paddingRight:10}},
+                          "₱"+peso(Number(s.value)||0),
+                          s.correctedBy&&h("div",{style:{fontSize:10,
+                            color:C.primary,fontWeight:500}},
+                            "corrected by "+s.correctedBy)),
                     h("div",{style:{fontSize:12,color:C.muted,
                       textAlign:"right",paddingRight:10}},s.itemCount||0),
                     h("div",{style:{fontSize:11,
@@ -24148,7 +24228,33 @@ function App(){
                       s.auto?"auto":"manual"),
                     h("div",{style:{fontSize:11,color:C.muted}},
                       (s.by||"—")+(s.takenOn&&s.takenOn!==s.date
-                        ?" ("+s.takenOn+")":"")));
+                        ?" ("+s.takenOn+")":"")),
+                    editing
+                      ?h("div",{style:{display:"flex",gap:4}},
+                          h("button",{disabled:snapEditSaving,
+                            onClick:()=>saveSnapEdit(snapHistBranch,s._id,snapEditVal),
+                            style:{padding:"3px 8px",borderRadius:6,fontSize:11,
+                              fontWeight:700,border:"none",cursor:"pointer",
+                              background:C.primary,color:"#fff"}},
+                            snapEditSaving?"...":"💾"),
+                          h("button",{onClick:()=>setSnapEditId(null),
+                            style:{padding:"3px 8px",borderRadius:6,fontSize:11,
+                              border:"1px solid "+C.border,background:"#fff",
+                              cursor:"pointer"}},"✕"))
+                      :h("div",{style:{display:"flex",gap:4}},
+                          h("button",{
+                            onClick:()=>{setSnapEditId(s._id);
+                              setSnapEditVal(String(s.value||0));},
+                            title:"I-correct ang value",
+                            style:{padding:"3px 7px",borderRadius:6,fontSize:11,
+                              border:"1px solid "+C.border,background:"#fff",
+                              cursor:"pointer"}},"✏️"),
+                          h("button",{
+                            onClick:()=>deleteSnapRow(snapHistBranch,s._id,s.date),
+                            title:"Tanggalin ang snapshot na ito",
+                            style:{padding:"3px 7px",borderRadius:6,fontSize:11,
+                              border:"1px solid "+C.border,background:"#fff",
+                              color:C.danger,cursor:"pointer"}},"🗑️")));
                 })),
               h("div",{style:{marginTop:8}},
                 h("button",{onClick:()=>setSnapHistOpen(false),
