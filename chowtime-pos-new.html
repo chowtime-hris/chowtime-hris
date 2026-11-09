@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261109-083600 -->
+<!-- BUILD:20261109-085800 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -9132,7 +9132,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261109-083600";
+const BUILD = "20261109-085800";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -17171,6 +17171,8 @@ function App(){
           const isCurrentPeriod=(R.to>=localDate());
           out.closeValue=isCurrentPeriod?out.value
             :(closeSnap?closeSnap.value:null);
+          out.closeDate=isCurrentPeriod?localDate()
+            :(closeSnap?closeSnap.date:null);
         }catch(e){ out.snapErr=String((e&&e.message)||e); }
         by[bid]=out;
       }
@@ -23900,6 +23902,8 @@ function App(){
               grossProfit:bGrossProfit,
               openValue:st?st.openValue:null,
               openDate:st?st.openDate:null,
+              closeValue:st?st.closeValue:null,
+              closeDate:st?st.closeDate:null,
               net:bNet,
               uncosted:manualSrc?mc.missing:(st?st.uncosted:0),
               value:st?st.value:null};
@@ -23925,18 +23929,20 @@ function App(){
               a.cogs+=r.cogs; a.grossProfit+=r.grossProfit; a.anyCogs=true;
             }
             if(r.openValue!=null){a.openValue+=r.openValue; a.anyOpen=true;}
+            if(r.closeValue!=null){a.closeValue+=r.closeValue; a.anyClose=true;}
             if(r.value!=null){a.value+=r.value; a.anyValue=true;}
             if(r.net!=null)a.net+=r.net; else a.netIncomplete=true;
             return a;
           },{sales:0,exp:0,vat:0,expDaily:0,expFixed:0,po:0,commi:0,txns:0,
-             cogs:0,grossProfit:0,net:0,value:0,openValue:0,
-             anyCogs:false,anyValue:false,anyOpen:false,netIncomplete:false});
+             cogs:0,grossProfit:0,net:0,value:0,openValue:0,closeValue:0,
+             anyCogs:false,anyValue:false,anyOpen:false,anyClose:false,
+             netIncomplete:false});
           // A total is only trustworthy once every row has it — one branch
           // still missing cost of goods would otherwise understate the sum
           // and look like a real (lower) figure instead of a partial one.
           const allNet=wideRows.length>0&&!wTot.netIncomplete;
 
-          const COLW="180px 106px 110px 100px 100px 100px 100px 108px 118px 100px 110px";
+          const COLW="180px 106px 110px 110px 100px 100px 100px 100px 108px 118px 100px 110px";
           const cell=(v,style)=>h("div",{style:Object.assign(
             {fontSize:13,textAlign:"right"},style||{})},v);
           const money=(v)=>"₱"+peso(v);
@@ -24265,14 +24271,14 @@ function App(){
             // Table scrolls sideways on a tablet rather than squeezing 11
             // columns into the screen width.
             h("div",{style:{overflowX:"auto"}},
-            h("div",{style:{minWidth:1204}},
+            h("div",{style:{minWidth:1324}},
             // Header
             h("div",{style:{display:"grid",gridTemplateColumns:COLW,gap:8,
               padding:"8px 14px",background:"#fafafa",
               borderBottom:"1px solid "+C.border}},
-              ["BRANCH","SALES","OPENING STOCK","COST OF GOODS","GROSS PROFIT",
-               "PURCHASED","COMMI INCOME","DAILY OPEX","MONTHLY FIXED",
-               "ITEM VALUE","NET INCOME"]
+              ["BRANCH","SALES","OPENING STOCK","ENDING STOCK","COST OF GOODS",
+               "GROSS PROFIT","PURCHASED","COMMI INCOME","DAILY OPEX",
+               "MONTHLY FIXED","ITEM VALUE","NET INCOME"]
                 .map((hh,i)=>h("div",{key:hh,style:{fontSize:10,fontWeight:700,
                   color:C.muted,letterSpacing:1,
                   textAlign:i?"right":"left"}},hh))),
@@ -24298,6 +24304,12 @@ function App(){
                     r.openValue==null?"—":money(r.openValue)),
                   r.openDate?h("div",{style:{fontSize:10,color:C.muted}},
                     r.openDate):null),
+                h("div",{style:{textAlign:"right"}},
+                  h("div",{style:{fontSize:13,
+                    color:r.closeValue==null?C.muted:C.text}},
+                    r.closeValue==null?"—":money(r.closeValue)),
+                  r.closeDate?h("div",{style:{fontSize:10,color:C.muted}},
+                    r.closeDate):null),
                 h("div",{style:{textAlign:"right"}},
                   h("div",{style:{fontSize:13,
                     color:r.cogs==null?C.muted:C.text}},
@@ -24338,6 +24350,7 @@ function App(){
               h("div",{style:{fontSize:13,fontWeight:900}},"TOTAL"),
               cell(money(wTot.sales),{fontWeight:900,color:C.primary}),
               cell(wTot.anyOpen?money(wTot.openValue):"—",{fontWeight:800}),
+              cell(wTot.anyClose?money(wTot.closeValue):"—",{fontWeight:800}),
               cell(wTot.anyCogs?money(wTot.cogs):"—",{fontWeight:800}),
               cell(wTot.anyCogs?money(wTot.grossProfit):"—",{fontWeight:800}),
               cell(money(wTot.po),{fontWeight:800}),
@@ -24454,10 +24467,12 @@ function App(){
               +"straight from that Setup and pro-rated by days, plus VAT/2307 "
               +"markup, shown underneath. Both are counted on the day "
               +"released or billed. OPENING STOCK is the branch's stock value "
-              +"as of the day before the period starts — captured "
-              +"automatically once a day, with the date it was read shown "
+              +"as of the day before the period starts, and ENDING STOCK is "
+              +"its value as of the last day of the period (or right now, "
+              +"for a period still in progress) — both captured "
+              +"automatically once a day, with the date each was read shown "
               +"under it. COST OF GOODS is "
-              +"OPENING STOCK + PURCHASED − ending stock value, when a "
+              +"OPENING STOCK + PURCHASED − ENDING STOCK, when a "
               +"branch has a snapshot on both ends of the period — the same "
               +"method as the single-branch statement. A branch with no "
               +"snapshot yet falls back to "
