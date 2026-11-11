@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261112-090000 -->
+<!-- BUILD:20261112-110000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -2353,10 +2353,10 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
           message:ordered.length+" item/s · review before the delivery arrives",
           page:"stock_order",ref:editPO.poNum||po.poNum,by:user.name});
         await notify(db,{to:"ct-main",type:"po_edited",
-          title:"Na-edit na order — "+(po.branchName||editPO.branch||branchId),
-          message:ordered.length+"  item/s (binago)",
+          title:"Order edited — "+(po.branchName||editPO.branch||branchId),
+          message:ordered.length+"  item/s (changed)",
           page:"po_monitor",ref:editPO.poNum||po.poNum,by:user.name});
-        showT((editPO.poNum||po.poNum)+" updated \u2014 naabisuhan ang Main at "
+        showT((editPO.poNum||po.poNum)+" updated \u2014 Main notified and "
           +(po.branchName||editPO.branch));
         onClose();return;
       }
@@ -2635,12 +2635,12 @@ function POForm({branchId,user,db,INIT_INVENTORY,onClose,showT,advances,setAdvan
             h("div",{style:{marginBottom:10,padding:"8px 12px",background:"#f9f9f9",borderRadius:8}},
               h("div",{style:{fontSize:12,fontWeight:700,color:C.muted,marginBottom:6,letterSpacing:1}},"DISCOUNT (₱)"),
               h("input",{type:"number",value:discount||"",min:0,
-                placeholder:"0.00 — iwanang blangko kung wala",
+                placeholder:"0.00 — leave blank if none",
                 onChange:e=>setDiscount(e.target.value),
                 style:{width:"100%",padding:"7px",border:"1px solid "+C.border,
                   borderRadius:7,fontSize:13,outline:"none",boxSizing:"border-box"}}),
               poTotals.disc>0&&h("div",{style:{fontSize:11,color:C.muted,marginTop:4}},
-                "Binabawas bago ang VAT.")
+                "Deducted before VAT.")
             ),
             // Computed totals
             (()=>{
@@ -3574,7 +3574,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
     <div class="hr"></div>
     <div class="sg">Counted by: ${esc(countedBy)}</div>
     <div class="sg">Verified by (Manager)</div>
-    <div class="f">Printed ${printedAt}<br>Chowtime POS &middot; hindi ito official receipt</div>
+    <div class="f">Printed ${printedAt}<br>Chowtime POS &middot; not an official receipt</div>
     </body></html>`);
     w.document.close();setTimeout(()=>w.print(),400);
   };
@@ -3666,8 +3666,8 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
                ["Remittance (total)","₱"+peso(selHistory.remittance||0),C.warning],
               ].concat(
                (selHistory.remittanceLogged||0)>0
-                 ?[["   \u00B7 mula sa bilang","₱"+peso(selHistory.remittanceField||0),C.muted],
-                   ["   \u00B7 naunang cash out","₱"+peso(selHistory.remittanceLogged||0),C.muted]]
+                 ?[["   \u00B7 from the count","₱"+peso(selHistory.remittanceField||0),C.muted],
+                   ["   \u00B7 from an earlier cash out","₱"+peso(selHistory.remittanceLogged||0),C.muted]]
                  :[]
               ).concat([
                ["Closing Balance","₱"+peso(selHistory.closingBalance||0),C.success],
@@ -3688,7 +3688,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
             const rows=countLog.filter(l=>l.date===selDate);
             if(!rows.length)return h("div",{style:{fontSize:13,color:C.muted,
               marginTop:8,lineHeight:1.6}},
-              "Walang naitalang save para sa petsang ito. Sa mga bagong count pa lang nagsisimula ang trail.");
+              "No saved count recorded for this date. The trail only starts from new counts going forward.");
             return h("div",{style:{marginTop:9}}, rows.map(l=>
               h("div",{key:l._docId,style:{display:"flex",alignItems:"center",gap:9,
                 padding:"7px 0",borderBottom:"1px solid #f5f5f5"}},
@@ -4043,9 +4043,9 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
           remitLogged>0&&h("div",{style:{background:"#FFF8E1",
             border:"1px solid #FFE082",borderRadius:8,padding:"8px 11px",
             marginBottom:8,fontSize:12,lineHeight:1.5}},
-            h("b",null,"\u20B1"+peso(remitLogged)+" ang naitala nang Cash Out \u2014 Remittance."),
+            h("b",null,"\u20B1"+peso(remitLogged)+" was recorded as a Cash Out \u2014 Remittance."),
             h("br"),
-            "Wala na ito sa bilang, kaya huwag mo nang ulitin sa taas. Kabuuang remittance ngayong araw: ",
+            "This is no longer counted, so don't add it again above. Total remittance for today: ",
             h("b",null,"\u20B1"+peso(remittanceAmt))),
           h("div",{style:{background:"#F3E5F5",borderRadius:9,padding:"10px 13px",display:"flex",justifyContent:"space-between",alignItems:"center"}},
             h("div",null,
@@ -4136,7 +4136,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
         ccStep===4&&Math.abs(variance)>=0.01&&!(countNote||"").trim()&&
           h("div",{style:{fontSize:12,color:C.danger,fontWeight:700,
             textAlign:"center",marginTop:6}},
-            "₱"+peso(Math.abs(variance))+" ang "+(variance>0?"over":"short")
+            "₱"+peso(Math.abs(variance))+" is "+(variance>0?"over":"short")
             +" — write a note in NOTES before closing."),
         ccStep<4&&h("button",{onClick:()=>{saveCashCount(false);},
           style:{width:"100%",marginTop:7,padding:"9px",background:"#fff",
@@ -4148,7 +4148,7 @@ function CashCountPage({branchId,curBranch,user,db,orders,cashLog,expenses,showT
           // The day is not finished until the reading is out too, and nothing
           // used to say so.
           h("div",{style:{fontSize:12,color:C.muted,marginTop:3}},
-            "Susunod: buksan ang Z-Reading at i-print ang End of Day."))
+            "Next: open the Z-Reading and print the End of Day."))
       )
     )
   );
@@ -4242,7 +4242,7 @@ function CALoanPage({user,branchId,curBranch,db,hrisDB,showT,mode,hrisEmps=[],pr
       if(branchId!=="ct-main"){
         await notify(db,{to:branchId,type:"info",
           title:(isCA?"Cash Advance":"Cash Loan")+" request \u2014 "+hrisEmp.name,
-          message:"\u20B1"+peso(amt)+" \u00B7 "+reason+" \u00B7 nasa Main ang approval",
+          message:"\u20B1"+peso(amt)+" \u00B7 "+reason+" \u00B7 awaiting approval at Main",
           page:"ca_request",ref:hrisEmp.name,by:user.name});
       }
     }catch(e){console.warn("CA notify failed:",e);}
@@ -4388,23 +4388,23 @@ function CALoanPage({user,branchId,curBranch,db,hrisDB,showT,mode,hrisEmps=[],pr
                 "Tinanggihan ni "+r.rejectedBy),
               r.syncError&&h("div",{style:{fontSize:12,color:C.danger,marginTop:3,
                 fontWeight:700}},
-                "\u26A0\uFE0F Hindi pa naipapasok sa payroll \u2014 nanatiling pending"),
+                "\u26A0\uFE0F Not yet posted to payroll \u2014 remains pending"),
               // The only thing the requester can do to their own request, and
               // it withdraws rather than deletes — the row and its trail stay.
               r.status==="pending"&&h("button",{
                 onClick:async()=>{
-                  if(!confirm("Bawiin ang \u20B1"+peso(r.amount)+" na request?"))return;
+                  if(!confirm("Revoke the \u20B1"+peso(r.amount)+" request?"))return;
                   try{
                     await updateDoc(doc(db,"hris_requests",r._docId),{
                       status:"cancelled",cancelledBy:user.name,
                       cancelledAt:serverTimestamp()});
                     await logCAEvent(db,r,"cancelled_by_requester",user.name,{});
                     showT("Request withdrawn","warn");
-                  }catch(e){showT("Hindi nabawi","err");}
+                  }catch(e){showT("Could not revoke","err");}
                 },
                 style:{marginTop:7,padding:"5px 11px",fontSize:12,fontWeight:700,
                   borderRadius:7,cursor:"pointer",border:"1px solid "+C.border,
-                  background:"#fff",color:C.danger}},"Bawiin ang request")
+                  background:"#fff",color:C.danger}},"Revoke request")
             ))
         )
       )
@@ -4838,7 +4838,7 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
     // Approving twice would post the deduction twice. The request itself is
     // the guard: only a pending one can be approved.
     if(req.status&&req.status!=="pending"){
-      showT("Naaksyunan na ito: "+req.status,"warn");
+      showT("Already actioned: "+req.status,"warn");
       return;
     }
     // 1. Update POS Firestore status
@@ -4862,7 +4862,7 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
     if(req.payrollSrc==="prod"){
       if(!prodDB||!req.hrisEmpId){
         await logCAEvent(db,req,"approved_no_payroll_link",user.name,
-          {note:"walang Production DB o walang staff id"});
+          {note:"no Production DB or no staff id"});
         showT("Approved — but Production payroll is unreachable. "
           +"Record it manually in the Production app.","warn");
         return;
@@ -4976,11 +4976,11 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
         try{
           await notify(db,{to:req.branch,type:"success",
             title:req.type+" approved — "+req.staffName,
-            message:"\u20B1"+peso(req.amount)+" \u00B7 ibabawas sa susunod na cutoff",
+            message:"\u20B1"+peso(req.amount)+" \u00B7 will be deducted on the next cutoff",
             page:"ca_request",ref:req.staffName||"",by:user.name});
         }catch(e3){}
         showT(already
-          ? "Naka-post na ang deduction na ito sa payroll"
+          ? "This deduction has already been posted to payroll"
           : ("Approved & synced to "
              +(isFranchiseReq?(reqBranch.name||reqBranch.full)+"'s payroll":"HRIS payroll")+" ✓"));
       }catch(e){
@@ -5112,9 +5112,9 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
       h("div",{style:{background:"#E3F2FD",border:"1px solid #90CAF9",
         borderRadius:10,padding:"9px 13px",marginBottom:12,fontSize:13,
         color:"#1565C0"}},
-        "Bawat hakbang ng CA, loan, at expense. Kapag may nawawalang bawas sa payslip o hindi tugmang cash count, dito makikita kung saan ito tumigil."),
+        "Every step of a CA, loan, or expense. When a deduction is missing from a payslip or the cash count doesn't match, this is where you can see where it stopped."),
       h("div",{style:{display:"flex",gap:6,marginBottom:11,flexWrap:"wrap"}},
-        [["all","Lahat"],["CA","Cash Advance"],["Loan","Cash Loan"],
+        [["all","All"],["CA","Cash Advance"],["Loan","Cash Loan"],
          ["Expense","Expenses"]].map(([k,l])=>
           h("button",{key:k,onClick:()=>setLogKind(k),
             style:{padding:"5px 13px",borderRadius:20,fontSize:13,
@@ -5125,20 +5125,20 @@ function HRISDashPage({user,db,hrisDB,showT,branches:BRANCHES,hrisEmps=[]}){
       caLog.length===0
         ? h("div",{style:{textAlign:"center",padding:"34px",color:C.muted,
             background:"#fff",borderRadius:12,border:"1px solid "+C.border}},
-            "Wala pang naitatalang hakbang. Nagsisimula ang trail sa mga bagong request.")
+            "No steps recorded yet. The trail starts from new requests going forward.")
         : h("div",{style:{background:"#fff",borderRadius:12,
             border:"1px solid "+C.border,overflow:"hidden"}},
             caLog.filter(l=>canDecide||l.branch===user.branch)
               .filter(l=>logKind==="all"||(l.kind||"CA")===logKind).map(l=>{
               const meta={
-                submitted:{c:C.info,i:"\uD83D\uDCE4",t:"Isinumite"},
-                posted_to_payroll:{c:C.success,i:"\u2705",t:"Naipasok sa payroll"},
-                already_in_payroll:{c:C.muted,i:"\u21BB",t:"Nakapasok na dati"},
+                submitted:{c:C.info,i:"\uD83D\uDCE4",t:"Submitted"},
+                posted_to_payroll:{c:C.success,i:"\u2705",t:"Posted to payroll"},
+                already_in_payroll:{c:C.muted,i:"\u21BB",t:"Already posted before"},
                 approved_no_payroll_link:{c:C.warning,i:"\u26A0\uFE0F",
-                  t:"Approved pero WALANG naipasok sa payroll"},
+                  t:"Approved but NOT posted to payroll"},
                 payroll_sync_failed:{c:C.danger,i:"\u274C",t:"Sync failed"},
                 rejected:{c:C.danger,i:"\u2716",t:"Tinanggihan"},
-                cancelled_by_requester:{c:C.muted,i:"\u21A9",t:"Binawi ng humiling"},
+                cancelled_by_requester:{c:C.muted,i:"\u21A9",t:"Revoked by requester"},
                 expense_created:{c:C.info,i:"\uD83D\uDCB8",t:"Expense naitala \u00B7 Cash Out"},
                 expense_edited:{c:C.warning,i:"\u270F\uFE0F",t:"Expense binago"},
                 expense_deleted:{c:C.danger,i:"\uD83D\uDDD1\uFE0F",t:"Expense binura"}
@@ -7600,8 +7600,8 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
           color:optToMode===v?"#fff":C.text}},lbl)));
   const ToNote=()=>optToMode&&h("div",{style:{padding:"8px 12px",background:"#FFF8E1",
     fontSize:12,color:"#6D4C00",borderBottom:"1px solid "+C.border,lineHeight:1.5}},
-    "Ibabawas LANG kapag take-out (o delivery) ang item na may option na ito \u2014 "
-    +"halimbawa cup + lid ng drink na pinili. Walang laman = walang ibabawas.");
+    "Deducted ONLY when this item's option is take-out (or delivery) \u2014 "
+    +"e.g. the cup + lid for a chosen drink. Empty = nothing deducted.");
 
   // selGroup is a snapshot captured on click — it never refreshes when the
   // onSnapshot listener updates `groups`. Reading choices from it means edits
@@ -7615,7 +7615,7 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
     const label=(editChVal||"").trim();
     if(!label){showT("Enter choice name","warn");return;}
     if(liveChoices.find(c=>c.id!==ch.id&&c.label===label)){
-      showT(" There is ganitong choice na","warn");return;
+      showT("That choice already exists","warn");return;
     }
     const price=parseFloat(editChPrice)||0;
     if(label===ch.label&&price===(ch.priceAdd||0)){setEditingChoice(null);return;}
@@ -7749,7 +7749,7 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
       const p=parseQuickLine(ln); if(!p)return;
       const ing=matchIng(p.name);
       if(!ing){missed.push(ln);return;}
-      if(keep.some(r=>r.ingId===ing.id)){missed.push(ln+" (nasa listahan na)");return;}
+      if(keep.some(r=>r.ingId===ing.id)){missed.push(ln+" (already in the list)");return;}
       keep.push({ingId:ing.id,ingName:ing.name,unit:ing.unit||"",
         deductUnit:p.unit||ing.unit||"",convUnit:ing.unit||"",
         convFactor:1,markup:0,qty:p.qty||0});
@@ -7758,8 +7758,8 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
     setRows(keep.concat([blankRow()]));
     setQuickAdd("");
     setQuickMsg(added+" naidagdag"
-      +(missed.length?"  \u00B7  hindi natugma: "+missed.join(" / "):"")
-      +(added?"  \u00B7  pindutin ang Save":""));
+      +(missed.length?"  \u00B7  no match: "+missed.join(" / "):"")
+      +(added?"  \u00B7  press Save":""));
   };
 
   // Every BOM already saved, as a copy source. R1/R2/R3 share a meal box and
@@ -7794,8 +7794,8 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
     const add=src.rows.filter(r=>!keep.some(k=>k.ingId===r.ingId))
       .map(r=>Object.assign({},r));
     setRows(keep.concat(add,[blankRow()]));
-    setQuickMsg(add.length+" hilera mula sa "+src.label
-      +(add.length?"  \u00B7  pindutin ang Save":"  \u00B7  nadoble lahat, walang idinagdag"));
+    setQuickMsg(add.length+" row(s) from "+src.label
+      +(add.length?"  \u00B7  press Save":"  \u00B7  all duplicates, nothing added"));
   };
 
   const BOMEditor=({rows,setRows,onSave,saving:sv})=>h("div",null,
@@ -7810,11 +7810,11 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
           style:{marginLeft:"auto",padding:"5px 7px",fontSize:12,
             border:"1px solid "+C.border,borderRadius:6,cursor:"pointer",
             maxWidth:250}},
-          [h("option",{key:"_",value:""},"\u2398 Kopyahin mula sa\u2026")]
+          [h("option",{key:"_",value:""},"\u2398 Copy from\u2026")]
             .concat(bomSources.map(x=>h("option",{key:x.key,value:x.key},x.label))))
       ),
       h("textarea",{value:quickAdd,onChange:e=>setQuickAdd(e.target.value),
-        rows:3,placeholder:"Isa bawat linya:\nchicken fillet 1 pc\nsauce 20 ml\nmeal box 1",
+        rows:3,placeholder:"One per line:\nchicken fillet 1 pc\nsauce 20 ml\nmeal box 1",
         style:{width:"100%",padding:"7px 9px",border:"1px solid "+C.border,
           borderRadius:7,fontSize:13,outline:"none",boxSizing:"border-box",
           resize:"vertical",fontFamily:"inherit",lineHeight:1.45}}),
@@ -7823,9 +7823,9 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
         h("button",{onClick:()=>applyQuick(rows,setRows),
           style:{padding:"6px 14px",background:C.primary,border:"none",
             borderRadius:7,color:"#fff",fontSize:12,fontWeight:800,
-            cursor:"pointer"}},"Idagdag sa listahan"),
+            cursor:"pointer"}},"Add to list"),
         h("span",{style:{fontSize:11,color:C.muted}},
-          "Pangalan lang ang kailangan \u2014 hinahanap nito ang tugma sa inventory."),
+          "Only the name is needed \u2014 it searches inventory for a match."),
         quickMsg&&h("span",{style:{fontSize:12,fontWeight:700,
           color:/hindi natugma/.test(quickMsg)?C.warning:C.success,
           width:"100%"}},quickMsg))
@@ -7921,8 +7921,8 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
         display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}},
         h("div",{style:{flex:1,minWidth:180,fontSize:12,color:C.danger,fontWeight:700}},
           "⚠️ Both "+baseU+" recipe and stock use "+factor+
-          " — "+(row.qty||0)+" "+baseU+" ay nagiging "+actualDeduct.toFixed(3).replace(/\.?0+$/,"")+
-          " "+baseU+" lang. Should be 1."),
+          " — "+(row.qty||0)+" "+baseU+" becomes "+actualDeduct.toFixed(3).replace(/\.?0+$/,"")+
+          " "+baseU+" only. Should be 1."),
         h("button",{
           onClick:()=>{const u=[...rows];u[i]={...u[i],convFactor:1};setRows(u);},
           style:{padding:"4px 9px",borderRadius:6,border:"none",background:C.danger,
@@ -8089,9 +8089,9 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
                 ),
                 h("div",{style:{padding:"10px 16px",background:"#FFF8E1",fontSize:12,
                   color:"#6D4C00",borderBottom:"1px solid "+C.border,lineHeight:1.5}},
-                  "Ibabawas LANG kapag take-out (o delivery) ang line na ito, kada pirasong T/O. "
-                  +"Ilagay dito ang packaging na kasama sa item na ito \u2014 halimbawa lalagyan; "
-                  +"cup lid kung ang set na ito ay may drink. Walang laman = walang ibabawas."),
+                  "Deducted ONLY when this line is take-out (or delivery), per T/O piece. "
+                  +"Put the packaging that comes with this item here \u2014 e.g. a container; "
+                  +"a cup lid if this set includes a drink. Empty = nothing deducted."),
                 h("div",{style:{padding:"14px 16px"}},
                   BOMEditor({rows:editToBom,setRows:setEditToBom,onSave:saveToBom,saving:saving}))
               ),
@@ -8165,9 +8165,9 @@ function BOMPage({menuItems,db,user,showT,inventory=[],optGroups=[]}){
           "\uD83E\uDD61 Take-out extras \u2014 kada order"),
         h("div",{style:{padding:"10px 16px",background:"#FFF8E1",fontSize:12,color:"#6D4C00",
           borderBottom:"1px solid "+C.border,lineHeight:1.5}},
-          "Ibabawas ISANG BESES kada order na may kahit isang take-out o delivery na piraso, "
-          +"kahit ilan ang laman \u2014 halimbawa plastic bag, kutsara/tinidor, tissue. "
-          +"Ang packaging na kada piraso (lalagyan, cup lid) ay ilagay sa Take-out extras ng mismong item."),
+          "Deducted ONCE per order that has at least one take-out or delivery piece, "
+          +"no matter how many pieces \u2014 e.g. plastic bag, spoon/fork, tissue. "
+          +"Per-piece packaging (container, cup lid) goes under Take-out extras on that item itself."),
         h("div",{style:{padding:"14px 16px"}},
           BOMEditor({rows:editOrdBom,setRows:setEditOrdBom,onSave:saveOrdBom,saving:saving}))
       ),
@@ -8613,8 +8613,8 @@ function BranchSettingsPage({branchId,curBranch,user,db,showT}){
         h("b",{style:{fontSize:14}},"\uD83D\uDD25 Kitchen flow"),
         h("div",{style:{fontSize:13,color:C.muted,marginTop:3,lineHeight:1.5}},
           kitchenFlow
-            ? "BUKAS \u2014 bagong order ay pending, dadaan sa Prepare at Served. Kailangan ng dispatcher o crew na maglilipat ng status."
-            : "SARADO \u2014 bagong order ay agad served. Nakatago ang Prepare at Served. Gamitin kapag walang dispatcher.")),
+            ? "OPEN \u2014 new orders start pending, moving through Prepare and Served. Needs a dispatcher or crew to move the status along."
+            : "CLOSED \u2014 new orders are served immediately. Prepare and Served are hidden. Use this when there's no dispatcher.")),
       h("button",{onClick:()=>setKitchenFlow(v=>!v),
         style:{width:64,height:32,borderRadius:16,border:"none",cursor:"pointer",
           background:kitchenFlow?C.success:"#C8C8C8",position:"relative",
@@ -8623,7 +8623,7 @@ function BranchSettingsPage({branchId,curBranch,user,db,showT}){
           width:26,height:26,borderRadius:"50%",background:"#fff",
           transition:"left .15s",display:"block"}}))),
     h("div",{style:{fontSize:12,color:C.muted,marginTop:8}},
-      "Hindi nito binubura ang dating order \u2014 ang bago lang ang apektado. Pindutin ang Save sa ibaba.")
+      "This does not erase past orders \u2014 only new ones are affected. Press Save below.")
   );
 
   const roleColors = {cashier:"#34C759",crew:"#FF9500",stockclerk:"#AF52DE"};
@@ -9148,7 +9148,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261112-090000";
+const BUILD = "20261112-110000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -9344,9 +9344,9 @@ function DiscountPage({db,user,branches,discounts,menuItems,showT}){
 
   const save=async()=>{
     const v=parseFloat(form.value)||0;
-    if(!form.name.trim()){showT("Kailangan ng pangalan","warn");return;}
-    if(v<=0){showT("Kailangan ng halaga","warn");return;}
-    if(form.valueType==="percent"&&v>100){showT("Hindi pwedeng lampas 100%","warn");return;}
+    if(!form.name.trim()){showT("Name is required","warn");return;}
+    if(v<=0){showT("Amount is required","warn");return;}
+    if(form.valueType==="percent"&&v>100){showT("Cannot exceed 100%","warn");return;}
     if(form.toDate&&form.fromDate&&form.toDate<form.fromDate){
       showT("Invalid dates — To Date is before From Date","warn");return;
     }
@@ -9360,7 +9360,7 @@ function DiscountPage({db,user,branches,discounts,menuItems,showT}){
       if(editId){ await updateDoc(doc(db,"discounts",editId),payload); }
       else{ await addDoc(collection(db,"discounts"),
         Object.assign({},payload,{createdBy:user.name,at:serverTimestamp()})); }
-      showT(editId?"Na-update ✓":"Discount added ✓");
+      showT(editId?"Updated ✓":"Discount added ✓");
       setForm(blank); setEditId(null);
     }catch(e){ showT("Failed: "+String(e&&e.message||e).slice(0,60),"err"); }
     setSaving(false);
@@ -9379,7 +9379,7 @@ function DiscountPage({db,user,branches,discounts,menuItems,showT}){
 
       h("div",{style:{background:"#fff",borderRadius:12,padding:16,
         border:"1px solid "+C.border}},
-        h("b",{style:{fontSize:14}},editId?"I-edit ang discount":"Bagong discount"),
+        h("b",{style:{fontSize:14}},editId?"Edit discount":"New discount"),
         h("div",{style:{display:"grid",gap:10,marginTop:11}},
           h("div",null,lbl("PANGALAN"),
             h("input",{value:form.name,placeholder:"hal. Opening Promo",
@@ -9399,16 +9399,16 @@ function DiscountPage({db,user,branches,discounts,menuItems,showT}){
                 style:Object.assign({},inp,{fontWeight:800})}))),
 
           h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}},
-            h("div",null,lbl("MULA"),
+            h("div",null,lbl("FROM"),
               h("input",{type:"date",value:form.fromDate,
                 onChange:e=>setForm(p=>({...p,fromDate:e.target.value})),
                 style:inp})),
-            h("div",null,lbl("HANGGANG"),
+            h("div",null,lbl("UNTIL"),
               h("input",{type:"date",value:form.toDate,
                 onChange:e=>setForm(p=>({...p,toDate:e.target.value})),
                 style:inp}))),
           h("div",{style:{fontSize:12,color:C.muted,marginTop:-4}},
-            "Iwanang blanko ang Hanggang kung walang katapusan."),
+            "Leave Until blank if there's no end date."),
 
           h("div",null,lbl("STATUS"),
             h("div",{style:{display:"flex",gap:6}},
@@ -9463,7 +9463,7 @@ function DiscountPage({db,user,branches,discounts,menuItems,showT}){
                     color:on?C.primary:C.muted}},b.name||b.full||b.id);
               }))),
 
-          h("div",null,lbl("PAALALA (opsyonal)"),
+          h("div",null,lbl("NOTE (optional)"),
             h("textarea",{value:form.note,rows:2,
               onChange:e=>setForm(p=>({...p,note:e.target.value})),
               style:Object.assign({},inp,{resize:"vertical",
@@ -9474,7 +9474,7 @@ function DiscountPage({db,user,branches,discounts,menuItems,showT}){
               background:saving?"#8A8A8A":C.primary,color:"#fff",
               fontWeight:800,fontSize:14,
               cursor:saving?"not-allowed":"pointer"}},
-            saving?"Sinesave...":(editId?"💾 I-update":"➕ Idagdag")),
+            saving?"Sinesave...":(editId?"💾 Update":"➕ Add")),
           editId&&h("button",{onClick:()=>{setForm(blank);setEditId(null);},
             style:{padding:"9px",borderRadius:9,border:"1px solid "+C.border,
               background:"#fff",color:C.muted,fontWeight:700,fontSize:13,
@@ -9486,10 +9486,10 @@ function DiscountPage({db,user,branches,discounts,menuItems,showT}){
         border:"1px solid "+C.border,overflow:"hidden"}},
         h("div",{style:{padding:"11px 15px",borderBottom:"1px solid "+C.border,
           fontSize:14,fontWeight:800}},
-          "Mga discount ("+(discounts||[]).length+")"),
+          "Discounts ("+(discounts||[]).length+")"),
         (discounts||[]).length===0
           ? h("div",{style:{padding:"34px",textAlign:"center",color:C.muted,
-              fontSize:13}},"Wala pang discount. Gumawa sa kaliwa.")
+              fontSize:13}},"No discounts yet. Create one on the left.")
           : (discounts||[]).slice().sort((a,b)=>
               String(a.name||"").localeCompare(String(b.name||"")))
             .map(d=>{
@@ -9506,10 +9506,10 @@ function DiscountPage({db,user,branches,discounts,menuItems,showT}){
                       ? ("₱"+peso(d.value||0)) : ((Number(d.value)||0)+"%"))),
                   h("div",{style:{fontSize:12,color:C.muted,marginTop:2}},
                     ((d.branches||[]).length===0
-                      ? "Lahat ng branch"
+                      ? "All branches"
                       : (d.branches||[]).map(bName).join(", "))),
                   h("div",{style:{fontSize:12,color:C.muted,marginTop:1}},
-                    (d.fromDate||"—")+" → "+(d.toDate||"walang katapusan")),
+                    (d.fromDate||"—")+" → "+(d.toDate||"no end date")),
                   h("div",{style:{fontSize:12,color:C.muted,marginTop:1}},
                     (d.items||[]).length===0
                       ? "Buong order"
@@ -9545,7 +9545,7 @@ function DiscountPage({db,user,branches,discounts,menuItems,showT}){
                         await updateDoc(doc(db,"discounts",d._docId),{
                           status:d.status==="active"?"inactive":"active",
                           updatedBy:user.name,updatedAt:serverTimestamp()});
-                        showT(d.status==="active"?"Na-off":"Na-on");
+                        showT(d.status==="active"?"Turned off":"Turned on");
                       }catch(e){showT("Failed","err");}
                     },
                     style:{padding:"4px 11px",borderRadius:7,fontSize:12,
@@ -9553,7 +9553,7 @@ function DiscountPage({db,user,branches,discounts,menuItems,showT}){
                       border:"1px solid "+C.border,color:C.muted}},
                     d.status==="active"?"Off":"On"),
                   h("button",{onClick:async()=>{
-                      if(!confirm("Burahin ang \""+(d.name||"")+"\"? Past sales are not affected."))return;
+                      if(!confirm("Delete \""+(d.name||"")+"\"? Past sales are not affected."))return;
                       try{ await deleteDoc(doc(db,"discounts",d._docId));
                         showT("Nabura","warn");
                       }catch(e){showT("Failed","err");}
@@ -9788,7 +9788,7 @@ function PaymentProofModal({db,branchId,curBranch,user,mySub,myProofs,onClose,sh
   // without needing one.
   const pickShot=(file)=>{
     if(!file)return;
-    if(!/^image\//.test(file.type||"")){showT("Larawan lang ang pwede","warn");return;}
+    if(!/^image\//.test(file.type||"")){showT("Images only","warn");return;}
     const r=new FileReader();
     r.onload=()=>{
       const img=new Image();
@@ -9800,13 +9800,13 @@ function PaymentProofModal({db,branchId,curBranch,user,mySub,myProofs,onClose,sh
         cv.getContext("2d").drawImage(img,0,0,cv.width,cv.height);
         let out=cv.toDataURL("image/jpeg",0.6);
         if(out.length>700000)out=cv.toDataURL("image/jpeg",0.4);
-        if(out.length>700000){showT("Masyadong malaki ang larawan","warn");return;}
+        if(out.length>700000){showT("Image is too large","warn");return;}
         setShot(out);setShotName(file.name||"screenshot.jpg");
       };
       img.onerror=()=>showT("Could not read the image","err");
       img.src=r.result;
     };
-    r.onerror=()=>showT("Hindi mabasa ang file","err");
+    r.onerror=()=>showT("Could not read the file","err");
     r.readAsDataURL(file);
   };
 
@@ -9827,7 +9827,7 @@ function PaymentProofModal({db,branchId,curBranch,user,mySub,myProofs,onClose,sh
         title:"Payment proof submitted",
         message:bFull+" \u00B7 \u20B1"+peso(amt)+" \u00B7 ref "+payRef.trim(),
         page:"subs",ref:payRef.trim(),by:user.name});
-      showT("Naipadala ang patunay \u2713");
+      showT("Proof sent \u2713");
       onClose();
     }catch(e){
       console.error("proof submit:",e);
@@ -9850,16 +9850,16 @@ function PaymentProofModal({db,branchId,curBranch,user,mySub,myProofs,onClose,sh
       boxShadow:"0 20px 60px rgba(0,0,0,.3)"}},
       h("div",{style:{display:"flex",justifyContent:"space-between",
         alignItems:"center",marginBottom:12}},
-        h("b",{style:{fontSize:15}},"\uD83D\uDCE4 Ipadala ang patunay ng bayad"),
+        h("b",{style:{fontSize:15}},"\uD83D\uDCE4 Send payment proof"),
         h("button",{onClick:onClose,style:{background:"none",border:"none",
           fontSize:18,cursor:"pointer"}},"\u00D7")),
       (mySub&&mySub.gcashNumber)&&h("div",{style:{background:"#F3E5F5",
         borderRadius:9,padding:"9px 12px",marginBottom:12,fontSize:13}},
         h("b",null,"GCash: "+mySub.gcashNumber),
         (mySub.amount?h("div",{style:{color:C.muted,marginTop:2}},
-          "Buwanang bayad: \u20B1"+peso(mySub.amount)):null)),
+          "Monthly payment: \u20B1"+peso(mySub.amount)):null)),
       h("div",{style:{display:"grid",gap:9}},
-        h("div",null,lbl("PETSA NG BAYAD"),
+        h("div",null,lbl("PAYMENT DATE"),
           h("input",{type:"date",value:paidOn,max:localDate(),
             onChange:e=>setPaidOn(e.target.value),style:inp})),
         h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}},
@@ -9887,7 +9887,7 @@ function PaymentProofModal({db,branchId,curBranch,user,mySub,myProofs,onClose,sh
               style:{marginTop:5,padding:"4px 10px",fontSize:12,
                 border:"1px solid "+C.border,borderRadius:6,background:"#fff",
                 cursor:"pointer"}},"Remove image"))),
-        h("div",null,lbl("PAALALA (opsyonal)"),
+        h("div",null,lbl("NOTE (optional)"),
           h("textarea",{value:note,onChange:e=>setNote(e.target.value),rows:2,
             placeholder:"hal. partial payment, kalahati muna",
             style:Object.assign({},inp,{resize:"vertical",
@@ -9896,14 +9896,14 @@ function PaymentProofModal({db,branchId,curBranch,user,mySub,myProofs,onClose,sh
           style:{padding:"11px",borderRadius:9,border:"none",
             background:busy?"#8A8A8A":C.primary,color:"#fff",fontWeight:800,
             fontSize:14,cursor:busy?"not-allowed":"pointer"}},
-          busy?"Ipinapadala...":"Ipadala sa main office")
+          busy?"Sending...":"Send to main office")
       ),
       h("div",{style:{fontSize:12,color:C.muted,marginTop:10,lineHeight:1.5}},
-        "Ang main office ang magko-confirm nito. Babalik ang access pagkatapos \u2014 hindi ito awtomatiko."),
+        "Main office will confirm this. Access returns afterward \u2014 it is not automatic."),
       mine.length>0&&h("div",{style:{marginTop:13,borderTop:"1px solid "+C.border,
         paddingTop:10}},
         h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,
-          letterSpacing:1,marginBottom:6}},"MGA NAIPADALA NA"),
+          letterSpacing:1,marginBottom:6}},"ALREADY SENT"),
         mine.map(x=>h("div",{key:x._docId,style:{display:"flex",
           justifyContent:"space-between",gap:8,padding:"5px 0",
           borderBottom:"1px solid #f7f7f7",fontSize:12}},
@@ -10574,7 +10574,7 @@ function voidSummary(r){
   return "₱"+peso(r.voidAmt)+" reversed · "+r.restocked+" ingredient/s restocked"
     +(r.restockSkipped?" (no restock — stock was never deducted for this order)":"")
     +(r.restockFailed?" ("+r.restockFailed+" failed)":"")
-    +(r.missingId?" ("+r.missingId+" walang BOM link)":"")
+    +(r.missingId?" ("+r.missingId+" no BOM link)":"")
     +(!r.orderUpdated?" ⚠️ order not updated":"");
 }
 
@@ -10840,7 +10840,7 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
         style:{padding:"6px 9px",fontSize:13,borderRadius:7,
           border:"1px solid "+C.border,cursor:"pointer",fontWeight:700}},
         [h("option",{key:"all",value:"all"},
-          "Lahat ng branch ("+Object.values(pendingByBranch)
+          "All branches ("+Object.values(pendingByBranch)
             .reduce((a,b)=>a+b,0)+" pending)")]
           .concat((branches||[]).map(b=>h("option",{key:b.id,value:b.id},
             (b.name||b.full||b.id)
@@ -10877,7 +10877,7 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
             h("div",{style:{fontWeight:700,fontSize:14,color:C.danger}},
               "Select Order to Void"),
             h("div",{style:{marginLeft:"auto",display:"flex",gap:4}},
-              [[0,"Ngayon"],[7,"7 araw"],[99999,"Lahat"]].map(([d,l])=>
+              [[0,"Today"],[7,"7 days"],[99999,"All"]].map(([d,l])=>
                 h("button",{key:d,onClick:()=>setVoidDays(d),
                   style:{padding:"4px 11px",fontSize:12,borderRadius:7,
                     cursor:"pointer",fontWeight:voidDays===d?800:600,
@@ -10888,8 +10888,8 @@ function VoidRequestPage({user,branchId,curBranch,db,orders,showT,isManager=fals
             ?h("div",{style:{padding:"20px",textAlign:"center",color:C.muted,
                 background:"#fff",borderRadius:10,border:"1px solid "+C.border,fontSize:13}},
               voidDays===0
-                ?"Walang order ngayong araw — subukan ang 7 araw o Lahat."
-                :"Walang mavo-void na order sa saklaw na ito.")
+                ?"No orders today — try 7 days or All."
+                :"No voidable orders in this range.")
             :h("div",{style:{display:"grid",gap:5,maxHeight:380,overflowY:"auto"}},
               todayOrders.map(o=>h("div",{key:o.id,
                 style:{padding:"10px 13px",borderRadius:9,
@@ -11390,10 +11390,10 @@ function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inve
             return h("div",{style:{marginTop:8,paddingTop:8,
               borderTop:"1px solid "+C.border,fontSize:12,lineHeight:1.5}},
               huge.length>0&&h("div",{style:{color:C.danger,fontWeight:700}},
-                "\u26A0\uFE0F "+huge.length+" item na lampas \u20B1100k ang halaga: "
+                "\u26A0\uFE0F "+huge.length+" item(s) valued over \u20B1100k: "
                 +nm(huge)),
               noCost.length>0&&h("div",{style:{color:C.warning,fontWeight:700}},
-                "\u26A0\uFE0F "+noCost.length+" item na may stock pero walang cost: "
+                "\u26A0\uFE0F "+noCost.length+" item(s) with stock but no cost: "
                 +nm(noCost)));
           })()
         ),
@@ -11429,8 +11429,8 @@ function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inve
     // ── ITEM TAB ──
     tab===" item"&&h("div",null,
       h("div",{style:{display:"flex",gap:6,marginBottom:10,alignItems:"center"}},
-        h("span",{style:{fontSize:13,color:C.muted}},"Ayos ayon sa:"),
-        [["qty","Dami"],["rev","Kita (₱)"]].map(([id,l])=>h("button",{key:id,onClick:()=>setItemSort(id),
+        h("span",{style:{fontSize:13,color:C.muted}},"Sort by:"),
+        [["qty","Qty"],["rev","Revenue (₱)"]].map(([id,l])=>h("button",{key:id,onClick:()=>setItemSort(id),
           style:{padding:"6px 14px",borderRadius:20,fontSize:13,cursor:"pointer",
             border:"1px solid "+(itemSort===id?C.primary:C.border),
             background:itemSort===id?C.primary:"#fff",color:itemSort===id?"#fff":C.muted,
@@ -12252,7 +12252,7 @@ function StockEditModal({ item,db,user,branchId,showT,onClose,boms=[]}){
               h("select",{value:details.packUnit||"",
                 onChange:e=>setDetails(p=>({...p,packUnit:e.target.value})),
                 style:{width:"100%",padding:"8px",border:"1px solid #ddd",borderRadius:7,fontSize:14,outline:"none"}},
-                h("option",{value:""},"— wala —"),
+                h("option",{value:""},"— none —"),
                 UNITS.map(u=>h("option",{key:u,value:u},u)))
             ),
             h("div",null,
@@ -12805,19 +12805,19 @@ function BatchTraceModal({db,advances,branches,onClose}){
         h("input",{value:q,onChange:e=>setQ(e.target.value),placeholder:"Search batch code or item…",
           style:{width:"100%",padding:"9px 10px",border:"1px solid #ddd",borderRadius:8,fontSize:13,boxSizing:"border-box"}}),
         h("div",{style:{fontSize:11,color:"#5A5A5A",marginTop:6}},
-          "Naipapakita ang mga batch na may sariling presyo. Ang mga lumabas bago ang update na ito ay wala pa rito.")),
+          "Showing batches that have their own price. Entries before this update are not included here.")),
       h("div",{style:{overflowY:"auto",padding:"0 18px 16px"}},
         inv===null?h("div",{style:{padding:20,color:"#999"}},"Loading…")
-        :!rows.length?h("div",{style:{padding:20,color:"#999"}},"Wala pang batch na may presyo.")
+        :!rows.length?h("div",{style:{padding:20,color:"#999"}},"No priced batches yet.")
         :rows.map(r=>h("div",{key:r.key,style:{border:"1px solid #eee",borderRadius:10,padding:"10px 12px",marginBottom:8}},
           h("div",{style:{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}},
             h("div",{style:{fontSize:13,fontWeight:800,color:"#6A1B9A"}},r.code),
             h("div",{style:{fontSize:13,fontWeight:700}},r.itemName+(r.price!=null?" · ₱"+peso(r.price)+"/"+r.unit:""))),
           h("div",{style:{fontSize:12,color:"#444",marginTop:4}},
-            (r.made!=null?("Nagawa: "+r2(r.made)+" · "):"")
-            +"Natitira: "+r2(r.remaining)+" · Nailabas: "+r2(r.sold)+" "+r.unit),
+            (r.made!=null?("Made: "+r2(r.made)+" · "):"")
+            +"Remaining: "+r2(r.remaining)+" · Issued: "+r2(r.sold)+" "+r.unit),
           Object.keys(r.by).length>0&&h("div",{style:{fontSize:12,color:"#5A5A5A",marginTop:4}},
-            "Napunta sa: "+Object.keys(r.by).map(b=>b+" "+r2(r.by[b])).join(", ")),
+            "Went to: "+Object.keys(r.by).map(b=>b+" "+r2(r.by[b])).join(", ")),
           Object.keys(r.pos).length>0&&h("div",{style:{fontSize:11,color:"#888",marginTop:2}},
             "PO: "+Object.keys(r.pos).join(", "))
         ))
@@ -14883,7 +14883,7 @@ function NewInventoryItemForm({db,user,branchId,showT,onClose,invBranch}){
           h("select",{value:form.packUnit||"",
             onChange:e=>setForm(p=>({...p,packUnit:e.target.value})),
             style:{width:"100%",padding:"8px",border:"1px solid #ddd",borderRadius:7,fontSize:14,outline:"none"}},
-            h("option",{value:""},"— wala —"),
+            h("option",{value:""},"— none —"),
             UNITS.map(u=>h("option",{key:u,value:u},u)))
         ),
         h("div",null,
@@ -15201,12 +15201,12 @@ function App(){
       },{merge:true});
       setSnapEditId(null);
       await loadSnapHist(bid);
-      showT("Na-correct ang snapshot ✓","ok");
+      showT("Snapshot corrected ✓","ok");
     }catch(e){ showT("Failed: "+String(e&&e.message||e).slice(0,60),"err"); }
     finally{ setSnapEditSaving(false); }
   }
   async function deleteSnapRow(bid,docId,dateStr){
-    if(!confirm("Tanggalin ang snapshot ng "+dateStr+"? Babalik sa pinakamalapit na naunang reading ang Opening/Ending Stock sa petsang ito."))return;
+    if(!confirm("Delete the "+dateStr+" snapshot? Opening/Ending Stock for this date will fall back to the nearest earlier reading."))return;
     try{
       await deleteDoc(doc(db,"stock_snapshots",docId));
       await loadSnapHist(bid);
@@ -15365,6 +15365,10 @@ function App(){
   const [curOrd,setCurOrd]=useState(null);
   const [toast,setToast]=useState(null);
   const [isOnline,setIsOnline]=useState(navigator.onLine);
+  // true = at least one of today's orders/cash-log/expense/cash-count
+  // entries for this branch is still sitting in the local offline queue,
+  // not yet acknowledged by the server. Gates Close Day / Z-Reading below.
+  const [pendingSync,setPendingSync]=useState(false);
   const [hrisReady,setHrisReady]=useState(false);
   const [dbReady,setDbReady]=useState(false);
   const [newExp,setNewExp]=useState({cat:"Utilities",desc:"",amount:"",date:""});
@@ -15431,6 +15435,34 @@ function App(){
     window.addEventListener("offline",off);
     return()=>{window.removeEventListener("online",on);window.removeEventListener("offline",off);};
   },[]);
+
+  // ── PENDING-SYNC CHECK (today, this branch) ───────────────
+  // Close Day / Z-Reading reads from orders+cash_log+expenses+cash_counts.
+  // Offline mode queues writes locally, so before locking in today's
+  // numbers we check each source's metadata.hasPendingWrites — true means
+  // a write for today is still sitting on this tablet, not yet confirmed
+  // by the server.
+  useEffect(()=>{
+    if(!branchId||!db)return;
+    const d=localDate();
+    const flags={o:false,c:false,e:false,cc:false};
+    const recompute=()=>setPendingSync(flags.o||flags.c||flags.e||flags.cc);
+    const unsubs=[
+      onSnapshot(query(collection(db,"orders"),where("branch","==",branchId),where("date","==",d)),
+        {includeMetadataChanges:true},
+        snap=>{flags.o=snap.metadata.hasPendingWrites;recompute();}, ()=>{}),
+      onSnapshot(query(collection(db,"cash_log"),where("branch","==",branchId),where("date","==",d)),
+        {includeMetadataChanges:true},
+        snap=>{flags.c=snap.metadata.hasPendingWrites;recompute();}, ()=>{}),
+      onSnapshot(query(collection(db,"expenses"),where("branch","==",branchId),where("date","==",d)),
+        {includeMetadataChanges:true},
+        snap=>{flags.e=snap.metadata.hasPendingWrites;recompute();}, ()=>{}),
+      onSnapshot(query(collection(db,"cash_counts"),where("branch","==",branchId),where("date","==",d)),
+        {includeMetadataChanges:true},
+        snap=>{flags.cc=snap.metadata.hasPendingWrites;recompute();}, ()=>{}),
+    ];
+    return()=>unsubs.forEach(u=>u());
+  },[branchId,db]);
 
   // ── FIREBASE LISTENERS ───────────────────────────────────
   useEffect(()=>{
@@ -17777,7 +17809,7 @@ function App(){
           !chkSplit&&chkPay!=="cash"&&h("div",{style:{marginTop:6,padding:"7px 11px",background:"#F3E9F7",borderRadius:8,fontSize:13,color:C.primary,fontWeight:600}},
             "📱 "+({gcash:"GCash",maya:"Maya/PayMaya",bank:"Bank Transfer",
               foodpanda:"FoodPanda",grabfood:"GrabFood",credit:"Credit"}[chkPay]
-              ||chkPay)+" — walang sukli"
+              ||chkPay)+" — no change"
           ),
 
           chkSplit&&h("div",{style:{marginTop:8,background:"#F3E9F7",
@@ -17891,7 +17923,7 @@ function App(){
             background:chkDiscBase>0?"#E8F5E9":"#FFEBEE",
             color:chkDiscBase>0?C.success:C.danger,fontWeight:700}},
             chkDiscBase>0
-              ? ("Covers ₱"+peso(chkDiscBase)+" sa order na ito.")
+              ? ("Covers ₱"+peso(chkDiscBase)+" on this order.")
               : "No item in the cart is covered by this discount — ₱0.00 off."),
           discRate>0&&h("input",{value:chkDiscId,onChange:e=>setChkDiscId(e.target.value),
             placeholder:chkDisc.label+" ID",
@@ -18013,7 +18045,7 @@ function App(){
         chkStep===1&&h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}},
           h("button",{
             onClick:()=>{
-              const lbl=prompt("Pangalan o label para sa held order na ito (hal. Table 5, Juan):",chkCust||chkTable||"");
+              const lbl=prompt("Name or label for this held order (e.g. Table 5, Juan):",chkCust||chkTable||"");
               if(lbl===null)return; // cancelled — don't hold
               holdOrder(lbl.trim());
             },
@@ -18075,7 +18107,7 @@ function App(){
             border:"none",borderRadius:10,color:"#fff",
             fontSize:14,fontWeight:800,
             cursor:placing?"not-allowed":"pointer"}},
-          placing?"⏳ Sinesave — huwag pindutin ulit"
+          placing?"⏳ Saving — don't press again"
                  :"✓ Confirm & Print Receipt"),
 
       )
@@ -18139,7 +18171,7 @@ function App(){
             h("div",null,h("b",null,dt.label+" ID: "),ord.discId||"___________"),
             h("div",{style:{marginTop:2}},h("b",null,"Sig: "),"________________")
           ),
-          h("div",{style:{textAlign:"center",fontSize:12,color:C.muted,margin:"8px 0"}},"Salamat! Kain na! 😊 · VAT REG: 000-123-456-000"),
+          h("div",{style:{textAlign:"center",fontSize:12,color:C.muted,margin:"8px 0"}},"Thank you! Enjoy your meal! 😊 · VAT REG: 000-123-456-000"),
           h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginTop:4}},
             // PRIMARY: both docs over one Bluetooth session
             h("button",{
@@ -18253,16 +18285,16 @@ function App(){
           h("div",{style:{fontSize:12,fontWeight:800,color:C.muted,
             letterSpacing:1,marginBottom:7}},"TO RESTORE ACCESS"),
           h("div",{style:{fontSize:13,lineHeight:1.8,color:C.text}},
-            "1. Magbayad sa GCash o bangko",h("br"),
-            "2. Ipadala ang patunay dito sa ibaba",h("br"),
-            "3. Ico-confirm ito ng main office at babalik ang access")),
+            "1. Pay via GCash or bank",h("br"),
+            "2. Send the proof here below",h("br"),
+            "3. Main office will confirm this and access will return")),
         (mySub&&mySub.gcashNumber)&&h("div",{style:{fontSize:14,fontWeight:800,
           marginBottom:14}},"GCash: "+mySub.gcashNumber),
         h("button",{onClick:()=>setProofOpen(true),
           style:{width:"100%",padding:"12px",borderRadius:10,border:"none",
             background:C.primary,color:"#fff",fontWeight:800,fontSize:14,
             cursor:"pointer",marginBottom:8}},
-          "\uD83D\uDCE4 Ipadala ang patunay ng bayad"),
+          "\uD83D\uDCE4 Send payment proof"),
         h("button",{onClick:handleSignOut,
           style:{width:"100%",padding:"11px",borderRadius:10,
             border:"1px solid "+C.border,background:"#fff",color:C.text,
@@ -18288,12 +18320,12 @@ function App(){
         boxShadow:"0 20px 60px rgba(0,0,0,.4)"}},
         h("div",{style:{fontSize:40,marginBottom:10}},"🔄"),
         h("div",{style:{fontSize:17,fontWeight:900,marginBottom:8}},
-          "May Bagong Update ang POS"),
+          "POS Has a New Update"),
         h("div",{style:{fontSize:13,color:C.muted,marginBottom:18,
           lineHeight:1.5}},
-          "May bagong bersyon na ng POS na kailangan mo munang i-load "
-          +"bago ka makapag-sale o makagawa ng kahit anong galaw dito. "
-          +"I-refresh ang page."),
+          "There's a new version of the POS you need to load first "
+          +"before you can sell or make any changes here. "
+          +"Refresh the page."),
         h("button",{onClick:()=>window.location.reload(),
           style:{width:"100%",padding:"12px",borderRadius:10,border:"none",
             background:`linear-gradient(135deg,${C.primary},${C.dark})`,
@@ -18815,7 +18847,7 @@ function App(){
         h("button",{onClick:()=>setProofOpen(true),
           style:{padding:"7px 13px",borderRadius:8,border:"none",
             background:C.primary,color:"#fff",fontSize:13,fontWeight:800,
-            cursor:"pointer"}},"\uD83D\uDCE4 Ipadala ang patunay")
+            cursor:"pointer"}},"\uD83D\uDCE4 Send proof")
       ),
 
       proofOpen&&h(PaymentProofModal,{db:db,branchId:branchId,
@@ -19054,7 +19086,7 @@ function App(){
                       border:"1px solid "+C.border,background:"#fff",
                       color:C.primary}},
                     (dashCompare&&dashCompare.loading)?"..."
-                      :"🔁 Ikumpara sa nakaraang 5 buwan")
+                      :"🔁 Compare to the last 5 months")
                 )
               ),
               // Ranked by sales for the chosen period, so the list answers
@@ -20161,7 +20193,7 @@ function App(){
             background:"#fff",borderRadius:10,border:"1px solid "+C.border}},
             h("span",{style:{fontSize:13,color:C.muted}},
               (_from+1)+"\u2013"+Math.min(_from+PER,_sorted.length)
-              +" ng "+_sorted.length+" order"),
+              +" of "+_sorted.length+" order(s)"),
             h("div",{style:{marginLeft:"auto",display:"flex",gap:6,
               alignItems:"center"}},
               h("button",{onClick:()=>setOrdPage(1),disabled:_pg<=1,
@@ -20220,7 +20252,7 @@ function App(){
               onChange:e=>{setAoTo(e.target.value);setOrdPage(1);},
               style:{padding:"6px 10px",borderRadius:8,fontSize:13,outline:"none",
                 border:"1px solid "+(aoTo?C.primary:C.border)}}),
-            h("span",{style:{fontSize:12,fontWeight:800,color:C.muted,letterSpacing:1,marginLeft:6}},"BAYAD"),
+            h("span",{style:{fontSize:12,fontWeight:800,color:C.muted,letterSpacing:1,marginLeft:6}},"PAYMENT"),
             h("select",{value:aoPay,onChange:e=>{setAoPay(e.target.value);setOrdPage(1);},
               style:{padding:"6px 10px",borderRadius:8,fontSize:13,outline:"none",
                 border:"1px solid "+(aoPay?C.primary:C.border)}},
@@ -20280,13 +20312,13 @@ function App(){
                   h("b",{style:{fontSize:16,color:C.primary}},"₱"+peso(sales))),
                 disc>0&&h("div",null,h("span",{style:{fontSize:11,fontWeight:800,color:C.muted,letterSpacing:1}},"DISCOUNTS "),
                   h("b",{style:{color:C.danger}},"₱"+peso(disc))),
-                nVoid>0&&h("div",{style:{color:C.danger,fontSize:12}},nVoid+" void/cancelled (hindi kasama sa total)")),
+                nVoid>0&&h("div",{style:{color:C.danger,fontSize:12}},nVoid+" void/cancelled (not included in total)")),
               h("div",{style:{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}},
                 Object.keys(pm).sort((a,b)=>pm[b].t-pm[a].t).map(m=>chip("p"+m,nm[m]||m.toUpperCase(),pm[m],aoPay===m))),
               h("div",{style:{display:"flex",gap:6,flexWrap:"wrap",marginTop:6}},
                 Object.keys(ty).sort((a,b)=>ty[b].t-ty[a].t).map(t=>chip("t"+t,tn[t]||t,ty[t],aoType===t))),
               (aoPay&&pm[aoPay])&&h("div",{style:{fontSize:11,color:C.muted,marginTop:6}},
-                "Ang ₱ sa bawat Bayad ay ang halagang binayad gamit ang paraang iyon; ang TOTAL SALES ay buong halaga ng mga order."));
+                "The ₱ under each Payment method is the amount paid using that method; TOTAL SALES is the full value of the orders."));
           })(),
 
           pager,
@@ -20346,7 +20378,7 @@ function App(){
                   (o.discAmt||0)>0&&h(Badge,{label:o.discType?.label||"Disc",color:C.danger,bg:"#FFEBEE"})
                 ),
                 h("div",{style:{fontSize:12,color:C.muted,marginTop:2}},(o. items||[]).map(i=>i.name).join(" · ")),
-                h("div",{style:{fontSize:11,color:C.primary,marginTop:3,fontWeight:700}},_open?"▲ Isara ang detalye":"▼ Tingnan ang detalye")
+                h("div",{style:{fontSize:11,color:C.primary,marginTop:3,fontWeight:700}},_open?"▲ Hide details":"▼ View details")
               ),
               h("div",{onClick:_toggle,style:{textAlign:"right",flexShrink:0,cursor:"pointer"}},
                 h("div",{style:{fontSize:13,fontWeight:900}},"₱"+peso(o.total||0)),
@@ -20404,7 +20436,7 @@ function App(){
                     o.branch&&h("span",null,"🏪 "+(((branches||[]).find(b=>b.id===o.branch)||{}).full||o.branch))),
                   h("table",{style:{width:"100%",borderCollapse:"collapse",background:"#fff",borderRadius:8}},
                     h("thead",null,h("tr",null,
-                      ["Item","Qty","Presyo","Total"].map((t,ti)=>h("th",{key:t,style:{..._cell,textAlign:ti?"right":"left",color:C.muted,fontWeight:700}},t)))),
+                      ["Item","Qty","Price","Total"].map((t,ti)=>h("th",{key:t,style:{..._cell,textAlign:ti?"right":"left",color:C.muted,fontWeight:700}},t)))),
                     h("tbody",null,_items.map((it,ii)=>{
                       const up=Number(it.unitPrice!=null?it.unitPrice:it.price)||0;
                       const lt=Number(it.lineTotal!=null?it.lineTotal:up*(it.qty||1))||0;
@@ -20432,7 +20464,7 @@ function App(){
                         h("span",null,"Discount"+(o.discType&&o.discType.label?(" ("+o.discType.label+")"):"")),h("span",null,"-₱"+peso(o.discAmt))),
                       h("div",{style:{display:"flex",justifyContent:"space-between",fontWeight:900,fontSize:13,borderTop:"1px solid #ddd",marginTop:3,paddingTop:3}},
                         h("span",null,"TOTAL"),h("span",null,"₱"+peso(o.total||0))),
-                      h("div",{style:{marginTop:6,fontWeight:700}},"💳 Bayad: "+(_pays.length>1?"SPLIT":String(_pays[0].method||"cash").toUpperCase())),
+                      h("div",{style:{marginTop:6,fontWeight:700}},"💳 Payment: "+(_pays.length>1?"SPLIT":String(_pays[0].method||"cash").toUpperCase())),
                       _pays.length>1&&_pays.map((pt,pi)=>h("div",{key:pi,style:{display:"flex",justifyContent:"space-between",paddingLeft:10}},
                         h("span",null,String(pt.method||"").toUpperCase()),h("span",null,"₱"+peso(Number(pt.amount)||0)))),
                       _isCash&&_cash>0&&h("div",{style:{display:"flex",justifyContent:"space-between"}},h("span",null,"Cash ibinigay"),h("span",null,"₱"+peso(_cash))),
@@ -20578,7 +20610,7 @@ function App(){
           };
 
           const rejectProof=async(x)=>{
-            const why=prompt("Dahilan ng pagtanggi (makikita ng branch):","");
+            const why=prompt("Reason for rejection (visible to the branch):","");
             if(why===null)return;
             try{
               await updateDoc(doc(db,"subscription_proofs",x._docId),{
@@ -20588,7 +20620,7 @@ function App(){
                 title:"Payment proof rejected",
                 message:why.trim()||"Check the reference number",
                 page:"dashboard",ref:x.ref||"",by:user.name});
-              showT("Tinanggihan ang patunay","warn");
+              showT("Proof rejected","warn");
             }catch(e){
               console.error("reject proof:",e);
               showT("Failed: "+String(e&&e.message||e).slice(0,60),"err");
@@ -20627,7 +20659,7 @@ function App(){
               h("div",{style:{padding:"10px 14px",background:"#FFF8E1",
                 borderBottom:"1px solid #FFE082",fontSize:13,fontWeight:800,
                 color:"#E65100"}},
-                "\uD83D\uDCE4 Naghihintay ng kumpirmasyon ("+pending.length+")"),
+                "\uD83D\uDCE4 Awaiting confirmation ("+pending.length+")"),
               pending.map(x=>h("div",{key:x._docId,style:{display:"flex",
                 gap:10,alignItems:"center",padding:"11px 14px",
                 borderBottom:"1px solid #f5f5f5",flexWrap:"wrap"}},
@@ -20670,7 +20702,7 @@ function App(){
                 gridTemplateColumns:"1fr 110px 100px 90px 150px",gap:8,
                 padding:"9px 14px",background:"#fafafa",
                 borderBottom:"1px solid "+C.border}},
-                ["BRANCH","STATUS","TO","BAYAD",""].map(hh=>
+                ["BRANCH","STATUS","TO","PAYMENT",""].map(hh=>
                   h("div",{key:hh,style:{fontSize:11,fontWeight:700,
                     color:C.muted,letterSpacing:1}},hh))),
               rows.map(r=>{
@@ -20874,7 +20906,7 @@ function App(){
                 style:{padding:"7px 10px",borderRadius:8,border:"1px solid "+C.border,
                   background:"#fff",fontSize:12,fontWeight:700,cursor:"pointer"}},"Clear dates"),
               h("button",{onClick:()=>download(
-                  "chowtime-daily-"+((repFrom||repTo)?((repFrom||"start")+"_to_"+(repTo||"now")):(repMonth||"lahat"))+".csv",toCSV(rows)),
+                  "chowtime-daily-"+((repFrom||repTo)?((repFrom||"start")+"_to_"+(repTo||"now")):(repMonth||"all"))+".csv",toCSV(rows)),
                 disabled:!rows.length,
                 style:{padding:"8px 14px",borderRadius:8,border:"none",
                   background:rows.length?"#2E7D32":"#8A8A8A",color:"#fff",
@@ -21280,7 +21312,7 @@ function App(){
                       fontStyle:"italic"}},
                     (zd.openingBy?("ni "+zd.openingBy):"")
                     +(zd.openingNote?(" · \u201c"+zd.openingNote+"\u201d")
-                                    :" \u00b7 walang dahilan")),
+                                    :" \u00b7 no reason given")),
                   (zd.openingEntries>1)&&h("div",{style:{fontSize:11,
                     color:C.danger,marginTop:3,fontWeight:700}},
                     zd.openingEntries+" separate Opening Fund entries today "
@@ -21364,6 +21396,19 @@ function App(){
                 )
               )
             ),
+            // Only today's LIVE reading can still have a local write that
+            // hasn't reached the server yet — a past saved day or an
+            // X-Reading (explicitly "not final") is not gated.
+            (()=>{const blockForSync=isZ&&!zSel&&pendingSync; return h(React.Fragment,null,
+            blockForSync&&h("div",{style:{background:C.warning+"18",
+              border:"1px solid "+C.warning,borderRadius:9,
+              padding:"9px 12px",marginBottom:8}},
+              h("div",{style:{fontSize:13,fontWeight:800,color:C.warning}},
+                "⏳ Some of today's data hasn't synced yet"),
+              h("div",{style:{fontSize:11,color:C.muted,marginTop:2}},
+                "Some of today's orders/cash entries are still syncing to the server — "
+                +"wait for them to finish syncing (get your internet connection back) before "
+                +"printing or closing the Z-Reading, so the numbers are complete.")),
             h("div",{style:{display:"flex",gap:8}},
               // Bluetooth first — the browser copy stays as a fallback
               h("button",{
@@ -21377,10 +21422,13 @@ function App(){
                     printZ(zd,zBrFull,user.name);
                   }
                 },
-                style:{padding:"10px 22px",background:"#1565C0",border:"none",borderRadius:9,
-                  color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer"}},
+                disabled:blockForSync,
+                style:{padding:"10px 22px",background:blockForSync?"#ccc":"#1565C0",border:"none",borderRadius:9,
+                  color:"#fff",fontWeight:800,fontSize:14,cursor:blockForSync?"not-allowed":"pointer"}},
                 "📡 BT Print "+(isZ?"Z":"X")+"-Reading"),
-              h("button",{onClick:()=>printZ(zd,zBrFull,user.name),style:{padding:"10px 22px",background:"#fff",border:"1px solid "+C.border,borderRadius:9,color:C.text,fontWeight:600,fontSize:14,cursor:"pointer"}},"🖨️ Browser"),
+              h("button",{onClick:()=>printZ(zd,zBrFull,user.name),
+                disabled:blockForSync,
+                style:{padding:"10px 22px",background:"#fff",border:"1px solid "+C.border,borderRadius:9,color:blockForSync?"#aaa":C.text,fontWeight:600,fontSize:14,cursor:blockForSync?"not-allowed":"pointer"}},"🖨️ Browser"),
               // Close Day used to only show a toast — nothing was ever written,
               // so yesterday's Z-Reading became unrecoverable once the orders
               // subscription scrolled past it.
@@ -21400,12 +21448,12 @@ function App(){
                     +peso(r.net)+" net","ok");
                   else showT("Close failed — try again","err");
                 },
-                disabled:closing,
-                style:{padding:"10px 22px",background:closing?"#ccc":"#E3F2FD",
-                  border:"none",borderRadius:9,color:closing?"#888":C.info,
-                  fontWeight:700,fontSize:14,cursor:closing?"wait":"pointer"}},
-                closing?"Saving...":"✓ Close Day")
-            ),
+                disabled:closing||blockForSync,
+                style:{padding:"10px 22px",background:(closing||blockForSync)?"#ccc":"#E3F2FD",
+                  border:"none",borderRadius:9,color:(closing||blockForSync)?"#888":C.info,
+                  fontWeight:700,fontSize:14,cursor:(closing||blockForSync)?"not-allowed":"pointer"}},
+                closing?"Saving...":blockForSync?"Waiting for sync...":"✓ Close Day")
+            ));})(),
 
             // Recompute a day that has already been closed.
             //
@@ -21521,7 +21569,7 @@ function App(){
                     if(!days.length){showT("Pick a valid range","warn");return;}
                     if(days.length>120){showT("Too long — 120 days maximum","warn");return;}
                     if(!confirm(days.length+" days × "+branches.length+" branch.\n"
-                      +"Tatagal ng ilang sandali. Ituloy?"))return;
+                      +"This will take a moment. Continue?"))return;
                     setBfBusy(true);setBfLog({total:days.length,done:0,written:0,traded:0});
                     const ids=branches.map(b=>b.id);
                     let written=0,traded=0,done=0;
@@ -21624,7 +21672,7 @@ function App(){
               const a=document.createElement("a");
               const rangeTag=(expDateFrom||expDateTo)
                 ?(expDateFrom||"start")+"_to_"+(expDateTo||"end")
-                :(expMonth||"lahat");
+                :(expMonth||"all");
               a.href=url; a.download="chowtime-expenses-"+rangeTag+".csv";
               document.body.appendChild(a); a.click(); document.body.removeChild(a);
               URL.revokeObjectURL(url);
@@ -21676,7 +21724,7 @@ function App(){
               setFixedDraft(next);
             };
             const addItem=()=>{
-              const name=(prompt("Pangalan ng bagong fixed bill (hal. CUSA, Electricity, Water, Internet):")||"").trim();
+              const name=(prompt("Name of the new fixed bill (e.g. CUSA, Electricity, Water, Internet):")||"").trim();
               if(!name)return;
               const next=JSON.parse(JSON.stringify(fixedDraft));
               next.items=next.items||[];
@@ -21685,7 +21733,7 @@ function App(){
               setFixedDraft(next);
             };
             const removeItem=(itemId)=>{
-              if(!confirm("Tanggalin ang bill na ito sa setup? (Hindi magagalaw ang mga naka-generate na expense dati)"))return;
+              if(!confirm("Delete this bill from the setup? (Expenses already generated from it are not affected)"))return;
               const next=JSON.parse(JSON.stringify(fixedDraft));
               next.items=(next.items||[]).filter(it=>it.id!==itemId);
               setFixedDraft(next);
@@ -21701,11 +21749,11 @@ function App(){
               border:"1px solid "+C.primary,borderRadius:10,padding:"12px 14px",
               marginBottom:12}},
               h("div",{style:{fontSize:13,fontWeight:800,color:C.primary,
-                marginBottom:4}},"🏠 Rent — buwanang halaga per branch:"),
+                marginBottom:4}},"🏠 Rent — monthly amount per branch:"),
               h("div",{style:{fontSize:11,color:C.muted,marginBottom:8}},
-                "Flat na 30 araw ang basehan — ÷30 palagi, hindi ÷ sa bilang ng "
-                +"araw ng buwan. Kaya sa buwang 31 araw, idadagdag ang 1 extra "
-                +"araw sa itaas ng buwanang halaga."),
+                "Based on a flat 30 days — always ÷30, not ÷ by the actual number of "
+                +"days in the month. So for a 31-day month, 1 extra "
+                +"day is added on top of the monthly amount."),
               h("div",{style:{display:"flex",gap:10,flexWrap:"wrap",
                 marginBottom:14}},
                 (branches||[]).filter(b=>b.id!=="ct-main").map(b=>{
@@ -21718,7 +21766,7 @@ function App(){
                     h("input",{type:"number",onFocus:e=>e.target.select(),
                       value:rent[b.id]!=null?rent[b.id]:"",
                       onChange:e=>setRent(b.id,e.target.value===""?"":Number(e.target.value)),
-                      placeholder:"₱/buwan",
+                      placeholder:"₱/month",
                       style:{width:100,padding:"4px 6px",textAlign:"right",
                         border:"1px solid "+C.border,borderRadius:6,fontSize:13}}),
                     // Preview of what this actually becomes — the number
@@ -21727,14 +21775,14 @@ function App(){
                     // always ÷30; a 31-day month adds one more day on top.
                     rv>0&&h("div",{style:{fontSize:10,color:C.muted,
                       marginTop:3,textAlign:"right"}},
-                      "= ₱"+peso(Math.round(rv/30*100)/100)+"/araw · ₱"
+                      "= ₱"+peso(Math.round(rv/30*100)/100)+"/day · ₱"
                       +peso(Math.round(rv*100)/100)+" (30d) · ₱"
                       +peso(Math.round((rv/30*31)*100)/100)+" (31d)"));
                 })),
               h("div",{style:{fontSize:13,fontWeight:800,color:C.primary,
-                marginBottom:8}},"Ibang bills — flat na buwanang halaga, per branch:"),
+                marginBottom:8}},"Other bills — flat monthly amount, per branch:"),
               !items.length&&h("div",{style:{fontSize:13,color:C.muted,
-                marginBottom:10}},"Wala pang naka-setup na bill. Mag-dagdag sa ibaba."),
+                marginBottom:10}},"No bills set up yet. Add one below."),
               items.length>0&&h("div",{style:{overflowX:"auto",marginBottom:10}},
                 h("table",{style:{borderCollapse:"collapse",fontSize:13,
                   background:"#fff",borderRadius:8,overflow:"hidden"}},
@@ -21749,7 +21797,7 @@ function App(){
                       h("div",null,h("button",{onClick:()=>removeItem(it.id),
                         style:{border:"none",background:"none",color:C.danger,
                           fontSize:10,cursor:"pointer",padding:0,marginTop:2}},
-                        "✕ tanggalin")))),
+                        "✕ remove")))),
                     h("th",{style:{padding:"8px 10px",borderBottom:"1px solid "+C.border}}))),
                   h("tbody",null,
                     (branches||[]).filter(b=>b.id!=="ct-main").map(b=>
@@ -21770,7 +21818,7 @@ function App(){
                 h("button",{onClick:addItem,
                   style:{padding:"6px 10px",borderRadius:7,fontSize:12,
                     border:"1px solid "+C.border,background:"#fff",
-                    cursor:"pointer"}},"+ Dagdag na bill"),
+                    cursor:"pointer"}},"+ Add bill"),
                 h("button",{
                   disabled:fixedSaving,
                   onClick:async()=>{
@@ -21782,7 +21830,7 @@ function App(){
                         rent:fixedDraft.rent||{},
                         updatedBy:user.name,updatedAt:serverTimestamp()
                       });
-                      showT("Na-save ang Fixed Expenses setup ✓","ok");
+                      showT("Fixed Expenses setup saved ✓","ok");
                       setFixedSetupOpen(false);
                     }catch(e){ showT("Failed: "+String(e&&e.message||e).slice(0,60),"err"); }
                     finally{ setFixedSaving(false); }
@@ -21790,7 +21838,7 @@ function App(){
                   style:{padding:"6px 14px",borderRadius:7,fontSize:12,
                     fontWeight:700,cursor:fixedSaving?"wait":"pointer",border:"none",
                     background:fixedSaving?"#D8C2E8":C.primary,color:"#fff"}},
-                  fixedSaving?"Saving...":"💾 I-save ang Setup"),
+                  fixedSaving?"Saving...":"💾 Save Setup"),
                 h("button",{onClick:()=>setFixedSetupOpen(false),
                   style:{padding:"6px 10px",borderRadius:7,fontSize:12,
                     border:"none",background:"none",color:C.muted,
@@ -21808,7 +21856,7 @@ function App(){
                 cursor:"pointer",border:"1px solid "+(expBranch?C.primary:C.border),
                 background:expBranch?"#F3E9F7":"#fff",fontWeight:expBranch?800:500,
                 outline:"none"}},
-              [h("option",{key:"_",value:""},"Lahat ng branch")]
+              [h("option",{key:"_",value:""},"All branches")]
                 .concat([...new Set(mine.map(e=>e.branch).filter(Boolean))]
                   .sort().map(b=>h("option",{key:b,value:b},
                     ((branches||[]).find(x=>x.id===b)||{}).name||b)))),
@@ -21880,9 +21928,9 @@ function App(){
           ),
           !expBranch&&!expMonth&&expenses.length>=1000&&h("div",{style:{fontSize:12,
             color:C.warning,marginBottom:10,fontWeight:700}},
-            "⚠️ Walang napiling branch o month — ipinapakita lang ang pinaka-"
-            +"kamakailang 1000 expenses. Pumili ng branch o month sa itaas "
-            +"para kumpleto."),
+            "⚠️ No branch or month selected — showing only the most "
+            +"recent 1000 expenses. Select a branch or month above "
+            +"for the complete list."),
           // A table, not cards: a month of expenses is a ledger to scan down
           // — same reason, amount and branch on every line, in the same place.
           h("div",{style:{background:"#fff",borderRadius:12,
@@ -21995,7 +22043,7 @@ function App(){
               boxShadow:"0 20px 60px rgba(0,0,0,.3)"}},
               h("div",{style:{display:"flex",justifyContent:"space-between",
                 marginBottom:12}},
-                h("b",null,"\u270F\uFE0F I-edit ang Expense"),
+                h("b",null,"\u270F\uFE0F Edit Expense"),
                 h("button",{onClick:()=>setEditExp(null),
                   style:{background:"none",border:"none",fontSize:17,
                     cursor:"pointer"}},"\u00D7")),
@@ -22031,7 +22079,7 @@ function App(){
                 h("div",{style:{fontSize:12,color:"#BF360C",background:"#FFF8E1",
                   border:"1px solid #FFE082",borderRadius:8,padding:"8px 10px",
                   lineHeight:1.45}},
-                  "Ang katumbas nitong Cash Out ay susunod sa bagong halaga, kaya mananatiling tugma ang cash count."),
+                  "The matching Cash Out will follow the new amount, so the cash count stays consistent."),
                 h("button",{onClick:async()=>{
                     const amt=parseFloat(editExp.amount)||0;
                     if(!editExp.desc||amt<=0){showT("Missing details","warn");return;}
@@ -22044,7 +22092,7 @@ function App(){
                         branch:editExp.branch,amount:amt},"expense_edited",
                         user.name,{note:"dating \u20B1"+peso(Number(editExp.amount)||0)
                           +" \u2192 \u20B1"+peso(amt)});
-                      showT("Na-update ang expense \u2713");
+                      showT("Expense updated \u2713");
                       setEditExp(null);
                     }catch(er){
                       showT("Failed: "+String(er&&er.message||er).slice(0,60),"err");
@@ -22054,7 +22102,7 @@ function App(){
                     borderRadius:8,color:"#fff",fontWeight:800,fontSize:13,
                     cursor:"pointer"}},"\uD83D\uDCBE I-save"),
                 h("button",{onClick:async()=>{
-                    if(!confirm("Burahin ang expense na ito? Babalik sa drawer ang halaga sa cash count."))return;
+                    if(!confirm("Delete this expense? The amount will go back into the cash count drawer."))return;
                     try{
                       await deleteDoc(doc(db,"expenses",editExp._docId));
                       // Logged BEFORE the row disappears — a deletion with no
@@ -22064,7 +22112,7 @@ function App(){
                         branch:editExp.branch,
                         amount:Number(editExp.amount)||0},"expense_deleted",
                         user.name,{note:"isinumite ni "+(editExp.by||"—")});
-                      showT("Nabura ang expense","warn");
+                      showT("Expense deleted","warn");
                       setEditExp(null);
                     }catch(er){
                       showT("Failed: "+String(er&&er.message||er).slice(0,60),"err");
@@ -22073,7 +22121,7 @@ function App(){
                   style:{padding:"9px",background:"#fff",
                     border:"1px solid "+C.border,borderRadius:8,
                     color:C.danger,fontWeight:700,fontSize:13,
-                    cursor:"pointer"}},"\uD83D\uDDD1\uFE0F Burahin")
+                    cursor:"pointer"}},"\uD83D\uDDD1\uFE0F Delete")
               )
             )
           ),
@@ -22093,7 +22141,7 @@ function App(){
                     color:"rgba(255,255,255,.85)",fontWeight:700,marginTop:3}},
                     "Will be filed under "+newExp.date+", not today")),
                 h("div",null,h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"CATEGORY"),h("select",{value:newExp.cat,onChange:e=>setNewExp(p=>({...p,cat:e.target.value})),style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:13,outline:"none"}},EXPENSE_CATS.map(c=>h("option",{key:c},c)))),
-                h("div",null,h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"DESCRIPTION"),h("textarea",{value:newExp.desc,onChange:e=>setNewExp(p=>({...p,desc:e.target.value})),rows:3,placeholder:"Isa bawat linya:\nIce \u2014 2 bag\nLPG refill",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:13,outline:"none",boxSizing:"border-box",resize:"vertical",fontFamily:"inherit",lineHeight:1.45}})),
+                h("div",null,h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"DESCRIPTION"),h("textarea",{value:newExp.desc,onChange:e=>setNewExp(p=>({...p,desc:e.target.value})),rows:3,placeholder:"One per line:\nIce \u2014 2 bag\nLPG refill",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:13,outline:"none",boxSizing:"border-box",resize:"vertical",fontFamily:"inherit",lineHeight:1.45}})),
                 h("div",null,h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,marginBottom:4,letterSpacing:1}},"AMOUNT (₱)"),h("input",{type:"number",onFocus:e=>e.target.select(),value:newExp.amount,onChange:e=>setNewExp(p=>({...p,amount:e.target.value})),placeholder:"0.00",style:{width:"100%",padding:"8px",border:"1px solid "+C.border,borderRadius:7,fontSize:14,fontWeight:700,outline:"none",boxSizing:"border-box"}})),
                 h("div",{style:{background:"#FFF8E1",border:"1px solid #FFE082",
                   borderRadius:8,padding:"8px 11px",fontSize:12,color:"#BF360C",
@@ -22249,7 +22297,7 @@ function App(){
                       style:{fontSize:11,color:C.muted,marginTop:2}},
                       x.d+" · "+(x.g>0?"+":"")+"₱"+peso(Math.round(x.g*100)/100)
                       +(x.by?(" · "+x.by):"")
-                      +(x.note?(" · \u201c"+x.note+"\u201d"):" · walang dahilan"))));
+                      +(x.note?(" · \u201c"+x.note+"\u201d"):" · no reason given"))));
               }));
           })(),
 
@@ -22389,16 +22437,16 @@ function App(){
                         if(from!==to)changes.push({id:it.id,name:it.name||it.id,from:from,to:to});
                       });
                       if(!changes.length){
-                        showT("Pareho na — walang ibang min stock sa "+srcName,"ok");
+                        showT("Already the same — no other min stock on "+srcName,"ok");
                         return;
                       }
                       const lines=changes.slice(0,10).map(c=>
                         "  • "+c.name+": "+c.from+" → "+c.to);
-                      if(!confirm("Kopyahin ang low stock meter (min stock) ng "
-                        +srcName+" papunta sa "+dstName+"?\n\n"
-                        +changes.length+" item(s) magbabago:\n"+lines.join("\n")
-                        +(changes.length>10?"\n  …at "+(changes.length-10)+" pa":"")
-                        +"\n\nStock on hand, cost, price — hindi magagalaw. Min stock lang."))
+                      if(!confirm("Copy the low stock meter (min stock) of "
+                        +srcName+" to "+dstName+"?\n\n"
+                        +changes.length+" item(s) will change:\n"+lines.join("\n")
+                        +(changes.length>10?"\n  …and "+(changes.length-10)+" more":"")
+                        +"\n\nStock on hand, cost, price are not affected. Min stock only."))
                         return;
                       let ok=0,bad=0;
                       for(const c of changes){
@@ -22412,8 +22460,8 @@ function App(){
                           ok++;
                         }catch(e){ bad++; console.warn("copy minStock",c.id,e); }
                       }
-                      showT(ok+" item min stock na-copy mula sa "+srcName
-                        +(bad?"  ·  "+bad+" bigo":""),bad?"warn":"ok");
+                      showT(ok+" item(s) min stock copied from "+srcName
+                        +(bad?"  ·  "+bad+" failed":""),bad?"warn":"ok");
                       setCopyMinFrom("");
                     }catch(e){
                       showT("Failed: "+String(e&&e.message||e).slice(0,60),"err");
@@ -22535,10 +22583,10 @@ function App(){
                         const brPackPrice=Number(cd.price)||0;
                         let why="";
                         if(stockTo>Math.max(mainStock*3,ms*20))
-                          why="stock "+(Number(cd.stock)||0)+" "+(cd.unit||"")+" ay sobrang laki";
+                          why="stock "+(Number(cd.stock)||0)+" "+(cd.unit||"")+" is far too large";
                         else if(mainPackPrice>0&&brPackPrice>0
                           &&Math.abs(brPackPrice-mainPackPrice)/mainPackPrice>0.2)
-                          why="presyo \u20b1"+brPackPrice+"/"+(cd.unit||"")+" \u2260 Main \u20b1"+r6(mainPackPrice);
+                          why="price \u20b1"+brPackPrice+"/"+(cd.unit||"")+" \u2260 Main \u20b1"+r6(mainPackPrice);
                         if(why){
                           skipped.push(base.branch+": "+base.name+"   SKIP \u2014 "+why);
                           pending[d.id]=true;
@@ -22619,7 +22667,7 @@ function App(){
                       if(changed)bomJobs.push({docId:bd.id,data:newData,lines:lines});
                     });
                     if(!jobs.length&&!bomJobs.length&&!skipped.length&&!bomCheck.length){
-                      showT("Pareho na lahat sa Main \u2014 walang babaguhin","ok");
+                      showT("Already all matching Main \u2014 nothing to change","ok");
                       return;
                     }
                     const nConv=jobs.filter(j=>j.conv).length;
@@ -22627,30 +22675,30 @@ function App(){
                     const lines=[];
                     jobs.slice().sort((a,b)=>(b.conv?1:0)-(a.conv?1:0)).slice(0,8)
                       .forEach(j=>lines.push(j.branch+": "+j.name+"   "+j.line));
-                    if(jobs.length>8)lines.push("\u2026 at "+(jobs.length-8)+" pa");
+                    if(jobs.length>8)lines.push("\u2026 and "+(jobs.length-8)+" more");
                     if(skipped.length){
                       lines.push("");
                       skipped.slice(0,6).forEach(x=>lines.push("\u26A0 "+x));
                     }
                     if(bomJobs.length){
                       lines.push("");
-                      lines.push("BOM ("+nBomRows+" row sa "+bomJobs.length+" recipe):");
+                      lines.push("BOM ("+nBomRows+" row(s) across "+bomJobs.length+" recipe(s)):");
                       bomJobs.slice(0,6).forEach(j=>
                         lines.push("  "+j.docId+": "+j.lines.slice(0,2).join("; ")));
                     }
                     const blk=Object.values(bomBlocked);
-                    if(blk.length)lines.push("\nBOM HINDI PA ginalaw (may branch pang nasa pack): "+blk.join(", "));
+                    if(blk.length)lines.push("\nBOM NOT YET touched (still has branches in the pack): "+blk.join(", "));
                     if(bomCheck.length){
-                      lines.push("\nBOM i-check manually:");
+                      lines.push("\nBOM to check manually:");
                       bomCheck.slice(0,4).forEach(x=>lines.push("  "+x));
                     }
                     if(!jobs.length&&!bomJobs.length){
-                      alert("Walang mababago pa. Mga SKIP/i-check lang:\n\n"+lines.join("\n"));
+                      alert("Nothing left to change. Just SKIP/check items:\n\n"+lines.join("\n"));
                       return;
                     }
                     if(!confirm(jobs.length+" branch item"+(nConv?" ("+nConv+" CONVERT)":"")
-                      +", "+nBomRows+" BOM row ang babaguhin.\n\n"+lines.join("\n")
-                      +"\n\nSa CONVERT: pati unit, stock, presyo, cost, min stock at lots."))return;
+                      +", "+nBomRows+" BOM row(s) will change.\n\n"+lines.join("\n")
+                      +"\n\nFor CONVERT: unit, stock, price, cost, min stock and lots are all included."))return;
                     let ok=0,bad=0,failedIds={};
                     for(const j of jobs){
                       try{
@@ -22680,9 +22728,9 @@ function App(){
                       try{ await setDoc(doc(db,"bom",bj.docId),bj.data); bomOk++; }
                       catch(e3){ bomBad++; console.warn("bom",bj.docId,e3); }
                     }
-                    showT(ok+" na-align"+(nConv?" ("+nConv+" converted)":"")
+                    showT(ok+" aligned"+(nConv?" ("+nConv+" converted)":"")
                       +(bomJobs.length?"  \u00B7  BOM "+bomOk+"/"+bomJobs.length:"")
-                      +((bad||bomBad)?"  \u00B7  "+(bad+bomBad)+" bigo":"")
+                      +((bad||bomBad)?"  \u00B7  "+(bad+bomBad)+" failed":"")
                       +(skipped.length?"  \u00B7  "+skipped.length+" SKIP":""),
                       (bad||bomBad)?"warn":"ok");
                   }catch(e){
@@ -22721,14 +22769,14 @@ function App(){
                 &&!(Number(retail?i.price:i.cost)||0)).length;
               return h("div",{style:{flex:1,minWidth:0}},
                 h(Stat,{
-                  label:retail?"Inv. Value — Benta":"Inv. Value — Puhunan",
+                  label:retail?"Inv. Value — Retail":"Inv. Value — Cost",
                   value:"₱"+peso(retail?atRetail:atCost),
-                  sub:!isMainInv?"Halaga ng binili sa Main"
-                    :retail?("Puhunan ₱"+peso(atCost)):("Benta ₱"+peso(atRetail)),
+                  sub:!isMainInv?"Amount purchased from Main"
+                    :retail?("Cost ₱"+peso(atCost)):("Retail ₱"+peso(atRetail)),
                   icon:retail?"🏷️":"💰",
                   color:retail?C.info:C.success}),
                 isMainInv&&h("div",{style:{display:"flex",gap:4,marginTop:5}},
-                  [["cost","💰 Puhunan"],["retail","🏷️ Benta"]].map(([m,lbl])=>
+                  [["cost","💰 Cost"],["retail","🏷️ Retail"]].map(([m,lbl])=>
                     h("button",{key:m,onClick:()=>setInvValMode(m),
                       style:{flex:1,padding:"4px",borderRadius:6,fontSize:12,
                         cursor:"pointer",fontWeight:invValMode===m?800:500,
@@ -22742,8 +22790,8 @@ function App(){
                 // makes the total look smaller than it is
                 noPrice>0&&h("div",{style:{fontSize:11,color:"#BF360C",
                   marginTop:4,fontWeight:700}},
-                  noPrice+" item/s may stock pero walang "
-                    +(retail?"presyo":"cost")+" — not counted")
+                  noPrice+" item(s) with stock but no "
+                    +(retail?"price":"cost")+" — not counted")
               );
             })()
           ),
@@ -22960,7 +23008,7 @@ function App(){
                 border:"1px solid "+C.primary,borderRadius:10,padding:"12px 14px",
                 marginBottom:10}},
                 h("div",{style:{fontSize:13,fontWeight:800,color:C.primary,
-                  marginBottom:8}},"Piliin ang branch na papuntahan ng low stock meter ng "+srcName+":"),
+                  marginBottom:8}},"Select the branch to copy "+srcName+"'s low stock meter to:"),
                 h("div",{style:{display:"flex",gap:10,flexWrap:"wrap",marginBottom:10}},
                   targets.map(b=>h("label",{key:b.id,style:{display:"flex",
                     gap:5,alignItems:"center",fontSize:13,cursor:"pointer",
@@ -22977,12 +23025,12 @@ function App(){
                     }),
                     style:{padding:"6px 10px",borderRadius:7,fontSize:12,
                       border:"1px solid "+C.border,background:"#fff",
-                      cursor:"pointer"}},"Lahat"),
+                      cursor:"pointer"}},"All"),
                   h("button",{
                     onClick:()=>setCopyMinTargets({}),
                     style:{padding:"6px 10px",borderRadius:7,fontSize:12,
                       border:"1px solid "+C.border,background:"#fff",
-                      cursor:"pointer"}},"Walang pili"),
+                      cursor:"pointer"}},"None selected"),
                   h("button",{
                     disabled:!nPicked||copyMinBusy,
                     onClick:async()=>{
@@ -23018,17 +23066,17 @@ function App(){
                           }
                         }
                         if(!totalChanges){
-                          showT("Pareho na sa napiling branch — walang babaguhin","ok");
+                          showT("Already the same on the selected branch — nothing to change","ok");
                           return;
                         }
                         const lines=perBranch.map(pb=>
                           pb.branch.full+" — "+pb.changes.length+" item"
                           +(pb.changes.length>1?"s":""));
-                        if(!confirm("Kopyahin ang low stock meter (min stock) ng "
-                          +srcName+" papunta sa "+perBranch.length+" branch:\n\n"
+                        if(!confirm("Copy the low stock meter (min stock) of "
+                          +srcName+" to "+perBranch.length+" branch(es):\n\n"
                           +lines.join("\n")
-                          +"\n\nTotal "+totalChanges+" item(s) magbabago. Stock on hand, "
-                          +"cost, presyo — hindi magagalaw. Min stock lang."))
+                          +"\n\nTotal "+totalChanges+" item(s) will change. Stock on hand, "
+                          +"cost, price — not affected. Min stock only."))
                           return;
                         let ok=0,bad=0;
                         for(const pb of perBranch){
@@ -23044,8 +23092,8 @@ function App(){
                             }catch(e){ bad++; console.warn("bulk copy minStock",c.id,e); }
                           }
                         }
-                        showT(ok+" item min stock na-copy sa "+perBranch.length
-                          +" branch mula sa "+srcName+(bad?"  ·  "+bad+" bigo":""),
+                        showT(ok+" item(s) min stock copied to "+perBranch.length
+                          +" branch(es) from "+srcName+(bad?"  ·  "+bad+" failed":""),
                           bad?"warn":"ok");
                         setCopyMinPicker(false);
                       }catch(e){
@@ -24059,7 +24107,7 @@ function App(){
                   border:"1px solid "+(plPicker?C.primary:C.border),
                   background:plPicker?"#F3E9F7":"#fff",
                   color:plPicker?C.primary:C.text}},
-                "☑️ Piliin ang branch"),
+                "☑️ Select branch"),
               user.role==="owner"&&h("button",{
                 onClick:()=>{
                   if(!plSettingsOpen)setPlSettingsDraft(Object.assign({},plSettings));
@@ -24099,7 +24147,7 @@ function App(){
             plPicker&&h("div",{style:{padding:"11px 14px",
               borderBottom:"1px solid "+C.border,background:"#F3E9F7"}},
               h("div",{style:{fontSize:12,fontWeight:800,color:C.primary,
-                marginBottom:8}},"Piliin ang branch na isasama sa listahan at TOTAL:"),
+                marginBottom:8}},"Select the branches to include in the list and TOTAL:"),
               h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",
                 marginBottom:10}},
                 (branches||[]).map(function(b){
@@ -24124,7 +24172,7 @@ function App(){
                   },
                   style:{padding:"6px 10px",borderRadius:7,fontSize:12,
                     border:"1px solid "+C.border,background:"#fff",
-                    cursor:"pointer"}},"Lahat"),
+                    cursor:"pointer"}},"All"),
                 h("button",{
                   onClick:function(){
                     const none={}; (branches||[]).forEach(function(b){none[b.id]=false;});
@@ -24132,7 +24180,7 @@ function App(){
                   },
                   style:{padding:"6px 10px",borderRadius:7,fontSize:12,
                     border:"1px solid "+C.border,background:"#fff",
-                    cursor:"pointer"}},"Walang pili"),
+                    cursor:"pointer"}},"None selected"),
                 h("button",{
                   onClick:()=>setPlPicker(false),
                   style:{padding:"6px 10px",borderRadius:7,fontSize:12,
@@ -24143,7 +24191,7 @@ function App(){
               borderBottom:"1px solid "+C.border,background:"#F3E9F7"}},
               h("div",{style:{fontSize:12,fontWeight:800,color:C.primary,
                 marginBottom:8}},
-                "Tax, Sinking Fund at Profit Sharing — i-edit kung sino/magkano:"),
+                "Tax, Sinking Fund and Profit Sharing — edit who/how much:"),
               h("div",{style:{display:"flex",gap:10,flexWrap:"wrap",
                 marginBottom:10}},
                 h("div",null,
@@ -24212,7 +24260,7 @@ function App(){
                         commiPct:Number(plSettingsDraft.commiPct)||0,
                         updatedBy:user.name,updatedAt:serverTimestamp()
                       });
-                      showT("Na-save ang P&L settings ✓","ok");
+                      showT("P&L settings saved ✓","ok");
                       setPlSettingsOpen(false);
                     }catch(e){ showT("Failed: "+String(e&&e.message||e).slice(0,60),"err"); }
                     finally{ setPlSettingsSaving(false); }
@@ -24232,9 +24280,9 @@ function App(){
               borderBottom:"1px solid "+C.border,background:"#F3E9F7"}},
               h("div",{style:{fontSize:12,fontWeight:800,color:C.primary,
                 marginBottom:8}},
-                "📈 Daily stock_snapshots — para makita kung aling petsa ang "
+                "📈 Daily stock_snapshots — to see which date a value "
                 +"ginamit bilang Opening/Ending Stock, at kung may masyadong "
-                +"tumalon na value."),
+                +"jumped on."),
               h("div",{style:{display:"flex",gap:6,flexWrap:"wrap",
                 marginBottom:10}},
                 (branches||[]).map(function(b){
@@ -24253,7 +24301,7 @@ function App(){
                 padding:"8px 10px",background:"#fff",borderRadius:8,
                 border:"1px solid "+C.border}},
                 h("span",{style:{fontSize:11,fontWeight:700,color:C.muted}},
-                  "🗑️ Burahin ang hanay:"),
+                  "🗑️ Delete a range:"),
                 h("input",{type:"date",value:snapDelFrom,
                   onChange:e=>setSnapDelFrom(e.target.value),
                   style:{padding:"4px 7px",border:"1px solid "+C.border,
@@ -24268,9 +24316,9 @@ function App(){
                   onClick:async()=>{
                     const hits=snapHistRows.filter(s=>
                       s.date>=snapDelFrom&&s.date<=snapDelTo);
-                    if(!hits.length){ showT("Walang snapshot sa saklaw na iyon","err"); return; }
-                    if(!confirm("Tanggalin ang "+hits.length+" snapshot ("
-                      +snapDelFrom+" → "+snapDelTo+") ng "+snapHistBranch+"?"))return;
+                    if(!hits.length){ showT("No snapshots in that range","err"); return; }
+                    if(!confirm("Delete "+hits.length+" snapshot(s) ("
+                      +snapDelFrom+" → "+snapDelTo+") for "+snapHistBranch+"?"))return;
                     try{
                       for(const s of hits) await deleteDoc(doc(db,"stock_snapshots",s._id));
                       await loadSnapHist(snapHistBranch);
@@ -24281,7 +24329,7 @@ function App(){
                     fontWeight:700,border:"none",cursor:"pointer",
                     background:(!snapDelFrom||!snapDelTo)?"#eee":C.danger,
                     color:(!snapDelFrom||!snapDelTo)?C.muted:"#fff"}},
-                  "Tanggalin ang hanay")),
+                  "Delete range")),
               snapHistLoading?h("div",{style:{padding:"14px",textAlign:"center",
                 color:C.muted,fontSize:13}},"Loading…"):
               h("div",{style:{background:"#fff",borderRadius:9,
@@ -24293,7 +24341,7 @@ function App(){
                   "DATE","VALUE","ITEMS","AUTO?","BY / TAKEN ON",""),
                 snapHistRows.length===0&&h("div",{style:{padding:"18px",
                   textAlign:"center",color:C.muted,fontSize:13}},
-                  snapHistBranch?"Walang snapshot para sa branch na ito.":""),
+                  snapHistBranch?"No snapshots for this branch.":""),
                 snapHistRows.map(function(s,i){
                   const editing=snapEditId===s._id;
                   return h("div",{key:s._id||i,style:{display:"grid",
@@ -24343,13 +24391,13 @@ function App(){
                           h("button",{
                             onClick:()=>{setSnapEditId(s._id);
                               setSnapEditVal(String(s.value||0));},
-                            title:"I-correct ang value",
+                            title:"Correct the value",
                             style:{padding:"3px 7px",borderRadius:6,fontSize:11,
                               border:"1px solid "+C.border,background:"#fff",
                               cursor:"pointer"}},"✏️"),
                           h("button",{
                             onClick:()=>deleteSnapRow(snapHistBranch,s._id,s.date),
-                            title:"Tanggalin ang snapshot na ito",
+                            title:"Delete this snapshot",
                             style:{padding:"3px 7px",borderRadius:6,fontSize:11,
                               border:"1px solid "+C.border,background:"#fff",
                               color:C.danger,cursor:"pointer"}},"🗑️")));
@@ -24522,8 +24570,8 @@ function App(){
                    onToggle:e=>setPlShareOnPersist(e.target.checked)}),
                 !allNet&&h("div",{style:{padding:"9px 14px",fontSize:11,
                   color:C.warning}},
-                  "Dash kasi hindi pa kumpleto ang COST OF GOODS sa lahat ng "
-                  +"kasamang branch — i-tap ang \"📦 Load cost of goods & "
+                  "Shown as a dash because COST OF GOODS isn't complete for all "
+                  +"included branches yet — tap \"📦 Load cost of goods & "
                   +"stock value\" sa itaas."));
             })(),
 
@@ -24578,7 +24626,7 @@ function App(){
               +"of today, not of the period, whichever dates are chosen. "
               +"COMMI INCOME is "+(Number(plSettings.commiPct)||0)+"% of "
               +"PURCHASED (the % is set in \"⚙️ P&L Settings\" above) — "
-              +"reference lang, hindi ito ibinabawas o idinadagdag sa NET "
+              +"reference only, it is not subtracted from or added to NET "
               +"INCOME. "
               +"OPERATING INCOME (the NET INCOME column above) is GROSS "
               +"PROFIT minus Daily OpEx minus Monthly Fixed, minus VAT 12% "
@@ -26080,7 +26128,7 @@ function App(){
                               cancelledBy:user.name,cancelledAt:serverTimestamp()});
                             await notify(db,{to:"ct-main",type:"info",
                               title:"Cancelled "+po.poNum,
-                              message:why.trim()||"No dahilan",
+                              message:why.trim()||"No reason given",
                               page:"po_monitor",ref:po.poNum,by:user.name});
                             showT(po.poNum+" cancelled","warn");
                           }catch(e){showT("Cancel failed","err");}
