@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261111-234500 -->
+<!-- BUILD:20261112-090000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -108,7 +108,8 @@ const { createElement: h, useState, useEffect, useRef, useCallback, useMemo } = 
 const { createRoot } = window.ReactDOM;
 import { initializeApp } from "firebase/app";
 import {
-  getFirestore, collection, doc,
+  getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
+  collection, doc,
   onSnapshot, addDoc, updateDoc, setDoc, deleteDoc,
   getDocs, getDoc, query, orderBy, where, serverTimestamp,
   writeBatch, limit, increment, arrayUnion, deleteField
@@ -138,7 +139,22 @@ const firebaseConfig = {
   measurementId:     "G-F1PRMVEX7Q"
 };
 const fbApp = initializeApp(firebaseConfig);
-const db    = getFirestore(fbApp);
+// Offline mode: cache data locally (survives app reload/slow signal) and
+// queue writes to auto-sync once back online. persistentMultipleTabManager
+// lets several tabs on the SAME device share one cache safely; it does not
+// cover two separate tablets at one branch going offline at the same time —
+// see the order-counter note near placeOrderInner() for that remaining risk.
+let db;
+try{
+  db = initializeFirestore(fbApp, {
+    localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+  });
+}catch(e){
+  // Falls back to plain (non-offline) mode if persistence can't start
+  // (e.g. private/incognito tab, or a second init already ran).
+  console.warn("Offline persistence unavailable, continuing online-only:", e);
+  db = getFirestore(fbApp);
+}
 const auth  = getAuth(fbApp);
 
 // createUserWithEmailAndPassword() signs the CALLER in as the newly created
@@ -9132,7 +9148,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261111-234500";
+const BUILD = "20261112-090000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -16653,6 +16669,16 @@ function App(){
     // gets the next one. The gap that leaves is not a void and not a missing
     // sale — nothing was ever recorded — but it reads like both, and BIR
     // sequence checks care. The number is handed back on failure, below.
+    //
+    // NOT fixed as part of enabling offline mode (flagged to Norman, not yet
+    // approved): this read-then-write is not atomic. If two separate tablets
+    // at the SAME branch are both fully offline at the same moment and both
+    // ring up a sale, each can grab the same next number; stock itself stays
+    // correct (increment() below resolves atomically on the server either
+    // way) but the human-readable order id could repeat, which matters for
+    // BIR sequencing. Low-probability (needs 2 devices offline together at
+    // one branch) and no worse than before this feature — just more
+    // reachable now that offline use actually works.
     let orderNum=1;
     let counterRef=null, counterWas=null;
     try{
