@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261109-085800 -->
+<!-- BUILD:20261111-234500 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -9132,7 +9132,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261109-085800";
+const BUILD = "20261111-234500";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -15209,6 +15209,10 @@ function App(){
   // showing a week's worth of orders as if it were the whole month. A direct
   // query for exactly the chosen range, same shape as plWide, fixes that.
   const [dashWide,setDashWide]=useState(null);   // {key,loading,orders,err}
+  // "Same window, last 5 months" comparison on Branch Performance — shifts
+  // the picked range back 1-5 months and re-queries, rather than deriving
+  // from whatever's already loaded for the currently selected range.
+  const [dashCompare,setDashCompare]=useState(null); // {forKey,loading,periods,err}
   // Cost of goods and stock value are per-branch collections — one query per
   // branch, every time. Kept behind a button: on Blaze that is eight reads of
   // a whole inventory, and nobody wants to pay for it on every page open.
@@ -17120,6 +17124,40 @@ function App(){
     return ()=>{dead=true;};
   },[user,page,dashRange,dashFrom,dashTo]);
 
+  // "Same window, last 5 months" — shifts BOTH ends of whatever's picked
+  // above back by 1..5 months (addMonths clamps a day that doesn't exist
+  // in a shorter month). A single day shifts to 5 single days; a month
+  // range shifts to the same date-range in each prior month, so "This
+  // month so far" compares apples to apples instead of full months against
+  // a partial one. One query per shifted period — button-driven like
+  // loadPlStock above, not auto-loaded.
+  async function loadDashCompare(R){
+    const key=R.from+".."+R.to;
+    setDashCompare({forKey:key,loading:true});
+    try{
+      const periods=[1,2,3,4,5].map(n=>({
+        n:n, from:addMonths(R.from,-n), to:addMonths(R.to,-n)
+      }));
+      const snaps=await Promise.all(periods.map(p=>
+        getDocs(query(collection(db,"orders"),
+          where("date",">=",p.from),where("date","<=",p.to)))
+      ));
+      const resolved=periods.map((p,i)=>{
+        const byBranch={};
+        snaps[i].docs.forEach(d=>{
+          const o=d.data();
+          if(o.status==="void"||o.status==="cancelled")return;
+          byBranch[o.branch]=(byBranch[o.branch]||0)+(Number(o.total)||0);
+        });
+        return {label:p.from===p.to?p.from:(p.from+" → "+p.to),
+          from:p.from,to:p.to,byBranch:byBranch};
+      });
+      setDashCompare({forKey:key,loading:false,periods:resolved});
+    }catch(e){
+      setDashCompare({forKey:key,loading:false,err:String((e&&e.message)||e)});
+    }
+  }
+
   // Cost of goods + stock value for every branch. Button-driven on purpose.
   const loadPlStock=async(bids,R,skipCogs)=>{
     const key=R.from+".."+R.to;
@@ -18977,10 +19015,21 @@ function App(){
               h("div",{style:{padding:"12px 16px",borderBottom:"1px solid "+C.border,
                 display:"flex",justifyContent:"space-between",alignItems:"center"}},
                 h("div",{style:{fontSize:13,fontWeight:800}},"🏪 Branch Performance"),
-                // Was today's date whatever period was selected — a label that
-                // contradicted the figures under it.
-                h("div",{style:{fontSize:12,color:C.muted}},
-                  R.from===R.to ? R.from : (R.from+" → "+R.to))
+                h("div",{style:{display:"flex",alignItems:"center",gap:10}},
+                  // Was today's date whatever period was selected — a label that
+                  // contradicted the figures under it.
+                  h("div",{style:{fontSize:12,color:C.muted}},
+                    R.from===R.to ? R.from : (R.from+" → "+R.to)),
+                  h("button",{
+                    onClick:()=>loadDashCompare(R),
+                    disabled:dashCompare&&dashCompare.loading,
+                    style:{padding:"5px 10px",borderRadius:7,fontSize:11,
+                      fontWeight:700,cursor:"pointer",
+                      border:"1px solid "+C.border,background:"#fff",
+                      color:C.primary}},
+                    (dashCompare&&dashCompare.loading)?"..."
+                      :"🔁 Ikumpara sa nakaraang 5 buwan")
+                )
               ),
               // Ranked by sales for the chosen period, so the list answers
               // "who is carrying the week" rather than listing stores in the
@@ -19003,34 +19052,51 @@ function App(){
                 const allBranchSales=dashOrders.filter(function(o){return inRange(o,R);})
                   .reduce(function(s,o){return s+(o.total||0);},0);
                 const pct=allBranchSales>0?Math.round(bSales/allBranchSales*100):0;
+                const showCompare=dashCompare
+                  &&dashCompare.forKey===(R.from+".."+R.to)
+                  &&!dashCompare.loading&&!dashCompare.err;
                 return h("div",{key:b.id,
-                  style:{display:"flex",alignItems:"center",padding:"10px 16px",
-                    borderBottom:"1px solid #f5f5f5",gap:10}},
-                  h("div",{style:{background:C.primary,color:"#fff",borderRadius:6,
-                    padding:"2px 6px",fontSize:12,fontWeight:900,flexShrink:0}},
-                    b.id.replace("ct-","").toUpperCase()),
-                  h("div",{style:{flex:1}},
-                    h("div",{style:{fontSize:13,fontWeight:700}},b.name||b.full),
-                    h("div",{style:{fontSize:12,color:C.muted}},b.address||"")
+                  style:{borderBottom:"1px solid #f5f5f5"}},
+                  h("div",{
+                    style:{display:"flex",alignItems:"center",padding:"10px 16px",
+                      gap:10}},
+                    h("div",{style:{background:C.primary,color:"#fff",borderRadius:6,
+                      padding:"2px 6px",fontSize:12,fontWeight:900,flexShrink:0}},
+                      b.id.replace("ct-","").toUpperCase()),
+                    h("div",{style:{flex:1}},
+                      h("div",{style:{fontSize:13,fontWeight:700}},b.name||b.full),
+                      h("div",{style:{fontSize:12,color:C.muted}},b.address||"")
+                    ),
+                    h("div",{style:{textAlign:"right",minWidth:150}},
+                      h("div",{style:{fontSize:13,fontWeight:900,
+                        color:bSales>0?C.primary:C.muted}},
+                        "₱"+peso(bSales)),
+                      h("div",{style:{fontSize:12,color:C.muted}},
+                        row.tx+" orders"
+                        +(row.tx?" · ₱"+peso(row.avg)+" avg":"")
+                        +(bPending>0?" · ⚠️"+bPending+" pending":""))
+                    ),
+                    h("div",{style:{fontSize:12,color:C.muted,minWidth:34,
+                      textAlign:"right"}},pct+"%"),
+                    // Progress bar
+                    h("div",{style:{width:60}},
+                      h("div",{style:{height:4,background:"#f0f0f0",borderRadius:2}},
+                        h("div",{style:{height:"100%",width:pct+"%",
+                          background:C.primary,borderRadius:2,
+                          transition:"width .3s"}}))
+                    )
                   ),
-                  h("div",{style:{textAlign:"right",minWidth:150}},
-                    h("div",{style:{fontSize:13,fontWeight:900,
-                      color:bSales>0?C.primary:C.muted}},
-                      "₱"+peso(bSales)),
-                    h("div",{style:{fontSize:12,color:C.muted}},
-                      row.tx+" orders"
-                      +(row.tx?" · ₱"+peso(row.avg)+" avg":"")
-                      +(bPending>0?" · ⚠️"+bPending+" pending":""))
-                  ),
-                  h("div",{style:{fontSize:12,color:C.muted,minWidth:34,
-                    textAlign:"right"}},pct+"%"),
-                  // Progress bar
-                  h("div",{style:{width:60}},
-                    h("div",{style:{height:4,background:"#f0f0f0",borderRadius:2}},
-                      h("div",{style:{height:"100%",width:pct+"%",
-                        background:C.primary,borderRadius:2,
-                        transition:"width .3s"}}))
-                  )
+                  // "Same window, last 5 months" — a single day compares to
+                  // the same date each prior month; a range compares to the
+                  // same date-range each prior month.
+                  showCompare&&h("div",{style:{display:"flex",flexWrap:"wrap",
+                    gap:12,padding:"0 16px 10px 54px",fontSize:11,color:C.muted}},
+                    dashCompare.periods.map(function(p){
+                      const v=p.byBranch[b.id]||0;
+                      return h("span",{key:p.label},
+                        p.label+": ",
+                        h("b",{style:{color:v>0?C.text:C.muted}},"₱"+peso(v)));
+                    }))
                 );
               })
             ),
