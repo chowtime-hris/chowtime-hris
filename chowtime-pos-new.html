@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261112-160000 -->
+<!-- BUILD:20261112-180000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -108,7 +108,7 @@ const { createElement: h, useState, useEffect, useRef, useCallback, useMemo } = 
 const { createRoot } = window.ReactDOM;
 import { initializeApp } from "firebase/app";
 import {
-  getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
+  getFirestore,
   collection, doc,
   onSnapshot, addDoc, updateDoc, setDoc, deleteDoc,
   getDocs, getDoc, getDocFromServer, query, orderBy, where, serverTimestamp,
@@ -139,22 +139,11 @@ const firebaseConfig = {
   measurementId:     "G-F1PRMVEX7Q"
 };
 const fbApp = initializeApp(firebaseConfig);
-// Offline mode: cache data locally (survives app reload/slow signal) and
-// queue writes to auto-sync once back online. persistentMultipleTabManager
-// lets several tabs on the SAME device share one cache safely; it does not
-// cover two separate tablets at one branch going offline at the same time —
-// see the order-counter note near placeOrderInner() for that remaining risk.
+// Offline persistence paused for now (back to plain online-mode Firestore)
+// while we check a report that live sales stopped updating on Main — see
+// the note near the top of the file for what this traded away.
 let db;
-try{
-  db = initializeFirestore(fbApp, {
-    localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
-  });
-}catch(e){
-  // Falls back to plain (non-offline) mode if persistence can't start
-  // (e.g. private/incognito tab, or a second init already ran).
-  console.warn("Offline persistence unavailable, continuing online-only:", e);
-  db = getFirestore(fbApp);
-}
+db = getFirestore(fbApp);
 const auth  = getAuth(fbApp);
 
 // createUserWithEmailAndPassword() signs the CALLER in as the newly created
@@ -9148,7 +9137,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261112-160000";
+const BUILD = "20261112-180000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
