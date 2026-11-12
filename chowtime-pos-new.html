@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261112-113000 -->
+<!-- BUILD:20261112-153000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -9148,7 +9148,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261112-113000";
+const BUILD = "20261112-153000";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -15323,6 +15323,12 @@ function App(){
   const narrow=vw<900;                       // iPad portrait and below
   const [navOpen,setNavOpen]=useState(false); // manual override on narrow
   const [placing,setPlacing]=useState(false);            // order submit in flight
+  // true once a save has been stuck for a few seconds while offline — Firestore
+  // write promises do not resolve until the server acknowledges them, so with
+  // no signal placeOrderInner() can sit mid-await for a long time. This only
+  // changes what the button SAYS during that wait; it is still safely queued
+  // and still blocked from a second tap, exactly as before.
+  const [placingOffline,setPlacingOffline]=useState(false);
   const [kitchenFlow,setKitchenFlow]=useState(true);     // pending→preparing→served
   // Split payment: the non-cash legs are listed here and whatever is left of
   // the total is settled in cash. Storing only the non-cash parts keeps one
@@ -16687,11 +16693,21 @@ function App(){
     if(placingRef.current)return;
     placingRef.current=true;
     setPlacing(true);
+    // Still blocks a second tap and still waits for the real result either
+    // way — this timer only swaps the label if we're offline and the save
+    // is taking a while, so it reads as "queued, hang on" instead of
+    // looking frozen. Does not touch placeOrderInner() or its order of
+    // operations at all.
+    const offlineHintTimer=setTimeout(()=>{
+      if(!navigator.onLine)setPlacingOffline(true);
+    },4000);
     try{
       await placeOrderInner();
     }finally{
+      clearTimeout(offlineHintTimer);
       placingRef.current=false;
       setPlacing(false);
+      setPlacingOffline(false);
     }
   };
   const placeOrderInner=async()=>{
@@ -18069,6 +18085,19 @@ function App(){
         h("button",{
           onClick:()=>{
             if(placing)return;
+            // A save already in flight can safely ride out a brief reconnect —
+            // Firestore queues it and finishes on its own. But STARTING a new
+            // save with no signal at all means an indefinite, unrecoverable
+            // wait (the order number gets burned if the screen is ever closed
+            // before it resolves) for no good reason, since nothing here
+            // needs to happen instantly. Catching it up front, before the
+            // order is built, is the safe version of offline mode: cached
+            // browsing keeps working, but the till only commits a sale once
+            // it can actually confirm it went through.
+            if(!navigator.onLine){
+              showT("No internet connection — please check your connection and try again","err");
+              return;
+            }
             // Out of stock beats everything — never sell what cannot be made.
             const short=cartShort();
             if(short.length){
@@ -18108,8 +18137,12 @@ function App(){
             border:"none",borderRadius:10,color:"#fff",
             fontSize:14,fontWeight:800,
             cursor:placing?"not-allowed":"pointer"}},
-          placing?"⏳ Saving — don't press again"
+          placing?(placingOffline
+                 ?"📡 No signal — queued, keep this screen open"
+                 :"⏳ Saving — don't press again")
                  :"✓ Confirm & Print Receipt"),
+        placingOffline&&h("div",{style:{fontSize:11,color:C.muted,textAlign:"center",marginTop:6}},
+          "Already saved locally — will finish automatically once signal is back. Don't close this tab."),
 
       )
     )
