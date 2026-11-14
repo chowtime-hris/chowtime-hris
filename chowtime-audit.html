@@ -529,17 +529,22 @@ const SECTIONS = [
     'Hairnet / cap worn properly',
     'Overall grooming presentable'
   ]},
-  { letter:'C', title:'Food Taste & Quality', items:[
+  { letter:'C', title:'Products Standard & Portion Control', items:[
     'Taste matches standard recipe (sample-tested)',
-    'Portion size correct per standard',
+    'Yang Chow Rice portion correct (1 rice cup)',
+    'Buy 1 Take 1 Rice Meal portion correct (2 rice cups)',
+    'Sauce portion correct (Signature Sauce 20g / Ala King Sauce 50g)',
     'Presentation/plating matches standard',
     'No stale, expired, or off ingredients used'
   ]},
-  { letter:'D', title:'Cooking Standard', items:[
-    'Cooking procedure followed per SOP',
-    'Correct temperature/doneness observed',
-    'Storage of raw vs cooked items proper',
-    'Handwashing / sanitation practiced while cooking'
+  { letter:'D', title:'Cooking Process', items:[
+    'Frozen items placed directly into hot oil (no thawing)',
+    'Fryer temperature verified at 160°C before cooking',
+    'Dumplings/Nuggeton: steamed 20 min @110°C OR fried 4 min @160°C',
+    'Chicken Fillet/Nuggets: fried until floating, ~1–1:30 min',
+    'Lumpia Shanghai: 3 min @160°C or until crispy/brown',
+    'Fryer basket not overcrowded; products properly drained before serving',
+    'Storage of raw vs cooked items proper'
   ]},
   { letter:'E', title:'Service', items:[
     'Crew greeted/attended to customers properly',
@@ -622,8 +627,8 @@ function renderCustomItems(){
         </div>
         <button type="button" data-customremove="${ci.id}" style="background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer;padding:0 4px;">&times;</button>
       </div>
-      <div style="display:${ci.result==='fail' ? 'block':'none'};margin-top:8px;" id="customnotewrap-${ci.id}">
-        <textarea class="item-note" placeholder="Optional note..." data-customnote="${ci.id}">${ci.note}</textarea>
+      <div style="margin-top:8px;" id="customnotewrap-${ci.id}">
+        <textarea class="item-note" placeholder="Add a remark or comment..." data-customnote="${ci.id}">${ci.note}</textarea>
         <div class="photo-row" id="customphotopreview-${ci.id}"></div>
       </div>
     `;
@@ -687,9 +692,9 @@ function renderSections(){
             <button type="button" class="fail" data-key="${key}" data-val="fail">✕</button>
           </div>
         </div>
-        <div class="fail-note-wrap" id="notewrap-${key}" style="display:none;">
-          <div class="note-hint">Add a quick note (what's wrong)</div>
-          <textarea class="item-note" data-notekey="${key}" placeholder="Optional note..."></textarea>
+        <div class="fail-note-wrap" id="notewrap-${key}">
+          <div class="note-hint">Remarks / comments (optional)</div>
+          <textarea class="item-note" data-notekey="${key}" placeholder="Add a remark or comment...">${notes[key]||''}</textarea>
           <div class="photo-row" id="photopreview-${key}"></div>
         </div>
       `;
@@ -755,10 +760,8 @@ function renderPhotoPreview(elId, key, kind){
 function updateToggleUI(key){
   const passBtn = document.querySelector(`.toggle button.pass[data-key="${key}"]`);
   const failBtn = document.querySelector(`.toggle button.fail[data-key="${key}"]`);
-  const notewrap = document.getElementById('notewrap-'+key);
   passBtn.classList.toggle('on', state[key] === 'pass');
   failBtn.classList.toggle('on', state[key] === 'fail');
-  notewrap.style.display = state[key] === 'fail' ? 'block' : 'none';
 }
 
 function totalItems(){
@@ -843,11 +846,16 @@ async function submitAudit(){
   const pct = total > 0 ? Math.round((passed/total)*100) : 0;
 
   const failedItems = [];
+  const passRemarks = [];
   SECTIONS.forEach((sec, sIdx)=>{
     sec.items.forEach((text, iIdx)=>{
       const key = itemKey(sIdx, iIdx);
+      const noteVal = notes[key] || '';
       if (state[key] === 'fail'){
-        failedItems.push({ section: sec.title, text, note: notes[key] || '', photo: photos[key] || null });
+        failedItems.push({ section: sec.title, text, note: noteVal, photo: photos[key] || null });
+      } else if (noteVal.trim()){
+        // Remark left on a PASSED item — kept separately so it isn't lost.
+        passRemarks.push({ section: sec.title, text, note: noteVal, photo: photos[key] || null });
       }
     });
   });
@@ -865,6 +873,7 @@ async function submitAudit(){
     store, date, auditor, overallNotes,
     score: pct, passed, answered, total,
     failedItems,
+    passRemarks,
     otherObservations,
     createdAt: new Date().toISOString()
   };
@@ -1058,6 +1067,9 @@ async function loadHistory(){
       const otherList = r.otherObservations && r.otherObservations.length
         ? r.otherObservations.map(o=>`<div${o.result==='fail' ? ' class="fail-item"' : ''}>${o.result==='fail'?'✕':'✓'} ${o.text}${o.note ? ' — "'+o.note+'"' : ''}${o.photo ? `<div class="hist-photos"><img src="${o.photo}" data-lightbox="${o.photo}"></div>` : ''}</div>`).join('')
         : '';
+      const remarkList = r.passRemarks && r.passRemarks.length
+        ? r.passRemarks.map(p=>`<div>✓ ${p.section}: ${p.text} — "${p.note}"${p.photo ? `<div class="hist-photos"><img src="${p.photo}" data-lightbox="${p.photo}"></div>` : ''}</div>`).join('')
+        : '';
       div.innerHTML = `
         <div class="hist-top">
           <div>
@@ -1070,6 +1082,7 @@ async function loadHistory(){
           <div><b>${r.passed}/${r.answered}</b> items passed</div>
           ${r.overallNotes ? `<div style="margin-top:6px;"><b>Notes:</b> ${r.overallNotes}</div>` : ''}
           <div style="margin-top:6px;">${failList}</div>
+          ${remarkList ? `<div style="margin-top:8px;"><b>Remarks on passed items:</b>${remarkList}</div>` : ''}
           ${otherList ? `<div style="margin-top:8px;"><b>Other Observations:</b>${otherList}</div>` : ''}
         </div>
       `;
