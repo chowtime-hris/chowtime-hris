@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261113-093000 -->
+<!-- BUILD:20261114-111500 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -354,9 +354,9 @@ const BRANCHES = [
 
 const ROLES = {
   owner:     {label:"Owner / Admin",    emoji:"\u{1F451}", color:"#6A1B9A",
-    nav:["dashboard","branches","subs","pos","orders","void_requests","all_orders","analytics","sales_report","z_reading","reports","feedback","cash_count","cash_in","expenses","cash_monitor","discount_mgmt","inventory","inv_log","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","settings","health","printer","ext_payroll","ext_kiosk","hris_dash","ext_production","ext_stock","branch_pl"]},
+    nav:["dashboard","branches","subs","pos","orders","void_requests","all_orders","analytics","sales_report","z_reading","reports","feedback","cash_count","cash_in","expenses","cash_monitor","discount_mgmt","inventory","inv_log","po_monitor","menu_mgmt","bom_mgmt","user_mgmt","settings","health","printer","ext_payroll","ext_kiosk","hris_dash","ext_production","ext_stock","ext_audit","branch_pl"]},
   manager:   {label:"Branch Manager",   emoji:"\u{1F3EA}", color:"#007AFF",
-    nav:["branch_dash","pos","orders","analytics","z_reading","reports","feedback","cash_count","cash_in","expenses","ext_payroll","inventory","inv_log","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","hris_dash","bom_mgmt","branch_settings","printer","ext_kiosk","ext_stock","branch_pl"]},
+    nav:["branch_dash","pos","orders","analytics","z_reading","reports","feedback","cash_count","cash_in","expenses","ext_payroll","inventory","inv_log","stock_order","branch_menu","crew_mgmt","void_requests","ca_request","loan_request","hris_dash","bom_mgmt","branch_settings","printer","ext_kiosk","ext_stock","ext_audit","branch_pl"]},
   cashier:   {label:"Cashier",          emoji:"\u{1F4B3}", color:"#34C759",
     nav:["pos","orders","x_reading","printer","z_reading","cash_count","cash_in","expenses","inventory","ca_request","loan_request","void_request","ext_kiosk","ext_stock"]},
   crew:      {label:"Crew / Kitchen",   emoji:"\u{1F9D1}\u{200D}\u{1F373}", color:"#FF9500",
@@ -380,8 +380,8 @@ const NAV_GROUPS = [
   {id:"menu",  icon:"\u{1F37D}", label:"Menu",
    pages:["menu_mgmt","branch_menu"]},
   {id:"people",icon:"\u{1F465}", label:"People & HR",
-   pages:["user_mgmt","crew_mgmt","ext_payroll","ext_kiosk","hris_dash",
-          
+   pages:["user_mgmt","crew_mgmt","ext_payroll","ext_kiosk","ext_audit","hris_dash",
+
           "ca_request","loan_request"]},
   {id:"money", icon:"\u{1F4B8}", label:"Expenses",
    pages:["expenses"]},
@@ -401,6 +401,7 @@ const NAV_META = {
   ext_kiosk:   {icon:"⏰",label:"Time Clock ↗"},
   ext_production:{icon:"🏭",label:"Production ↗"},
   ext_stock:   {icon:"🧊",label:"Freezer Count ↗"},
+  ext_audit:   {icon:"🛡️",label:"Store Audit ↗"},
   branch_pl:   {icon:"📊",label:"Branch P&L"},
   x_reading:   {icon:"📃",label:"X-Reading"},
   expenses:    {icon:"💸",label:"Expenses"},
@@ -9137,7 +9138,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261113-093000";
+const BUILD = "20261114-111500";
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -13428,6 +13429,7 @@ function PermissionsTab({db,showT,companySettings,setCompanySettings}){
       {key:"loan_request",label:"🏦 Loan Request"},
       {key:"ext_kiosk",label:"⏰ Time Clock ↗"},
       {key:"ext_payroll",label:"💵 Payroll System ↗"},
+      {key:"ext_audit",label:"🛡️ Store Audit ↗"},
     ]},
     {label:"Setup", items:[
       {key:"printer",label:"🖨️ Printer"},
@@ -18493,7 +18495,8 @@ function App(){
             ext_payroll:"chowtime-payroll.html",
             ext_kiosk:"chowtime-kiosk.html",
             ext_production:"chowtime-production.html",
-            ext_stock:"chowtime-stock.html"
+            ext_stock:"chowtime-stock.html",
+            ext_audit:"chowtime-audit.html"
           };
           const  item=(p,indent)=>{
             const m=NAV_META[p]; if(!m)return null;
