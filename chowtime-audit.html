@@ -449,6 +449,9 @@
     </div>
 
     <div id="auditContent" style="display:none;">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:8px;">
+        <button type="button" class="btn secondary" id="auditLockBtn" style="padding:6px 14px;font-size:12.5px;">🔒 Lock</button>
+      </div>
       <div class="card">
         <div class="row2">
           <div class="field">
@@ -500,6 +503,27 @@
     </div>
 
     <div id="historyContent" style="display:none;">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:8px;">
+        <button type="button" class="btn secondary" id="historyLockBtn" style="padding:6px 14px;font-size:12.5px;">🔒 Lock</button>
+      </div>
+
+      <div class="section-title"><div class="letter">#</div><h2>Change PINs</h2></div>
+      <div class="card">
+        <div style="font-size:12.5px;color:var(--muted);margin-bottom:10px;">Updates take effect right away, on this and other devices. Leave a field blank to keep that PIN unchanged.</div>
+        <div class="row2">
+          <div class="field">
+            <label>AOM PIN (New Audit)</label>
+            <input type="text" inputmode="numeric" maxlength="8" id="newAomPin" placeholder="New AOM PIN">
+          </div>
+          <div class="field">
+            <label>Owner PIN (History)</label>
+            <input type="text" inputmode="numeric" maxlength="8" id="newOwnerPin" placeholder="New Owner PIN">
+          </div>
+        </div>
+        <button type="button" class="btn" id="savePinsBtn" style="width:100%;">Save PINs</button>
+        <div id="pinSaveMsg" style="font-size:12.5px;color:var(--pass);margin-top:8px;"></div>
+      </div>
+
       <div class="section-title"><div class="letter">+</div><h2>Manage Branches</h2></div>
       <div class="card">
         <div style="font-size:12.5px;color:var(--muted);margin-bottom:10px;">Official branch list — used by both the Audit form and the Feedback form. Keeping this managed here avoids typos/duplicates.</div>
@@ -920,7 +944,10 @@ function showToast(msg){
 }
 
 // ---------- History (PIN protected) ----------
-const HISTORY_PIN = '00042190'; // change this to whatever 8-digit PIN you want the owner to use
+// Fallback defaults — overridden once the saved PINs load from Firebase
+// (see loadPins() below), and can be changed any time from the "Change
+// PINs" card in this History tab, with no code redeploy needed.
+let HISTORY_PIN = '00042190';
 
 function checkHistoryPin(){
   const val = document.getElementById('historyPinInput').value.trim();
@@ -935,9 +962,15 @@ document.getElementById('historyPinSubmit').addEventListener('click', checkHisto
 document.getElementById('historyPinInput').addEventListener('keydown', (e)=>{
   if (e.key === 'Enter') checkHistoryPin();
 });
+document.getElementById('historyLockBtn').addEventListener('click', ()=>{
+  document.getElementById('historyContent').style.display = 'none';
+  document.getElementById('historyGate').style.display = 'block';
+  document.getElementById('historyPinInput').value = '';
+  document.getElementById('historyPinError').textContent = '';
+});
 
 // ---------- New Audit (AOM PIN protected) ----------
-const AOM_PIN = '24681357'; // change this to whatever PIN the AOM/auditor should use
+let AOM_PIN = '24681357'; // same fallback/override behavior as HISTORY_PIN above
 let auditUnlocked = false;
 
 function checkAuditPin(){
@@ -955,6 +988,52 @@ function checkAuditPin(){
 document.getElementById('auditPinSubmit').addEventListener('click', checkAuditPin);
 document.getElementById('auditPinInput').addEventListener('keydown', (e)=>{
   if (e.key === 'Enter') checkAuditPin();
+});
+document.getElementById('auditLockBtn').addEventListener('click', ()=>{
+  auditUnlocked = false;
+  document.getElementById('auditContent').style.display = 'none';
+  document.getElementById('scoreBar').style.display = 'none';
+  document.getElementById('auditGate').style.display = 'block';
+  document.getElementById('auditPinInput').value = '';
+  document.getElementById('auditPinError').textContent = '';
+});
+
+// ---------- Change PINs (stored in Firebase so they survive reloads
+// and sync across every tablet/device without re-shipping the file) ----------
+async function loadPins(){
+  try{
+    await waitForStorage();
+    const res = await window.storage.get('pin_settings', true);
+    if (res && res.value){
+      const saved = JSON.parse(res.value);
+      if (saved.aom) AOM_PIN = saved.aom;
+      if (saved.owner) HISTORY_PIN = saved.owner;
+    }
+  } catch(e){
+    console.error('Could not load saved PINs — using defaults', e);
+  }
+}
+loadPins();
+
+document.getElementById('savePinsBtn').addEventListener('click', async ()=>{
+  const newAom = document.getElementById('newAomPin').value.trim();
+  const newOwner = document.getElementById('newOwnerPin').value.trim();
+  if (!newAom && !newOwner){ showToast('Walang nilagay na bagong PIN'); return; }
+  try{
+    await waitForStorage();
+    const finalAom = newAom || AOM_PIN;
+    const finalOwner = newOwner || HISTORY_PIN;
+    await window.storage.set('pin_settings', JSON.stringify({ aom: finalAom, owner: finalOwner }), true);
+    AOM_PIN = finalAom;
+    HISTORY_PIN = finalOwner;
+    document.getElementById('newAomPin').value = '';
+    document.getElementById('newOwnerPin').value = '';
+    document.getElementById('pinSaveMsg').textContent = 'Saved ✓ — active na agad.';
+  } catch(e){
+    document.getElementById('pinSaveMsg').textContent = '';
+    showToast('Could not save PINs. Try again.');
+    console.error(e);
+  }
 });
 
 function showHistoryContent(){
@@ -1202,6 +1281,7 @@ const db = getDatabase(app);
 function nodeFor(key){
   if (key.startsWith('feedback_')) return 'feedback';
   if (key.startsWith('branch_')) return 'branches';
+  if (key.startsWith('pin_')) return 'settings';
   return 'audits';
 }
 
