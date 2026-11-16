@@ -115,7 +115,7 @@ tbody td{padding:9px 11px;}
 .modal-box h2{font-family:'Syne',sans-serif;font-size:18px;margin-bottom:16px;}
 @media(max-width:600px){nav.tabs{padding:5px 10px;}.kpi-value{font-size:20px;}.panel{padding:14px;}}
 </style>
-<!-- BUILD:20261116-174500 -->
+<!-- BUILD:20261116-233500 -->
 </head>
 <body>
 
@@ -416,7 +416,7 @@ tbody td{padding:9px 11px;}
           <th>Employee</th><th>Days</th><th>Basic Pay</th><th>OT Pay</th><th>ND Pay</th>
           <th>Holiday Pay</th><th>Sales Incentive</th><th>Commission</th><th>Tips</th>
           <th>GROSS</th><th>SSS</th><th>PHIC</th><th>Pag-Ibig</th>
-          <th>Tax</th><th>Loan Ded.</th><th>NET PAY</th>
+          <th>Tax</th><th>Loan Ded.</th><th>NET PAY</th><th>Status</th>
         </tr></thead>
         <tbody id="payroll-tbody"></tbody>
       </table>
@@ -1314,6 +1314,7 @@ function buildPeriodDropdown() {
 //  PERSISTENT STATE  (localStorage keys: ct_*)
 // ══════════════════════════════════════════════════════════
 let employees = load('employees') || [];
+let payrollPaidStatus = load('payrollPaidStatus') || {}; // {[periodKey]: {[empId]: 'paid'|'unpaid'}}
 let incentiveData = load('incentiveData') || {}; // declared early — used in buildPayrollRow
 let shiftDefs  = load('shiftDefs') || [];  // declared early — used in getDTRTotals/getEmpShiftForDay
 let empShifts  = load('empShifts') || {};  // declared early — used in getEmpShiftForDay
@@ -2226,6 +2227,23 @@ function bulkSetHoliday() {
   if (typeof loadDTR === 'function') { try { loadDTR(); } catch(e) { console.warn(e); } }
 }
 window.bulkSetHoliday = bulkSetHoliday;
+
+// Paid / Unpaid flag per employee per cut-off — bookkeeping only (whether
+// the money has actually gone OUT to that person), separate from Release
+// (which just locks/logs the computed figures) and separate from "Record
+// salaries to POS" (which posts the expense). Nothing else in payroll reads
+// this value, so changing it never affects any computed amount.
+function setPayrollPaidStatus(periodKey, empId, value) {
+  if (!payrollPaidStatus[periodKey]) payrollPaidStatus[periodKey] = {};
+  payrollPaidStatus[periodKey][empId] = value;
+  save('payrollPaidStatus', payrollPaidStatus);
+  if (window._fbDB && window._fbFns) {
+    window._fbFns.set(
+      window._fbFns.ref(window._fbDB, `payrollPaidStatus/${periodKey}/${empId}`), value
+    ).catch(e => console.warn(e));
+  }
+}
+window.setPayrollPaidStatus = setPayrollPaidStatus;
 
 // ══════════════════════════════════════════════════════════
 //  SHIFT SCHEDULER
@@ -3622,9 +3640,11 @@ function computeAllPayroll() {
   document.getElementById('pay-period-label').textContent = p.label || getPeriodLabel(p.key);
   const rows = employees
     .filter(e => e && e.id && e.name)
-    .map(e => { try { return buildPayrollRow(e, p.key, {preview:true}); } catch(err) { return {name:e.name,days:0,basic:0,otPay:0,ndPay:0,holPay:0,gross:0,sss:0,phic:0,pagibig:0,tax:0,loanDed:0,totalDed:0,net:0}; } });
+    .map(e => { try { return {...buildPayrollRow(e, p.key, {preview:true}), id:e.id}; } catch(err) { return {id:e.id,name:e.name,days:0,basic:0,otPay:0,ndPay:0,holPay:0,gross:0,sss:0,phic:0,pagibig:0,tax:0,loanDed:0,totalDed:0,net:0}; } });
 
-  document.getElementById('payroll-tbody').innerHTML = rows.map(r=>`
+  document.getElementById('payroll-tbody').innerHTML = rows.map(r=>{
+    const status = (payrollPaidStatus[p.key] && payrollPaidStatus[p.key][r.id]) || 'unpaid';
+    return `
     <tr>
       <td><strong>${r.name}</strong></td>
       <td>${r.days}</td>
@@ -3639,7 +3659,15 @@ function computeAllPayroll() {
       <td>₱${fmt(r.tax)}</td>
       <td>₱${fmt(r.loanDed+r.totalDed)}</td>
       <td style="font-weight:700;color:var(--brand);font-size:14px;">₱${fmt(r.net)}</td>
-    </tr>`).join('')||'<tr><td colspan="16" style="text-align:center;padding:20px;color:var(--muted);">No employees.</td></tr>';
+      <td>
+        <select onchange="setPayrollPaidStatus('${p.key}','${r.id}',this.value); this.style.color = this.value==='paid' ? 'var(--green)' : 'var(--red)';"
+          style="font-weight:700;color:${status==='paid' ? 'var(--green)' : 'var(--red)'};padding:4px 6px;border-radius:6px;">
+          <option value="unpaid" ${status==='unpaid'?'selected':''}>Unpaid</option>
+          <option value="paid" ${status==='paid'?'selected':''}>Paid</option>
+        </select>
+      </td>
+    </tr>`;
+  }).join('')||'<tr><td colspan="17" style="text-align:center;padding:20px;color:var(--muted);">No employees.</td></tr>';
 }
 
 // ══════════════════════════════════════════════════════════
@@ -5073,9 +5101,10 @@ function exportPayroll(){
     ['Generated', new Date().toLocaleString('en-PH')],
     [],
     ['Employee','Position','Daily Rate','Days','Basic','OT','ND','Holiday','Incentive','GROSS',
-     'SSS','PhilHealth','Pag-Ibig','Tax','Loan Ded.','Other Ded.','NET PAY'],
+     'SSS','PhilHealth','Pag-Ibig','Tax','Loan Ded.','Other Ded.','NET PAY','Status'],
     ...rows.map(r => [r.name, r.pos||'', r.rate, r.days, r.basic, r.otPay, r.ndPay,
-      r.holPay, r.incentiveAmt||0, r.gross, r.sss, r.phic, r.pagibig, r.tax, r.loanDed, r.totalDed, r.net])
+      r.holPay, r.incentiveAmt||0, r.gross, r.sss, r.phic, r.pagibig, r.tax, r.loanDed, r.totalDed, r.net,
+      ((payrollPaidStatus[p.key] && payrollPaidStatus[p.key][r.id]) || 'unpaid') === 'paid' ? 'Paid' : 'Unpaid'])
   ]);
 }
 window.exportPayroll = exportPayroll;
@@ -6245,6 +6274,15 @@ onValue(ref(db,'dtrData'), snap => {
     computeAllPayroll();
     if (active?.id === 'page-dashboard') renderDashboard();
   }, 500);
+});
+
+// ── Pull payroll Paid/Unpaid status from cloud ───────────────
+onValue(ref(db,'payrollPaidStatus'), snap => {
+  const data = snap.val();
+  payrollPaidStatus = data || {};
+  localStorage.setItem('ct_payrollPaidStatus', JSON.stringify(payrollPaidStatus));
+  const active = document.querySelector('.page.active');
+  if (active?.id === 'page-payroll') computeAllPayroll();
 });
 
 // ── Push branch config to cloud when saved ──────────────────
