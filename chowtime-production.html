@@ -138,7 +138,7 @@ header.app .brand{flex:1 1 100%;}
 @media(min-width:700px){header.app .brand{flex:0 1 auto;}}
 @media print{#ctGate,#ctSignOut,#ctWho{display:none!important;}}
 </style>
-<!-- BUILD:20261013-140000 -->
+<!-- BUILD:20261116-160500 -->
 </head>
 <body>
 
@@ -374,6 +374,18 @@ async function postProductionToPOS(dateStr, products){
       // DR is issued. Stock that predates the first priceLot keeps the item's
       // current price, so an opening lot is written for it first.
       const refTag0 = "Production " + dateStr;
+      // Batch code: P-<date>-<product code>. A second price on the same day
+      // gets -B, -C … so each price stays traceable on its own.
+      const baseCode = "P-" + dateStr.replace(/-/g,"") + "-" + String(code).toUpperCase().replace(/[^A-Z0-9]/g,"");
+      const codeFor = (list, price)=>{
+        const sameDay = list.filter(l=>l.ref===refTag0);
+        const hit = sameDay.find(l=>Number(l.price)===Number(price));
+        if(hit) return hit.code || baseCode;
+        const used = new Set(sameDay.map(l=>l.code||baseCode));
+        if(!used.has(baseCode)) return baseCode;
+        for(let k=66;k<91;k++){ const c2=baseCode+"-"+String.fromCharCode(k); if(!used.has(c2)) return c2; }
+        return baseCode + "-" + (sameDay.length+1);
+      };
       let plWork = Array.isArray(snap.data().priceLots) ? snap.data().priceLots.map(x=>Object.assign({},x)) : [];
       let plTouched = false;
       if(needReprice){
@@ -392,7 +404,7 @@ async function postProductionToPOS(dateStr, products){
             const atT = Date.parse(dateStr + "T12:00:00+08:00") || Date.now();
             let idx = plWork.findIndex(l=>(Number(l.at)||0) > atT);
             if(idx < 0) idx = plWork.length;
-            plWork.splice(idx, 0, {qty:portion, remaining:portion, price:bPrice, ref:refTag0, at:atT});
+            plWork.splice(idx, 0, {qty:portion, remaining:portion, price:bPrice, ref:refTag0, code:codeFor(plWork,bPrice), at:atT});
           }
         }
         plTouched = true;
@@ -403,7 +415,7 @@ async function postProductionToPOS(dateStr, products){
         const tracked = pl.reduce((a,l)=>a+(Number(l.remaining)||0),0);
         const untracked = Math.round((prev - tracked) * 1000) / 1000;
         if(untracked > 0 && Number(d0.price) > 0){
-          pl.unshift({qty:untracked, remaining:untracked, price:Number(d0.price), ref:"Opening", at:0});
+          pl.unshift({qty:untracked, remaining:untracked, price:Number(d0.price), ref:"Opening", code:"OPENING", at:0});
         }
         const refTag = "Production " + dateStr;
         const same = pl.find(l=>l.ref===refTag && Number(l.price)===bPrice && (Number(l.remaining)||0)>0);
@@ -411,7 +423,7 @@ async function postProductionToPOS(dateStr, products){
           same.qty = Math.round((Number(same.qty)+delta)*1000)/1000;
           same.remaining = Math.round((Number(same.remaining)+delta)*1000)/1000;
         }else{
-          pl.push({qty:delta, remaining:delta, price:bPrice, ref:refTag, at:Date.now()});
+          pl.push({qty:delta, remaining:delta, price:bPrice, ref:refTag, code:codeFor(pl,bPrice), at:Date.now()});
         }
         plWork = pl; plTouched = true;
       }else if(delta < 0 && plWork.length){
@@ -451,7 +463,7 @@ async function postProductionToPOS(dateStr, products){
         prevStock: prev,
         newStock: next,
         desc: "Production " + dateStr + " · " + code +
-              (bPrice>0 ? (" · batch price ₱" + bPrice) : "") +
+              (bPrice>0 ? (" · batch " + baseCode + " · price ₱" + bPrice) : "") +
               (alreadyBase
                 ? ((products[code]||{}).packs
                     ? (" · " + (products[code]||{}).packs + " pack"
@@ -1908,6 +1920,163 @@ function renderCashFundRows(){
 }
 
 /* ---------- PAYSLIP ---------- */
+// Shared calculation, used by the single Generate preview, the single Email
+// button, AND the Email All queue below — one source of numbers, three callers.
+function computePayslip(sid, ck, sss, phil, pagibig){
+  const s = state.staff[sid];
+  const {total, byProduct} = staffCutoffProduction(sid, ck);
+  const side = (state.sideJobs[ck]||{})[sid] || 0;
+  const gross = total + side;
+
+  const dates = new Set(cutoffDatesForKey(ck));
+  const entries = (state.ledger[sid]||[]).filter(e=>dates.has(e.date));
+  const allDebts = staffDebts(sid);
+  const debtsById = {}; allDebts.forEach(d=>{ debtsById[d.id]=d; });
+  const paymentsThisCutoff = entries.filter(e=>e.type==='payment');
+  const payByType = {loan:0, fine:0, ca:0, unlinked:0};
+  paymentsThisCutoff.forEach(p=>{
+    const d = debtsById[p.debtId];
+    if(d && payByType[d.type]!=null) payByType[d.type]+=Number(p.amount);
+    else payByType.unlinked+=Number(p.amount);
+  });
+  const deductionPayment = paymentsThisCutoff.reduce((a,e)=>a+Number(e.amount),0);
+  const balByType = staffDebtBalancesByType(sid);
+  const cashfund = entries.filter(e=>e.type==='cashfund_deduct').reduce((a,e)=>a+Number(e.amount),0);
+  const currentBalance = ledgerBalance(sid).loanOwed;
+  let caTotal = 0;
+  cutoffDatesForKey(ck).forEach(d=>{
+    const day = state.production[d];
+    if(day && day.ca) caTotal += Number(day.ca[sid]||0);
+  });
+
+  const autoByType = {loan:0, fine:0, ca:0};
+  allDebts.forEach(d=>{
+    if(!(Number(d.perCutoff)>0)) return;
+    const manualHere = paymentsThisCutoff
+      .filter(p=>p.debtId===d.id).reduce((a,p)=>a+Number(p.amount),0);
+    const due = debtDueThisCutoff(d, Number(d.paid)||0, ck);
+    const extra = Math.max(0, due - manualHere);
+    if(autoByType[d.type]!=null) autoByType[d.type]+=extra;
+  });
+  const autoTotal = autoByType.loan+autoByType.fine+autoByType.ca;
+
+  const totalDeduction = sss+phil+pagibig+deductionPayment+autoTotal+caTotal+cashfund;
+  const net = gross - totalDeduction;
+
+  const deductionRows = [
+    {label:'Loan payment', pay:payByType.loan+autoByType.loan, bal:balByType.loan},
+    {label:'Fine / penalty payment', pay:payByType.fine+autoByType.fine, bal:balByType.fine},
+    {label:'Cash advance payment', pay:payByType.ca+autoByType.ca, bal:balByType.ca}
+  ].filter(r=>r.pay>0.004 || r.bal>0.004);
+
+  return {s, total, byProduct, side, gross, sss, phil, pagibig, caTotal, cashfund,
+          payByType, balByType, deductionRows, totalDeduction, net, currentBalance};
+}
+
+// Builds the same email text the single "Email payslip" button sends, from a
+// computePayslip() result — so Email All can never drift from it.
+function buildPayslipEmailLines(ck, d){
+  const {s, byProduct, side, gross, sss, phil, pagibig, caTotal, deductionRows,
+         payByType, cashfund, totalDeduction, net, currentBalance} = d;
+  const lines = [];
+  lines.push(`CHOWTIME PRODUCTION — PAYSLIP`);
+  lines.push(cutoffLabel(ck));
+  lines.push('');
+  lines.push(`Employee ID: ${s.idNumber||'—'}`);
+  lines.push(`Name: ${s.name}`);
+  lines.push(`Position: ${s.jobTitle||''}`);
+  lines.push('');
+  lines.push('PRODUCTION EARNINGS');
+  state.products.forEach(p=>{
+    const qty = byProduct[p.code]||0;
+    const rate = (s.rates&&s.rates[p.code])||0;
+    if(qty>0) lines.push(`  ${p.label}: ${fmt(qty)} x ₱${fmt(rate)} = ₱${fmt(qty*rate)}`);
+  });
+  if(side>0) lines.push(`  Side job / income share: ₱${fmt(side)}`);
+  lines.push(`  Gross Salary: ₱${fmt(gross)}`);
+  lines.push('');
+  lines.push('DEDUCTIONS');
+  lines.push(`  SSS: ₱${fmt(sss)}`);
+  lines.push(`  PhilHealth: ₱${fmt(phil)}`);
+  lines.push(`  Pag-IBIG: ₱${fmt(pagibig)}`);
+  lines.push(`  Cash Advance (same-day): ₱${fmt(caTotal)}`);
+  deductionRows.forEach(r=>{
+    lines.push(`  ${r.label}: ₱${fmt(r.pay)}  (remaining balance: ₱${fmt(r.bal)})`);
+  });
+  if(payByType.unlinked>0) lines.push(`  Other payment (unlinked): ₱${fmt(payByType.unlinked)}`);
+  lines.push(`  Cash Fund payout: ₱${fmt(cashfund)}`);
+  lines.push(`  Total Deductions: ₱${fmt(totalDeduction)}`);
+  lines.push('');
+  lines.push(`NET SALARY: ₱${fmt(net)}`);
+  lines.push('');
+  lines.push(`Account: ${s.account||'—'}`);
+  lines.push(`Total remaining balance (all deductions): ₱${fmt(currentBalance)}`);
+  lines.push('');
+  lines.push('---');
+  lines.push('If you have no concerns or questions about this payslip, please reply to this email');
+  lines.push('with a photo of your Bank/GCash QR code so we can process your payment.');
+  const subject = `Chowtime Production Payslip — ${cutoffLabel(ck)}`;
+  const body = lines.join('\n');
+  return {subject, body};
+}
+
+// ── Email All (Option A: batch queue, send/skip one-by-one — mailto: still
+// needs a manual Send tap per person, this just removes the re-navigating) ──
+let prodEmailQueue = [];
+let prodEmailQueueIdx = 0;
+let prodEmailQueueStats = {sent:0, skipped:0};
+
+function openEmailAllQueue(){
+  const ck = document.getElementById('psCutoff').value;
+  prodEmailQueue = activeStaffList();
+  if(!prodEmailQueue.length){ alert('Walang staff na naka-save.'); return; }
+  prodEmailQueueIdx = 0;
+  prodEmailQueueStats = {sent:0, skipped:0};
+  renderEmailAllStep(ck);
+}
+window.openEmailAllQueue = openEmailAllQueue;
+
+function renderEmailAllStep(ck){
+  const out = document.getElementById('emailAllOut');
+  if(prodEmailQueueIdx >= prodEmailQueue.length){
+    out.innerHTML = `<div class="card">
+      <div class="msg info">✅ Tapos na ang listahan. Na-send: ${prodEmailQueueStats.sent} &nbsp;•&nbsp; Na-skip: ${prodEmailQueueStats.skipped}</div>
+      <div class="foot-actions"><button class="btn ghost" id="emailAllCloseBtn">Close</button></div>
+    </div>`;
+    document.getElementById('emailAllCloseBtn').onclick = ()=>{ out.innerHTML=''; };
+    return;
+  }
+  const s = prodEmailQueue[prodEmailQueueIdx];
+  out.innerHTML = `<div class="card">
+    <h2>📧 Email All — staff ${prodEmailQueueIdx+1} of ${prodEmailQueue.length}</h2>
+    <div class="grid cols-2">
+      <div><label>Name</label><div style="padding:8px 0;font-weight:600;">${s.name}</div></div>
+      <div><label>Email</label><input id="emailAllAddr" type="email" value="${s.email||''}" placeholder="staff@email.com"></div>
+    </div>
+    <div class="foot-actions">
+      <button class="btn gold" id="emailAllSendBtn">📧 Send &amp; Next →</button>
+      <button class="btn ghost" id="emailAllSkipBtn">⏭️ Skip</button>
+      <button class="btn ghost" id="emailAllStopBtn">✖ Stop</button>
+    </div>
+  </div>`;
+  document.getElementById('emailAllSendBtn').onclick = ()=>{
+    const addr = (document.getElementById('emailAllAddr').value||'').trim();
+    if(!addr){ alert(`Walang email para kay ${s.name}. Lagyan muna o i-Skip.`); return; }
+    const d = computePayslip(s.id, ck, 0, 0, 0);
+    const {subject, body} = buildPayslipEmailLines(ck, d);
+    window.location.href = `mailto:${encodeURIComponent(addr)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    prodEmailQueueStats.sent++;
+    prodEmailQueueIdx++;
+    renderEmailAllStep(ck);
+  };
+  document.getElementById('emailAllSkipBtn').onclick = ()=>{
+    prodEmailQueueStats.skipped++;
+    prodEmailQueueIdx++;
+    renderEmailAllStep(ck);
+  };
+  document.getElementById('emailAllStopBtn').onclick = ()=>{ out.innerHTML=''; };
+}
+
 function renderPayslip(main){
   const staffList = activeStaffList();
   const keys = allCutoffKeysWithData();
@@ -1926,73 +2095,27 @@ function renderPayslip(main){
       <div><label>PhilHealth</label><input id="psPhil" type="number" step="any" value="0"></div>
       <div><label>Pag-IBIG</label><input id="psPagibig" type="number" step="any" value="0"></div>
     </div>
-    <div class="foot-actions"><button class="btn gold" id="genBtn">Generate</button></div>
+    <div class="foot-actions"><button class="btn gold" id="genBtn">Generate</button><button class="btn ghost" id="emailAllBtn">Email All</button></div>
   </div>
   <div id="payslipOut"></div>
+  <div id="emailAllOut"></div>
   `;
 
   document.getElementById('genBtn').onclick = ()=>genPayslip();
   document.getElementById('psStaff').onchange = ()=>genPayslip();
   document.getElementById('psCutoff').onchange = ()=>genPayslip();
+  document.getElementById('emailAllBtn').onclick = ()=>openEmailAllQueue();
   function genPayslip(){
     const sid = document.getElementById('psStaff').value;
     const ck = document.getElementById('psCutoff').value;
     const s = state.staff[sid];
     if(!s) return;
-    const {total, byProduct} = staffCutoffProduction(sid, ck);
-    const side = (state.sideJobs[ck]||{})[sid] || 0;
-    const gross = total + side;
     const sss = Number(document.getElementById('psSss').value)||0;
     const phil = Number(document.getElementById('psPhil').value)||0;
     const pagibig = Number(document.getElementById('psPagibig').value)||0;
-
-    // this cutoff's actual deduction is whatever "Payment received" was logged this cutoff —
-    // categorized by which debt (loan/fine/CA) each payment was tagged to. Issuing a loan,
-    // fine, or cash advance itself doesn't touch payroll; only a logged payment does, whenever
-    // and however much it's actually paid.
-    const dates = new Set(cutoffDatesForKey(ck));
-    const entries = (state.ledger[sid]||[]).filter(e=>dates.has(e.date));
-    const allDebts = staffDebts(sid);
-    const debtsById = {}; allDebts.forEach(d=>{ debtsById[d.id]=d; });
-    const paymentsThisCutoff = entries.filter(e=>e.type==='payment');
-    const payByType = {loan:0, fine:0, ca:0, unlinked:0};
-    paymentsThisCutoff.forEach(p=>{
-      const d = debtsById[p.debtId];
-      if(d && payByType[d.type]!=null) payByType[d.type]+=Number(p.amount);
-      else payByType.unlinked+=Number(p.amount);
-    });
-    const deductionPayment = paymentsThisCutoff.reduce((a,e)=>a+Number(e.amount),0);
-    const balByType = staffDebtBalancesByType(sid);
-    const cashfund = entries.filter(e=>e.type==='cashfund_deduct').reduce((a,e)=>a+Number(e.amount),0);
-    const currentBalance = ledgerBalance(sid).loanOwed;
-    let caTotal = 0;
-    cutoffDatesForKey(ck).forEach(d=>{
-      const day = state.production[d];
-      if(day && day.ca) caTotal += Number(day.ca[sid]||0);
-    });
-
-    // Automatic schedule. Each debt with a perCutoff contributes its step for
-    // this cutoff; a hand-logged payment in the same cutoff counts toward it
-    // rather than on top of it.
-    const autoByType = {loan:0, fine:0, ca:0};
-    allDebts.forEach(d=>{
-      if(!(Number(d.perCutoff)>0)) return;
-      const manualHere = paymentsThisCutoff
-        .filter(p=>p.debtId===d.id).reduce((a,p)=>a+Number(p.amount),0);
-      const due = debtDueThisCutoff(d, Number(d.paid)||0, ck);
-      const extra = Math.max(0, due - manualHere);
-      if(autoByType[d.type]!=null) autoByType[d.type]+=extra;
-    });
-    const autoTotal = autoByType.loan+autoByType.fine+autoByType.ca;
-
-    const totalDeduction = sss+phil+pagibig+deductionPayment+autoTotal+caTotal+cashfund;
-    const net = gross - totalDeduction;
-
-    const deductionRows = [
-      {label:'Loan payment', pay:payByType.loan+autoByType.loan, bal:balByType.loan},
-      {label:'Fine / penalty payment', pay:payByType.fine+autoByType.fine, bal:balByType.fine},
-      {label:'Cash advance payment', pay:payByType.ca+autoByType.ca, bal:balByType.ca}
-    ].filter(r=>r.pay>0.004 || r.bal>0.004);
+    const d = computePayslip(sid, ck, sss, phil, pagibig);
+    const {total, byProduct, side, gross, caTotal, cashfund, currentBalance,
+           payByType, balByType, deductionRows, totalDeduction, net} = d;
 
     document.getElementById('payslipOut').innerHTML = `
     <div class="card">
@@ -2046,45 +2169,7 @@ function renderPayslip(main){
         alert(`No email on file for ${s.name}. Add one in the Staff & Rates tab (tap "Edit" next to their name), then try again.`);
         return;
       }
-      const lines = [];
-      lines.push(`CHOWTIME PRODUCTION — PAYSLIP`);
-      lines.push(cutoffLabel(ck));
-      lines.push('');
-      lines.push(`Employee ID: ${s.idNumber||'—'}`);
-      lines.push(`Name: ${s.name}`);
-      lines.push(`Position: ${s.jobTitle||''}`);
-      lines.push('');
-      lines.push('PRODUCTION EARNINGS');
-      state.products.forEach(p=>{
-        const qty = byProduct[p.code]||0;
-        const rate = (s.rates&&s.rates[p.code])||0;
-        if(qty>0) lines.push(`  ${p.label}: ${fmt(qty)} x ₱${fmt(rate)} = ₱${fmt(qty*rate)}`);
-      });
-      if(side>0) lines.push(`  Side job / income share: ₱${fmt(side)}`);
-      lines.push(`  Gross Salary: ₱${fmt(gross)}`);
-      lines.push('');
-      lines.push('DEDUCTIONS');
-      lines.push(`  SSS: ₱${fmt(sss)}`);
-      lines.push(`  PhilHealth: ₱${fmt(phil)}`);
-      lines.push(`  Pag-IBIG: ₱${fmt(pagibig)}`);
-      lines.push(`  Cash Advance (same-day): ₱${fmt(caTotal)}`);
-      deductionRows.forEach(r=>{
-        lines.push(`  ${r.label}: ₱${fmt(r.pay)}  (remaining balance: ₱${fmt(r.bal)})`);
-      });
-      if(payByType.unlinked>0) lines.push(`  Other payment (unlinked): ₱${fmt(payByType.unlinked)}`);
-      lines.push(`  Cash Fund payout: ₱${fmt(cashfund)}`);
-      lines.push(`  Total Deductions: ₱${fmt(totalDeduction)}`);
-      lines.push('');
-      lines.push(`NET SALARY: ₱${fmt(net)}`);
-      lines.push('');
-      lines.push(`Account: ${s.account||'—'}`);
-      lines.push(`Total remaining balance (all deductions): ₱${fmt(currentBalance)}`);
-      lines.push('');
-      lines.push('---');
-      lines.push('If you have no concerns or questions about this payslip, please reply to this email');
-      lines.push('with a photo of your Bank/GCash QR code so we can process your payment.');
-      const subject = `Chowtime Production Payslip — ${cutoffLabel(ck)}`;
-      const body = lines.join('\n');
+      const {subject, body} = buildPayslipEmailLines(ck, d);
       window.location.href = `mailto:${encodeURIComponent(s.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
     };
 
