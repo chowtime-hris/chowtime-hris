@@ -115,7 +115,7 @@ tbody td{padding:9px 11px;}
 .modal-box h2{font-family:'Syne',sans-serif;font-size:18px;margin-bottom:16px;}
 @media(max-width:600px){nav.tabs{padding:5px 10px;}.kpi-value{font-size:20px;}.panel{padding:14px;}}
 </style>
-<!-- BUILD:20261116-160500 -->
+<!-- BUILD:20261116-174500 -->
 </head>
 <body>
 
@@ -268,6 +268,31 @@ tbody td{padding:9px 11px;}
     <div class="alert alert-warn">
       ⚠️ Admin use only. Edit any employee's attendance for any date. Changes sync to all branches instantly.
     </div>
+
+    <div class="panel" style="background:var(--surface);border:1px solid var(--brand);margin-bottom:16px;">
+      <div class="panel-title"><span>🎉</span> Bulk-set Holiday — ALL Employees</div>
+      <div class="alert alert-info">Isang beses lang i-set dito, mala-mark na ang lahat ng employee (lahat ng branch) para sa petsang ito — hindi mo na kailangan isa-isahin sa DTR.</div>
+      <div style="display:flex;gap:12px;margin-bottom:10px;flex-wrap:wrap;align-items:flex-end;">
+        <div class="form-group">
+          <label>Date</label>
+          <input type="date" id="bulk-hol-date">
+        </div>
+        <div class="form-group">
+          <label>Mark as</label>
+          <select id="bulk-hol-type">
+            <option value="">— Clear (remove holiday mark) —</option>
+            <option value="RH">Regular Holiday</option>
+            <option value="SH">Special Holiday</option>
+            <option value="RD">Rest Day</option>
+          </select>
+        </div>
+        <div class="form-group" style="align-self:flex-end;">
+          <button class="btn btn-primary" onclick="bulkSetHoliday()">✅ Apply to ALL Employees</button>
+        </div>
+      </div>
+      <div id="bulk-hol-msg" style="display:none;font-size:13px;"></div>
+    </div>
+
     <div style="display:flex;gap:8px;margin-bottom:14px;">
       <button type="button" class="btn" id="editor-mode-emp-btn" onclick="setDTREditorMode('emp')"
         style="font-weight:700;">👤 Per Employee</button>
@@ -2142,6 +2167,66 @@ function adminEditDTR(dateStr, field, value, empId, periodKey) {
   loadDTREditor();
   showToastAdmin && showToastAdmin('✅ DTR updated & synced!');
 }
+
+// Marks ONE date as a holiday (or clears it) for EVERY employee in one click —
+// instead of switching the DTR Editor's employee picker one-by-one and
+// setting the same dropdown per person. Reuses the same local-save +
+// Firebase-sync steps as a single-cell edit (adminEditDTR above), just looped
+// once per employee with ONE confirm and ONE summary message at the end.
+function bulkSetHoliday() {
+  const dateStr = document.getElementById('bulk-hol-date').value;
+  const value = document.getElementById('bulk-hol-type').value; // '', 'RH', 'SH', 'RD'
+  const msgEl = document.getElementById('bulk-hol-msg');
+  const showMsg = (text, ok) => {
+    msgEl.style.display = 'block';
+    msgEl.style.color = ok ? 'var(--green)' : 'var(--red)';
+    msgEl.textContent = text;
+  };
+  if (!dateStr) { showMsg('⚠️ Pumili muna ng petsa.', false); return; }
+  if (!employees.length) { showMsg('⚠️ Walang naka-save na employee.', false); return; }
+
+  const label = value === 'RH' ? 'Regular Holiday'
+    : value === 'SH' ? 'Special Holiday'
+    : value === 'RD' ? 'Rest Day'
+    : '— (tatanggalin ang holiday mark)';
+  if (!confirm(`I-mark ang ${dateStr} bilang "${label}" para sa LAHAT ng ${employees.length} employee, sa LAHAT ng branch?`)) return;
+
+  const periodKey = getPeriodKey(dateStr);
+  employees.forEach(emp => {
+    setDTREntry(periodKey, emp.id, dateStr, 'holiday', value);
+    setDTREntry(periodKey, emp.id, dateStr, 'auto', false);
+    setDTREntry(periodKey, emp.id, dateStr, '_date', null);
+    if (window._fbDB && window._fbFns) {
+      const dKey = periodKey + '__' + emp.id;
+      const fieldRef = window._fbFns.ref(window._fbDB, `dtrData/${dKey}/${dateStr}/holiday`);
+      if (value === '') {
+        window._fbFns.remove(fieldRef).catch(e => console.warn(e));
+      } else {
+        window._fbFns.set(fieldRef, value).catch(e => console.warn(e));
+      }
+      window._fbFns.set(
+        window._fbFns.ref(window._fbDB, `dtrData/${dKey}/${dateStr}/adminEdited`), true
+      ).catch(e => console.warn(e));
+      window._fbFns.remove(
+        window._fbFns.ref(window._fbDB, `dtrData/${dKey}/${dateStr}/auto`)
+      ).catch(e => console.warn(e));
+      window._fbFns.remove(
+        window._fbFns.ref(window._fbDB, `dtrData/${dKey}/${dateStr}/_date`)
+      ).catch(e => console.warn(e));
+    }
+  });
+
+  showMsg(`✅ Na-mark ang ${dateStr} bilang "${label}" para sa lahat ng ${employees.length} employee.`, true);
+  showToastAdmin && showToastAdmin('✅ Bulk holiday update saved & synced!');
+  // Refresh whichever DTR views happen to be on screen so the change is
+  // visible immediately — each of these is already a no-op when nothing is
+  // selected there.
+  loadDTREditor();
+  loadDTRBranchView();
+  if (typeof loadDTR === 'function') { try { loadDTR(); } catch(e) { console.warn(e); } }
+}
+window.bulkSetHoliday = bulkSetHoliday;
+
 // ══════════════════════════════════════════════════════════
 //  SHIFT SCHEDULER
 // ══════════════════════════════════════════════════════════
