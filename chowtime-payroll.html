@@ -115,7 +115,7 @@ tbody td{padding:9px 11px;}
 .modal-box h2{font-family:'Syne',sans-serif;font-size:18px;margin-bottom:16px;}
 @media(max-width:600px){nav.tabs{padding:5px 10px;}.kpi-value{font-size:20px;}.panel{padding:14px;}}
 </style>
-<!-- BUILD:20261116-233500 -->
+<!-- BUILD:20261116-234500 -->
 </head>
 <body>
 
@@ -416,7 +416,7 @@ tbody td{padding:9px 11px;}
           <th>Employee</th><th>Days</th><th>Basic Pay</th><th>OT Pay</th><th>ND Pay</th>
           <th>Holiday Pay</th><th>Sales Incentive</th><th>Commission</th><th>Tips</th>
           <th>GROSS</th><th>SSS</th><th>PHIC</th><th>Pag-Ibig</th>
-          <th>Tax</th><th>Loan Ded.</th><th>NET PAY</th><th>Status</th>
+          <th>Tax</th><th>Loan Ded.</th><th>NET PAY</th><th>Status</th><th>QR</th>
         </tr></thead>
         <tbody id="payroll-tbody"></tbody>
       </table>
@@ -1004,11 +1004,31 @@ tbody td{padding:9px 11px;}
       <div class="form-group"><label>📧 Email</label><input id="e-email" type="email" placeholder="employee@email.com"></div>
       <div class="form-group"><label>Contact No.</label><input id="e-contact"></div>
       <div class="form-group"><label>Emergency Contact</label><input id="e-emergency"></div>
+      <div class="form-group"><label>GCash Number</label><input id="e-gcash" placeholder="09XX-XXX-XXXX"></div>
+      <div class="form-group"><label>Bank Account</label><input id="e-bank" placeholder="e.g. BPI — 1234-5678-90"></div>
+      <div class="form-group" style="grid-column:1/-1;">
+        <label>Bank/GCash QR Code</label>
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+          <input type="file" id="e-qr-file" accept="image/*" onchange="handleQRUpload(event)">
+          <img id="gcash-qr-preview" style="max-width:110px;max-height:110px;border:1px solid var(--line);border-radius:8px;display:none;object-fit:contain;">
+          <button type="button" class="btn btn-secondary" id="qr-remove-btn" style="display:none;" onclick="removeQRPreview()">🗑 Remove QR</button>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px;">I-upload ang screenshot ng QR na ipinadala ng empleyado (GCash o bank). Awtomatikong ia-resize para hindi bumigat.</div>
+      </div>
     </div>
     <div style="display:flex;gap:10px;margin-top:18px;">
       <button class="btn btn-primary" onclick="saveEmployee()">💾 Save</button>
       <button class="btn btn-secondary" onclick="closeModal('emp-modal')">Cancel</button>
     </div>
+  </div>
+</div>
+
+<div id="qr-view-modal" class="modal-overlay">
+  <div class="modal-box" style="max-width:340px;text-align:center;">
+    <h2 id="qr-view-name">📱 Bank/GCash QR</h2>
+    <img id="qr-view-img" style="width:100%;max-width:280px;border-radius:10px;border:1px solid var(--line);margin:10px 0;">
+    <div id="qr-view-details" style="font-size:13px;color:var(--muted);margin-bottom:14px;"></div>
+    <button class="btn btn-secondary" onclick="closeModal('qr-view-modal')">Close</button>
   </div>
 </div>
 
@@ -3358,10 +3378,28 @@ function openEmpModal(idx){
       + names.map(n=>'<option value="'+n.replace(/"/g,'&quot;')+'">'+n+'</option>').join('');
     brSel.value = e.branch || '';
   }
-  ['id','name','type','rate','hired','sss','phic','pagibig','tin','email','contact','emergency'].forEach(f=>{
+  ['id','name','type','rate','hired','sss','phic','pagibig','tin','email','gcash','bank','contact','emergency'].forEach(f=>{
     const el=document.getElementById('e-'+f);
     if(el) el.value=e[f]||'';
   });
+  // QR preview — show the saved one when editing, blank when adding new
+  const qrPrev = document.getElementById('gcash-qr-preview');
+  const qrRemoveBtn = document.getElementById('qr-remove-btn');
+  const qrFile = document.getElementById('e-qr-file');
+  if (qrFile) qrFile.value = '';
+  if (qrPrev) {
+    if (e.gcashQR) {
+      qrPrev.src = e.gcashQR;
+      qrPrev.dataset.qr = e.gcashQR;
+      qrPrev.style.display = 'inline-block';
+      if (qrRemoveBtn) qrRemoveBtn.style.display = 'inline-block';
+    } else {
+      qrPrev.src = '';
+      qrPrev.dataset.qr = '';
+      qrPrev.style.display = 'none';
+      if (qrRemoveBtn) qrRemoveBtn.style.display = 'none';
+    }
+  }
   const doleEl=document.getElementById('e-dole');
   if(doleEl) doleEl.value=e.dole||'yes';
   // Position: try to match dropdown, otherwise put in custom field
@@ -3398,7 +3436,10 @@ function saveEmployee(){
     hired:v('e-hired'),sss:v('e-sss'),phic:v('e-phic'),pagibig:v('e-pagibig'),
     tin:v('e-tin'), email:v('e-email')||'',
     gcash:v('e-gcash')||'', bank:v('e-bank')||'',
-    gcashQR: document.getElementById('gcash-qr-preview')?.dataset?.qr || employees.find(emp=>emp.id===v('e-id'))?.gcashQR || '',
+    // dataset.qr is always kept in sync by openEmpModal (on open) and
+    // handleQRUpload/removeQRPreview (on change) — no fallback needed, and a
+    // fallback here would silently undo "Remove QR" by reading the old value.
+    gcashQR: document.getElementById('gcash-qr-preview')?.dataset?.qr || '',
     contact:v('e-contact')||'', emergency:v('e-emergency')||'',
     dole: document.getElementById('e-dole')?.value || 'yes'
   };
@@ -3426,6 +3467,67 @@ function saveEmployee(){
       alert('❌ Firebase error: ' + err.message + '\n\nCheck your internet connection.');
     });
 }
+
+// Reads the uploaded QR screenshot, shrinks it to a reasonable scan size
+// (longest side capped at 500px, re-encoded as JPEG) so it never bloats the
+// Firebase record — a straight phone-screenshot can be several MB raw.
+function handleQRUpload(ev) {
+  const file = ev.target.files && ev.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const img = new Image();
+    img.onload = function() {
+      const maxSide = 500;
+      let w = img.width, h = img.height;
+      if (w >= h && w > maxSide) { h = Math.round(h * maxSide / w); w = maxSide; }
+      else if (h > maxSide) { w = Math.round(w * maxSide / h); h = maxSide; }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      const preview = document.getElementById('gcash-qr-preview');
+      preview.src = dataUrl;
+      preview.dataset.qr = dataUrl;
+      preview.style.display = 'inline-block';
+      const removeBtn = document.getElementById('qr-remove-btn');
+      if (removeBtn) removeBtn.style.display = 'inline-block';
+    };
+    img.onerror = function() { alert('Hindi ma-read ang image na ito. Subukan ulit ng ibang file.'); };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+window.handleQRUpload = handleQRUpload;
+
+function removeQRPreview() {
+  const preview = document.getElementById('gcash-qr-preview');
+  if (preview) { preview.src = ''; preview.dataset.qr = ''; preview.style.display = 'none'; }
+  const removeBtn = document.getElementById('qr-remove-btn');
+  if (removeBtn) removeBtn.style.display = 'none';
+  const fileInput = document.getElementById('e-qr-file');
+  if (fileInput) fileInput.value = '';
+}
+window.removeQRPreview = removeQRPreview;
+
+// Shows one employee's saved Bank/GCash QR big enough to scan — used by the
+// "📱" button in the Payroll Computation table when it's time to pay them.
+function showEmployeeQR(empId) {
+  const emp = employees.find(e => e.id === empId);
+  if (!emp) return;
+  if (!emp.gcashQR) {
+    alert(`Walang naka-save na Bank/GCash QR para kay ${emp.name}.\n\nI-upload muna sa Employee 201 File (tap "Edit" sa pangalan niya).`);
+    return;
+  }
+  document.getElementById('qr-view-name').textContent = `📱 ${emp.name}`;
+  document.getElementById('qr-view-img').src = emp.gcashQR;
+  const details = [];
+  if (emp.gcash) details.push(`GCash: ${emp.gcash}`);
+  if (emp.bank) details.push(`Bank: ${emp.bank}`);
+  document.getElementById('qr-view-details').textContent = details.join('  •  ');
+  document.getElementById('qr-view-modal').style.display = 'block';
+}
+window.showEmployeeQR = showEmployeeQR;
 
 // ══════════════════════════════════════════════════════════
 //  DTR — fully linked per period & employee, auto-saves
@@ -3666,8 +3768,9 @@ function computeAllPayroll() {
           <option value="paid" ${status==='paid'?'selected':''}>Paid</option>
         </select>
       </td>
+      <td><button type="button" class="btn btn-secondary" style="padding:4px 10px;font-size:12px;" onclick="showEmployeeQR('${r.id}')">📱 Show</button></td>
     </tr>`;
-  }).join('')||'<tr><td colspan="17" style="text-align:center;padding:20px;color:var(--muted);">No employees.</td></tr>';
+  }).join('')||'<tr><td colspan="18" style="text-align:center;padding:20px;color:var(--muted);">No employees.</td></tr>';
 }
 
 // ══════════════════════════════════════════════════════════
