@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261114-111500 -->
+<!-- BUILD:20261117-133000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -9138,7 +9138,17 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261114-111500";
+const BUILD = "20261117-133000";
+
+// PO docIds currently mid-delete (restore-stock-then-delete flow). A second
+// tap on the same 🗑 Delete button — e.g. an impatient re-tap because there's
+// no loading indicator while the Firestore round trips are in flight — used
+// to start a completely independent second run of the handler BEFORE the
+// first run's deleteDoc() had committed, so both runs still saw the PO as
+// "not yet deleted" and both restored its stock, doubling the restore.
+// Checked synchronously at the very top of the click handler, before the
+// first await, so a true double-tap is blocked no matter how fast it is.
+const _poDeleteBusy = new Set();
 
 // Re-fetch this file with the cache bypassed and read its BUILD marker.
 // The marker travels in the HTML, so no server is involved.
@@ -26946,6 +26956,12 @@ function App(){
                   // and is hidden from everyone but the owner.
                   (user&&(user.role==="owner"||user.role==="commissary"||user.branch==="all")) && h("button",{
                     onClick:async()=>{
+                      if(_poDeleteBusy.has(po._docId)){
+                        showT("Nag-de-delete na "+po.poNum+" — sandali lang, hintayin matapos.","warn");
+                        return;
+                      }
+                      _poDeleteBusy.add(po._docId);
+                      try{
                       const live0=await getDoc(doc(db,"advances",po._docId));
                       const d0=live0.exists()?live0.data():{};
                       const wasDeducted=!!(d0.stockIssued||d0.mainDeducted);
@@ -26998,6 +27014,9 @@ function App(){
                           +(d0.followUpPO?" · follow-up removed":""),"warn");
                       }catch(e){
                         showT("Delete failed: "+String(e&&e.message||e).slice(0,60),"err");
+                      }
+                      }finally{
+                        _poDeleteBusy.delete(po._docId);
                       }
                     },
                     style:{padding:"7px 12px",background:C.danger,
@@ -27251,6 +27270,66 @@ function App(){
                       border:"none",borderRadius:8,color:"#fff",
                       fontSize:13,fontWeight:700,cursor:"pointer"}},
                     "✅ Approve Discrepancy"),
+
+                  // DISCREPANCY → Disapprove
+                  // The branch's count may itself be wrong (mistyped qty,
+                  // missed item). Disapproving sends it BACK to the branch
+                  // instead of settling it — nothing moves in stock or on the
+                  // bill. It reopens Receive Items so they recount and
+                  // resubmit; the old report is kept under
+                  // priorDiscrepancyItems for reference, not left live.
+                  st==="discrepancy"&&h("button",{
+                    onClick:async()=>{
+                     if(poActionBusy.current[po._docId])return;
+                     poActionBusy.current[po._docId]=true;
+                     try{
+                      const _live=await getDoc(doc(db,"advances",po._docId));
+                      const _d=_live.exists()?(_live.data()||{}):{};
+                      if(_d.discrepancyStatus==="approved"||_d.status==="completed"){
+                        showT(po.poNum+" is already settled — nothing to do.","warn");
+                        return;
+                      }
+                      const reason=prompt("Bakit dis-approve ang discrepancy "
+                        +"report ng "+po.poNum+"?\n\nIsulat kung ano ang mali o "
+                        +"kailangang itama — makikita ito ng branch.","");
+                      if(reason===null)return;           // cancelled
+                      if(!reason.trim()){
+                        showT("Kailangan ng dahilan bago i-disapprove.","warn");
+                        return;
+                      }
+                      if(!confirm("I-send pabalik sa "+(po.branchName||po.branch)
+                        +" ang "+po.poNum+" para ma-tama?\n\nDahilan: "+reason
+                        +"\n\nWalang maidadagdag sa stock o babaguhin sa bill "
+                        +"hangga't hindi sila nag-resubmit."))return;
+                      await updateDoc(doc(db,"advances",po._docId),{
+                        status:"paid",        // reopens Receive Items
+                        discrepancyStatus:"disapproved",
+                        priorDiscrepancyItems:_d.discrepancyItems||po.discrepancyItems||[],
+                        discrepancyItems:[],
+                        hasDiscrepancy:false,
+                        discrepancyNotes:"",
+                        disapprovedBy:user.name,
+                        disapprovedAt:serverTimestamp(),
+                        disapproveReason:reason
+                      });
+                      await notify(db,{to:po.branch,type:"warning",
+                        title:"Discrepancy report dis-approved — "+po.poNum,
+                        message:"May mali sa report — "+reason
+                          +". Pakitama at i-submit ulit sa Receive Items.",
+                        page:"stock_order",ref:po.poNum,by:user.name});
+                      showT(po.poNum+" dis-approved — pabalik sa branch para i-tama");
+                     }catch(err){
+                       console.error("disapprove discrepancy:",err);
+                       showT("Disapprove failed: "
+                         +String((err&&err.message)||err).slice(0,80),"err");
+                     }finally{
+                       delete poActionBusy.current[po._docId];
+                     }
+                    },
+                    style:{padding:"7px 14px",background:"#fff",
+                      border:"1px solid "+C.danger,borderRadius:8,
+                      color:C.danger,fontSize:13,fontWeight:700,cursor:"pointer"}},
+                    "❌ Disapprove"),
 
                   // DEDUCT from Main Inventory button
                   //
