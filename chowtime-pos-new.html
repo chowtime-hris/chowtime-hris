@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261117-133000 -->
+<!-- BUILD:20261119-100000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -9138,7 +9138,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261117-133000";
+const BUILD = "20261119-100000";
 
 // PO docIds currently mid-delete (restore-stock-then-delete flow). A second
 // tap on the same 🗑 Delete button — e.g. an impatient re-tap because there's
@@ -27490,6 +27490,30 @@ function App(){
                             return;
                           }
                         }
+                        // The parent PO's own item rows still show the FULL
+                        // ordered qty (qty/totalAmount deliberately untouched,
+                        // see below) — but a shortfall item that just got
+                        // split into a follow-up PO was NOT fully shipped on
+                        // THIS po. Leaving actualQty unset left it defaulting
+                        // to the full ordered qty, so Receive Items compared
+                        // the real 280 delivered against an expected 400 and
+                        // flagged a false "short delivery" discrepancy for
+                        // the SAME 120 already tracked on the follow-up PO —
+                        // approving that discrepancy then credited the 120
+                        // back into Main's stock as if it were never shipped,
+                        // when it was never THERE to begin with (that's why
+                        // it was short). actualQty is what Receive Items
+                        // expects; qty (the order/bill record) is untouched.
+                        const _correctedRows=_short.length
+                          ? _rows.map(function(r){
+                              const sh=_short.find(function(s){return s.id===r.id;});
+                              if(!sh)return r;
+                              return Object.assign({},r,{
+                                actualQty:Math.max(0,Number(sh.have)||0),
+                                orderedQty:(r.orderedQty!=null?r.orderedQty:r.qty)
+                              });
+                            })
+                          : null;
                         for(const _p of _plan){
                           const  item=_p.item, qty=_p.qty, prev=_p.prev, _plots=_p.lots, _pplots=_p.pl?_p.pl.lots:null;
                           try{
@@ -27515,13 +27539,15 @@ function App(){
                             });
                           }catch(e){}
                         }
-                        // The branch FULL-PAID the parent, so its totalAmount and
-                        // deliveredItems stay WHOLE — the money and the record of
-                        // what was ordered/paid must not shrink. Double-counting
-                        // is avoided on the OTHER side: the follow-up PO is a pure
-                        // delivery record with totalAmount 0 and per-line cost 0,
-                        // so it never re-adds sales or cost. The parent already
-                        // accounts for the full order.
+                        // The branch FULL-PAID the parent, so its qty and
+                        // totalAmount stay WHOLE — the money and the record of
+                        // what was ordered/paid must not shrink. Only
+                        // actualQty (built just above, on a short item) is
+                        // corrected to what actually shipped. Double-counting
+                        // on the OTHER side is avoided too: the follow-up PO
+                        // is a pure delivery record with totalAmount 0 and
+                        // per-line cost 0, so it never re-adds sales or cost.
+                        // The parent already accounts for the full order.
                         await updateDoc(doc(db,"advances",po._docId),{
                           mainDeducted:true,stockIssued:true,stockShort:[],
                           // which price batches left Main, so Revert / a short
@@ -27533,6 +27559,10 @@ function App(){
                           followUpPO:_shortPO||null,
                           mainDeductedBy:user.name,
                           mainDeductedAt:serverTimestamp(),
+                          ...(_correctedRows
+                            ? {items:noUndef(_correctedRows),
+                               deliveredItems:noUndef(_correctedRows)}
+                            : {}),
                           // The other half of the paid/deducted pair above —
                           // if payment finished FIRST (now allowed), status
                           // stayed "processing" waiting on this deduction.
