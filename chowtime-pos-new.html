@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261119-100000 -->
+<!-- BUILD:20261122-080000 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -6736,18 +6736,8 @@ function DateRangeBar({from,to,setFrom,setTo,note,allLabel}){
           color:active?C.primary:C.text,
           fontWeight:active?800:500,cursor:"pointer"}},o[0]);
     }),
-    h(MonthPicker,{onPick:function(r){setFrom(r.from);setTo(r.to);},from:from,to:to}),
-    h("input",{type:"date",value:from,
-      onChange:function(e){setFrom(e.target.value);
-        if(!to)setTo(localDate());},
-      style:{padding:"5px 8px",border:"1px solid "+C.border,
-        borderRadius:8,fontSize:12,fontFamily:"inherit"}}),
-    h("span",{style:{fontSize:12,color:C.muted}},"\u2192"),
-    h("input",{type:"date",value:to,
-      onChange:function(e){setTo(e.target.value);
-        if(!from)setFrom(e.target.value);},
-      style:{padding:"5px 8px",border:"1px solid "+C.border,
-        borderRadius:8,fontSize:12,fontFamily:"inherit"}}),
+    h(CalendarRangePicker,{onPick:function(r){setFrom(r.from);setTo(r.to);},
+      from:from,to:to,active:!!(from&&to)}),
     note&&h("span",{style:{fontSize:11,color:C.muted,marginLeft:"auto"}},note));
 }
 
@@ -7361,6 +7351,115 @@ function MonthPicker({onPick,months,from,to,active}){
       fontWeight:selected?800:500,cursor:"pointer"}},
     h("option",{value:""},"📅 Pick a month…"),
     keys.map(k=>h("option",{key:k,value:k},monthLabel(k)))
+  );
+}
+
+// ─── CALENDAR RANGE PICKER ───────────────────────────────
+// Replaces "pick a whole month from a dropdown, or type two dates by
+// hand" with an actual calendar: see the day names and the numbers, tap
+// the day the range should START, then tap the day it should END — same
+// idea as the calendar app on his phone. Picking a single day is just
+// tapping it twice (or once, then the same day again).
+const _CRP_DOW=["M","T","W","T","F","S","S"];   // Mon-first
+const _CRP_MONTHS=["January","February","March","April","May","June","July",
+  "August","September","October","November","December"];
+function _crpGrid(y,m){   // m is 0-based
+  const first=new Date(y,m,1);
+  const startDow=(first.getDay()+6)%7;             // 0=Mon ... 6=Sun
+  const daysInMonth=new Date(y,m+1,0).getDate();
+  const daysInPrev=new Date(y,m,0).getDate();
+  const cells=[];
+  for(let i=startDow-1;i>=0;i--) cells.push({d:daysInPrev-i,date:new Date(y,m-1,daysInPrev-i),out:true});
+  for(let d=1;d<=daysInMonth;d++) cells.push({d,date:new Date(y,m,d),out:false});
+  let nd=1;
+  while(cells.length<42){ cells.push({d:nd,date:new Date(y,m+1,nd),out:true}); nd++; }
+  return cells;
+}
+function CalendarRangePicker({onPick,from,to,active,label}){
+  const [open,setOpen]=useState(false);
+  const [viewY,setViewY]=useState(new Date().getFullYear());
+  const [viewM,setViewM]=useState(new Date().getMonth());
+  const [pickStart,setPickStart]=useState(null);
+  const [pickEnd,setPickEnd]=useState(null);
+  const todayStr=localDate();
+  // Re-seed from the saved range every time it's opened, instead of
+  // carrying stale taps from the last time it was open.
+  const openPicker=()=>{
+    const seed=(active&&from)?new Date(from+"T00:00:00"):new Date();
+    setViewY(seed.getFullYear()); setViewM(seed.getMonth());
+    setPickStart(active?(from||null):null);
+    setPickEnd(active?(to||null):null);
+    setOpen(true);
+  };
+  const dayClick=(ds)=>{
+    if(!pickStart||(pickStart&&pickEnd)){
+      setPickStart(ds); setPickEnd(null);
+    }else if(ds<pickStart){
+      onPick({from:ds,to:pickStart}); setOpen(false);
+    }else{
+      onPick({from:pickStart,to:ds}); setOpen(false);
+    }
+  };
+  const cells=open?_crpGrid(viewY,viewM):[];
+  const lo=pickStart&&pickEnd?(pickStart<pickEnd?pickStart:pickEnd):null;
+  const hi=pickStart&&pickEnd?(pickStart<pickEnd?pickEnd:pickStart):null;
+  return h("div",{style:{position:"relative",display:"inline-block"}},
+    h("button",{onClick:openPicker,
+      style:{padding:"7px 14px",borderRadius:20,fontSize:12,cursor:"pointer",
+        border:"1px solid "+(active?C.primary:C.border),
+        background:active?"#F3E9F7":"#fff",
+        color:active?C.primary:C.text,
+        fontWeight:active?800:500}},
+      "📅 "+((active&&from&&to)?(from===to?from:from+" → "+to):(label||"Pick dates…"))),
+    open&&h("div",{onClick:()=>setOpen(false),
+      style:{position:"fixed",inset:0,zIndex:1500,background:"rgba(0,0,0,.35)",
+        display:"flex",alignItems:"center",justifyContent:"center"}},
+      h("div",{onClick:e=>e.stopPropagation(),
+        style:{background:"#fff",borderRadius:16,padding:16,width:300,
+          boxShadow:"0 20px 60px rgba(0,0,0,.35)"}},
+        h("div",{style:{display:"flex",alignItems:"center",
+          justifyContent:"space-between",marginBottom:10}},
+          h("button",{onClick:()=>{let m=viewM-1,y=viewY; if(m<0){m=11;y--;}
+              setViewM(m);setViewY(y);},
+            style:{border:"none",background:"#f5f5f5",borderRadius:8,
+              width:32,height:32,fontSize:16,cursor:"pointer"}},"‹"),
+          h("div",{style:{fontWeight:800,fontSize:14}},
+            _CRP_MONTHS[viewM]+" "+viewY),
+          h("button",{onClick:()=>{let m=viewM+1,y=viewY; if(m>11){m=0;y++;}
+              setViewM(m);setViewY(y);},
+            style:{border:"none",background:"#f5f5f5",borderRadius:8,
+              width:32,height:32,fontSize:16,cursor:"pointer"}},"›")
+        ),
+        h("div",{style:{display:"grid",gridTemplateColumns:"repeat(7,1fr)",
+          gap:2,marginBottom:4}},
+          _CRP_DOW.map((dLbl,i)=>h("div",{key:i,style:{textAlign:"center",
+            fontSize:11,fontWeight:800,color:C.muted,padding:"4px 0"}},dLbl))),
+        h("div",{style:{display:"grid",gridTemplateColumns:"repeat(7,1fr)",
+          gap:2}},
+          cells.map((c,i)=>{
+            const ds=localDate(c.date);
+            const cap=ds===pickStart||ds===pickEnd;
+            const inside=lo&&hi&&ds>lo&&ds<hi;
+            const isToday=ds===todayStr;
+            return h("button",{key:i,onClick:()=>dayClick(ds),
+              style:{aspectRatio:"1",border:"none",
+                borderRadius:cap?"50%":(inside?4:8),
+                cursor:"pointer",fontSize:13,
+                fontWeight:cap?800:(c.out?400:600),
+                background:cap?C.primary:(inside?C.primary+"22":
+                  (isToday?"#eee":"transparent")),
+                color:cap?"#fff":(c.out?"#ccc":C.text),
+                outline:(isToday&&!cap)?"1px solid "+C.border:"none"}},
+              c.d);
+          })
+        ),
+        h("div",{style:{fontSize:11,color:C.muted,marginTop:10,
+          textAlign:"center"}},
+          !pickStart ? "Tap the START date"
+            : !pickEnd ? "Start: "+pickStart+" — tap the END date"
+            : pickStart+" → "+pickEnd)
+      )
+    )
   );
 }
 
@@ -9138,7 +9237,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261119-100000";
+const BUILD = "20261122-080000";
 
 // PO docIds currently mid-delete (restore-stock-then-delete flow). A second
 // tap on the same 🗑 Delete button — e.g. an impatient re-tap because there's
@@ -11343,15 +11442,8 @@ function AnalyticsPage({orders,branchId,curBranch,user,db,showT,advances=[],inve
             color:period===id?"#fff":C.muted,
             fontWeight:period===id?700:400}},lbl)
       ),
-      h(MonthPicker,{onPick:r=>{setPeriod("custom");setFrom(r.from);setTo(r.to);},
-        from:dateFrom,to:dateTo,active:period==="custom"}),
-      period==="custom"&&h("div",{style:{display:"flex",gap:6,alignItems:"center"}},
-        h("input",{type:"date",value:dateFrom,onChange:e=>setFrom(e.target.value),
-          style:{padding:"5px 8px",border:"1px solid "+C.border,borderRadius:7,fontSize:13,outline:"none"}}),
-        h("span",{style:{color:C.muted}},"→"),
-        h("input",{type:"date",value:dateTo,onChange:e=>setTo(e.target.value),
-          style:{padding:"5px 8px",border:"1px solid "+C.border,borderRadius:7,fontSize:13,outline:"none"}})
-      )
+      h(CalendarRangePicker,{onPick:r=>{setPeriod("custom");setFrom(r.from);setTo(r.to);},
+        from:dateFrom,to:dateTo,active:period==="custom"})
     ),
 
     // Tabs
@@ -14397,18 +14489,8 @@ function InvLogPage({db,user,branchId,branches,showT}){
               color:active?C.primary:C.text,
               fontWeight:active?800:500,cursor:"pointer"}},o[0]);
         }),
-      h(MonthPicker,{onPick:function(r){setLgFrom(r.from);setLgTo(r.to);},from:lgFrom,to:lgTo}),
-      h("input",{type:"date",value:lgFrom,
-        onChange:function(e){setLgFrom(e.target.value);
-          if(!lgTo)setLgTo(localDate());},
-        style:{padding:"5px 8px",border:"1px solid "+C.border,
-          borderRadius:8,fontSize:12,fontFamily:"inherit"}}),
-      h("span",{style:{fontSize:12,color:C.muted}},"\u2192"),
-      h("input",{type:"date",value:lgTo,
-        onChange:function(e){setLgTo(e.target.value);
-          if(!lgFrom)setLgFrom(e.target.value);},
-        style:{padding:"5px 8px",border:"1px solid "+C.border,
-          borderRadius:8,fontSize:12,fontFamily:"inherit"}}),
+      h(CalendarRangePicker,{onPick:function(r){setLgFrom(r.from);setLgTo(r.to);},
+        from:lgFrom,to:lgTo,active:!!(lgFrom&&lgTo)}),
       h("span",{style:{fontSize:11,color:C.muted,marginLeft:"auto"}},
         (lgFrom&&lgTo)
           ? (logs.length+" movement"+(logs.length===1?"":"s")+" \u00b7 "+lgFrom+" \u2192 "+lgTo)
@@ -18974,7 +19056,7 @@ function App(){
                   border:"1px solid "+(dashRange===k?C.primary:C.border),
                   background:dashRange===k?C.primary+"18":"#fff",
                   color:dashRange===k?C.primary:C.text}},lbl)),
-              h(MonthPicker,{onPick:r=>{setDashRange("custom");setDashFrom(r.from);setDashTo(r.to);},
+              h(CalendarRangePicker,{onPick:r=>{setDashRange("custom");setDashFrom(r.from);setDashTo(r.to);},
                 from:dashFrom,to:dashTo,active:dashRange==="custom"}),
               h("div",{style:{flex:1}}),
               h("select",{value:dashBranch,
@@ -18986,18 +19068,6 @@ function App(){
                   color:dashBranch?C.primary:C.text}},
                 h("option",{value:""},"All branches"),
                 branches.map(b=>h("option",{key:b.id,value:b.id},b.full)))),
-            dashRange==="custom"&&h("div",{style:{display:"flex",gap:8,
-              marginTop:9,alignItems:"center",flexWrap:"wrap"}},
-              h("span",{style:{fontSize:12,color:C.muted}},"From"),
-              h("input",{type:"date",value:dashFrom,
-                onChange:e=>setDashFrom(e.target.value),
-                style:{padding:"7px",border:"1px solid "+C.border,
-                  borderRadius:8,fontSize:13,outline:"none"}}),
-              h("span",{style:{fontSize:12,color:C.muted}},"to"),
-              h("input",{type:"date",value:dashTo,
-                onChange:e=>setDashTo(e.target.value),
-                style:{padding:"7px",border:"1px solid "+C.border,
-                  borderRadius:8,fontSize:13,outline:"none"}})),
             h("div",{style:{fontSize:11,color:C.muted,marginTop:7}},
               R.from===R.to?R.from:(R.from+" → "+R.to)
               +(dashBranch?"  ·  "+((branches.find(b=>b.id===dashBranch)||{}).full||""):"")
@@ -20946,7 +21016,7 @@ function App(){
                     border:"1px solid "+(repRange===k?C.primary:C.border),
                     background:repRange===k?C.primary+"18":"#fff",
                     color:repRange===k?C.primary:C.text}},lbl)),
-                h(MonthPicker,{onPick:r=>{setRepRange("custom");setRepFrom(r.from);setRepTo(r.to);},
+                h(CalendarRangePicker,{onPick:r=>{setRepRange("custom");setRepFrom(r.from);setRepTo(r.to);},
                   from:repFrom,to:repTo,active:repRange==="custom"}),
                 (repRange||repFrom||repTo)&&h("button",{onClick:()=>{setRepRange("");setRepFrom("");setRepTo("");},
                   style:{padding:"7px 10px",borderRadius:8,border:"1px solid "+C.border,
@@ -20958,19 +21028,7 @@ function App(){
                     background:rows.length?"#2E7D32":"#8A8A8A",color:"#fff",
                     fontWeight:800,fontSize:13,
                     cursor:rows.length?"pointer":"not-allowed"}},
-                  "⬇ Download CSV ("+rows.length+")")),
-              repRange==="custom"&&h("div",{style:{display:"flex",gap:8,
-                marginTop:9,alignItems:"center",flexWrap:"wrap"}},
-                h("span",{style:{fontSize:12,color:C.muted}},"From"),
-                h("input",{type:"date",value:repFrom,max:repTo||undefined,
-                  onChange:e=>setRepFrom(e.target.value),
-                  style:{padding:"7px",border:"1px solid "+C.border,
-                    borderRadius:8,fontSize:13,outline:"none"}}),
-                h("span",{style:{fontSize:12,color:C.muted}},"to"),
-                h("input",{type:"date",value:repTo,min:repFrom||undefined,
-                  onChange:e=>setRepTo(e.target.value),
-                  style:{padding:"7px",border:"1px solid "+C.border,
-                    borderRadius:8,fontSize:13,outline:"none"}}))
+                  "⬇ Download CSV ("+rows.length+")"))
             ),
 
             // ── Z-Reading summary for a date range, built straight from orders (no Close Day needed)
@@ -24737,20 +24795,8 @@ function App(){
                     border:"1px solid "+(plRange===k?C.primary:C.border),
                     background:plRange===k?C.primary+"18":"#fff",
                     color:plRange===k?C.primary:C.text}},lbl)),
-                h(MonthPicker,{onPick:r=>{setPlRange("custom");setPlFrom(r.from);setPlTo(r.to);},
+                h(CalendarRangePicker,{onPick:r=>{setPlRange("custom");setPlFrom(r.from);setPlTo(r.to);},
                   from:plFrom,to:plTo,active:plRange==="custom"})),
-              plRange==="custom"&&h("div",{style:{display:"flex",gap:8,
-                marginTop:9,alignItems:"center",flexWrap:"wrap"}},
-                h("span",{style:{fontSize:12,color:C.muted}},"From"),
-                h("input",{type:"date",value:plFrom,
-                  onChange:e=>setPlFrom(e.target.value),
-                  style:{padding:"7px",border:"1px solid "+C.border,
-                    borderRadius:8,fontSize:13,outline:"none"}}),
-                h("span",{style:{fontSize:12,color:C.muted}},"to"),
-                h("input",{type:"date",value:plTo,
-                  onChange:e=>setPlTo(e.target.value),
-                  style:{padding:"7px",border:"1px solid "+C.border,
-                    borderRadius:8,fontSize:13,outline:"none"}})),
               h("div",{style:{fontSize:11,color:C.muted,marginTop:7}},
                 (R.from===R.to?R.from:(R.from+" → "+R.to))
                 +"  ·  "+txns+" transaction"+(txns===1?"":"s"))),
