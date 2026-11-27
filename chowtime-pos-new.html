@@ -11,7 +11,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%23C8151B'/%3E%3Ctext x='256' y='330' font-family='Arial' font-size='230' font-weight='900' fill='white' text-anchor='middle'%3ECT%3C/text%3E%3C/svg%3E"/>
 <link rel="manifest" href="chowtime.webmanifest"/>
-<!-- BUILD:20261127-151500 -->
+<!-- BUILD:20261127-152200 -->
 <!-- React UMD DEV - full error messages -->
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
@@ -9242,7 +9242,7 @@ function renderDRDoc(po,cs,brs){
   }catch(e){}
 })();
 
-const BUILD = "20261127-151500";
+const BUILD = "20261127-152200";
 
 // PO docIds currently mid-delete (restore-stock-then-delete flow). A second
 // tap on the same 🗑 Delete button — e.g. an impatient re-tap because there's
@@ -10377,10 +10377,15 @@ async function notify(db,n){
 // "Extra" (whatever the cashier typed in the note) or a Dumpling ordered
 // Fried vs Steamed (picked as a variant, not an option) reached the kitchen
 // as a bare name with nothing else \u2014 the cook had to go ask.
-function kdsLine(i){
+function kdsLine(i,mixedType){
+  // Per-item T/O only means anything on a SPLIT order (half dine-in, half
+  // takeout) \u2014 on a normal order the badge up top already says it all.
+  const toTag=(mixedType&&i.takeout)
+    ?(i.partialTO?" [T/O split]":" [T/O]"):"";
   return (i.qty||1)+"x "+i.name
     +(i.variant?" ["+i.variant+"]":"")
     +((i.options||[]).length?" \u00B7 "+i.options.join(", "):"")
+    +toTag
     +(i.note?" \u2014 "+i.note:"");
 }
 
@@ -20251,10 +20256,14 @@ function App(){
               h("div",{style:{color:C.warning,fontSize:12,fontWeight:800,letterSpacing:1,marginBottom:7}},"⏳ PENDING ("+myOrders.filter(o=>o.status==="pending").length+")"),
               myOrders.filter(o=>o.status==="pending").map(o=>h("div",{key:o._docId||o.id,style:{background:"#FFF8E1",border:"2px solid "+C.warning,borderRadius:12,padding:"11px 12px",marginBottom:8}},
                 h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:6}},
-                  h("b",{style:{fontSize:14}},"#"+(o.id||"—").slice(-4)),
+                  h("div",{style:{display:"flex",alignItems:"center",gap:6}},
+                    h("b",{style:{fontSize:14}},"#"+(o.id||"—").slice(-4)),
+                    h(Badge,{label:o.mixedType?"MIXED":(o.orderType||"dine-in").toUpperCase(),
+                      color:"#BF360C",bg:"#FFF3E0"})
+                  ),
                   h("span",{style:{fontSize:12,color:C.muted}},o.time+(o.tableNo?" · T"+o.tableNo:""))
                 ),
-                (o. items||[]).map((i,idx)=>h("div",{key:idx,style:{fontSize:13,fontWeight:600,padding:"2px 0",borderBottom:"1px solid rgba(0,0,0,.05)"}},kdsLine(i))),
+                (o. items||[]).map((i,idx)=>h("div",{key:idx,style:{fontSize:13,fontWeight:600,padding:"2px 0",borderBottom:"1px solid rgba(0,0,0,.05)"}},kdsLine(i,o.mixedType))),
                 h("button",{onClick:()=>{if(o._docId)updateStatus(o._docId,"preparing");showT("#"+(o.id||"").slice(-4)+" → Cooking","info");},
                   style:{marginTop:8,width:"100%",padding:"8px",background:C.info,border:"none",borderRadius:7,color:"#fff",fontWeight:700,fontSize:13,cursor:"pointer"}},"🔥 Start Cooking")
               )),
@@ -20264,10 +20273,14 @@ function App(){
               h("div",{style:{color:C.info,fontSize:12,fontWeight:800,letterSpacing:1,marginBottom:7}},"🔥 COOKING ("+myOrders.filter(o=>o.status==="preparing").length+")"),
               myOrders.filter(o=>o.status==="preparing").map(o=>h("div",{key:o._docId||o.id,style:{background:"#E3F2FD",border:"2px solid "+C.info,borderRadius:12,padding:"11px 12px",marginBottom:8}},
                 h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:6}},
-                  h("b",{style:{fontSize:14}},"#"+(o.id||"—").slice(-4)),
+                  h("div",{style:{display:"flex",alignItems:"center",gap:6}},
+                    h("b",{style:{fontSize:14}},"#"+(o.id||"—").slice(-4)),
+                    h(Badge,{label:o.mixedType?"MIXED":(o.orderType||"dine-in").toUpperCase(),
+                      color:"#BF360C",bg:"#FFF3E0"})
+                  ),
                   h("span",{style:{fontSize:12,color:C.muted}},o.time+(o.tableNo?" · T"+o.tableNo:""))
                 ),
-                (o. items||[]).map((i,idx)=>h("div",{key:idx,style:{fontSize:13,fontWeight:600,padding:"2px 0",borderBottom:"1px solid rgba(0,0,0,.05)"}},kdsLine(i))),
+                (o. items||[]).map((i,idx)=>h("div",{key:idx,style:{fontSize:13,fontWeight:600,padding:"2px 0",borderBottom:"1px solid rgba(0,0,0,.05)"}},kdsLine(i,o.mixedType))),
                 h("button",{onClick:()=>{if(o._docId)updateStatus(o._docId,"served");showT("#"+(o.id||"").slice(-4)+" ✓");},
                   style:{marginTop:8,width:"100%",padding:"8px",background:C.success,border:"none",borderRadius:7,color:"#fff",fontWeight:700,fontSize:13,cursor:"pointer"}},"✅ Mark Served")
               )),
